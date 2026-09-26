@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.1-alpha1 - 2026-09-26
+
 First working release. The package was ported out of the originating application
 verbatim; the following defects came with it and are now fixed — along with one
 found in the release tooling written alongside it. Each one is covered by tests.
