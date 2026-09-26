@@ -1,0 +1,37 @@
+# Path-based git attributes
+# https://www.kernel.org/pub/software/scm/git/docs/gitattributes.html
+
+# Normalise line endings in the repository itself.
+* text=auto eol=lf
+
+# cmd.exe reads a batch file line by line, and its handling of labels and
+# parenthesised blocks depends on the carriage return. Keep CRLF in the working
+# tree for batch files only; everything else stays LF. This rule has to come
+# after the line above to win.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Ignore all test and documentation with "export-ignore".
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/.editorconfig      export-ignore
+/tests              export-ignore
+/phpunit.xml.dist   export-ignore
+/phpstan.neon.dist  export-ignore
+/pint.json          export-ignore
+/CHANGELOG.md       export-ignore
+/STATIC-ANALYSIS.md export-ignore
+/.idea              export-ignore
+/RELEASING.md       export-ignore
+/PUSHING.md         export-ignore
+/bin/checks.php       export-ignore
+/bin/release.php      export-ignore
+/bin/surface.php      export-ignore
+/bin/inventory.php    export-ignore
+/bin/composer-link.cmd export-ignore
+/files.tsv            export-ignore
+/methods.tsv          export-ignore
+
+# The inventory is read line by line and compared byte for byte against what the
+# tree produces, so it is pinned to LF on disk as well as in the repository.
+*.tsv text eol=lf

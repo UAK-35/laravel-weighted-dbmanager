@@ -1,0 +1,10 @@
+parameters:
+    # The supported floor — the same 8.4 that `require.php: ^8.4` promises to
+    # consumers — so analysis cannot start relying on 8.5+ APIs behind their back.
+    phpVersion: 80400
+    # Tightened from level 6 to max with zero baseline entries — no ignoreErrors,
+    # no generated baseline file, so every finding is fixed rather than silenced.
+    # STATIC-ANALYSIS.md records the staged burn-down and how to reproduce it.
+    level: max
+    paths:
+        - src

@@ -1,0 +1,85 @@
+name: PHP Composer
+
+on:
+  push:
+    # Both lanes, because both get released from: a version with no suffix is cut
+    # from `main`, and a prerelease from `dev`. A branch CI never looks at is a
+    # branch that can be tagged on a commit nothing verified.
+    branches: [ "main", "dev" ]
+    # A tag is what Packagist publishes. Defining `branches` alone excludes tag
+    # refs, so without this every `v*` push — and so every published version —
+    # would carry no CI record at all.
+    tags: [ "v*" ]
+  pull_request:
+    # The base branch, so a merge into either lane is checked before it lands
+    # rather than after.
+    branches: [ "main", "dev" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      # One entry, not three: require.php is ^8.4, so the 8.2 and 8.3 legs could
+      # never get past `composer install`. Add newer releases here as they ship.
+      matrix:
+        php: [ "8.4" ]
+
+    name: PHP ${{ matrix.php }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # Full history: Composer guesses the root package version from tags and
+        # branches, and a shallow clone leaves that guess wrong.
+        fetch-depth: 0
+
+    - name: Pin the root package version
+      # Branch builds only. `dev-` plus the ref name is how a branch is spelled
+      # as a version, and a slash is not valid in one — that part still holds.
+      # On a tag build the ref name is the tag, so the same line would pin
+      # `dev-v0.0.1-alpha1`: Composer accepts it, and it is meaningless. The env
+      # var wins over the VCS guess, so a tag build leaves it unset and lets the
+      # tag answer instead — which it can, now that a prerelease tag is a version
+      # Composer can read.
+      if: github.ref_type != 'tag'
+      run: |
+        BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+        ROOT_VERSION="dev-${BRANCH//\//-}"
+        echo "COMPOSER_ROOT_VERSION=$ROOT_VERSION" >> "$GITHUB_ENV"
+        echo "Root version pinned to $ROOT_VERSION"
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php }}
+        coverage: none
+
+    - name: Cache Composer packages
+      id: composer-cache
+      uses: actions/cache@v4
+      with:
+        path: vendor
+        # A library commits no composer.lock, so the manifest is what the cache
+        # key can hash.
+        key: ${{ runner.os }}-php-${{ matrix.php }}-${{ hashFiles('composer.json') }}
+        restore-keys: |
+          ${{ runner.os }}-php-${{ matrix.php }}-
+
+    - name: Install dependencies
+      run: composer install --prefer-dist --no-progress
+
+    - name: Run the check suite
+      # The same eight checks a release is gated behind locally — PHP syntax, an
+      # AST parse of the same files, `composer validate --strict`, platform
+      # requirements, the workflow YAML, PHPStan, Pint and PHPUnit — rather than
+      # the three `composer test` covers. CI must not be weaker than the gate a
+      # tag is cut behind, and the YAML check is the one that reads this file.
+      # A tool the runner is missing drops to a skip; `--require-all` is what
+      # would make that a failure instead.
+      run: composer checks

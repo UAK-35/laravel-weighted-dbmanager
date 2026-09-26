@@ -1,0 +1,97 @@
+{
+    "name": "uak35/laravel-weighted-dbmanager",
+    "description": "Smooth weighted round-robin read-replica routing, windowed writer fallback and replica health tracking for Laravel",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "database",
+        "laravel",
+        "laravel-package",
+        "load-balancing",
+        "pgcat",
+        "read-replicas",
+        "read-write-splitting",
+        "redis",
+        "swrr"
+    ],
+    "homepage": "https://github.com/UAK-35/laravel-weighted-dbmanager",
+    "authors": [
+        {
+            "name": "Umar Ali Khan",
+            "email": "uak282006@gmail.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/UAK-35/laravel-weighted-dbmanager/issues",
+        "source": "https://github.com/UAK-35/laravel-weighted-dbmanager",
+        "security": "https://github.com/UAK-35/laravel-weighted-dbmanager/security/policy"
+    },
+    "require": {
+        "php": "^8.4",
+        "illuminate/console": "^12.0",
+        "illuminate/database": "^12.0",
+        "illuminate/http": "^12.0",
+        "illuminate/redis": "^12.0",
+        "illuminate/routing": "^12.0",
+        "illuminate/support": "^12.0",
+        "symfony/process": "^7.2"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.25",
+        "orchestra/testbench": "^10.0",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^11.5"
+    },
+    "suggest": {
+        "ext-redis": "Required by RedisAtomicStateStore when using the phpredis client",
+        "predis/predis": "Alternative pure-PHP Redis client for RedisAtomicStateStore"
+    },
+    "autoload": {
+        "psr-4": {
+            "Uak35\\WeightedDbManager\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Uak35\\WeightedDbManager\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": []
+        },
+        "branch-alias": {
+            "dev-dev": "0.0.x-dev",
+            "dev-main": "0.0.x-dev"
+        }
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "@publish-config"
+        ],
+        "post-update-cmd": [
+            "@publish-config"
+        ],
+        "checks": "@php bin/checks.php",
+        "release": "@php bin/release.php",
+        "publish-config": "@php bin/publish-config.php",
+        "lint": "pint",
+        "test:lint": "pint --test",
+        "test:types": "phpstan analyse --ansi",
+        "test:unit": "phpunit --colors=always",
+        "test": [
+            "@test:lint",
+            "@test:types",
+            "@test:unit"
+        ]
+    }
+}
