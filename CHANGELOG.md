@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The release script closed with a promise that does not hold on a package's first
+  release — `Packagist picks the tag up from there`, printed before there is anything for
+  Packagist to pick up.** A pushed tag publishes nothing until the package has been
+  submitted at packagist.org, so the first release now says the submission comes first,
+  and that every tag is picked up from there afterwards. Later releases keep the plain
+  line, so the caveat appears on the run where it is news rather than on every one.
+
 ## 0.0.1-alpha1 - 2026-09-26
 
 First working release. The package was ported out of the originating application

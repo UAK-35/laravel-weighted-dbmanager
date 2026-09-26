@@ -222,6 +222,43 @@ final class ReleaseApplyTest extends TestCase
         $this->assertSame($before, $repo->read('composer.json'));
     }
 
+    /**
+     * The closing note is the one place the tool says what to do next, so it has to be
+     * true. A pushed tag publishes nothing until the package has been submitted at
+     * packagist.org — and that is only ever the case on the first release, so the first
+     * release says it and later ones do not repeat it.
+     */
+    public function test_the_closing_note_names_the_packagist_submission_on_the_first_release_only(): void
+    {
+        $first = ReleaseRepo::make(self::FIXED);
+
+        $run = $first->release('--weigh', '--yes');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('the package has to be submitted at packagist.org/packages/submit first'),
+            $run->describe(),
+        );
+        $this->assertTrue(
+            $run->said('after that, Packagist picks each tag up from here'),
+            $run->describe(),
+        );
+
+        // A release cut on top of a tag that already exists is the later case: whatever
+        // published that tag has been registered by now, so the note is the plain one.
+        $later = ReleaseRepo::make(self::FIXED);
+        $later->tag('v1.0.0');
+
+        $second = $later->release('--weigh', '--yes');
+
+        $this->assertSame(0, $second->exitCode, $second->describe());
+        $this->assertTrue(
+            $second->said('next: git push origin main --follow-tags    (Packagist picks the tag up from there)'),
+            $second->describe(),
+        );
+        $this->assertFalse($second->said('packagist.org/packages/submit'), $second->describe());
+    }
+
     private static function assertSameSubstringCount(string $needle, int $expected, string $haystack): void
     {
         self::assertSame($expected, substr_count($haystack, $needle), $haystack);

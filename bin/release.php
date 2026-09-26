@@ -621,10 +621,20 @@ if ($options['push']) {
 
     note("pushed {$branch} and {$tag} to {$options['remote']}");
 } else {
+    // The first release is the one where the promise is not yet in effect: a package
+    // has to be submitted at packagist.org before any of its tags mean anything to a
+    // consumer. Saying so on the run where it is true beats a note the reader has to
+    // find out is premature, and after that first submission the plain line is right.
+    $packagist = $latestTag === null
+        ? 'the package has to be submitted at packagist.org/packages/submit first —'
+            . ' after that, Packagist picks each tag up from here'
+        : 'Packagist picks the tag up from there';
+
     note(sprintf(
-        'next: git push %s %s --follow-tags    (Packagist picks the tag up from there)',
+        'next: git push %s %s --follow-tags    (%s)',
         $options['remote'],
         $branch,
+        $packagist,
     ));
 }
 
