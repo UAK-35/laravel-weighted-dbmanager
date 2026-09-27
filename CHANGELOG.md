@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0-alpha1 - 2026-09-27
+
 ### Added
 
 - **`swrr.connection` names the connection the pgcat surfaces follow, for an installation
