@@ -236,13 +236,10 @@ final class ReleaseApplyTest extends TestCase
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue(
-            $run->said('the package has to be submitted at packagist.org/packages/submit first'),
+            $run->said('The package has to be submitted at packagist.org first'),
             $run->describe(),
         );
-        $this->assertTrue(
-            $run->said('after that, Packagist picks each tag up from here'),
-            $run->describe(),
-        );
+        $this->assertTrue($run->said('after that Packagist'), $run->describe());
 
         // A release cut on top of a tag that already exists is the later case: whatever
         // published that tag has been registered by now, so the note is the plain one.
@@ -253,10 +250,60 @@ final class ReleaseApplyTest extends TestCase
 
         $this->assertSame(0, $second->exitCode, $second->describe());
         $this->assertTrue(
-            $second->said('next: git push origin main --follow-tags    (Packagist picks the tag up from there)'),
+            $second->said('next: git push origin main --follow-tags'),
             $second->describe(),
         );
-        $this->assertFalse($second->said('packagist.org/packages/submit'), $second->describe());
+        $this->assertTrue(
+            $second->said('Packagist picks the tag up from there.'),
+            $second->describe(),
+        );
+        $this->assertFalse($second->said('packagist.org'), $second->describe());
+    }
+
+    /**
+     * The pointer to the manual crawl, on both exits. A tag on GitHub and a version on
+     * Packagist are two different events, so a successful push says nothing about whether
+     * a version was published — and the exit that has just pushed is where that gap
+     * matters most, because nothing else on that path mentions Packagist at all.
+     *
+     * The push is real: the fixture is given a bare repository as `origin`, so `--push` is
+     * exercised rather than assumed, and the tag is read back off the remote afterwards.
+     */
+    public function test_both_closing_notes_point_at_the_manual_crawl(): void
+    {
+        $byHand = ReleaseRepo::make(self::FIXED);
+        $byHand->tag('v1.0.0');
+
+        $run = $byHand->release('--weigh', '--yes');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue($run->said('next: git push origin main --follow-tags'), $run->describe());
+        $this->assertTrue(
+            $run->said('If no version appears, trigger a crawl'),
+            $run->describe(),
+        );
+        $this->assertTrue(
+            $run->said('RELEASING.md, "Triggering a crawl by hand".'),
+            $run->describe(),
+        );
+
+        $pushed = ReleaseRepo::make(self::FIXED)->withRemote();
+        $pushed->tag('v1.0.0');
+
+        $pushedRun = $pushed->release('--weigh', '--yes', '--push');
+
+        $this->assertSame(0, $pushedRun->exitCode, $pushedRun->describe());
+        $this->assertTrue(
+            $pushedRun->said('pushed main and v1.0.1 to origin'),
+            $pushedRun->describe(),
+        );
+        $this->assertTrue(
+            $pushedRun->said('If no version appears, trigger a crawl'),
+            $pushedRun->describe(),
+        );
+
+        // The push happened, so the note is advice about a tag that really left.
+        $this->assertStringContainsString('v1.0.1', $pushed->git('ls-remote', '--tags', 'origin'));
     }
 
     private static function assertSameSubstringCount(string $needle, int $expected, string $haystack): void

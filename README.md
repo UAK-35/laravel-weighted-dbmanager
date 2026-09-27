@@ -225,6 +225,7 @@ next to the `read` list being weighted.
 
 | Key                              | Env                            | Sample value                 | Meaning                                                                               |
 |----------------------------------|--------------------------------|------------------------------|---------------------------------------------------------------------------------------|
+| `swrr.connection`                | `SWRR_CONNECTION`              | *(unset)*                    | The connection the pgcat gate, the flipper and `db:doctor` follow; unset ⇒ `database.default`. Set it when the app's real PostgreSQL path is a **non-default** connection — e.g. the one `app.default_api_connection` (`API_DB_CONNECTION`) names while `database.default` stays on SQLite |
 | `swrr.primary_store`             | `DB_STORE_PRIMARY`             | `redis`                      | `redis` or `local`                                                                    |
 | `swrr.redis_connection`          | `SWRR_REDIS_CONNECTION`        | `default`                    | Connection name used by `RedisAtomicStateStore`                                       |
 | `swrr.state_ttl`                 | `SWRR_STATE_TTL`               | `86400`                      | TTL (s) for the SWRR state key                                                        |
@@ -933,7 +934,7 @@ describe a different rule from the one that produced the code:
 
 ```
 $ php artisan db:doctor
-Connection inspected: pgsql, database.default is pgsql
+Connection inspected: pgsql, followed connection is pgsql
 
 PASS  provider swap       WeightedDatabaseServiceProvider is in charge, weighted manager bound
 PASS  weighted factory    db.factory is Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory

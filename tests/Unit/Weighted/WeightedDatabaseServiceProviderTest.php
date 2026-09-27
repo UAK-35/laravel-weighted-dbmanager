@@ -28,6 +28,7 @@ use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
+use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
 use Uak35\WeightedDbManager\Tests\TestCase;
@@ -219,6 +220,53 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->assertSame('pgsql', $status['driver']);
         $this->assertTrue($status['driver_supported']);
         $this->assertTrue($status['enabled']);
+    }
+
+    /**
+     * An application whose real data path is a *non-default* connection — the host app's
+     * `app.default_api_connection` (env `API_DB_CONNECTION`) — names it under
+     * `swrr.connection`, and the flipper follows that rather than `database.default`. The
+     * default here is a connection pgcat cannot front, so without the knob this is exactly
+     * the mismatch the gate exists to warn about.
+     */
+    public function test_the_pgcat_surfaces_follow_a_named_connection_over_database_default(): void
+    {
+        $this->useMysqlDefaultConnection();
+        config()->set(ActiveConnection::CONFIGURED_SOURCE, self::CONNECTION);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        $status = $this->app->make(PgcatConfigFlipper::class)->status();
+
+        $this->assertSame(self::CONNECTION, $status['connection']);
+        $this->assertSame('pgsql', $status['driver']);
+        $this->assertTrue($status['driver_supported']);
+        $this->assertTrue($status['enabled']);
+        $this->assertFalse($status['mismatch'], 'the named connection is PostgreSQL, so nothing is mismatched');
+    }
+
+    /**
+     * The boot gate judges the connection the installation named, not `database.default`. A
+     * named PostgreSQL connection silences the finding even while the default connection is
+     * one pgcat cannot front.
+     */
+    public function test_a_named_non_default_connection_silences_the_pgcat_gate(): void
+    {
+        $this->useMysqlDefaultConnection();
+        config()->set(ActiveConnection::CONFIGURED_SOURCE, self::CONNECTION);
+        $this->usePgcat(['enabled' => true]);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $this->reportBootAudit();
+
+        $gate = array_values(array_filter(
+            $records,
+            static fn (array $record): bool => ($record['context']['finding'] ?? null) === 'swrr.pgcat.gate',
+        ));
+
+        $this->assertSame([], $gate, 'the gate judged the named connection, not the default');
     }
 
     public function test_pgcat_is_disabled_when_the_current_connection_is_not_postgresql(): void

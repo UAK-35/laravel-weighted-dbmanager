@@ -71,6 +71,9 @@ final class ReleaseRepo
      * @param string $config the git config handed to every command; a sibling of
      *                       `$root` rather than a file in it, so it is never tracked
      */
+    /** the bare repository `withRemote()` creates, once a test asks for one */
+    private ?string $remote = null;
+
     private function __construct(
         private readonly string $root,
         private readonly string $config,
@@ -100,6 +103,38 @@ final class ReleaseRepo
         // once, handed to each child as `GIT_CONFIG_GLOBAL`, and never written again, so
         // a copy of it would be a copy of a constant.
         return new self($root, $template->config);
+    }
+
+    /**
+     * Give this copy a remote to push to: a bare repository beside it, created when it is
+     * asked for rather than with every fixture, because `--push` is the only thing here
+     * that needs one and a caller that never pushes should not pay for a `git init --bare`
+     * on every test.
+     *
+     * Beside the root rather than inside it, for the same reason the config is: inside, it
+     * would be copied and then committed into the fixture; shared between copies, a push
+     * from one test would land in another test's history.
+     */
+    public function withRemote(): self
+    {
+        if ($this->remote !== null) {
+            return $this;
+        }
+
+        $remote = $this->root . '.git-remote';
+
+        if (!mkdir($remote, 0o777, true) && !is_dir($remote)) {
+            throw new RuntimeException("Could not create {$remote}");
+        }
+
+        $this->git('init', '--bare', '--quiet', $remote);
+        $this->git('remote', 'add', 'origin', $remote);
+
+        self::sweep([$remote]);
+
+        $this->remote = $remote;
+
+        return $this;
     }
 
     public function path(string $relative): string

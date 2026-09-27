@@ -621,22 +621,27 @@ if ($options['push']) {
 
     note("pushed {$branch} and {$tag} to {$options['remote']}");
 } else {
-    // The first release is the one where the promise is not yet in effect: a package
-    // has to be submitted at packagist.org before any of its tags mean anything to a
-    // consumer. Saying so on the run where it is true beats a note the reader has to
-    // find out is premature, and after that first submission the plain line is right.
-    $packagist = $latestTag === null
-        ? 'the package has to be submitted at packagist.org/packages/submit first —'
-            . ' after that, Packagist picks each tag up from here'
-        : 'Packagist picks the tag up from there';
-
-    note(sprintf(
-        'next: git push %s %s --follow-tags    (%s)',
-        $options['remote'],
-        $branch,
-        $packagist,
-    ));
+    note(sprintf('next: git push %s %s --follow-tags', $options['remote'], $branch));
 }
+
+// The Packagist hint, printed after either exit — the one that leaves the push to the
+// reader, and the one that has just pushed. It names the way to close the gap rather than
+// promising that the version will appear, because a tag on GitHub and a version on
+// Packagist are two different events: a push that succeeded says nothing about whether a
+// version was published. On the first release the gap is usually that the package was
+// never submitted; after that it is usually a hook that did not fire.
+$packagist = $latestTag === null
+    ? [
+        'The package has to be submitted at packagist.org first; after that Packagist',
+        'picks each tag up from there. If no version appears, trigger a crawl by hand',
+        '— RELEASING.md, "Triggering a crawl by hand".',
+    ]
+    : [
+        'Packagist picks the tag up from there. If no version appears, trigger a crawl',
+        'by hand — RELEASING.md, "Triggering a crawl by hand".',
+    ];
+
+note(implode(PHP_EOL . '  ', $packagist));
 
 exit(0);
 

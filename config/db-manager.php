@@ -26,6 +26,17 @@ return [
     */
 
     'swrr' => [
+        // ── Active connection (optional) ─────────────────────────────────────────
+        //
+        // The connection the pgcat flipper follows, the pgcat gate judges and
+        // `db:doctor` reports. Left unset, the package follows `database.default`,
+        // which is right when the application's real data path *is* the default
+        // connection. An application whose PostgreSQL path is a non-default
+        // connection — e.g. one named by `app.default_api_connection` (env
+        // `API_DB_CONNECTION`) while `database.default` stays on SQLite — names that
+        // connection here, so the pgcat surfaces judge the connection queries run on.
+        'connection' => env('SWRR_CONNECTION'),
+
         'primary_store' => env('DB_STORE_PRIMARY', 'redis'),   // 'redis' or 'local'
         'redis_connection' => env('SWRR_REDIS_CONNECTION', 'default'),
         'state_ttl' => (int) env('SWRR_STATE_TTL', 86400),

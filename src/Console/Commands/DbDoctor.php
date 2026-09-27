@@ -15,6 +15,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
+use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ReaderDays;
@@ -1563,12 +1564,15 @@ class DbDoctor extends Command
     }
 
     /**
-     * `database.default` as the banner and the JSON report both name it — one read, so the
-     * two cannot describe different applications.
+     * The connection the package follows — `db-manager.swrr.connection` when the installation
+     * names one, `database.default` otherwise — as the banner and the JSON report both name it
+     * (the key stays `default_connection` so a gate that already reads it keeps working). Read
+     * through ActiveConnection, the same place the gate and the flipper read it, so the three
+     * cannot describe different applications.
      */
-    private function defaultConnection(): string
+    private function followedConnection(): string
     {
-        return ConfigValue::string($this->laravel->make(Repository::class)->get('database.default'));
+        return ActiveConnection::resolve($this->laravel->make(Repository::class))['connection'];
     }
 
     /**
@@ -1597,7 +1601,7 @@ class DbDoctor extends Command
                 [
                     'command' => 'db:doctor',
                     'connection' => $connection,
-                    'default_connection' => $this->defaultConnection(),
+                    'default_connection' => $this->followedConnection(),
                     'strict' => $strict,
                     'verdict' => $this->runVerdict($rows),
                     'exit_code' => $exitCode,
@@ -1740,8 +1744,8 @@ class DbDoctor extends Command
     private function render(array $rows, string $connection, array $counts): void
     {
         $this->line(
-            'Connection inspected: <comment>' . $connection . '</comment>, database.default is <comment>'
-            . $this->defaultConnection() . '</comment>',
+            'Connection inspected: <comment>' . $connection . '</comment>, followed connection is <comment>'
+            . $this->followedConnection() . '</comment>',
         );
         $this->newLine();
 

@@ -22,6 +22,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
+use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\BootAuditFinding;
 use Uak35\WeightedDbManager\Support\ConfigValue;
@@ -323,6 +324,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 timezone: ConfigValue::string($swrr['timezone'] ?? null, 'UTC'),
                 connectionName: $current['connection'],
                 driver: $current['driver'],
+                connectionSource: $current['source'],
                 supervisorStep: $app->make(SupervisorStep::class),
             );
         });
@@ -447,20 +449,16 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
 
     /**
      * The connection the flipper follows and the driver that decides whether it
-     * applies: `database.default`, plus that connection's driver. Read here once
-     * so the flipper, the health snapshot and the boot-time warning cannot
-     * disagree about which connection is in play.
+     * applies — `db-manager.swrr.connection` when the installation names one, and
+     * `database.default` otherwise — plus that connection's driver. Read here once,
+     * through ActiveConnection, so the flipper, the health snapshot and the
+     * boot-time warning cannot disagree about which connection is in play.
      *
-     * @return array{connection: string, driver: string}
+     * @return array{connection: string, driver: string, source: string}
      */
     private static function currentConnection(Repository $config): array
     {
-        $connection = ConfigValue::string($config->get('database.default'));
-
-        return [
-            'connection' => $connection,
-            'driver' => ConfigValue::string($config->get("database.connections.{$connection}.driver")),
-        ];
+        return ActiveConnection::resolve($config);
     }
 
     /**

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added
+
+- **`swrr.connection` names the connection the pgcat surfaces follow, for an installation
+  whose PostgreSQL path is not `database.default`.** The pgcat gate, `PgcatConfigFlipper`,
+  `/health/db`, `db:replica-status` and `db:doctor` all read `database.default` and treated
+  it as the connection queries run on. That is wrong for an application that reaches
+  PostgreSQL through a *non-default* connection — one named by its own config (say
+  `app.default_api_connection`, env `API_DB_CONNECTION`) while `database.default` stays on a
+  peripheral database — so the gate warned `pgcat will never act: connection "sqlite" uses
+  driver "sqlite"` on a boot that was correctly configured, every boot. `swrr.connection`
+  (env `SWRR_CONNECTION`) names the connection instead; left unset the package follows
+  `database.default` exactly as before, so existing installations and their tests are
+  unaffected. The resolution lives in one place, `Support\ActiveConnection::resolve()`, so
+  the gate, the flipper's health snapshot and the doctor cannot disagree about which
+  connection is in play.
+
+### Changed
+
+- **The pgcat mismatch sentence names the setting the connection came from.** It always
+  said `… Set swrr.pgcat.enabled = false, or point database.default at the pgcat-fronted
+  connection`, which sends an operator to the wrong key when the connection was chosen by
+  `swrr.connection`. It now names whichever key decided the connection, and `db:doctor`'s
+  banner reads `followed connection is …` (the JSON key stays `default_connection`, so a
+  gate that already reads it keeps working).
+
 ### Fixed
 
 - **The release script closed with a promise that does not hold on a package's first
@@ -10,6 +35,13 @@
   submitted at packagist.org, so the first release now says the submission comes first,
   and that every tag is picked up from there afterwards. Later releases keep the plain
   line, so the caveat appears on the run where it is news rather than on every one.
+- **The closing note promised that Packagist would pick the tag up, and said nothing about
+  what to do when it does not — which is the case a release can actually end in.** A tag on
+  GitHub and a version on Packagist are two different events: a push that succeeded says
+  nothing about whether a version was published, and the usual causes are a hook that did
+  not fire or a package that was never submitted. Both exits now name the way to close the
+  gap — trigger a crawl by hand — where before only the exit that left the push to the
+  reader mentioned Packagist at all, and the one that had just pushed said nothing.
 
 ## 0.0.1-alpha1 - 2026-09-26
 

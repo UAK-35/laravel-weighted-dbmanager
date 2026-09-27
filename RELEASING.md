@@ -357,12 +357,120 @@ Dev tags ahead of it are cut from `dev` rather than `main`, and are named with
 nothing else: the notes are promoted and the inventory stamped exactly as above, under the
 prerelease tag.
 
-Then publish it once: submit `https://github.com/UAK-35/laravel-weighted-dbmanager`
-at [packagist.org](https://packagist.org/packages/submit) and connect the GitHub
-webhook (or the Packagist app) so every later tag is picked up automatically.
-Until that is done, the branches are still installable from the repository URL:
-`dev-main` for the release line, `dev-dev` for the dev lane, each resolving to the
-`X.Y.x-dev` both aliases name.
+Then publish it once — see [publishing](#publishing). Until that is done, the branches
+are still installable from the repository URL: `dev-main` for the release line,
+`dev-dev` for the dev lane, each resolving to the `X.Y.x-dev` both aliases name.
+
+## Publishing
+
+`bin/release.php` creates the tag. Publishing it is a one-time setup at Packagist, plus
+whatever keeps it in step afterwards.
+
+### The first submission
+
+Sign in at [packagist.org](https://packagist.org) **with the GitHub account that owns the
+repository** — `UAK-35` for this package — then submit
+`https://github.com/UAK-35/laravel-weighted-dbmanager` at
+[packagist.org/packages/submit](https://packagist.org/packages/submit).
+
+Packagist crawls immediately when JavaScript is enabled, and a first submission reads the
+repository's **whole history**, so a tag already pushed is picked up there rather than
+only by the pushes that come after it. The name it publishes is
+`uak35/laravel-weighted-dbmanager`, from `composer.json` — which is already held to
+`composer validate --strict` by `composer checks`.
+
+### The vendor is already claimed
+
+`uak35` is an existing vendor on Packagist: `uak35/laravel-response-compression`,
+maintained by this same GitHub account. Packagist protects a vendor once a package exists
+in it — publishing into it requires being a maintainer of at least one package already
+there. That is satisfied here, which is why the submission needs no special permission. It
+does mean the login has to be that account: a different one fails on submit rather than
+succeeding quietly.
+
+(An unclaimed vendor — `uak-35`, say — would skip the check entirely, at the cost of
+renaming the package.)
+
+### What appears, and why
+
+| Version | Where it comes from |
+|---|---|
+| `dev-main` | the default branch |
+| `dev-dev` | the dev lane |
+| `0.0.x-dev` | `extra.branch-alias`, which names both of them (see [the branch alias](#the-branch-alias)) |
+| `v0.0.1-alpha1` | the annotated tag, read as `0.0.1.0-alpha1` at stability `alpha` |
+
+A prerelease is not matched by a plain `^0.0.1`, so a consumer needs
+`"minimum-stability": "alpha"` or a constraint such as `"^0.0.1@alpha"`.
+
+### Making later tags publish themselves
+
+Without this step Packagist crawls **once a week**, so whether a tag publishes itself
+depends on it. Use Packagist's GitHub integration from the package page: it installs the
+hook, and it asks for hook-configuration access on the repository while doing so. If the
+package list afterwards warns that a package is not automatically synced, trigger a manual
+account sync from your profile — an archived repository cannot be hooked at all, because it
+is read-only through GitHub's API.
+
+To add the hook by hand instead, these are Packagist's own values:
+
+```
+Payload URL    https://packagist.org/api/github?username=<your packagist username>
+Content type   application/json
+Secret         your Packagist API token, from your profile page
+Events         just the push event
+```
+
+### Triggering a crawl by hand
+
+The hook is the automation; this is the lever for when it did not run, or was never added.
+It asks Packagist to re-read the repository now, which is also what makes a just-pushed tag
+appear without waiting for the next push:
+
+```bash
+# Username UAK — the account that owns the uak35 vendor. The token is on the
+# same profile page as the username.
+read -rsp 'Packagist API token: ' PACKAGIST_TOKEN; echo
+
+curl -sS -XPOST \
+  -H 'content-type: application/json' \
+  "https://packagist.org/api/update-package?username=UAK&apiToken=${PACKAGIST_TOKEN}" \
+  -d '{"repository":{"url":"https://github.com/UAK-35/laravel-weighted-dbmanager"}}'
+
+unset PACKAGIST_TOKEN
+```
+
+A working call answers `{"status":"success"}`. It is not silent when it fails: verified
+against the live endpoint, bad credentials answer `403` with
+
+```
+{"status":"error","message":"Missing or invalid username/apiToken in request"}
+```
+
+That token goes in the **query string** — both here and in the webhook — so a URL written
+by hand with the real values in it puts it in your shell history and in the logs of
+anything that proxies the request. `read -rsp` is what the sample above uses for that
+reason: it echoes nothing and leaves nothing in history, and the credential is dropped
+again after the call. It is an account-wide token that can publish every package under the
+vendor, so treat it as a password rather than a URL parameter.
+
+### Confirming the published version
+
+```
+curl -s https://repo.packagist.org/p2/uak35/laravel-weighted-dbmanager.json \
+  | jq -r '.packages["uak35/laravel-weighted-dbmanager"][] | [.version, .version_normalized] | @tsv'
+composer show --all uak35/laravel-weighted-dbmanager
+```
+
+Both answer `404` before the submission, and afterwards the first lists the versions in
+the table above. The `p2` endpoint is what Composer resolves against, so it is the one
+that answers the question; the search index behind `composer show` refreshes every five
+minutes, so a package can be installable before it is findable.
+
+A `dev-main` version with no tag beside it is a crawl that has not finished — press
+"Update" on the package page, or [trigger a crawl by hand](#triggering-a-crawl-by-hand).
+Nothing at all under `uak35/` is the vendor protection, which means the login is not the
+account that owns the vendor.
 
 ## The root version in CI
 

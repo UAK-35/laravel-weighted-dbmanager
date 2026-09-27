@@ -5,6 +5,7 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Pgcat;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
+use Uak35\WeightedDbManager\Support\ActiveConnection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -151,6 +152,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $driver = null,
         ?string $connectionName = null,
         ?\Closure $runner = null,
+        ?string $connectionSource = null,
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -200,6 +202,7 @@ class PgcatConfigFlipperTest extends TestCase
             timezone: 'UTC',
             connectionName: $connectionName,
             driver: $driver,
+            connectionSource: $connectionSource ?? ActiveConnection::DEFAULT_SOURCE,
         );
 
         return $flipper;
@@ -1074,6 +1077,41 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertStringContainsString('swrr.pgcat.enabled is true but pgcat will never act', $warning);
         $this->assertStringContainsString('driver "mysql"', $warning);
         $this->assertStringContainsString('mysql_app', $warning);
+    }
+
+    /**
+     * A mismatch sentence names the setting that chose the connection, so an operator edits
+     * the key the flipper actually read. An installation that named its PostgreSQL path via
+     * `swrr.connection` (a non-default connection, e.g. `app.default_api_connection`) used to
+     * be told to edit `database.default`, which it does not follow.
+     */
+    public function test_the_mismatch_sentence_names_the_key_the_connection_came_from(): void
+    {
+        $byDefault = (string) $this->build(
+            'readers',
+            [],
+            driver: 'mysql',
+            connectionName: 'mysql_app',
+        )->armingWarning();
+
+        $this->assertStringContainsString(
+            'point database.default at the pgcat-fronted connection',
+            $byDefault,
+        );
+
+        $configured = (string) $this->build(
+            'readers',
+            [],
+            driver: 'mysql',
+            connectionName: 'mysql_app',
+            connectionSource: ActiveConnection::CONFIGURED_SOURCE,
+        )->armingWarning();
+
+        $this->assertStringContainsString(
+            'point db-manager.swrr.connection at the pgcat-fronted connection',
+            $configured,
+        );
+        $this->assertStringNotContainsString('point database.default', $configured);
     }
 
     public function test_switching_it_off_on_an_unsupported_driver_is_not_a_mismatch(): void

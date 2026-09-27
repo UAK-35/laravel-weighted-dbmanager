@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Uak35\WeightedDbManager\Pgcat;
 
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
+use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\SwitchValue;
 use DateTimeImmutable;
@@ -150,6 +151,10 @@ final class PgcatConfigFlipper
         private readonly ?string $connectionName = null,
         private readonly ?string $driver = null,
         ?SupervisorStep $supervisorStep = null,
+        // The config key the connection name was read from — `db-manager.swrr.connection` or
+        // `database.default` — so the mismatch sentence points an operator at the setting that
+        // actually decided this connection instead of guessing `database.default`.
+        private readonly string $connectionSource = ActiveConnection::DEFAULT_SOURCE,
     ) {
         $this->fileCopier = $fileCopier ?? static function (string $from, string $to): bool {
             $tmp = $to . '.tmp.' . getmypid();
@@ -655,7 +660,7 @@ final class PgcatConfigFlipper
      *
      * The switch is on where pgcat cannot act, so the value that stops the warning is the one
      * that turns it off — and the sentence already says so ("Set swrr.pgcat.enabled = false,
-     * or point database.default at the pgcat-fronted connection"). The line is what a *sentence*
+     * or point <the configured connection> at the pgcat-fronted connection"). The line is what a *sentence*
      * cannot be: something to paste, and a string a job can read out of `--json`. The sentence
      * and the line agree, which is the point — and the sentence stays, because the flip's refusal
      * and `--dry-run` print it too, and neither of those has a suggestion column.
@@ -711,8 +716,10 @@ final class PgcatConfigFlipper
      * only place that answer is computed. /health/db, db:replica-status and
      * db:pgcat-flip --status all read it, so the three cannot disagree.
      *
-     * The flipper is global: it follows `database.default`, not whichever
-     * connection a caller happens to be inspecting.
+     * The flipper is global: it follows the package's active connection —
+     * `db-manager.swrr.connection` when an installation names one, and
+     * `database.default` otherwise — not whichever connection a caller happens
+     * to be inspecting.
      *
      * `reason` and `armed_reason` are exact opposites: exactly one of them is
      * null, and which one says whether the gate opened or closed. `mismatch`
@@ -878,9 +885,10 @@ final class PgcatConfigFlipper
             return sprintf(
                 'swrr.pgcat.enabled is true but pgcat will never act: connection "%s" uses driver "%s", '
                 .'and pgcat only fronts PostgreSQL. Set swrr.pgcat.enabled = false, or point '
-                .'database.default at the pgcat-fronted connection.',
+                .'%s at the pgcat-fronted connection.',
                 $this->connectionName ?: '(unset)',
                 $this->driver ?: '(unset)',
+                $this->connectionSource,
             );
         }
 
