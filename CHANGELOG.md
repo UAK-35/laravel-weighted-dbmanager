@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.1.0-alpha3 (pre-release) - 2026-09-27
+
+### Fixed
+
+- **Reads served by the writer outside a reader window kept the address declared in `write[]`.**
+  The windowed fallback merged `ConfigValue::assoc($config['write'])` into the connection config,
+  and `write` is a *list* of server entries — Laravel's shape for a write connection, and the shape
+  a real installation declares — so `assoc()`, which builds a map, returned `['0' => [$entry]]`
+  instead of the entry. The address therefore arrived at key `0`, `read` and `write` were dropped by
+  the merge, and a connection that declares its address only inside those lists (no top-level
+  `host`) reached the connector with no host and no port at all. Laravel took its without-hosts
+  path, the connector built `pgsql:dbname=''`, and libpq dialled its default address — a local
+  socket, port 5432 — instead of the configured one, so every read outside every reader window
+  failed with `SQLSTATE[08006] connection to server on socket "/var/run/postgresql/.s.PGSQL.5432"`
+  while writes, which the framework merges itself, kept working: an application that serves
+  `/health-check` and answers on the writer, and fails on the first read of an authenticated
+  request. Both branches that fall back to the writer now narrow the write side to one entry with
+  `pickUnweighted()` — the same pick the read pool already used, and the one the framework's own
+  `getReadWriteConfig()` makes with `Arr::random()` — so a list of writers and a single write map
+  resolve identically. The branch for a connection with no read list is fixed the same way, and it
+  is a no-op without a write config. A merge that still produces neither `host` nor `unix_socket`
+  now logs a `[WeightedDB]` warning rather than failing, because omitting both on purpose, to reach
+  a local socket, is a legitimate configuration. The suite did not see any of this: both
+  writer-fallback fixtures declare `write` as a single map, the one shape `assoc()` wraps
+  correctly, and the new test declares the list shape instead.
+
+## 0.1.0-alpha2 - 2026-09-27
+Published without changelog - a mistake - will fix
+
 ## 0.1.0-alpha1 - 2026-09-27
 
 ### Added

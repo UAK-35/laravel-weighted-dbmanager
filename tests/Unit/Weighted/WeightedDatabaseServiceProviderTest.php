@@ -148,6 +148,48 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->assertSame('10.1.0.9', $picked['host']);
     }
 
+    /**
+     * The same fallback, declared the way a real installation declares it: `write` as a *list*
+     * of server entries (Laravel's shape for a write connection, and what config/database.php
+     * in the LPR app uses) with **no top-level host**, so the address exists only inside the
+     * list the merge has to narrow to one entry.
+     *
+     * The test above asserts the host of a fixture that declares `write` as a single map — the
+     * one shape ConfigValue::assoc() wraps correctly — so it passes whether or not the list
+     * branch merges the entry, and the difference between the two declarations is the whole
+     * bug: with a list, the entry arrived at key 0, `read`/`write` were dropped, and the config
+     * reached the connector with no host at all (libpq then dials its default socket, port 5432,
+     * instead of the configured 5433).
+     */
+    public function test_reads_go_to_the_writer_when_write_is_a_list_and_there_is_no_top_level_host(): void
+    {
+        config()->set('db-manager.swrr.reader_windows', [['start' => '00:00:00', 'end' => '00:00:00']]);
+        config()->set('db-manager.swrr.reader_days', [1, 2, 3, 4, 5, 6, 7]);
+        $this->app->forgetInstance(TimeWindowResolver::class);
+
+        config()->set('database.connections.weighted_list', [
+            'driver' => 'pgsql',
+            'write' => [['host' => '10.1.0.9', 'port' => 5433, 'database' => 'writer_db_1']],
+            'read' => [[
+                'host' => '10.1.0.1',
+                'port' => 5433,
+                'database' => 'reader_db_2',
+                'cpu_cores' => 4,
+                'ram_gb' => 16,
+                'weight' => 1.0,
+            ]],
+        ]);
+
+        $manager = $this->manager();
+        $picked = $manager->readConfigFor($manager->connectionConfig('weighted_list'));
+
+        $this->assertSame('10.1.0.9', $picked['host']);
+        $this->assertSame(5433, $picked['port']);
+        $this->assertSame('writer_db_1', $picked['database']);
+        $this->assertArrayNotHasKey('read', $picked);
+        $this->assertArrayNotHasKey('write', $picked);
+    }
+
     public function test_it_degrades_loudly_and_reports_which_store_is_serving(): void
     {
         $manager = $this->manager();

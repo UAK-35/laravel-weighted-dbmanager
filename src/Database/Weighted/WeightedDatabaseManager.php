@@ -209,14 +209,16 @@ class WeightedDatabaseManager extends DatabaseManager
     {
         // 1. Windowed fallback — writer serves reads.
         if ($this->timeWindow !== null && !$this->timeWindow->isReaderWindow()) {
-            return $this->mergeReadWriteConfig($config, ConfigValue::assoc($config['write'] ?? null));
+            return $this->mergeReadWriteConfig($config, $this->writeEntry($config));
         }
 
         $replicas = $config['read'] ?? [];
 
-        // 2. No replicas defined at all — fall through.
+        // 2. No replicas defined at all — fall through, with the writer as the only
+        // address there is to serve reads from. Safe when the connection declares no
+        // write config: writeEntry() is [] then, so the merge behaves as it always did.
         if (!is_array($replicas) || $replicas === []) {
-            return $this->mergeReadWriteConfig($config, []);
+            return $this->mergeReadWriteConfig($config, $this->writeEntry($config));
         }
 
         // 3. Replicas with no weight metadata — fall back to Laravel's random pick
@@ -251,8 +253,46 @@ class WeightedDatabaseManager extends DatabaseManager
     }
 
     /**
+     * The write side of a connection config, narrowed to the single server entry a
+     * merge can use: the entry the framework's own pick would take when `write` is a
+     * list, the map itself when one server is declared, and nothing when there is no
+     * usable write config at all.
+     *
+     * Narrowing is the whole point. `write` is a *list* of server entries — Laravel's
+     * documented shape for a write connection — so merging the list itself (through
+     * ConfigValue::assoc(), which builds a map) puts the entry at key 0 instead of
+     * spelling out its host. A connection that declares its address only inside
+     * write[]/read[], with no top-level host, is then handed to the connector with no
+     * host and no port: Laravel takes its without-hosts path and libpq dials its
+     * default address — a local socket, port 5432 — instead of the configured one.
+     * Laravel's own getReadWriteConfig() narrows with Arr::random() before merging;
+     * this is the same narrowing, and pickUnweighted() already did it for the read
+     * pool.
+     *
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private function writeEntry(array $config): array
+    {
+        $write = $config['write'] ?? null;
+
+        return is_array($write) ? $this->pickUnweighted($write) : [];
+    }
+
+    /**
      * The merge Laravel's own ConnectionFactory performs: overlay the chosen
      * host keys onto the base config and drop the read/write lists.
+     *
+     * `$merge` has to be a single server entry, never a list of them — a caller
+     * holding a `read`/`write` list narrows it first (pickUnweighted(), the same
+     * random pick the framework makes). Merging the list itself puts the entry at
+     * key 0 instead of spelling out its host, and a connection that declares its
+     * address only inside those lists then reaches the connector with none:
+     * Laravel takes its without-hosts path and libpq dials its default address —
+     * a local socket, port 5432 — instead of the configured one. That failure is
+     * silent by construction, so a merge that ends up with neither host nor
+     * unix_socket is logged here. Logged rather than thrown because omitting both
+     * on purpose, to reach a local socket, is a legitimate configuration.
      *
      * @param array<string, mixed> $config
      * @param array<string, mixed> $merge
@@ -260,7 +300,17 @@ class WeightedDatabaseManager extends DatabaseManager
      */
     private function mergeReadWriteConfig(array $config, array $merge): array
     {
-        return ConfigValue::assoc(Arr::except(array_merge($config, $merge), ['read', 'write']));
+        $merged = ConfigValue::assoc(Arr::except(array_merge($config, $merge), ['read', 'write']));
+
+        if ($merge !== [] && !isset($merged['host']) && !isset($merged['unix_socket'])) {
+            Log::warning(sprintf(
+                '[WeightedDB] connection "%s" resolved a read config with neither host nor unix_socket, so the connector will use libpq\'s default address (a local socket, port 5432) rather than the one the connection declares. Merged keys: %s.',
+                ConfigValue::string($config['name'] ?? null, 'unknown'),
+                implode(', ', array_keys($merged)),
+            ));
+        }
+
+        return $merged;
     }
 
     // -------------------------------------------------------------------------
