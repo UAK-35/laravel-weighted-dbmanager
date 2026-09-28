@@ -66,6 +66,103 @@ final class Readme
     }
 
     /**
+     * Everything under a heading, to the next heading of the same level or higher.
+     *
+     * The unit a reader reads a section as, and the unit a guard has to read it as too: an
+     * alert recipe is prose, a table and a fenced block that only mean anything together, so
+     * checking the fenced block alone would check the half of it that a rename breaks last.
+     *
+     * @throws RuntimeException when no heading reads as the given one
+     */
+    public static function section(string $heading): string
+    {
+        $lines = self::lines();
+        $at = self::headingAt($lines, $heading);
+        $level = self::levelOf($lines[$at - 1]);
+        $section = [];
+        $fence = null;
+
+        foreach (array_slice($lines, $at) as $line) {
+            $trimmed = trim($line);
+
+            // A block is not read for headings: a `#` inside one is a shell comment or
+            // output, and reading it as a heading would end the section at it — which is
+            // exactly what a fenced `jq` program full of `#` comments does.
+            if (str_starts_with($trimmed, '```')) {
+                $fence = $fence === null ? $trimmed : null;
+                $section[] = $line;
+
+                continue;
+            }
+
+            if ($fence === null && self::levelOf($line) > 0 && self::levelOf($line) <= $level) {
+                break;
+            }
+
+            $section[] = $line;
+        }
+
+        return implode("\n", $section);
+    }
+
+    /**
+     * The bodies of the fenced blocks under a heading whose info string is `$language`.
+     *
+     * A fence with no language is read as an empty `$language`, which is how the README writes
+     * a block that is output or a snippet rather than something to run — and a fence left open
+     * raises, because a guard that silently read half a block would agree with a file it never
+     * finished reading.
+     *
+     * @return list<string>
+     *
+     * @throws RuntimeException when the heading, a fence's language, or the closing of a fence is not what this reads
+     */
+    public static function fenced(string $heading, string $language = ''): array
+    {
+        $blocks = [];
+        $body = [];
+        $inside = null;
+        $openedAt = 0;
+
+        foreach (explode("\n", self::section($heading)) as $index => $line) {
+            $trimmed = trim($line);
+
+            if (! str_starts_with($trimmed, '```')) {
+                if ($inside !== null) {
+                    $body[] = $line;
+                }
+
+                continue;
+            }
+
+            if ($inside === null) {
+                $inside = trim(substr($trimmed, 3));
+                $body = [];
+                $openedAt = $index + 1;
+
+                continue;
+            }
+
+            if ($inside === $language) {
+                $blocks[] = implode("\n", $body);
+            }
+
+            $inside = null;
+        }
+
+        if ($inside !== null) {
+            throw new RuntimeException(sprintf(
+                'README.md opens a %s fence under [%s] that is never closed (line %d of the section).',
+                $inside === '' ? 'no-language' : $inside,
+                $heading,
+                $openedAt,
+            ));
+        }
+
+        return $blocks;
+    }
+
+    /**
      * The documented row whose `$column` cell reads as `$label` — the label being how a
      * table names one case, and the one thing a test can hold on to. A label that is no
      * longer there fails with the labels that are, so a reworded row is a decision to
@@ -212,6 +309,22 @@ final class Readme
     /**
      * @param list<string> $headers
      */
+    /**
+     * The markdown heading level of a line: `0` for a line that is not a heading.
+     *
+     * A fence's info string can open with `#` (a shell comment inside a block, as the README's
+     * alert patterns do), so only a line whose leading `#` run is followed by a space is a
+     * heading — which is also the only shape markdown reads as one.
+     */
+    private static function levelOf(string $line): int
+    {
+        if (preg_match('/^(#{1,6})\s/', ltrim($line), $matches) !== 1) {
+            return 0;
+        }
+
+        return strlen($matches[1]);
+    }
+
     private static function indexOf(array $headers, string $column): ?int
     {
         foreach ($headers as $index => $header) {
