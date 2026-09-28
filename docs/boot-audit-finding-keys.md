@@ -51,9 +51,9 @@ The package noticed the shape of the hazard in words before it was guarded, twic
 comments and documentation: `readerFallbackFindings()` folds its two causes into one
 sentence rather than emit a second finding that "would overwrite this one", and the reader
 audit's changelog entry called a finding key "unique by construction". That was a claim about
-the *provider* — its four assembly methods happen not to produce the same key twice — turned
-into a guarantee the repository did not hold. The provider is the thing that can change; the
-audit is the thing that has to survive the change.
+the *provider* — the four assembly methods it had then happened not to produce the same key
+twice, and it spreads six today — turned into a guarantee the repository did not hold. The
+provider is the thing that can change; the audit is the thing that has to survive the change.
 
 So the decision has two halves, and they are not the same half:
 
@@ -232,9 +232,9 @@ Today no two branches produce the same key, and that is worth pinning rather tha
 because the fold is no longer a silent place for a mistake to land:
 `WeightedDatabaseServiceProviderTest::test_no_two_findings_of_one_boot_share_a_key` boots the
 package in the richest misconfiguration it can have — a pgcat gate that cannot act, both
-reader lists refused, a primary store that is not the one running, and a formula with no
-implementation — and asserts on the keys that were logged: five findings, five keys, the
-exact set, and no collision line among the messages.
+reader lists refused, all three replica settings unreadable, a primary store that is not the
+one running, and a formula with no implementation — and asserts on the keys that were logged:
+eight findings, eight keys, the exact set, and no collision line among the messages.
 
 A configuration the suite never walks is not covered by that test, and this is the honest
 limit of a test-based half: the guard makes such a case loud in production (both sentences,
@@ -301,7 +301,7 @@ fails).
 - **If a third level were added.** Then "keep the louder" needs an order and the line needs to
   name the ranks it compared rather than "the louder of the two".
 - **If host applications assembled findings.** Today only the provider builds the list, inside
-  one file with four methods. A public extension point would need the same uniqueness stated
+  one file with six methods. A public extension point would need the same uniqueness stated
   as part of its contract, because a host that emitted a key twice would be relying on this
   line to notice.
 
@@ -311,7 +311,7 @@ fails).
 |---|---|
 | `src/Support/BootAudit.php` | `report()` calls `fold()`, which logs every finding and names a shared key |
 | `src/Support/BootAuditFinding.php` | the value being folded: key, warning, resolution, context, level |
-| `src/Providers/WeightedDatabaseServiceProvider.php` | the four methods whose lists are spread into one boot's findings |
+| `src/Providers/WeightedDatabaseServiceProvider.php` | the six methods whose lists are spread into one boot's findings |
 | `tests/Unit/Support/BootAuditTest.php` | the guard: both sentences logged, the collision named, which sentence the record keeps |
 | `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | the provider half: no two findings in the richest configuration share a key |
 | `docs/boot-audit-surfaces.md` | what happens to a finding after it is remembered |

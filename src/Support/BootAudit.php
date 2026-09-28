@@ -22,6 +22,9 @@ use Illuminate\Support\Facades\Log;
  *                                 one that cannot be reached
  *   swrr.default_weight_formula   a formula that silently runs as linear
  *   swrr.pgcat.*                  pgcat switched on where it cannot act
+ *   database.read.*               replica metadata the resolver does not read as
+ *                                 written, including the weight that quietly
+ *                                 takes a replica out of the pool
  *
  * A misconfiguration that throws on first use is deliberately out of scope: the
  * runtime logs it, `db:doctor` reports it, and a flip reports it as a failure. The
@@ -106,32 +109,106 @@ final class BootAudit
 
     /**
      * The findings a previous boot reported, and when the store was last probed.
-     * Every unreadable state — no file, a truncated one, a hand-edited one — reads
-     * as "nothing recorded": the failure mode is one line too few, never a claim
-     * about a warning that was never logged.
+     *
+     * The *boot's* reader, and tolerant on purpose: a record this process cannot read is
+     * one it cannot carry over or close out, so every unreadable state — no file, a
+     * truncated one, a hand-edited one — reads as "nothing recorded", and the failure
+     * mode is one line too few rather than a claim about a warning that was never logged.
+     * Its callers are the ones where that is the right answer: `report()` writes from it,
+     * and `db:doctor` reads one finding out of it to add a clause to a row it is already
+     * printing.
+     *
+     * It is not the reader a *surface* uses. "Nothing recorded" printed to an operator is
+     * a claim about the installation — that nothing is standing — and an unreadable file
+     * cannot support it. `standing()` is where that question is asked, and it refuses to
+     * round one to the other.
      *
      * @return Record
      */
     public function read(): array
     {
-        $findings = [];
-        $probedAt = null;
+        try {
+            return $this->decode();
+        } catch (UnreadableRecord) {
+            return ['findings' => [], 'store_probed_at' => null];
+        }
+    }
 
-        $raw = is_file($this->file) ? @file_get_contents($this->file) : false;
-
-        if (is_string($raw) && $raw !== '') {
-            /** @var mixed $decoded */
-            $decoded = json_decode($raw, true);
-
-            if (is_array($decoded)) {
-                $findings = $this->readFindings($decoded['findings'] ?? null);
-
-                $probed = $decoded['store_probed_at'] ?? null;
-                $probedAt = is_int($probed) ? $probed : null;
+    /**
+     * The record as the file holds it, or the reason it is not a record.
+     *
+     * One parse in one place, with two readers either side of it: `read()` catches what
+     * this throws and `standing()` lets it through, so the boot and a surface can disagree
+     * about what to *do* with an unreadable file while still agreeing about what one is.
+     *
+     * A missing file is not unreadable. It is what `persist()` leaves behind when nothing
+     * is left to remember, so it means "this installation has nothing standing" — the one
+     * state that is genuinely a fact rather than a failure.
+     *
+     * The shapes that are refused are the file-level ones, and each is named as what it is:
+     * a path with something other than a file on it, bytes that could not be read, nothing at
+     * all, text that is not JSON, a JSON list (an object is what a record is — `{}` included,
+     * being a record with no findings), and an object whose `findings` is not the map of
+     * entries it claims to hold. Entries *inside* a readable record are a different question
+     * and stay as tolerant as they were: an entry that does not substantiate itself is skipped
+     * by `readFindings()`, because the record around it can still be read.
+     *
+     * @return Record
+     * @throws UnreadableRecord when the file is there and is not a record
+     */
+    private function decode(): array
+    {
+        if (! is_file($this->file)) {
+            // Something that is not a file and is not nothing: a `file:` naming a directory,
+            // most plausibly, which can never be a record however many boots run.
+            if (file_exists($this->file)) {
+                throw UnreadableRecord::of($this->file, 'is not a file');
             }
+
+            return ['findings' => [], 'store_probed_at' => null];
         }
 
-        return ['findings' => $findings, 'store_probed_at' => $probedAt];
+        $raw = @file_get_contents($this->file);
+
+        if (! is_string($raw)) {
+            // A type guard as much as a state: the file can be removed between the check and
+            // the read, and `persist()` does exactly that when a boot finds nothing left to
+            // remember. A read that failed is not a record either way.
+            throw UnreadableRecord::of($this->file, 'could not be read');
+        }
+
+        if (trim($raw) === '') {
+            throw UnreadableRecord::of($this->file, 'is empty');
+        }
+
+        // Parsed twice on purpose: the first parse keeps JSON objects as objects, which is
+        // the only way to tell `{}` — an empty record — from `[]`, which is not a record at
+        // all. The second is the map the rest of this class reads.
+        $shape = json_decode($raw);
+
+        /** @var mixed $decoded */
+        $decoded = json_decode($raw, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw UnreadableRecord::of($this->file, 'is not JSON ('.json_last_error_msg().')');
+        }
+
+        if (! $shape instanceof \stdClass || ! is_array($decoded)) {
+            throw UnreadableRecord::of($this->file, 'is not the JSON object a record is');
+        }
+
+        $findings = $decoded['findings'] ?? [];
+
+        if (! is_array($findings)) {
+            throw UnreadableRecord::of($this->file, 'does not hold a map of findings');
+        }
+
+        $probed = $decoded['store_probed_at'] ?? null;
+
+        return [
+            'findings' => $this->readFindings($findings),
+            'store_probed_at' => is_int($probed) ? $probed : null,
+        ];
     }
 
     /**
@@ -149,13 +226,20 @@ final class BootAudit
      * worker resolving this once would keep answering from the file as it was when the
      * worker started.
      *
+     * This is the strict reader: a file that is there and is not a record throws, rather
+     * than returning an empty list that a surface would print as "nothing standing". The
+     * caller is `reported()`, which turns the throw into the `available: false` block with
+     * the reason in it — so "the record could not be read" is a thing both surfaces can say
+     * instead of a branch nothing could reach.
+     *
      * @return list<Standing>
+     * @throws UnreadableRecord when the record exists and cannot be read as one
      */
     public function standing(): array
     {
         $standing = [];
 
-        foreach ($this->read()['findings'] as $key => $finding) {
+        foreach ($this->decode()['findings'] as $key => $finding) {
             $seconds = self::ageSeconds($finding['first_reported_at']);
 
             $standing[] = [
@@ -200,8 +284,17 @@ final class BootAudit
      * the point: a record that could be read is `available` with `error` null — including an
      * empty one, which is a fact about the installation rather than a failure — and a surface
      * with nothing to read is `available: false` with `error` naming which of the two reasons
-     * it was. `null` is the audit that was never registered, and a message is a `standing()`
-     * that threw.
+     * it was. `null` is the audit that was never registered; a message is the record that is
+     * there and is not one — `standing()` throws `UnreadableRecord` for a file that could not
+     * be read, is empty, is not a JSON object, or does not hold a map of findings, and the
+     * `catch` above is what turns that into a reason.
+     *
+     * That branch is the reason the two readers are split. While `standing()` could not throw
+     * the branch could not fire either, and an unreadable record came out the other side as an
+     * empty one: `available: true, count: 0` — "nothing is standing" — asserted about a file
+     * the reader had just failed to open. Silence would have been closer to true. The tolerant
+     * reading belongs to the boot that has to carry the record over (`read()`), and refusing to
+     * round one to the other is what makes this reachable.
      *
      * The summary is built from an empty list rather than from an assumption in the
      * unavailable case: `severity` is `none` because nothing is *known* to stand, not because

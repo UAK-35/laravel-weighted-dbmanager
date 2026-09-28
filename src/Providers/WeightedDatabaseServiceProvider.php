@@ -29,6 +29,7 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
 use Uak35\WeightedDbManager\Support\RedisAccess;
+use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Support\SwitchValue;
 
 /**
@@ -118,6 +119,9 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         self::KEY_PGCAT_ENABLED_REFUSED,
         self::KEY_PGCAT_RELOAD_REFUSED,
         self::KEY_FALLBACK_REFUSED,
+        self::KEY_REPLICA_WEIGHT_REFUSED,
+        self::KEY_REPLICA_CORES_REFUSED,
+        self::KEY_REPLICA_RAM_REFUSED,
     ];
 
     /**
@@ -191,6 +195,63 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * same reading, so the warning cannot describe a switch the routing does not hold.
      */
     public const KEY_FALLBACK_REFUSED = 'swrr.allow_local_fallback.refused';
+
+    /**
+     * A `weight` the resolver does not read as written. At `error` level, like the reader
+     * refusals and for the same reason: this is input the package will not interpret on the
+     * operator's behalf, and what it substitutes instead is the value that disables the
+     * replica — so an installation whose weight was a typo lost a member of its read pool
+     * without a word from anything.
+     *
+     * One key per setting rather than one for a replica's metadata, because a record remembers
+     * a finding by its key: a weight and a core count on the same replica are two mistakes with
+     * two repairs, and one key would have them resolve together and be dated together.
+     *
+     * The path is the setting's own — `database.connections.*.read.*.weight` — because that is
+     * where the operator edits it and what they would grep for. The connection it applied to is
+     * in the finding's context rather than in the key: the package follows one connection, and a
+     * key that carried the name would resolve the wrong warning when that name changed.
+     */
+    public const KEY_REPLICA_WEIGHT_REFUSED = 'database.read.weight.refused';
+
+    /**
+     * A `cpu_cores` the resolver does not read as written: the replica stays in the pool,
+     * weighted as one core, which is a size the read list does not describe.
+     */
+    public const KEY_REPLICA_CORES_REFUSED = 'database.read.cpu_cores.refused';
+
+    /**
+     * A `ram_gb` the resolver does not read as written: the replica stays in the pool, weighted
+     * with no memory, which is a size the read list does not describe.
+     */
+    public const KEY_REPLICA_RAM_REFUSED = 'database.read.ram_gb.refused';
+
+    /**
+     * The three replica settings this audit refuses a value for, the finding key its refusal is
+     * filed under, and what the refusal leaves behind.
+     *
+     * `$consequence` states what the substitution costs the pool, in words. It is not
+     * `ReplicaMetadata`'s to say, and not the resolver's either: the reading is the same for
+     * every replica in every installation, while the cost depends on which setting it was — a
+     * weight removes the replica, a core count and a memory figure leave it there, sized as
+     * something else. The same split as the switches below.
+     *
+     * @var array<string, array{key: string, consequence: string}>
+     */
+    private const REPLICA_METADATA = [
+        'weight' => [
+            'key' => self::KEY_REPLICA_WEIGHT_REFUSED,
+            'consequence' => 'A replica weighted 0 leaves the pool, so reads are routed over a smaller pool than the read list describes and nothing else reports that it happened.',
+        ],
+        'cpu_cores' => [
+            'key' => self::KEY_REPLICA_CORES_REFUSED,
+            'consequence' => 'The replica stays in the pool, weighted as if it had one core — a size the read list does not describe.',
+        ],
+        'ram_gb' => [
+            'key' => self::KEY_REPLICA_RAM_REFUSED,
+            'consequence' => 'The replica stays in the pool, weighted as if it had no memory — a size the read list does not describe.',
+        ],
+    ];
 
     /**
      * Every on/off setting this package has, the finding key its refusal is filed under, and
@@ -468,8 +529,10 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * value the package cannot read as on or off, `swrr.pgcat.enabled` on for a connection
      * pgcat cannot front, a reader fallback that can never apply (or never lets the pool be
      * used), a `primary_store` that is not the store that runs, an unreachable primary store,
-     * and a weight formula that is not one of the two this package has. Each reads as on while
-     * doing nothing, and each logs the same sentence /health/db and the CLI report, so the
+     * a weight formula that is not one of the two this package has, and replica metadata
+     * (weight, cpu_cores, ram_gb) the resolver does not read as written — where the
+     * substitution it makes instead can take a replica out of the read pool. Each reads as on
+     * while doing nothing, and each logs the same sentence /health/db and the CLI report, so the
      * surfaces cannot disagree.
      *
      * A misconfiguration that throws on first use is deliberately not audited here:
@@ -527,6 +590,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             ...$this->switchFindings($swrr, $flipper),
             ...$this->pgcatFindings($flipper),
             ...$this->readerFallbackFindings($swrr),
+            ...$this->replicaMetadataFindings($this->app->make(Repository::class)),
             ...$this->primaryStoreFindings($store, $swrr, $probeStore),
             ...$this->weightFormulaFindings($swrr),
         ];
@@ -941,6 +1005,92 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                     $setting,
                 ),
                 context: ['setting' => $setting, 'configured' => $refused[$setting]],
+                level: 'error',
+            );
+        }
+
+        return $findings;
+    }
+
+    /**
+     * The replica metadata the connection the package follows declares, where a value is one the
+     * resolver does not read as written.
+     *
+     * The read list is read here rather than asked of the manager, and that is deliberate: the
+     * boot that first sees a typo has to be able to name the replica it costs without building
+     * the store, the factory and the pool for a diagnostic that is meant to cost nothing.
+     * `ReplicaMetadata` owns both halves of what is needed — the readability rule, which is the
+     * resolver's own arithmetic, and the replica's identity — so the sentence this writes and
+     * the sentence `db:doctor`'s row writes come from one place and cannot disagree.
+     *
+     * A refusal is an `error`, like the reader-window refusals and for the same reason: this is
+     * input the package will not interpret on the operator's behalf. What it does instead is
+     * substitute a value, and for `weight` the substitute is the value that removes the replica
+     * from the pool, so the docblock above `AUDITED_KEYS` is honest about why this is here —
+     * nothing failed, nothing was logged, and the pool was simply one member smaller.
+     *
+     * @return list<BootAuditFinding>
+     */
+    private function replicaMetadataFindings(Repository $config): array
+    {
+        $connection = self::currentConnection($config)['connection'];
+        $replicas = ConfigValue::assocList($config->get("database.connections.{$connection}.read"));
+
+        /** @var array<string, list<array{replica: string, configured: mixed, sentence: string}>> $refused */
+        $refused = [];
+
+        foreach ($replicas as $replica) {
+            $named = ReplicaMetadata::key($replica);
+
+            foreach (ReplicaMetadata::refusals($replica) as $refusal) {
+                $refused[$refusal['setting']][] = [
+                    'replica' => $named,
+                    'configured' => $refusal['written'],
+                    'sentence' => '['.$named.'] '.$refusal['sentence'],
+                ];
+            }
+        }
+
+        $findings = [];
+
+        foreach (self::REPLICA_METADATA as $setting => $metadata) {
+            if (!isset($refused[$setting])) {
+                continue;
+            }
+
+            $entries = $refused[$setting];
+
+            $findings[] = new BootAuditFinding(
+                key: $metadata['key'],
+                // The same opening the row prints — `replica metadata the resolver cannot read on
+                // [pgsql]: [10.1.0.2:5432] weight is …` — because a boot line and a preflight row
+                // that describe one value should read as one sentence with two audiences.
+                warning: sprintf(
+                    'replica metadata the resolver cannot read on [%s]: %s. Refused: %s. %s',
+                    $connection,
+                    implode('; ', array_map(static fn (array $entry): string => $entry['sentence'], $entries)),
+                    ReplicaMetadata::ACCEPTED,
+                    $metadata['consequence'],
+                ),
+                // True however it stops applying: the value repaired, the replica dropped from
+                // the read list, or the whole read list removed. "Every value is a number" is
+                // vacuously true once there is no read list left to be wrong about.
+                resolution: sprintf(
+                    'no replica\'s %s is refused any more: every value written under it is a number, so nothing is substituted for one.',
+                    $setting,
+                ),
+                context: [
+                    'connection' => $connection,
+                    'setting' => $setting,
+                    'replicas_configured' => count($replicas),
+                    'refused' => array_map(
+                        static fn (array $entry): array => [
+                            'replica' => $entry['replica'],
+                            'configured' => $entry['configured'],
+                        ],
+                        $entries,
+                    ),
+                ],
                 level: 'error',
             );
         }

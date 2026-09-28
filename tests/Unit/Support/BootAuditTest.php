@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\BootAuditFinding;
+use Uak35\WeightedDbManager\Support\UnreadableRecord;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
 /**
@@ -508,6 +509,165 @@ class BootAuditTest extends TestCase
 
         $this->assertSame(0, $standing[0]['age_seconds']);
         $this->assertSame('less than a minute', $standing[0]['age']);
+    }
+
+    /**
+     * The state both surfaces were built to print and could not reach.
+     *
+     * `/health/db` publishes `available` and `error`, `db:replica-status` renders the same pair
+     * as `not registered` / `unreadable` / `nothing standing`, and the middle one needed a
+     * `standing()` that throws. It could not throw: an unreadable file was rounded to an empty
+     * record on its way through the tolerant reader, so a half-written record — a full disk or
+     * a hand edit, with a real finding inside it — came out as `available: true, count: 0`.
+     * That is "nothing is standing", asserted about a file the reader had just failed to open,
+     * and it is the one answer an unreadable record must not produce: the honest alternative to
+     * a reading is silence, not an all-clear.
+     */
+    public function test_a_record_that_cannot_be_read_is_not_rounded_to_nothing_standing(): void
+    {
+        $audit = $this->audit();
+
+        // Half a finding: the key and the sentence are on disk, the JSON around them is not.
+        file_put_contents($this->auditFile, '{"findings": {"swrr.pgcat.gate": {"warning": "pgcat will never act.');
+
+        $report = BootAudit::reported($audit);
+
+        $this->assertFalse($report['available'], 'an unreadable record is not a record with nothing in it');
+        $this->assertSame(0, $report['count']);
+        $this->assertSame([], $report['findings'], 'nothing is claimed about findings that could not be read');
+        $this->assertNull($report['oldest']);
+        $this->assertSame('none', $report['severity'], 'nothing is *known* to stand, which is not the same as nothing standing');
+        $this->assertSame(['error' => 0, 'warning' => 0], $report['counts']);
+
+        $error = (string) $report['error'];
+
+        $this->assertNotSame('', $error, 'the reason is the value here: a reader has to know which way to look');
+        $this->assertStringContainsString((string) $this->auditFile, $error, 'named, so an operator knows which file to open');
+        $this->assertStringContainsString('is not JSON', $error);
+    }
+
+    /**
+     * Every shape an unreadable record comes in, each named as what it is.
+     *
+     * "Unreadable" on its own sends an operator to a file with no idea what to look for, and
+     * these need different answers: text that is not JSON is a hand edit or a write that never
+     * finished, a JSON list is the wrong thing in the right place, an empty file is a write that
+     * never landed, `findings` that is not a map is a record edited into a shape nothing can
+     * read, and a directory where the record belongs is a `file:` that can never work however
+     * many boots run.
+     *
+     * The one shape missing is a read that failed outright — the file removed between the check
+     * and the read, which `persist()` does when a boot finds nothing left to remember. There is
+     * no seam to hold a writer inside, so it stays a guard rather than a case.
+     *
+     * @param string|null $body the file's contents, or null for a directory
+     */
+    #[DataProvider('unreadableRecordShapes')]
+    public function test_each_shape_of_unreadable_record_is_named_for_what_it_is(?string $body, string $reason): void
+    {
+        $audit = $this->audit();
+
+        if ($body === null) {
+            mkdir((string) $this->auditFile, 0o777, true);
+        } else {
+            file_put_contents((string) $this->auditFile, $body);
+        }
+
+        $report = BootAudit::reported($audit);
+
+        $this->assertFalse($report['available'], "a record that is {$reason} is not a record");
+        $this->assertStringContainsString((string) $this->auditFile, (string) $report['error']);
+        $this->assertStringContainsString($reason, (string) $report['error']);
+
+        // The strict reader throws rather than answering "no findings"; `reported()` is the
+        // caller that turns the throw into the block above, and the message travels unchanged.
+        try {
+            $audit->standing();
+
+            $this->fail('a surface must not be handed an unreadable record as a record with no findings');
+        } catch (UnreadableRecord $e) {
+            $this->assertSame($report['error'], $e->getMessage());
+        }
+    }
+
+    /**
+     * @return array<string, array{0: string|null, 1: string}>
+     */
+    public static function unreadableRecordShapes(): array
+    {
+        return [
+            'half-written' => ['{"findings": {"swrr.pgcat.gate": {"warning": "pgcat will never act.', 'is not JSON'],
+            'never JSON' => ['swrr.pgcat.gate: the gate never opened', 'is not JSON'],
+            'a list where an object belongs' => ['["swrr.pgcat.gate"]', 'is not the JSON object a record is'],
+            'a write that never landed' => ['', 'is empty'],
+            'findings that are not a map' => ['{"findings": "swrr.pgcat.gate"}', 'does not hold a map of findings'],
+            'a directory where the record belongs' => [null, 'is not a file'],
+        ];
+    }
+
+    /**
+     * The boundary from the other side: a record that is *gone* is not a failure.
+     *
+     * `persist()` removes the file when nothing is left to remember, so an installation with
+     * nothing standing has no record at all — which is why "there is no file" stays `available`
+     * with an empty list instead of becoming the unreadable case. A surface that treated the two
+     * alike would report a permanent failure on every installation that ever fixed its
+     * configuration, and the reason is the only thing separating them.
+     */
+    public function test_a_record_that_is_not_there_is_nothing_standing_rather_than_a_failure(): void
+    {
+        $audit = $this->audit();
+
+        $this->assertFileDoesNotExist((string) $this->auditFile);
+        $this->assertSame([], $audit->standing());
+
+        $report = BootAudit::reported($audit);
+
+        $this->assertTrue($report['available']);
+        $this->assertNull($report['error']);
+        $this->assertSame(0, $report['count']);
+        $this->assertSame([], $report['findings']);
+        $this->assertSame('none', $report['severity']);
+    }
+
+    /**
+     * The split itself: the boot keeps its tolerant reader, so an unreadable record cannot stop
+     * a boot — and the write that follows repairs the file the surfaces were complaining about.
+     *
+     * A boot that cannot read the record cannot close out or carry over what is in it, and
+     * throwing instead would let a corrupt file stop the diagnostic whose job is to report
+     * corrupt states. What it must not do is *print* the empty reading, which is the half
+     * `standing()` owns — hence the same file being `nothing` to one reader and a failure to
+     * the other, in the same process.
+     */
+    public function test_the_boot_reads_an_unreadable_record_as_nothing_while_a_surface_refuses_to(): void
+    {
+        $audit = $this->audit();
+
+        file_put_contents((string) $this->auditFile, '{"findings": ');
+
+        $this->assertSame($this->emptyRecord(), $audit->read(), 'the boot reads what it can and carries nothing over');
+        $this->assertFalse(BootAudit::reported($audit)['available']);
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($audit->read(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(1, $records, 'the warning this boot logged, and no resolution it cannot substantiate');
+        $this->assertStringContainsString('pgcat will never act.', $records[0]['message']);
+
+        // Written over: the record the surfaces could not read is one they can now, which is how
+        // the next `db:replica-status` stops saying `unreadable`. Nothing repairs it by hand.
+        $repaired = BootAudit::reported($audit);
+
+        $this->assertTrue($repaired['available']);
+        $this->assertSame(1, $repaired['count']);
+        $this->assertSame('warning', $repaired['severity']);
     }
 
     public function test_a_finding_stops_being_remembered_once_a_boot_checks_it_clean(): void

@@ -295,12 +295,12 @@ what "the store" is.
 
 | rule | test | in |
 |---|---|---|
-| an unreachable store is probed, reported, and later resolved | `test_an_unreachable_primary_store_is_probed_reported_and_resolved` | audit |
+| an unreachable store is probed, reported, and later resolved | `test_an_unreachable_primary_store_is_probed_reported_and_resolved` | provider |
 | an unwritable record, and probing switched off, are reported rather than silent | `test_the_store_probe_row_fails_when_its_record_cannot_be_written`, `test_the_store_probe_row_warns_when_probing_is_switched_off` | doctor |
 | both of them at once are named together, with the loudest as the verdict | `test_the_store_probe_row_names_a_switched_off_probe_and_an_unwritable_record`, `test_the_store_probe_row_names_the_moot_store_beside_an_unwritable_record` | doctor |
-| the interval bounds the probe; without a writable record there is no probe at all | `test_the_store_probe_respects_its_interval_and_is_not_attempted_unrecorded` | audit |
-| an unbound `redis` is reported without resolving it, then resolved once bound | `test_a_store_with_no_binding_at_all_is_reported_without_resolving_it` | audit |
-| a deliberate in-process store is never probed, and still closes a recorded finding | `test_a_deliberate_in_process_store_is_not_probed_and_closes_the_finding` | audit |
+| the interval bounds the probe; without a writable record there is no probe at all | `test_the_store_probe_respects_its_interval_and_is_not_attempted_unrecorded` | provider |
+| an unbound `redis` is reported without resolving it, then resolved once bound | `test_a_store_with_no_binding_at_all_is_reported_without_resolving_it` | provider |
+| a deliberate in-process store is never probed, and still closes a recorded finding | `test_a_deliberate_in_process_store_is_not_probed_and_closes_the_finding` | provider |
 | the accessor's guard, and that the container really would build the extension class | `RedisAccessTest` | accessor |
 | a store that already failed is reported without asking Redis | `test_a_store_that_already_failed_is_reported_without_being_probed` | doctor |
 | an in-process store is warned about rather than probed | `test_an_in_process_primary_store_warns_without_being_probed` | doctor |

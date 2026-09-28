@@ -19,10 +19,12 @@ use Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand;
 use Uak35\WeightedDbManager\Console\Commands\DbProbeReplicas;
 use Uak35\WeightedDbManager\Console\Commands\DbReplicaStatus;
 use Uak35\WeightedDbManager\Database\Weighted\AtomicStateStore;
+use Uak35\WeightedDbManager\Database\Weighted\HealthMonitor;
 use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
+use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
@@ -30,6 +32,7 @@ use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
@@ -44,6 +47,28 @@ use Uak35\WeightedDbManager\Tests\TestCase;
  *   linear      → round(16×3.0 + 64×3.375)     = 264  round(8×3.0 + 32×3.375)     = 132
  */class WeightedDatabaseServiceProviderTest extends TestCase
 {
+    /**
+     * Every finding key the richest misconfiguration produces, at once.
+     *
+     * Named rather than written into the assertion, because the *count* is a claim two records
+     * make in prose — `docs/boot-audit-finding-keys.md` says "eight findings, eight keys" — and a
+     * number written twice is a number that can drift. `ProseNumbersTest` reads this list, so the
+     * sentence and the set are one source: changing the set without touching the record fails the
+     * suite, and neither the record nor this list holds an independent copy of the number.
+     *
+     * @var list<string>
+     */
+    public const RICHEST_BOOT_KEYS = [
+        'swrr.pgcat.gate',
+        'swrr.reader_windows.refused',
+        'swrr.reader_days.refused',
+        'swrr.primary_store.unknown',
+        'swrr.default_weight_formula.unknown',
+        'database.read.weight.refused',
+        'database.read.cpu_cores.refused',
+        'database.read.ram_gb.refused',
+    ];
+
     /** @var list<string> */
     private array $tempDirs = [];
 
@@ -1354,15 +1379,21 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     public function test_no_two_findings_of_one_boot_share_a_key(): void
     {
         // Every auditable problem at once: a pgcat gate that cannot act, both reader lists
-        // refused, a primary store that is not the one running, and a formula with no
-        // implementation. Five findings, five keys — and the point of stacking them is that
-        // the assembly is where a shared key would come from: the four methods below are
-        // spread into one list, and the record holds one entry per key, so two branches
-        // agreeing on a key would cost one of them its entry *and* its log line. The audit
-        // now logs every finding it is given and names a collision, so this asserts the
-        // stronger thing: for this configuration there is nothing to name.
+        // refused, a primary store that is not the one running, a formula with no
+        // implementation, and all three replica settings the resolver cannot read. Eight
+        // findings, eight keys — and the point of stacking them is that the assembly is where a
+        // shared key would come from: the six methods below are spread into one list, and the
+        // record holds one entry per key, so two branches agreeing on a key would cost one of
+        // them its entry *and* its log line. The audit now logs every finding it is given and
+        // names a collision, so this asserts the stronger thing: for this configuration there is
+        // nothing to name.
         $this->pgcatSwitchedOnForAMysqlConnection();
         $this->useReaderFallback('10:00-14:20', '1,2,3');
+        $this->useReplicas([
+            ['host' => '10.2.0.1', 'port' => 5432, 'weight' => 'heavy'],
+            ['host' => '10.2.0.2', 'port' => 5432, 'cpu_cores' => 0],
+            ['host' => '10.2.0.3', 'port' => 5432, 'ram_gb' => 'lots'],
+        ]);
         config()->set('db-manager.swrr.primary_store', 'Local');
         config()->set('db-manager.swrr.default_weight_formula', 'Diminishing');
         self::resetBootAuditGuard();
@@ -1374,21 +1405,247 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $keys = array_map(static fn (array $record): string => (string) $record['context']['finding'], $records);
 
         $this->assertSame($keys, array_unique($keys), 'one key is one finding: two branches producing it would be a defect');
-        $this->assertEqualsCanonicalizing([
-            'swrr.pgcat.gate',
-            'swrr.reader_windows.refused',
-            'swrr.reader_days.refused',
-            'swrr.primary_store.unknown',
-            'swrr.default_weight_formula.unknown',
-        ], $keys);
+        $this->assertEqualsCanonicalizing(self::RICHEST_BOOT_KEYS, $keys);
 
         foreach ($records as $record) {
             $this->assertStringNotContainsString('share the key', $record['message'], 'the collision line is for a defect, and this installation has none');
         }
 
-        // And the record agrees with the log: five findings, one entry each, so a boot that
-        // sees one of them fixed closes exactly that one out.
-        $this->assertCount(5, $this->recordedKeys());
+        // And the record agrees with the log: one entry per key, so a boot that sees one of
+        // them fixed closes exactly that one out.
+        $this->assertCount(count(self::RICHEST_BOOT_KEYS), $this->recordedKeys());
+    }
+
+    /**
+     * A weight the resolver does not read as written, refused on the boot that reads it.
+     *
+     * `ConfigValue` falls back to `0` for a value that is not a number, and `0` is how a replica
+     * is disabled — so `replicaStatus()` reports the pool that was left, one member short, and
+     * before this refusal nothing said the read list had described another one. The finding names
+     * the replica and the value, so the repair is in the sentence rather than in a file nobody
+     * opened until after the traffic was already thin.
+     */
+    public function test_replica_metadata_the_resolver_cannot_read_is_refused_at_boot(): void
+    {
+        $this->useReplicas([
+            ['host' => '10.1.0.1', 'port' => 5432, 'cpu_cores' => 16, 'ram_gb' => 64],
+            ['host' => '10.1.0.2', 'port' => 5432, 'weight' => 'heavy'],
+        ]);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records);
+        $this->assertSame('error', $records[0]['level'], 'a value the package refuses, like the reader windows');
+        $this->assertSame('database.read.weight.refused', $records[0]['context']['finding']);
+
+        // The row's sentence, word for word, under the row's own opening — one classifier, so a
+        // boot and a preflight cannot name the same value differently. `DbDoctorTest` asserts
+        // this same string on the `replica metadata` row.
+        $this->assertStringContainsString('replica metadata the resolver cannot read on [weighted]', $records[0]['message']);
+        $this->assertStringContainsString('[10.1.0.2:5432] weight is "heavy", which the resolver reads as 0', $records[0]['message']);
+        $this->assertStringContainsString('leaves the pool', $records[0]['message']);
+        $this->assertStringContainsString('smaller pool than the read list describes', $records[0]['message']);
+
+        $this->assertSame('weighted', $records[0]['context']['connection']);
+        $this->assertSame('weight', $records[0]['context']['setting']);
+        $this->assertSame(2, $records[0]['context']['replicas_configured']);
+        $this->assertSame(
+            [['replica' => '10.1.0.2:5432', 'configured' => 'heavy']],
+            $records[0]['context']['refused'],
+        );
+
+        $this->assertSame(['database.read.weight.refused'], $this->recordedKeys());
+
+        // And the shrink the refusal is about is real: the read list names two replicas and the
+        // pool the resolver builds holds one — the state that used to be reported as the
+        // installation.
+        $this->assertCount(1, $this->manager()->replicaStatus(self::CONNECTION));
+    }
+
+    /**
+     * Three settings, three mistakes, three repairs — and one key each, because a record
+     * remembers a finding by its key: a single key for a replica's metadata would resolve all
+     * three when one of them was fixed, and date the other two from the wrong boot.
+     */
+    public function test_each_size_setting_is_refused_under_its_own_key(): void
+    {
+        $this->useReplicas([
+            ['host' => '10.1.0.1', 'port' => 5432, 'weight' => -5],
+            ['host' => '10.1.0.2', 'port' => 5432, 'cpu_cores' => 0],
+            ['host' => '10.1.0.3', 'port' => 5432, 'ram_gb' => 'lots'],
+        ]);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertSame([
+            'database.read.weight.refused',
+            'database.read.cpu_cores.refused',
+            'database.read.ram_gb.refused',
+        ], array_map(static fn (array $record): string => (string) $record['context']['finding'], $records));
+
+        $this->assertStringContainsString('weight is -5, which the resolver reads as 0', $records[0]['message']);
+        $this->assertStringContainsString('cpu_cores is 0, which the resolver reads as 1 core', $records[1]['message']);
+        $this->assertStringContainsString('ram_gb is "lots", which the resolver reads as 0 GB', $records[2]['message']);
+
+        // A replica that leaves the pool and one that stays in it sized as something else are
+        // different consequences, and each sentence says which happened.
+        $this->assertStringContainsString('leaves the pool', $records[0]['message']);
+        $this->assertStringContainsString('stays in the pool', $records[1]['message']);
+        $this->assertStringContainsString('stays in the pool', $records[2]['message']);
+        $this->assertStringNotContainsString('leaves the pool', $records[1]['message']);
+        $this->assertStringNotContainsString('leaves the pool', $records[2]['message']);
+
+        $this->assertSame([
+            'database.read.weight.refused',
+            'database.read.cpu_cores.refused',
+            'database.read.ram_gb.refused',
+        ], $this->recordedKeys());
+    }
+
+    public function test_a_replica_disabled_with_weight_zero_is_not_refused(): void
+    {
+        // `weight: 0` is the documented way to take a replica out of the pool and the package
+        // means it, so a drain is not a fault. The refusal is for the values that read as 0
+        // *without* having been written as 0.
+        $this->useReplicas([
+            ['host' => '10.1.0.1', 'port' => 5432, 'weight' => 0],
+            ['host' => '10.1.0.2', 'port' => 5432, 'weight' => '0'],
+        ]);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertSame([], $records);
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    public function test_replica_metadata_that_reads_as_written_is_not_refused(): void
+    {
+        // The suite's own replicas: a core count and a memory figure, and nothing substituted for
+        // either. The vacuity guard for the three keys above — a rule that refused everything it
+        // looked at would pass every test that only checks what it names.
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertSame([], $records);
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    public function test_a_refused_replica_weight_is_closed_out_when_the_value_is_repaired(): void
+    {
+        $this->useReplicas([['host' => '10.1.0.1', 'port' => 5432, 'weight' => 'heavy']]);
+        self::resetBootAuditGuard();
+        $this->reportBootAudit();
+
+        $this->assertSame(['database.read.weight.refused'], $this->recordedKeys());
+
+        $records = [];
+        $this->collectLogs($records);
+
+        // A different process, so the record on disk is the only thing that can tell it there was
+        // a warning to close out — which is why `database.read.*` has to be a key every boot
+        // checks and reports on, clean or not.
+        $this->useReplicas([['host' => '10.1.0.1', 'port' => 5432, 'weight' => 10]]);
+        self::resetBootAuditGuard();
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records);
+        $this->assertSame('warning', $records[0]['level']);
+        $this->assertSame('database.read.weight.refused', $records[0]['context']['finding']);
+        $this->assertStringContainsString('no replica\'s weight is refused any more', $records[0]['message']);
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    public function test_removing_the_read_list_closes_a_refused_metadata_finding_out(): void
+    {
+        // The resolution sentence is true however the finding stops applying — the value repaired,
+        // the replica dropped from the read list, or the whole list removed — which is why it says
+        // every value written is a number rather than that somebody fixed one.
+        $this->useReplicas([['host' => '10.1.0.1', 'port' => 5432, 'ram_gb' => 'lots']]);
+        self::resetBootAuditGuard();
+        $this->reportBootAudit();
+
+        $this->assertSame(['database.read.ram_gb.refused'], $this->recordedKeys());
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->useReplicas([]);
+        self::resetBootAuditGuard();
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records);
+        $this->assertSame('database.read.ram_gb.refused', $records[0]['context']['finding']);
+        $this->assertStringContainsString('no replica\'s ram_gb is refused any more', $records[0]['message']);
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    /**
+     * The pool, and what the pool does not hold — the pair a report needs, because the second half
+     * is the one that used to have to be reconstructed by comparing two lists.
+     */
+    public function test_the_pool_and_the_exclusions_are_the_two_halves_of_the_read_list(): void
+    {
+        $this->useReplicas([
+            ['host' => '10.1.0.1', 'port' => 5432, 'cpu_cores' => 16, 'ram_gb' => 64],
+            ['host' => '10.1.0.2', 'port' => 5432, 'weight' => 0],
+            ['host' => '10.1.0.3', 'port' => 5432, 'weight' => 'heavy'],
+        ]);
+
+        $manager = $this->manager();
+
+        // The pool: one of the three, which is what used to be the whole report.
+        $this->assertSame(['10.1.0.1'], array_column($manager->replicaStatus(self::CONNECTION), 'host'));
+
+        // And the two that are missing from it, each with the reason the resolver reached.
+        $excluded = $manager->poolExclusions(self::CONNECTION);
+
+        $this->assertSame(['10.1.0.2:5432', '10.1.0.3:5432'], array_column($excluded, 'key'));
+        $this->assertSame(
+            [
+                '10.1.0.2:5432' => WeightResolver::EXCLUDED_DISABLED,
+                '10.1.0.3:5432' => WeightResolver::EXCLUDED_REFUSED,
+            ],
+            array_column($excluded, 'reason', 'key'),
+        );
+        $this->assertSame('weight is "heavy", which the resolver reads as 0', $excluded[1]['detail']);
+        $this->assertSame(ReplicaMetadata::DISABLED, $excluded[0]['detail']);
+
+        // Two lists, three replicas, no overlap: the partition is the point.
+        $this->assertCount(3, [...array_column($manager->replicaStatus(self::CONNECTION), 'host'), ...array_column($excluded, 'key')]);
+    }
+
+    /**
+     * The boundary, and it is deliberate: a replica in cool-down is out of the pool for *this read*,
+     * which `replicaStatus()` reports per replica, while `poolExclusions()` answers the
+     * configuration question a deploy gate can act on. Reporting a failing replica as a
+     * configuration exclusion would make a preflight fail on a transient state.
+     */
+    public function test_the_exclusions_are_the_configuration_and_not_a_replica_in_cool_down(): void
+    {
+        $manager = $this->manager();
+        $this->app->make(HealthMonitor::class)->markFailed('10.1.0.2:5432');
+
+        $this->assertSame([true, false], array_column($manager->replicaStatus(self::CONNECTION), 'healthy'));
+        $this->assertSame([], $manager->poolExclusions(self::CONNECTION));
+
+        // The read path is filtered all the same, so the two answers really are about two
+        // questions: the pool a read uses holds one replica while nothing is excluded from the
+        // configuration.
+        $this->assertSame(
+            '10.1.0.1',
+            $manager->readConfigFor($manager->connectionConfig(self::CONNECTION))['host'],
+        );
     }
 
     public function test_the_two_reasons_the_pool_is_never_used_become_one_finding(): void
@@ -1663,6 +1920,19 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         ]);
 
         $this->app->forgetInstance(PgcatConfigFlipper::class);
+    }
+
+    /**
+     * Replace the read list of the connection the package follows — `database.default`, unless
+     * the installation names one in `swrr.connection`. The boot audit reads the same list from
+     * the same place, so a test that configures a replica's metadata is configuring what the
+     * audit and the resolver both see.
+     *
+     * @param list<array<string, mixed>> $replicas
+     */
+    private function useReplicas(array $replicas): void
+    {
+        config()->set('database.connections.' . config('database.default') . '.read', $replicas);
     }
 
     /**
