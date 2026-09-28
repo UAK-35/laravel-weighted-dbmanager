@@ -6,6 +6,7 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Release;
 
 use PHPUnit\Framework\TestCase;
 use Uak35\WeightedDbManager\Tests\Support\ReleaseRepo;
+use Uak35\WeightedDbManager\Tests\Support\ReleaseRun;
 
 /**
  * The part of the command the dry run never reaches: promoting the changelog,
@@ -27,7 +28,7 @@ final class ReleaseApplyTest extends TestCase
         $repo = ReleaseRepo::make(self::ADDED);
         $repo->tag('v1.0.0');
 
-        $run = $repo->release('--weigh', '--yes');
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue($run->said('committed and tagged v1.1.0'), $run->describe());
@@ -68,7 +69,7 @@ final class ReleaseApplyTest extends TestCase
         $repo = ReleaseRepo::make(self::FIXED);
         $repo->tag('v1.0.0');
 
-        $first = $repo->release('--weigh', '--yes');
+        $first = $repo->release('--weigh', '--yes', '--skip-ci');
         $this->assertSame(0, $first->exitCode, $first->describe());
         $this->assertStringContainsString('describes the tree at v1.0.1', $repo->read('methods.tsv'));
 
@@ -107,7 +108,7 @@ final class ReleaseApplyTest extends TestCase
         $repo->tag('v1.0.0');
         $before = $repo->read('composer.json');
 
-        $run = $repo->release('--weigh', '--yes');
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertSame('dev-dev, dev-main -> 1.1.x-dev  (updated)', $run->plan('branch-alias'), $run->describe());
@@ -142,7 +143,7 @@ final class ReleaseApplyTest extends TestCase
         $repo->tag('v0.0.1');
         $before = $repo->read('composer.json');
 
-        $run = $repo->release('--weigh', '--yes');
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertSame('0.0.2  (tag v0.0.2)', $run->plan('next version'), $run->describe());
@@ -175,7 +176,7 @@ final class ReleaseApplyTest extends TestCase
         $repo->commit('chore: a maintenance line with an alias of its own');
         $repo->tag('v0.0.1');
 
-        $run = $repo->release('--weigh', '--yes');
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertSame(
@@ -207,7 +208,7 @@ final class ReleaseApplyTest extends TestCase
         $repo->tag('v0.0.1');
         $before = $repo->read('composer.json');
 
-        $run = $repo->release('--weigh', '--yes');
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertSame(
@@ -223,41 +224,59 @@ final class ReleaseApplyTest extends TestCase
     }
 
     /**
-     * The closing note is the one place the tool says what to do next, so it has to be
-     * true. A pushed tag publishes nothing until the package has been submitted at
-     * packagist.org — and that is only ever the case on the first release, so the first
-     * release says it and later ones do not repeat it.
+     * The closing note is the one place the tool says what to do next, so it has to be true —
+     * and it cannot be conditioned on a fact the script does not have. Whether the package has
+     * ever been submitted to packagist.org is exactly that kind of fact: a tag on GitHub says
+     * nothing about whether a version is being served, so the first release and the tenth are
+     * told the same thing, and the line names both ways the gap closes rather than guessing at
+     * which one applies. Guessing was the defect: the note used to read the presence of an
+     * earlier tag as proof of a submission, which is true of a package that has been submitted
+     * and false of one that has been tagged several times without ever being submitted.
      */
-    public function test_the_closing_note_names_the_packagist_submission_on_the_first_release_only(): void
+    public function test_the_closing_note_says_the_same_thing_on_every_run(): void
     {
         $first = ReleaseRepo::make(self::FIXED);
 
-        $run = $first->release('--weigh', '--yes');
+        $run = $first->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue(
-            $run->said('The package has to be submitted at packagist.org first'),
+            $run->said('next: git push origin main --follow-tags'),
             $run->describe(),
         );
-        $this->assertTrue($run->said('after that Packagist'), $run->describe());
 
-        // A release cut on top of a tag that already exists is the later case: whatever
-        // published that tag has been registered by now, so the note is the plain one.
+        // A release cut on top of a tag that already exists — the run the old note assumed had
+        // been published. It gets the same sentence, word for word.
         $later = ReleaseRepo::make(self::FIXED);
         $later->tag('v1.0.0');
 
-        $second = $later->release('--weigh', '--yes');
+        $second = $later->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $second->exitCode, $second->describe());
-        $this->assertTrue(
-            $second->said('next: git push origin main --follow-tags'),
+
+        $line = self::closingLine($run);
+
+        // The same sentence for a first release and for one cut on top of a tag. The version is
+        // the only part allowed to differ, so it is the only part normalised away.
+        $this->assertSame(
+            self::closingNoteShape($run),
+            self::closingNoteShape($second),
             $second->describe(),
         );
-        $this->assertTrue(
-            $second->said('Packagist picks the tag up from there.'),
-            $second->describe(),
-        );
-        $this->assertFalse($second->said('packagist.org'), $second->describe());
+        $this->assertStringContainsString('{version}', self::closingNoteShape($run), $run->describe());
+
+        // One line, and true whichever state the reader is in: the question is about this
+        // release's tag, and both ways of closing the gap are named on it.
+        $this->assertStringNotContainsString(PHP_EOL, $line);
+        $this->assertStringContainsString('Packagist reads tags, not commits', $line);
+        $this->assertStringContainsString('submit the package if it never was', $line);
+        $this->assertStringContainsString('or trigger a crawl', $line);
+        $this->assertStringContainsString('RELEASING.md, "Publishing".', $line);
+
+        $tag = self::taggedVersion($run);
+
+        $this->assertNotSame('', $tag, $run->describe());
+        $this->assertStringContainsString($tag, $line);
     }
 
     /**
@@ -269,41 +288,68 @@ final class ReleaseApplyTest extends TestCase
      * The push is real: the fixture is given a bare repository as `origin`, so `--push` is
      * exercised rather than assumed, and the tag is read back off the remote afterwards.
      */
-    public function test_both_closing_notes_point_at_the_manual_crawl(): void
+    public function test_the_closing_note_points_at_the_manual_crawl_on_both_exits(): void
     {
         $byHand = ReleaseRepo::make(self::FIXED);
         $byHand->tag('v1.0.0');
 
-        $run = $byHand->release('--weigh', '--yes');
+        $run = $byHand->release('--weigh', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue($run->said('next: git push origin main --follow-tags'), $run->describe());
-        $this->assertTrue(
-            $run->said('If no version appears, trigger a crawl'),
-            $run->describe(),
-        );
-        $this->assertTrue(
-            $run->said('RELEASING.md, "Triggering a crawl by hand".'),
-            $run->describe(),
-        );
+        $this->assertTrue($run->said('or trigger a crawl'), $run->describe());
+        $this->assertTrue($run->said('RELEASING.md, "Publishing".'), $run->describe());
 
         $pushed = ReleaseRepo::make(self::FIXED)->withRemote();
         $pushed->tag('v1.0.0');
 
-        $pushedRun = $pushed->release('--weigh', '--yes', '--push');
+        $pushedRun = $pushed->release('--weigh', '--yes', '--skip-ci', '--push');
 
         $this->assertSame(0, $pushedRun->exitCode, $pushedRun->describe());
         $this->assertTrue(
             $pushedRun->said('pushed main and v1.0.1 to origin'),
             $pushedRun->describe(),
         );
-        $this->assertTrue(
-            $pushedRun->said('If no version appears, trigger a crawl'),
-            $pushedRun->describe(),
-        );
+        $this->assertTrue($pushedRun->said('or trigger a crawl'), $pushedRun->describe());
 
         // The push happened, so the note is advice about a tag that really left.
         $this->assertStringContainsString('v1.0.1', $pushed->git('ls-remote', '--tags', 'origin'));
+    }
+
+    /**
+     * The last line a run printed — the note the tool ends on.
+     */
+    private static function closingLine(ReleaseRun $run): string
+    {
+        $lines = array_values(array_filter(
+            array_map('trim', preg_split('/\R/', $run->output) ?: []),
+            static fn (string $line): bool => $line !== '',
+        ));
+
+        return $lines === [] ? '' : (string) end($lines);
+    }
+
+    /**
+     * The version this run committed and tagged, read out of the run's own output, so the note
+     * can be asserted against the release it was printed for rather than a version this test
+     * has to guess at.
+     */
+    private static function taggedVersion(ReleaseRun $run): string
+    {
+        return preg_match('/committed and tagged (v\S+)/', $run->output, $match) === 1 ? $match[1] : '';
+    }
+
+    /**
+     * The note a run ends on, with the version it names replaced by `{version}` — two runs of
+     * two different releases can then be asked whether they say the same thing, which is the
+     * property the note is supposed to have.
+     */
+    private static function closingNoteShape(ReleaseRun $run): string
+    {
+        $line = self::closingLine($run);
+        $tag = self::taggedVersion($run);
+
+        return $tag === '' ? $line : str_replace($tag, '{version}', $line);
     }
 
     private static function assertSameSubstringCount(string $needle, int $expected, string $haystack): void

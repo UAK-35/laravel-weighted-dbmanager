@@ -149,6 +149,51 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
+     * The base is the last tag this branch actually contains, not the highest tag in the
+     * repository.
+     *
+     * A dev tag cut on a side branch is a real tag and, from here, not an ancestor of
+     * HEAD: this line has never had that version. Reading it as the base measures the bump
+     * against a release this branch never made, and the range `vX.Y.Z..HEAD` walks a
+     * history the tag is not part of. The leak was the fallback rather than `git
+     * describe`, which already reads only reachable tags — `git tag --list` sees every tag
+     * in the repository, so a branch with no tag of its own used to take the highest one
+     * anywhere, a dev tag on another lane included.
+     */
+    public function test_a_tag_this_branch_cannot_reach_is_not_the_base(): void
+    {
+        $repo = ReleaseRepo::make(self::ADDED);
+
+        // The dev lane, tagged ahead of a release — from `main` that is a different
+        // branch, and the tag is not a version this one contains.
+        $repo->git('checkout', '-b', 'dev');
+        $repo->write('src/Dev.php', "<?php\n\nnamespace Fixture;\n\nfinal class Dev\n{\n}\n");
+        $repo->commit('feat: something on the dev lane');
+        $repo->tag('v0.9.0');
+
+        $repo->git('checkout', 'main');
+        $repo->write('src/Main.php', "<?php\n\nnamespace Fixture;\n\nfinal class Main\n{\n}\n");
+        $repo->commit('feat: something on main');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+
+        // The tag is in the repository; it is simply not this branch's base.
+        $this->assertStringContainsString('v0.9.0', $repo->tags());
+        $this->assertSame('(none)', $run->plan('latest tag'), $run->describe());
+        $this->assertTrue($run->said('no release tag yet'), $run->describe());
+        $this->assertFalse(
+            $run->said('since v0.9.0'),
+            "The commits were diffed against a tag this branch cannot reach.\n" . $run->describe(),
+        );
+
+        // With no base, the notes decide the first version — 0.1.0, not something built
+        // on 0.9.0.
+        $this->assertSame('0.1.0  (tag v0.1.0)', $run->plan('next version'), $run->describe());
+    }
+
+    /**
      * A stale stamp cannot tell "nothing changed" from "not refreshed", so the file is
      * reported and skipped rather than trusted. Skipping is safe in exactly one
      * direction, which is the one a versioning signal must never be wrong in.
@@ -230,5 +275,69 @@ final class BumpWeighingTest extends TestCase
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
         $this->assertTrue($run->said('written by this release'), $run->describe());
+    }
+
+    /**
+     * The stale case on a release that proceeds, which is where the file's fate is decided:
+     * a plan only reports it, but a real release *replaces* it.
+     *
+     * That replacement is the whole reason the file can be stale at all. A release that
+     * skipped it — or that wrote it with the old stamp — would leave the next run reading a
+     * stamp that is wrong forever, and "not refreshed" would never become "fresh" again: the
+     * inventory would be a signal the suite has and the process never recovers. So the stamp
+     * is asserted to be the tag this run cut, that v0.9.9 is gone rather than left beside it,
+     * and that the stale file did not lower the bump on the way through.
+     */
+    public function test_a_stale_inventory_is_replaced_by_the_release_that_proceeds(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+
+        $repo->refreshInventory();
+        $repo->restampInventory('v0.9.9');
+        $repo->commit('chore: keep an inventory');
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('stale, refreshed by this release and not weighed'),
+            $run->describe(),
+        );
+        $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
+        $this->assertSame('0.1.1  (tag v0.1.1)', $run->plan('next version'), $run->describe());
+        $this->assertTrue(
+            $run->said('inventory refreshed — 2 file(s), 2 method(s), described as v0.1.1'),
+            $run->describe(),
+        );
+
+        // Rewritten, not appended to: the stamp describes the tag that was just cut.
+        foreach (['files.tsv', 'methods.tsv'] as $inventory) {
+            $this->assertStringContainsString(
+                'describes the tree at v0.1.1',
+                $repo->read($inventory),
+                $run->describe(),
+            );
+            $this->assertStringNotContainsString('v0.9.9', $repo->read($inventory), $run->describe());
+        }
+
+        // And it went into the release commit, so the tag points at the inventory that
+        // describes it — the next release reads that stamp rather than the one it replaced.
+        $this->assertSame(
+            '',
+            trim($repo->git('status', '--porcelain', '--untracked-files=no', '--', '.')),
+            $run->describe(),
+        );
+        $this->assertSame('describes the tree at v0.1.1', self::stamp($repo->git('show', 'v0.1.1:files.tsv')));
+    }
+
+    /** The `describes the tree at …` stamp of an inventory file, read off the file itself. */
+    private static function stamp(string $inventory): string
+    {
+        if (preg_match('/^# .*(describes the tree at .*)$/m', $inventory, $match) !== 1) {
+            return '';
+        }
+
+        return trim($match[1]);
     }
 }

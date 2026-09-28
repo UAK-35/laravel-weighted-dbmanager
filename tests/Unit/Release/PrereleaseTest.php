@@ -38,7 +38,7 @@ final class PrereleaseTest extends TestCase
         $repo = ReleaseRepo::make(self::FIXED);
         $repo->git('checkout', '-b', 'dev');
 
-        $run = $repo->release('--version=0.0.1-alpha1', '--yes');
+        $run = $repo->release('--version=0.0.1-alpha1', '--yes', '--skip-ci');
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue($run->said('committed and tagged v0.0.1-alpha1'), $run->describe());
@@ -284,7 +284,7 @@ final class PrereleaseTest extends TestCase
         $repo->git('checkout', '-b', 'dev');
 
         foreach ([1, 2, 3] as $number) {
-            $run = $repo->release("--version=0.0.1-alpha{$number}", '--yes');
+            $run = $repo->release("--version=0.0.1-alpha{$number}", '--yes', '--skip-ci');
 
             $this->assertSame(0, $run->exitCode, "alpha{$number} should cut. " . $run->describe());
             $this->assertSame(
@@ -330,7 +330,7 @@ final class PrereleaseTest extends TestCase
         $repo = ReleaseRepo::make(self::FIXED);
         $repo->git('checkout', '-b', 'dev');
 
-        $first = $repo->release('--version=0.0.1-alpha1', '--yes');
+        $first = $repo->release('--version=0.0.1-alpha1', '--yes', '--skip-ci');
         $this->assertSame(0, $first->exitCode, $first->describe());
 
         // The notes have moved to their promoted heading; what is left behind is empty.
@@ -355,6 +355,76 @@ final class PrereleaseTest extends TestCase
     }
 
     /**
+     * The same tree, two questions, two answers — and the plan says which one it answered.
+     *
+     * The refusal above is about what a release *publishes*: the notes are the version's
+     * record, so a release with none is one nobody can read. The weighing is about the
+     * *changes*, and the notes are only one of the four things it reads — so `--weigh
+     * --dry-run` is let past an empty section, reports the bump the other signals weigh, and
+     * says in the plan that a real run would refuse here. The release is exercised on the
+     * same tree, because "leave the rail alone" is half of what this is about.
+     */
+    public function test_a_weighing_dry_run_reports_the_bump_while_a_release_of_it_refuses(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v1.0.0');
+        $repo->release_notes('');
+        $repo->commit('docs: nothing to release yet');
+
+        $plan = $repo->release('--weigh', '--dry-run', '--skip-ci');
+
+        $this->assertSame(0, $plan->exitCode, $plan->describe());
+        $this->assertSame('patch  (weighed: a patch change)', $plan->plan('bump'), $plan->describe());
+        $this->assertStringContainsString('1.0.1', $plan->plan('next version'), $plan->describe());
+
+        // The line a reader trusts to know what this plan is: it reports the weighing and
+        // names the refusal it is standing in for.
+        $this->assertTrue($plan->said('nothing to promote'), $plan->describe());
+        $this->assertTrue($plan->said('a real run refuses here'), $plan->describe());
+
+        // And the weighing table says which signal was silent, in the same words the empty
+        // section gets anywhere else — an empty section and a section in a vocabulary the
+        // policy does not know are not reported as the same thing.
+        $this->assertTrue(
+            $plan->said('the Unreleased section is empty — nothing for a release to publish'),
+            $plan->describe(),
+        );
+
+        // A plan writes nothing, so the report above cannot be mistaken for a cut.
+        $this->assertSame('v1.0.0', trim($repo->tags()));
+        $this->assertSame('docs: nothing to release yet', trim($repo->git('log', '-1', '--format=%s')));
+
+        $release = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(1, $release->exitCode, $release->describe());
+        $this->assertTrue($release->refused('The Unreleased section has no entries'), $release->describe());
+
+        // And the refusal names the run that does report, so a reader who wanted the bump is
+        // not left to find it: only --weigh asks the question the notes are irrelevant to.
+        $this->assertTrue($release->refused('--weigh'), $release->describe());
+        $this->assertSame('v1.0.0', trim($repo->tags()));
+    }
+
+    /**
+     * The exemption is exactly `--weigh`. A declared bump is not a question the changes
+     * answer — the weighing is only a check on it — so a dry run of one is refused here like
+     * any other run that could tag, and the refusal says which flag would have reported.
+     */
+    public function test_a_declared_bump_is_not_let_past_an_empty_unreleased_even_as_a_dry_run(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v1.0.0');
+        $repo->release_notes('');
+        $repo->commit('docs: nothing to release yet');
+
+        $run = $repo->release('--minor', '--dry-run', '--skip-ci');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue($run->refused('The Unreleased section has no entries'), $run->describe());
+        $this->assertFalse($run->said('Release plan'), $run->describe());
+    }
+
+    /**
      * A prerelease's own commit is bookkeeping, like any other release commit.
      *
      * The tag is moved back to put the release commit *inside* `base..HEAD`, which is the
@@ -371,7 +441,7 @@ final class PrereleaseTest extends TestCase
         $repo = ReleaseRepo::make(self::FIXED);
         $repo->git('checkout', '-b', 'dev');
 
-        $first = $repo->release('--version=0.0.1-alpha1', '--yes');
+        $first = $repo->release('--version=0.0.1-alpha1', '--yes', '--skip-ci');
         $this->assertSame(0, $first->exitCode, $first->describe());
 
         // The cut consumed the section, so the weigh below needs notes of its own — and

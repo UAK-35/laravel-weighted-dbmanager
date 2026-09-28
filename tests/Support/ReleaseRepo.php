@@ -74,6 +74,9 @@ final class ReleaseRepo
     /** the bare repository `withRemote()` creates, once a test asks for one */
     private ?string $remote = null;
 
+    /** extra environment for every child this fixture starts, merged over the machine's */
+    private array $env = [];
+
     private function __construct(
         private readonly string $root,
         private readonly string $config,
@@ -137,6 +140,67 @@ final class ReleaseRepo
         return $this;
     }
 
+    /**
+     * Add environment for the children this fixture starts, over the machine's own.
+     *
+     * This is how a test answers a question the script would otherwise put to GitHub: the
+     * release script asks one, and a test cannot let it reach the network — a suite that
+     * reported on whatever the last push happened to leave behind would be asserting on
+     * GitHub rather than on the rail.
+     *
+     * @param array<string, string> $env
+     */
+    public function withEnv(array $env): self
+    {
+        $this->env = array_merge($this->env, $env);
+
+        return $this;
+    }
+
+    /**
+     * Answer the release script's CI question without a network: point
+     * `RELEASE_CI_COMMAND` at a small script that prints what `gh run list --json …` would
+     * have printed, and exits with the code gh would have exited with.
+     *
+     * The script is PHP and sits beside the root, so one file works on Windows and on Linux
+     * without a shell shim, and it is never part of the tree the release commits. It also
+     * records what it was asked, because "it asked about this commit" is half of what the
+     * rail claims.
+     *
+     * @param string $stdout the JSON a run list would be, or whatever a broken gh would say
+     * @param int    $exit   what gh exits with — non-zero is the "cannot be asked" case
+     * @param string $stderr gh's diagnostics, which the refusal quotes
+     */
+    public function withCiAnswer(string $stdout, int $exit = 0, string $stderr = ''): self
+    {
+        $script = $this->root . '.ci-answer.php';
+        $asked = $this->root . '.ci-asked';
+
+        $fake = "<?php\n\ndeclare(strict_types=1);\n\n"
+            . 'file_put_contents(' . var_export($asked, true) . ', implode(" ", array_slice($argv, 1)));' . "\n\n"
+            . 'fwrite(STDERR, ' . var_export($stderr, true) . ");\n\n"
+            . 'fwrite(STDOUT, ' . var_export($stdout, true) . ");\n\n"
+            . 'exit(' . $exit . ");\n";
+
+        if (file_put_contents($script, $fake) === false) {
+            throw new RuntimeException("Could not write {$script}");
+        }
+
+        self::sweep([$script, $asked]);
+
+        return $this->withEnv([
+            'RELEASE_CI_COMMAND' => '"' . PHP_BINARY . '" "' . $script . '" %SHA%',
+        ]);
+    }
+
+    /** The arguments the fake gh was last asked with — the commit the rail looked up. */
+    public function ciAsked(): string
+    {
+        $contents = @file_get_contents($this->root . '.ci-asked');
+
+        return $contents === false ? '' : trim($contents);
+    }
+
     public function path(string $relative): string
     {
         return $this->root . '/' . $relative;
@@ -163,6 +227,33 @@ final class ReleaseRepo
         if (file_put_contents($this->path($relative), $contents) === false) {
             throw new RuntimeException("Could not write {$relative}");
         }
+    }
+
+    /**
+     * Delete a path inside the fixture — a file, or a whole tree with `drop('.git')`.
+     *
+     * A rail is about a state of the tree, so producing the state is half of testing it:
+     * a changelog that is not there, a package that is not a repository, and a file that
+     * cannot be written are all states a move or a chmod produces and no argument does.
+     */
+    public function drop(string $relative): void
+    {
+        self::remove($this->path($relative));
+    }
+
+    /**
+     * Make a file read-only, answering whether this machine could.
+     *
+     * The write failures are asserted by making the write impossible, and on some
+     * environments the read-only bit is not honoured — a suite running as root, or a
+     * filesystem that ignores the mode. A test that cannot produce the state has nothing to
+     * assert about it, so it asks here rather than asserting something else.
+     */
+    public function makeReadOnly(string $relative): bool
+    {
+        @chmod($this->path($relative), 0o444);
+
+        return !is_writable($this->path($relative));
     }
 
     /** Replace the `## Unreleased` body, for a test that wants a different signal. */
@@ -226,6 +317,13 @@ final class ReleaseRepo
 
     /**
      * Run the release command, exactly as `composer release` does.
+     *
+     * Most tests that cut a release here pass `--skip-ci`: their fixture is a local
+     * repository with no remote, and the rail about CI asks for two things a local-only
+     * fixture cannot answer — that the commit be the tip of a remote branch, and that the
+     * workflow's run for it have passed. That is the flag's own meaning rather than a check
+     * being waved through, and `CiGateTest` is where the rail itself is exercised, remote
+     * and run and all.
      */
     public function release(string ...$arguments): ReleaseRun
     {
@@ -394,13 +492,29 @@ final class ReleaseRepo
      */
     private function exec(array $command): array
     {
-        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        // All three streams are declared, stdin included, rather than left to be
+        // inherited. With no descriptor 0 the child is handed whatever handle the
+        // *runner* gave this process, and a parallel runner spawns its workers with
+        // pipes of its own. No child of this fixture reads stdin, so the write end of
+        // its pipe is closed as soon as the process exists.
+        $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 
-        $process = @proc_open($command, $descriptors, $pipes, $this->root, $this->environment());
+        $pipes = null;
+
+        [$process, $reason] = $this->spawn($command, $descriptors, $pipes);
 
         if (!is_resource($process)) {
-            throw new RuntimeException('Could not start: ' . implode(' ', $command));
+            throw new RuntimeException(sprintf(
+                'Could not start: %s%s',
+                implode(' ', $command),
+                $reason === null ? '' : " — {$reason}",
+            ));
         }
+
+        // The child's stdin is closed rather than left open: it is a pipe this
+        // process holds the write end of, and a child that never reads it must see
+        // the end of its input rather than wait for one that will not come.
+        fclose($pipes[0]);
 
         $output = (string) stream_get_contents($pipes[1]);
         $error = (string) stream_get_contents($pipes[2]);
@@ -409,6 +523,50 @@ final class ReleaseRepo
         fclose($pipes[2]);
 
         return [proc_close($process), $output, $error];
+    }
+
+    /**
+     * One child, and the operating system's own words when it will not be created.
+     *
+     * `@proc_open` failing says only that it could not start; the warning it raises says
+     * why, and a suppressed warning still reaches an error handler, so the reason is read
+     * out here and carried into the exception rather than dropped. "Could not start: git
+     * init …" on its own is a diagnosis nobody can act on; "— CreateProcess failed: The
+     * parameter is incorrect" is one somebody can.
+     *
+     * That reason is the whole reason this is a method. Creating a process can fail without
+     * the command being wrong, and running the suite in parallel is where it happens: at 16
+     * workers of per-test parallelism these fixtures are dozens of freshly created PHP
+     * processes at once, and Windows intermittently refuses one with ERROR_INVALID_PARAMETER
+     * while the identical command succeeds in the worker beside it. Measured, in a worker
+     * that was refusing: the same command is created fine with no environment and with a
+     * subset of one, and refused with the machine's whole environment — and once a worker is
+     * refusing it refuses for that process, not for one attempt. A retry therefore cannot be
+     * the fix, which is why nothing here retries; the environment that is passed is the thing
+     * to settle.
+     *
+     * @param list<string> $command
+     * @param array<int, array{string, string}> $descriptors
+     * @param array<int, resource>|null         $pipes  the child's ends, filled in by proc_open
+     * @return array{0: resource|false, 1: string|null}
+     */
+    private function spawn(array $command, array $descriptors, ?array &$pipes): array
+    {
+        $reason = null;
+
+        set_error_handler(static function (int $severity, string $message) use (&$reason): bool {
+            $reason = $message;
+
+            return true;
+        });
+
+        try {
+            $process = proc_open($command, $descriptors, $pipes, $this->root, $this->environment());
+        } finally {
+            restore_error_handler();
+        }
+
+        return [$process, $process === false ? $reason : null];
     }
 
     /**
@@ -426,7 +584,7 @@ final class ReleaseRepo
             $inherited = [];
         }
 
-        return array_merge($inherited, [
+        return array_merge($inherited, $this->env, [
             'GIT_CONFIG_NOSYSTEM' => '1',
             'GIT_CONFIG_GLOBAL' => $this->config,
             'GIT_AUTHOR_NAME' => self::NAME,

@@ -35,10 +35,11 @@ report the next version, it decides it.
 
 | Step | Detail |
 |---|---|
-| Base version | `git describe` for the most recent reachable `v*` tag, so a release is always built on what `main` actually contains |
+| Base version | The most recent `v*` tag that is an **ancestor of HEAD** — `git describe`, and when that finds nothing, the same question asked of `git tag --merged HEAD` — so a release is built on what the branch actually contains, never on a tag cut on a branch it cannot reach |
 | Bump | `--weigh` lets the policy pick it; `--minor`, `--major` or `--version=X.Y.Z` declare it instead, and are refused when they undersell the changes |
 | Next version | The base plus the bump, or exactly `--version=X.Y.Z`; the suffix may be a prerelease |
 | Branch | `main` for a release, `dev` for a prerelease — the suffix decides, and `--branch=NAME` overrides |
+| CI | HEAD has to be the tip of the remote branch and the workflow's run for it — a push run on that branch — has to have finished and passed. `--skip-ci` tags anyway |
 | No tags yet | The base is `0.0.0`, so the bump applies to it directly: a weighed minor is **0.1.0**, a weighed patch **0.0.1** |
 | CHANGELOG | Promotes `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` and puts a fresh, empty `## Unreleased` section above it. Heading style (bracketed or not) follows the file |
 | Compare links | When the changelog has an `[Unreleased]:` link reference, it is repointed at the new tag and a `[X.Y.Z]` compare link is added |
@@ -50,6 +51,13 @@ report the next version, it decides it.
 `--dry-run` prints all of the above, the CHANGELOG head after promotion, and the
 exact git commands it would run — without writing, committing or tagging
 anything. It is safe to run on a dirty tree.
+
+It is also the only run that answers `--weigh` with an empty `## Unreleased`: a
+plan publishes nothing, so the rail above does not apply to it, and the bump is
+weighed from the commits, the public surface and the inventory instead. The plan's
+`CHANGELOG` line says which question it answered, and the refusal a real run
+prints names the flag — so neither the bump nor the reason it is not a release is
+left to be inferred.
 
 ## What the release does to CHANGELOG.md
 
@@ -195,27 +203,51 @@ The next free number in that lane is 0.0.1-alpha2.
 
 ## Safety rails
 
-Each of these stops the release with exit code 1:
+Each of these stops the release with exit code 1, and each is proved by the test in the last
+column — the test names a state of the tree, and the state is made rather than mocked, so a
+row without one is a rail nobody has driven:
 
-| Rail | Why |
-|---|---|
-| Not a git repository | Tags are the version; there is nothing to release into |
-| `HEAD` is not the expected branch | A release is cut from `main`, a prerelease from `dev` — not from wherever you happen to be (see [prerelease tags](#prerelease-dev-tags)) |
-| Tracked files are dirty | The tag must point at exactly what was reviewed — commit first. `--dry-run` only warns |
-| Target tag already exists | A published tag is never reused or moved (see below) |
-| The version is not newer | A release cannot go backwards |
-| Not `X.Y.Z` or a Composer-legal prerelease | A tag Composer cannot parse is one nobody can install, and it fails quietly rather than loudly (see [prerelease tags](#prerelease-dev-tags)). This one exits **2**, not 1 |
-| No `## Unreleased` section | There is nothing to promote |
-| The Unreleased section is empty | Refused, with no override. The notes are what the bump is weighed from and what a reader upgrades on, so there is nothing to release without them |
-| The declared bump is smaller than `--weigh`'s | Shipping a breaking change as a patch is the accident this policy exists to prevent. `--ignore-policy` overrides it, and the plan says so |
-| Non-interactive shell | It asks before committing and tagging. `--yes` (or `--dry-run`) is required when stdin is not a terminal |
+| Rail | Why | Proved by |
+|---|---|---|
+| Not a git repository | Tags are the version; there is nothing to release into | `test_a_tree_that_is_not_a_repository_is_refused` |
+| `HEAD` is not the expected branch | A release is cut from `main`, a prerelease from `dev` — not from wherever you happen to be (see [prerelease tags](#prerelease-dev-tags)) | `test_a_release_cannot_be_cut_from_dev`, `test_a_prerelease_cannot_be_cut_from_main` |
+| Tracked files are dirty | The tag must point at exactly what was reviewed — commit first. `--dry-run` only warns | `test_tracked_files_have_to_be_committed_first`, `test_the_dry_run_warns_about_a_dirty_tree_instead_of_refusing` |
+| CI has not verified the commit being released | A tag is a version and publishing one is not undoable, so the commit a release is cut from has to be one the workflow built and passed: HEAD must be the tip of the remote branch, and its run must have finished green. A commit that was never pushed is not one CI can have an opinion about, a run still going is not a pass, and a failure beside a success is not a pass either. `--skip-ci` overrides it; `--dry-run` reports it instead of refusing | `test_a_failed_run_refuses_the_tag`, `test_a_run_that_has_not_finished_refuses_the_tag`, `test_a_dry_run_reports_the_state_without_refusing`, `test_skip_ci_tags_without_asking_anything` |
+| Target tag already exists | A published tag is never reused or moved (see below) | `test_the_refusal_names_the_next_free_number_in_the_lane` |
+| The version is not newer | A release cannot go backwards | `test_a_version_that_is_not_newer_is_refused` |
+| Not `X.Y.Z` or a Composer-legal prerelease | A tag Composer cannot parse is one nobody can install, and it fails quietly rather than loudly (see [prerelease tags](#prerelease-dev-tags)). This one exits **2**, not 1 | `test_the_suffix_grammar_is_the_one_composer_can_read`, `test_a_refused_suffix_is_refused_before_the_branch_is_checked` |
+| No `## Unreleased` section | There is nothing to promote | `test_a_changelog_with_no_unreleased_heading_is_refused` |
+| The Unreleased section is empty | Refused, with no override. The notes are what a release publishes and what a reader upgrades on, so there is nothing to release without them. `--weigh --dry-run` is the one run let past it — and it is not a release: it reports the bump the other signals weigh and prints, in the plan, that a real run refuses here. The two answers differ because they answer different questions: the bump is read off the changes, the version is what a reader gets | `test_a_dev_tag_with_no_notes_is_refused_and_has_no_override`, `test_a_weighing_dry_run_reports_the_bump_while_a_release_of_it_refuses` |
+| The declared bump is smaller than `--weigh`'s | Shipping a breaking change as a patch is the accident this policy exists to prevent. `--ignore-policy` overrides it, and the plan says so | `test_a_declared_bump_below_the_weighed_one_is_refused`, `test_ignore_policy_releases_anyway_and_says_so` |
+| Non-interactive shell | It asks before committing and tagging. `--yes` (or `--dry-run`) is required when stdin is not a terminal | `test_a_non_interactive_shell_is_refused_without_yes` |
+
+Every test named in this file is checked to exist, so a renamed test is a doc failure
+rather than a row that quietly stops proving anything.
 
 `--allow-dirty` exists for the first release of an already-populated repository,
-where the import and the release are the same commit.
+where the import and the release are the same commit. Both escapes are tested from the
+side that matters: `test_allow_dirty_releases_the_written_files_and_leaves_the_edit_out`
+asserts that the tag holds the reviewed file and not the uncommitted edit, because an
+`--allow-dirty` that swept the tree into the tag would be the rail's own defect one flag
+away.
+
+`--skip-ci` is the same kind of escape for the newest rail. It is not a variance that
+still consults CI: it releases on a repository with no remote at all, which is what a
+machine with no `gh`, no token or no network needs — and "nothing verified" otherwise
+means no tag, because the rail is only allowed to be wrong in one direction. The plan
+prints `not checked (--skip-ci)` so a release that skipped it says so.
+
+The question itself is `gh run list --commit <sha> --limit 20 --json
+name,status,conclusion,event,headBranch`, asked of the commit being released and read for
+the runs that are a **push on the branch being released** — a run for the tag, or for a
+branch that also received the commit, says nothing about this one. `RELEASE_CI_COMMAND`
+replaces that command (`%SHA%` is where the commit goes), for a machine whose `gh` lives
+somewhere else, or one that has to answer without a network.
 
 `--patch` is not a rail but a removal: it is no longer an option at all, and
 passing it exits `2` with a pointer to `--weigh`. A patch release is what
-`--weigh` computes when nothing louder is found.
+`--weigh` computes when nothing louder is found
+(`test_patch_is_refused_with_a_pointer_to_weigh`).
 
 `--allow-empty` is gone the same way, and for the opposite reason: it used to let
 a release through with an empty Unreleased section, which is the one signal that
@@ -225,7 +257,28 @@ refused.
 
 An out-of-date `files.tsv` or `methods.tsv` is not a rail either. It is reported
 in the plan and then ignored: a release should not be blocked by a file that is
-neither the version nor the tree.
+neither the version nor the tree. Ignored is not forgotten, though — a release that
+proceeds **replaces** the file with the stamp of the tag it just cut, so "stale" is a
+state the next run recovers from rather than one it is stuck in
+(`test_a_stale_inventory_is_reported_and_skipped`,
+`test_a_missing_inventory_never_moves_the_bump`,
+`test_a_stale_inventory_is_replaced_by_the_release_that_proceeds`).
+
+A rail is not the only way a release stops, and the difference is worth knowing before
+reading an exit code as "nothing happened". A step of the release *itself* can fail — the
+CHANGELOG, the inventory or `composer.json` cannot be written, git will not take the index,
+or the push cannot run. A rail refuses before anything is written; these do not, so the
+tree may already have a promoted CHANGELOG in it. What never happens is a new tag, because
+the commit and the tag are the last two steps: an unpublished failure leaves no version
+behind, and the remedy is to look at the tree and run again
+(`test_a_changelog_that_cannot_be_written_is_refused`,
+`test_a_composer_json_that_cannot_be_written_is_refused_after_the_notes_are_promoted`,
+`test_an_inventory_that_cannot_be_written_is_refused`,
+`test_an_index_that_cannot_be_locked_refuses_the_add`,
+`test_a_push_that_cannot_run_is_reported_after_the_tag_was_cut`). The push is the one
+exception to "no version behind": it runs after the tag, so a push that cannot run leaves the
+tag local and the next run refuses on the notes the release consumed — the push is the step
+to repeat.
 
 ## Versioning policy
 
@@ -366,6 +419,25 @@ are still installable from the repository URL: `dev-main` for the release line,
 `bin/release.php` creates the tag. Publishing it is a one-time setup at Packagist, plus
 whatever keeps it in step afterwards.
 
+The script's last line says so, and says the same thing on every run: it names the tag it
+just cut and both ways the gap closes — submit the package if it never was, or trigger a
+crawl — because whether either has happened is a fact about Packagist that a tag on GitHub
+cannot reveal. Which section below applies is the reader's to pick.
+
+The order matters, and it is short:
+
+1. **Submit the repository once** — [the first submission](#the-first-submission). Nothing
+   is published before this, whatever the tags say.
+2. **Install Packagist's GitHub hook** — [making later tags publish
+   themselves](#making-later-tags-publish-themselves). Without it a tag waits for the next
+   weekly crawl, which is not the same day it was pushed.
+3. **Confirm the version is being served** — [confirming the published
+   version](#confirming-the-published-version). A tag on GitHub and a version on Packagist
+   are two different events, and the crawl is what closes the gap between them.
+4. **Tell consumers a prerelease needs an opt-in** — [the minimum-stability
+   opt-in](#the-minimum-stability-opt-in). A published version nobody's constraints can
+   match is published and still not installed.
+
 ### The first submission
 
 Sign in at [packagist.org](https://packagist.org) **with the GitHub account that owns the
@@ -400,17 +472,47 @@ renaming the package.)
 | `0.0.x-dev` | `extra.branch-alias`, which names both of them (see [the branch alias](#the-branch-alias)) |
 | `v0.0.1-alpha1` | the annotated tag, read as `0.0.1.0-alpha1` at stability `alpha` |
 
-A prerelease is not matched by a plain `^0.0.1`, so a consumer needs
-`"minimum-stability": "alpha"` or a constraint such as `"^0.0.1@alpha"`.
+### The minimum-stability opt-in
+
+Publishing is not the same as installing. A default `composer.json` resolves against
+**stable** versions, so a `-alpha1` tag can be published, listed and still unmatched: a
+plain `^0.1` constraint skips it and installs the last stable release instead — or nothing,
+on a package whose only versions are prereleases. The opt-in belongs to the consumer,
+because their project's stability floor is theirs to set, and there are two ways to write
+it:
+
+```json
+{ "minimum-stability": "alpha" }
+```
+
+or scoped to this one package, so the rest of the project stays on stable:
+
+```bash
+composer require uak35/laravel-weighted-dbmanager:'^0.1.0@alpha'
+```
+
+The lanes Composer reads are ordered `dev` < `alpha` < `beta` < `RC` < `stable`;
+`minimum-stability` sets the floor by hand and `prefer-stable` keeps a stable version
+preferred whenever one also qualifies. Nothing in this repository can relax those rules
+for someone else's build — a prerelease is a version a consumer has to ask for by name.
 
 ### Making later tags publish themselves
 
-Without this step Packagist crawls **once a week**, so whether a tag publishes itself
-depends on it. Use Packagist's GitHub integration from the package page: it installs the
-hook, and it asks for hook-configuration access on the repository while doing so. If the
-package list afterwards warns that a package is not automatically synced, trigger a manual
-account sync from your profile — an archived repository cannot be hooked at all, because it
-is read-only through GitHub's API.
+**Without the hook, a tag is invisible until the next weekly crawl.** Packagist re-reads a
+repository on two occasions only: when a GitHub hook says something was pushed, and on its
+own schedule, which is **once a week**. A tag pushed with no hook installed can therefore
+be absent from `repo.packagist.org` for up to seven days — and it is not merely unlisted in
+the meantime: the `p2` endpoint Composer actually resolves against has no such version, so
+`composer require uak35/laravel-weighted-dbmanager:v0.1.0-alpha1` fails as if the tag had
+never been cut. A dev tag feels the wait worst, because that lane exists to be cut again and
+again and its whole point is to be installable the afternoon it is pushed.
+
+Use Packagist's GitHub integration from the package page: it installs the hook, and it asks
+for hook-configuration access on the repository while doing so. If the package list
+afterwards warns that a package is not automatically synced, trigger a manual account sync
+from your profile — an archived repository cannot be hooked at all, because it is read-only
+through GitHub's API, and it will stay on the weekly crawl. When the hook has not fired,
+[triggering a crawl by hand](#triggering-a-crawl-by-hand) is the lever that does not wait.
 
 To add the hook by hand instead, these are Packagist's own values:
 
@@ -471,6 +573,23 @@ A `dev-main` version with no tag beside it is a crawl that has not finished — 
 "Update" on the package page, or [trigger a crawl by hand](#triggering-a-crawl-by-hand).
 Nothing at all under `uak35/` is the vendor protection, which means the login is not the
 account that owns the vendor.
+
+### A published version is immutable
+
+A version Packagist has served cannot be changed — not by deleting the tag, not by
+re-creating it at a corrected commit, and not by force-pushing the branch behind it.
+Packagist caches the `composer.json` it read and the version it derived, and a moved tag
+makes dependency resolution disagree with the published metadata; Composer's own guidance
+is to ignore a tag that moved rather than re-read it, so the repair is invisible to the
+tool it was meant for. By the time anyone notices, the version is already in somebody's
+`composer.lock`.
+
+So a bad published version is fixed the way a bad commit is: cut the next tag. The mistake
+is corrected *forward*, never rewritten. [Never move a published
+tag](#never-move-a-published-tag) states the rule for the tag on GitHub; this is the same
+rule one step later, with the sharper consequence — after the push, `git tag -d` and a
+re-tag publish nothing at all, because there is no new version for Packagist to read and
+no mechanism that replaces one it already served.
 
 ## The root version in CI
 

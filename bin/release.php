@@ -73,6 +73,13 @@ declare(strict_types=1);
  *   above them, and the inventory is rewritten and stamped with the prerelease tag —
  *   because a prerelease is a version like any other. It is the numbering that differs.
  *
+ *   A tag is a version, so it is not cut on a commit nothing verified. Before anything is
+ *   written, the script asks whether the commit being released — HEAD, the tip of the
+ *   branch — is on the remote and whether the workflow's run for it passed; --skip-ci
+ *   releases anyway and says so in the plan. The release *commit* is bookkeeping and cannot
+ *   have a run of its own yet, because the push that puts it on the remote comes last; the
+ *   workflow's `v*` tag trigger is what records it, after the fact.
+ *
  * USAGE
  * -----
  *   php bin/release.php --weigh --dry-run      show the plan, change nothing
@@ -117,6 +124,7 @@ $options = [
     'branch' => null,
     'remote' => 'origin',
     'allow-dirty' => false,
+    'skip-ci' => false,
     'ignore-policy' => false,
 ];
 
@@ -198,6 +206,11 @@ foreach (array_slice($argv, 1) as $argument) {
 
     if ($argument === '--allow-dirty') {
         $options['allow-dirty'] = true;
+        continue;
+    }
+
+    if ($argument === '--skip-ci') {
+        $options['skip-ci'] = true;
         continue;
     }
 
@@ -314,11 +327,24 @@ if ($unreleased === null) {
 
 $entries = countBullets($unreleased['body']);
 
-if ($entries === 0) {
+// The rail below is about what a release *publishes*; the weighing is a question about the
+// *changes*, and the notes are only one of the four things it reads. So `--weigh --dry-run`
+// is let past an empty section: it writes nothing, so no version can be published with no
+// notes under it, and "what does the next bump weigh as?" is exactly the question a tree
+// with nothing under Unreleased is asked. Every run that could tag still refuses here — the
+// two answers differ because they are answers to different questions, one about the version
+// a reader gets and one about the changes a release would carry.
+$emptyNotes = $entries === 0;
+$weighsEmptyNotes = $emptyNotes && $dryRun && $options['kind'] === 'weigh';
+
+if ($emptyNotes && !$weighsEmptyNotes) {
     fail(
         'The Unreleased section has no entries, so there is nothing to release. Write'
         . ' them under "## Unreleased" first; a version with no notes is one nobody can'
-        . ' read, and the bump is weighed from them.',
+        . ' read, and the bump is weighed from them.'
+        . PHP_EOL . PHP_EOL
+        . 'A dry run of --weigh reports the weighed bump from an empty section instead of'
+        . ' refusing, because a plan publishes nothing. Every run that could tag refuses.',
     );
 }
 
@@ -407,6 +433,26 @@ if ($declared !== null && severityRank($declared) < severityRank($required)) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CI — the commit being released is one CI has verified
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Last of the preconditions on purpose, and the only one that leaves the machine: every
+// refusal above this is cheaper, local, and about the tree rather than about GitHub, so a
+// run that is not releasable anyway is told why without a network call first.
+$ci = ciVerdict($root, $branch, $options['remote'], $options['skip-ci']);
+
+if ($ci['state'] !== 'green' && $ci['state'] !== 'skipped') {
+    if (!$dryRun) {
+        fail($ci['refusal']);
+    }
+
+    // A dry run stops at nothing: the plan exists to show whether the release would go
+    // through, and "push this first" is the answer this rail exists to give. The state is
+    // in the plan's `ci` line, and this says what a real run would have done with it.
+    note($ci['line'] . ' — a real run would refuse to tag on this.');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The promoted CHANGELOG
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -443,6 +489,7 @@ $bumpLine = $declared === null
 
 echo PHP_EOL . "Release plan" . PHP_EOL . str_repeat('─', 72) . PHP_EOL;
 printf("  branch        %s%s%s", $branch, $dirty === '' ? '' : '  (dirty)', PHP_EOL);
+printf("  ci            %s%s", $ci['line'], PHP_EOL);
 printf("  latest tag    %s%s", $previous, PHP_EOL);
 printf("  bump          %s%s", $bumpLine, PHP_EOL);
 printf("  next version  %s  (tag %s)%s", $version, $tag, PHP_EOL);
@@ -457,10 +504,11 @@ if (isPrerelease($version)) {
 }
 
 printf(
-    "  CHANGELOG     ## Unreleased -> ## %s - %s, new Unreleased section above%s",
-    $version,
-    gmdate('Y-m-d'),
-    PHP_EOL
+    "  CHANGELOG     %s%s",
+    $weighsEmptyNotes
+        ? 'nothing to promote — ## Unreleased is empty, so a real run refuses here; this plan weighs the changes in it instead'
+        : sprintf('## Unreleased -> ## %s - %s, new Unreleased section above', $version, gmdate('Y-m-d')),
+    PHP_EOL,
 );
 $inventoryLine = $weighing['inventory']['stamp'] === '(missing)'
     ? 'written by this release'
@@ -624,24 +672,19 @@ if ($options['push']) {
     note(sprintf('next: git push %s %s --follow-tags', $options['remote'], $branch));
 }
 
-// The Packagist hint, printed after either exit — the one that leaves the push to the
-// reader, and the one that has just pushed. It names the way to close the gap rather than
-// promising that the version will appear, because a tag on GitHub and a version on
-// Packagist are two different events: a push that succeeded says nothing about whether a
-// version was published. On the first release the gap is usually that the package was
-// never submitted; after that it is usually a hook that did not fire.
-$packagist = $latestTag === null
-    ? [
-        'The package has to be submitted at packagist.org first; after that Packagist',
-        'picks each tag up from there. If no version appears, trigger a crawl by hand',
-        '— RELEASING.md, "Triggering a crawl by hand".',
-    ]
-    : [
-        'Packagist picks the tag up from there. If no version appears, trigger a crawl',
-        'by hand — RELEASING.md, "Triggering a crawl by hand".',
-    ];
-
-note(implode(PHP_EOL . '  ', $packagist));
+// The line the run ends on, printed after either exit — the one that leaves the push to the
+// reader, and the one that has just pushed. It is one line and the same line on every run,
+// because what it has to say does not depend on anything this script knows: a tag on GitHub
+// and a version on Packagist are two different events, and a push that succeeded says nothing
+// about whether a version is being served. Which of the two ways the gap gets closed applies
+// is a fact about the outside world — whether the package was ever submitted — so the note
+// names both and leaves the state to the reader. A note that assumed an earlier release had
+// been published would be false exactly on the run where it was read, and one that assumed it
+// never had would be false on every run after the first.
+note(sprintf(
+    'Packagist reads tags, not commits: if %s is not listed there yet, submit the package if it never was, or trigger a crawl — RELEASING.md, "Publishing".',
+    $tag,
+));
 
 exit(0);
 
@@ -1002,8 +1045,14 @@ function changelogSignal(string $unreleased): array
         $evidence[] = sprintf('### %s — %d %s', $name, $count, $count === 1 ? 'entry' : 'entries');
     }
 
+    // An empty section and a section whose headings the policy does not know are one signal
+    // whose evidence differs: the first is a release with nothing to publish, the second is
+    // notes written in a vocabulary the policy cannot weigh. Naming them separately is what
+    // lets a plan say which of the two it is looking at.
     $summary = $top === null
-        ? 'the Unreleased section has no `###` heading the policy knows'
+        ? (trim($unreleased) === ''
+            ? 'the Unreleased section is empty — nothing for a release to publish'
+            : 'the Unreleased section has no `###` heading the policy knows')
         : sprintf('### %s — %d %s, the loudest heading the notes use', $top['name'], $top['count'], $top['count'] === 1 ? 'entry' : 'entries');
 
     // A `### Breaking changes` heading, or the uppercase marker a changelog can
@@ -1394,6 +1443,315 @@ function commitMessage(string $version): string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CI — a tag is a version, so it is not cut on a commit nothing verified
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the commit being released is one CI has verified.
+ *
+ * A tag is the version, so tagging a commit nothing has checked publishes a version no
+ * build ever saw. The commit that has to be verified is therefore the one the release is
+ * *built on* — HEAD, the tip of the branch — and not the release commit this script is
+ * about to create. That one is bookkeeping (the CHANGELOG, the inventory, the branch
+ * alias), and it cannot have a run yet: it is not on the remote until the push at the end,
+ * and the workflow's `v*` tag trigger is what records it, after the fact.
+ *
+ * Two questions, asked in this order because they fail differently:
+ *
+ *   1. Is HEAD the tip of the remote branch? A commit that has not been pushed is one CI
+ *      cannot have an opinion about, and answering "no run found" for it would send the
+ *      reader to the wrong place entirely.
+ *   2. Does the workflow have a run for it, and did that run pass? A run still in progress
+ *      is not a pass — the rail must not answer before CI does — and a commit with one
+ *      failed run beside a passing one is not verified either, because this rail is only
+ *      allowed to be wrong in one direction.
+ *
+ * `--skip-ci` answers "not checked" without asking anything, which is the way out for a
+ * machine with no `gh`, no token, or no network.
+ *
+ * @return array{state: string, line: string, refusal: string} `state` is `green` or
+ *   `skipped` when the release may go ahead, and `refusal` is empty in those two cases and
+ *   the sentence to print in the others.
+ */
+function ciVerdict(string $root, string $branch, string $remote, bool $skip): array
+{
+    if ($skip) {
+        return ['state' => 'skipped', 'line' => 'not checked (--skip-ci)', 'refusal' => ''];
+    }
+
+    $head = trim(git($root, ['rev-parse', 'HEAD'])['output']);
+
+    // `credential.interactive=false` turns "a private remote with no cached credential" from
+    // a prompt nobody asked for into the refusal below. A credential helper still answers —
+    // only the terminal is taken away — so this cannot lock anyone out of pushing later.
+    $listing = git($root, ['-c', 'credential.interactive=false', 'ls-remote', $remote, 'refs/heads/' . $branch]);
+
+    if ($listing['exit'] !== 0) {
+        return ciRefusal('unreachable', sprintf('%s could not be read', $remote), [
+            sprintf('Could not read %s, so whether CI has run on this commit is unknown:', $remote),
+            '',
+            '  ' . firstLine($listing['output']),
+            '',
+            'Check the remote name and the network — or pass --skip-ci to tag without a CI',
+            'verdict.',
+        ]);
+    }
+
+    $refs = lines($listing['output']);
+
+    if ($refs === []) {
+        return ciRefusal('unpushed', sprintf('%s has no %s branch', $remote, $branch), [
+            sprintf('%s has no %s branch, so nothing there has ever been built.', $remote, $branch),
+            '',
+            sprintf('Push %s first and let the workflow finish: a tag is cut from a commit CI', $branch),
+            'has verified — or pass --skip-ci, which says in the plan what it skipped.',
+        ]);
+    }
+
+    $tip = explode("\t", $refs[0])[0];
+
+    if ($tip !== $head) {
+        return ciRefusal('unpushed', sprintf('HEAD is not the tip of %s/%s', $remote, $branch), [
+            sprintf('HEAD (%s) is not the tip of %s/%s (%s).', shortSha($head), $remote, $branch, shortSha($tip)),
+            '',
+            sprintf('A release is cut from a commit the remote has and CI has built. Push %s and let', $branch),
+            'the workflow finish first — or fetch, if the remote has moved ahead of you. To tag',
+            'without a verdict, pass --skip-ci.',
+        ]);
+    }
+
+    $asked = ciRuns($root, $head, $branch);
+
+    if ($asked['exit'] !== 0) {
+        return ciRefusal('unaskable', sprintf('CI could not be asked about %s', shortSha($head)), [
+            sprintf('Could not ask CI about %s:', shortSha($head)),
+            '',
+            '  ' . $asked['error'],
+            '',
+            'Log in first (gh auth login), or pass --skip-ci to tag without a CI verdict.',
+        ]);
+    }
+
+    $runs = $asked['runs'];
+
+    if ($runs === []) {
+        return ciRefusal('missing', sprintf('CI has no run for %s', shortSha($head)), [
+            sprintf('CI has no run for %s on %s/%s, so nothing verified this commit.', shortSha($head), $remote, $branch),
+            '',
+            'Check that the workflow covers this branch and push a commit it will build — or',
+            'pass --skip-ci.',
+        ]);
+    }
+
+    $running = array_values(array_filter(
+        $runs,
+        static fn (array $run): bool => ($run['status'] ?? '') !== 'completed',
+    ));
+
+    if ($running !== []) {
+        return ciRefusal('running', sprintf('CI is still running (%s)', runNames($running)), [
+            sprintf('CI is still running for %s:', shortSha($head)),
+            '',
+            ...array_map(static fn (array $run): string => sprintf('  %s (%s)', $run['name'], $run['status'] ?? ''), $running),
+            '',
+            'Wait for it to finish — the rail will not answer before CI does — or pass --skip-ci.',
+        ]);
+    }
+
+    $failed = array_values(array_filter(
+        $runs,
+        static fn (array $run): bool => ($run['conclusion'] ?? '') !== 'success',
+    ));
+
+    if ($failed !== []) {
+        return ciRefusal('failed', sprintf('CI failed (%s)', runNames($failed)), [
+            sprintf('CI failed for %s:', shortSha($head)),
+            '',
+            ...array_map(static fn (array $run): string => sprintf('  %s (%s)', $run['name'], $run['conclusion'] ?? 'unknown'), $failed),
+            '',
+            'A tag is a version, so it is not cut on a commit CI rejected. Fix it and release the',
+            'commit that passes — or pass --skip-ci, which says in the plan what it skipped.',
+        ]);
+    }
+
+    return [
+        'state' => 'green',
+        'line' => sprintf('%s/%s @ %s — CI green (%s)', $remote, $branch, shortSha($head), runNames($runs)),
+        'refusal' => '',
+    ];
+}
+
+/**
+ * A refusal as the three parts of a verdict: the state it is in, the one-line summary the
+ * plan prints, and the sentence that stops a real run. The body carries its own blank
+ * lines, because a refusal here is a short report rather than a sentence.
+ *
+ * @param list<string> $body
+ * @return array{state: string, line: string, refusal: string}
+ */
+function ciRefusal(string $state, string $line, array $body): array
+{
+    return ['state' => $state, 'line' => $line, 'refusal' => implode(PHP_EOL, $body)];
+}
+
+/**
+ * The runs GitHub has for one commit, filtered to the ones that say something about the
+ * branch being released: a run whose event is a push and whose head branch is this branch.
+ *
+ * The filter is not decoration. One commit carries several runs — this package's own
+ * `v0.1.0-alpha1` commit has two, one for the branch push and one for the tag, and the tag
+ * run reports its head branch as the *tag name* — and a run for another branch or another
+ * event is not evidence about this one. A pull request's run does not vouch for the branch
+ * tip either, even though it runs the same steps.
+ *
+ * `gh run list` is the ask because a GitHub Actions workflow is what reports a run, and its
+ * per-commit JSON is the same data branch protection reads.
+ *
+ * @return array{exit: int, runs: list<array<string, string>>, error: string}
+ */
+function ciRuns(string $root, string $sha, string $branch): array
+{
+    $asked = runCommand(ciCommand($sha), $root);
+
+    if ($asked['exit'] !== 0) {
+        $report = $asked['error'] !== '' ? $asked['error'] : $asked['output'];
+
+        return ['exit' => $asked['exit'], 'runs' => [], 'error' => firstLine($report)];
+    }
+
+    $decoded = json_decode(trim($asked['output']), true);
+
+    if (!is_array($decoded)) {
+        return [
+            'exit' => 1,
+            'runs' => [],
+            'error' => 'the answer was not a list of runs: ' . firstLine($asked['output']),
+        ];
+    }
+
+    $runs = [];
+
+    foreach ($decoded as $run) {
+        if (!is_array($run) || ($run['event'] ?? '') !== 'push' || ($run['headBranch'] ?? '') !== $branch) {
+            continue;
+        }
+
+        $runs[] = array_map(
+            static fn (mixed $value): string => is_string($value) ? $value : '',
+            $run,
+        );
+    }
+
+    return ['exit' => 0, 'runs' => $runs, 'error' => ''];
+}
+
+/**
+ * The command that answers the CI question: `gh run list` for one commit.
+ *
+ * RELEASE_CI_COMMAND overrides it, for a machine whose gh lives somewhere else and for a
+ * test that has to answer without a network. It is a command line, tokenised the way a
+ * shell splits one — quote a path that contains a space — and `%SHA%` is where the commit
+ * goes. The default needs the placeholder mid-line because `--commit` takes a value rather
+ * than a trailing argument.
+ *
+ * @return list<string>
+ */
+function ciCommand(string $sha): array
+{
+    $template = getenv('RELEASE_CI_COMMAND');
+
+    if (!is_string($template) || trim($template) === '') {
+        $template = 'gh run list --commit %SHA% --limit 20 --json name,status,conclusion,event,headBranch';
+    }
+
+    return tokens(str_replace('%SHA%', $sha, $template));
+}
+
+/**
+ * A command line as its words: on whitespace, with `"` and `'` grouping, so a path with a
+ * space in it survives. The quotes are dropped — they are how the word is written, not
+ * part of what the program receives.
+ *
+ * @return list<string>
+ */
+function tokens(string $line): array
+{
+    preg_match_all('/"[^"]*"|\'[^\']*\'|\S+/', $line, $matches);
+
+    return array_map(
+        static fn (string $token): string => trim($token, '"\''),
+        $matches[0],
+    );
+}
+
+/**
+ * Run a command with its streams apart, because the answer to the CI question is JSON on
+ * stdout and a warning on stderr would be sitting in front of it in a merged stream.
+ *
+ * @param list<string> $command
+ * @return array{exit: int, output: string, error: string}
+ */
+function runCommand(array $command, string $root): array
+{
+    $process = @proc_open(
+        $command,
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        $root,
+    );
+
+    if (!is_resource($process)) {
+        return ['exit' => 127, 'output' => '', 'error' => $command === [] ? 'nothing to run' : $command[0] . ' could not be started'];
+    }
+
+    $output = (string) stream_get_contents($pipes[1]);
+    $error = (string) stream_get_contents($pipes[2]);
+
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+
+    return ['exit' => proc_close($process), 'output' => $output, 'error' => $error];
+}
+
+/**
+ * The first non-empty line of a tool's own words, for a message that quotes them rather than
+ * describing them.
+ */
+function firstLine(string $text): string
+{
+    foreach (lines($text) as $line) {
+        return $line;
+    }
+
+    return '(no output)';
+}
+
+/** A commit as a message spells it: short enough to read in a sentence. */
+function shortSha(string $sha): string
+{
+    return substr($sha, 0, 7);
+}
+
+/**
+ * The distinct workflow names behind a set of runs, so a refusal names what ran rather than
+ * how many things did.
+ *
+ * @param list<array<string, string>> $runs
+ */
+function runNames(array $runs): string
+{
+    $names = [];
+
+    foreach ($runs as $run) {
+        $name = $run['name'] ?? '';
+
+        $names[$name === '' ? 'unnamed' : $name] = true;
+    }
+
+    return $names === [] ? 'unnamed' : implode(', ', array_keys($names));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Plumbing
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1469,6 +1827,10 @@ function usage(): void
                           version is a prerelease).
           --remote=NAME    Remote to push to (default: origin).
           --allow-dirty    Allow uncommitted changes to tracked files.
+          --skip-ci        Tag without asking CI: the commit being released has to
+                           be the tip of the remote branch and its run has to have
+                           passed. Set RELEASE_CI_COMMAND to ask a gh that lives
+                           somewhere else, or to answer from a fixture.
           --ignore-policy  Release even though the bump undersells the changes.
       -h, --help           Show this help.
 
@@ -1482,6 +1844,14 @@ function usage(): void
       the other once it exists. The suffix also decides the branch: a prerelease
       is cut from dev, a release from main. The CHANGELOG and the inventory are
       promoted exactly as for a release.
+
+    CI:
+      A tag is a version, so it is not cut on a commit nothing verified. The commit
+      being released — HEAD, the tip of the branch — has to be on the remote, and the
+      workflow's run for it (a push run on this branch) has to have finished and
+      passed. The release commit itself is bookkeeping and cannot have a run of its
+      own yet, so the workflow's v* tag trigger records that one after the push.
+      --skip-ci tags anyway; the plan says what it skipped.
 
     On a repository with no tags the base version is 0.0.0, so a weighed minor
     gives 0.1.0 and a weighed patch gives 0.0.1.

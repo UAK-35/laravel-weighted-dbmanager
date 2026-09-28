@@ -137,15 +137,27 @@ function relativeTo(string $root, string $path): string
 }
 
 /**
- * The most recent v-prefixed release tag, or null when the repository has none
- * — a fresh package whose first release is still ahead of it.
+ * The most recent v-prefixed release tag that is an **ancestor of HEAD**, or null
+ * when this branch has none — a fresh package whose first release is still ahead
+ * of it.
+ *
+ * Ancestry is the question, not a detail of it: the base is the version the branch
+ * being released actually contains. A tag on a branch HEAD cannot reach is a real
+ * tag and still not one of this line's — reading it as the base measures the bump
+ * against a release this line never made, and the range `vX.Y.Z..HEAD` then walks a
+ * history the tag was never part of.
+ *
+ * `git describe` already reads only reachable tags, which is what makes it the base.
+ * Its fallback did not: `git tag --list` sees every tag in the repository whatever
+ * HEAD can reach, so a branch with no tag of its own took the highest tag anywhere —
+ * including a dev tag cut on a side branch. Both paths now ask the same question.
  */
 function latestTag(string $root): ?string
 {
     $result = git($root, ['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*']);
 
     if ($result['exit'] !== 0) {
-        $result = git($root, ['tag', '--list', 'v[0-9]*', '--sort=-v:refname']);
+        $result = git($root, ['tag', '--merged', 'HEAD', '--list', 'v[0-9]*', '--sort=-v:refname']);
     }
 
     $tag = trim(strtok($result['output'], "\n") ?: '');
