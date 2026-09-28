@@ -100,7 +100,9 @@ The empty `-c credential.helper=` resets the helper list so **only** `gh`'s help
 the `!`-prefixed value means git executes `gh auth git-credential`, which supplies the
 keyring token without printing it, and **nothing is written to git config**. This is the
 GitHub equivalent of the `glab` trick used elsewhere on this machine — the shape transfers,
-the token does not.A personal access token is the last resort, and only because it is the one path with no
+the token does not.
+
+A personal access token is the last resort, and only because it is the one path with no
 stored credential at all:
 
 ```powershell

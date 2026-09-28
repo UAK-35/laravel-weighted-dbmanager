@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`PUSHING.md`'s credential section is two paragraphs again.** The sentence that closes the
+  `glab` half of it — `the token does not.` — had run into the sentence after it, so the advice
+  about a personal access token read as its continuation. Nothing was reworded, and the shape is
+  worth naming because nothing here reads sentence shape: the guards over these records read
+  claims — a cited test name, a count, a fenced block — so a fused pair of sentences is exactly
+  what the suite cannot see.
+
 ## 0.2.0-alpha1 - 2026-09-28
 
 ### Added
