@@ -24,8 +24,10 @@ rules are pinned by the tests named at the end.
 **Ask supervisor the read-only version of the flip's own command — and let the flip ask
 it too.** `SupervisorStep::inspect()` derives `supervisorctl status "<program>"` from the
 configured command — the same executable token, the same program argument, `status` in the
-verb position — runs that one command, and reads supervisor's answer. Nothing is
-restarted, signalled or stopped, and the only command it can run is one it derived itself.
+verb position — runs it, and reads supervisor's answer. Nothing is restarted, signalled or
+stopped, and the only commands it can run are ones it derived itself: that one, and — for the
+one fault whose repair is a name — a second, bare `supervisorctl status` that lists what
+supervisord is running.
 
 One verdict, three readers: `db:doctor`'s `pgcat supervisor` row reports it, the flip
 refuses the swap on it, and `--dry-run` prints it as a step. A row that passes while the
@@ -68,12 +70,48 @@ back if the judgement was wrong about a command that fails anyway): see
 |---|---|
 | The executable does not resolve — not an absolute path, not on this user's `PATH` | `sh: supervisorctl: not found`, exit 127 |
 | The program name was rewritten by the shell before supervisorctl saw it | supervisorctl acts on the wrong program, or on a file name |
-| supervisorctl runs, but supervisord does not know the program | `pgcat:*: ERROR (no such group)`, non-zero exit |
+| supervisorctl runs, but supervisord does not know the program | `pgcat:*: ERROR (no such group)`, non-zero exit — and then the names supervisord *is* running, nearest to the configured one first |
 | supervisorctl cannot reach supervisord at all | socket missing, permissions, `error: <class 'socket.error'>` |
 
 Each has a different repair — install it, quote the name, fix the group name, start or
 unmask supervisord — and each is a *fault code* rather than a message, so the row, the
 flip's refusal and the rehearsal can say which one it is without re-deriving it.
+
+### 2b. The answer that is not a fault: a program supervisord knows and is not running
+
+`supervisorctl status` exits non-zero the moment one program it was asked about is not
+RUNNING, so `pgcat:pgcat_00   FATAL   Exited too quickly` arrives at this check the same
+way a missing socket does — and for a long time it was read as the socket's case:
+`errored`, `usable: false`, the flip refusing *before it swaps the file*. That is backwards
+exactly when it matters. A pgcat that is crash-looping is crash-looping on the config that
+is in place, so the file the flip wants to write is the repair, and the refusal left a dead
+pooler with the config that killed it and nothing on the host willing to replace it.
+
+The verdict is its own (`not_running`), and it is one of the three that do **not** refuse.
+It carries the two facts the repair needs:
+
+| Key | What it holds |
+|---|---|
+| `state` | the state word the answer named — `STARTING`, `BACKOFF`, `EXITED`, `FATAL` — with `RUNNING` winning whenever any program of the group is up, and the most severe state chosen otherwise |
+| `start_command` | `supervisorctl start "pgcat:*"`: the configured command with the verb replaced |
+
+The verb matters as much as the verdict. `signal HUP` and `restart` both act on a program
+that is already up, and supervisor answers `ERROR (not running)` for one that is not, so a
+flip that ran the configured command after finding pgcat FATAL would have replaced a file
+and changed nothing. `start` is the one verb that works there, and it is derived from the
+configured command rather than configured beside it, so the binary, the group name and the
+quoting are the ones this check already judged.
+
+What the flip does with it is [the ordering, closed](#the-ordering-closed) read the other
+way round: the file goes in first — it *is* the repair — then `start`, then the state is
+read back, up to `swrr.pgcat.start_attempts` times with `swrr.pgcat.start_retry_delay_ms`
+between them. The read-back is what keeps the retry from being a guess: a program inside
+supervisor's `startsecs` window answers `STARTING` after a start that is going to succeed,
+and a program in a crash loop answers the same thing after one that is not. If the attempts
+run out, the new file **stays** — rolling it back would restore exactly the config pgcat
+could not start on — and no mode is recorded, so the next poll writes the same file again
+and tries again. That is the whole self-healing loop: it needs no operator, and it cannot
+leave the disk holding a mode the daemon is not running.
 
 ### 3. The quoting is not cosmetic, and it is easy to get wrong
 
@@ -191,6 +229,53 @@ one thing. Whether the *configured* command's pattern reached supervisorctl unqu
 separate fact (`glob_exposed`), and that is the one the row fails on, because it is what
 the flip will do — not what the inspection does.
 
+### An unknown program asks a second question
+
+Three of the four faults are repaired at the thing the command *is* — install the binary,
+quote the name, start or unmask supervisord. The fourth is repaired at a *name*, and a
+refusal that only says "supervisor does not know `pgcat:*`" leaves the operator with the
+one question they cannot answer from this host: what should it be instead. So that fault
+asks once more, and only that fault:
+
+```
+command            supervisorctl status "pgcat:*"        ← unknown program
+command            supervisorctl status                   ← …so: what is it running?
+```
+
+Both are the same binary derived from the same command, and both are read-only. The
+second one runs after the first has already been found missing, so a command that works —
+the ordinary case, on every flip and every `db:doctor` — never pays for it.
+
+`runningPrograms()` reads that answer the way supervisor writes it, one line per program:
+`pgcat:pgcat_00   RUNNING   pid 4242, uptime 0:12:34`. It is deliberately not "the first
+word of every line": the same command answers `unix:///var/run/supervisor.sock no such
+file` when it cannot reach supervisord, and `supervisord` is a plausible name for a
+program in an installation that names one after the daemon. So a line counts only when its
+first word could be a supervisor name and its *second* word is one of supervisor's states.
+
+`nearMisses()` then ranks the running names against the configured one and offers the
+nearest few, which is the whole of what "probably should be" can honestly mean. The
+relations are checked in the order an operator would think of them — the same name, the
+group that name belongs to (`pgcat` and `pgcat:pgcat_00`), a prefix (`pgcat-1`), a name
+that holds it (`lpr-pgcat-a`), and finally an edit distance within a third of the longer
+name. Both spellings of the configured name are compared, because `pgcat` and `pgcat:*`
+mean the same programs. A name with nothing in common is **not** a suggestion: pointing an
+operator at a program that was never going to match is a guess dressed as an answer, and
+the sentence says so instead — "none of them is close to `pgcat:*`, so the name to use is
+the one above that this flip belongs to, or the program has to be added to supervisord".
+
+At most three are named, and the sentence is written for one and for several: "the closest
+is `pgcat_primary`, which is the name to write" or "the closest are `a`, `b`, which are the
+names to write". Both give the group line when there is one to give — `or the whole group
+"pgcat_x:*"` — because restarting a pool and signalling one program are different intents,
+and only the operator knows which was meant. It is omitted when the command already
+addressed that group (a `pgcat:*` asking about a `pgcat:pgcat_00` needs no hint that
+`pgcat:*` exists), and it is kept when the command named a group the way it would name a
+program — `pgcat` alone — which is the spelling supervisorctl reads as a single program and
+the one the group line can actually repair. The full list, the exit code and the answer
+are in the verdict (`running`, `near_misses`, `discovery_command`, `discovery_exit`,
+`discovery_answer`), so a surface that would rather read the data than the sentence can.
+
 ### Resolution is checked the way the shell checks it
 
 `locate()` treats a token containing a separator as a path and checks it as such;
@@ -211,7 +296,7 @@ what it means for the flip:
 | `empty` | `the configured supervisor command is empty, so a flip would replace the config and then have nothing to tell pgcat with — write swrr.pgcat.restart_command …` |
 | `unresolved` | `a flip would run … doesn't resolve to an executable: tried supervisorctl on C:\…, … and 78 more PATH entries` |
 | `unquoted` | `a flip would run … but pgcat:* is unquoted: the shell may expand it before supervisorctl sees it. Write supervisorctl signal HUP "pgcat:*" — the quoted name is the one supervisorctl receives unchanged` |
-| `unknown_program` | `supervisor does not know "pgcat:*": pgcat:*: ERROR (no such group). The name has to match what supervisord runs: a group called pgcat is addressed as "pgcat:*", a single program by its own name` |
+| `unknown_program` | `supervisor does not know "pgcat:*": pgcat:*: ERROR (no such group). The name has to match what supervisord runs: a group called pgcat is addressed as "pgcat:*", a single program by its own name. supervisorctl status says supervisord runs 1 program(s): pgcat_primary — the closest is "pgcat_primary", which is the name to write` |
 | `unanswered` | `supervisorctl status "pgcat:*" did not answer in time: …` |
 | `errored` | `supervisorctl could not answer for "pgcat:*" (exit 3): …` |
 
@@ -244,10 +329,21 @@ one: the step cannot know which, and the flipper can.
 
 The other four faults get no line, which is `ReaderWindows::suggestion()`'s rule applied
 here: a value is suggested only when the fault reduces to one exactly. An executable that
-does not resolve is a PATH or an install; a supervisord that does not know the program is a
-`[program:]` section; an unanswered command is a socket or a running daemon; an errored one
-is whatever supervisorctl said. A plausible-looking value in any of those columns would
-replace the operator's intent with this tool's guess.
+does not resolve is a PATH or an install; an unanswered command is a socket or a running
+daemon; an errored one is whatever supervisorctl said. A plausible-looking value in any of
+those columns would replace the operator's intent with this tool's guess.
+
+An unknown program is the near case, and it is worth saying why it also gets no line *now
+that the row can name the candidates*. The second question gives the row names — often
+exactly one, sometimes three, sometimes a group they could all be addressed by — and the
+sentence offers them in that shape: "the closest is …", "the closest are …". Putting that
+in the value column would change what the column means. A `suggestion` is written to be
+applied — `db:doctor --json` hands it to a gate, and a checklist applies it without reading
+English — while `pgcat_x:pgcat_00` being the closest *name* is not evidence that this flip
+belongs to that pool. That judgement is the operator's, so it belongs in the sentence, where
+it is offered as the probable answer, and not in the line. The repair the row names when
+there is one to name is still the `[program:]` section: a name supervisor does not have at
+all is a fact only supervisord's own configuration can change.
 
 Both faults fail the row whether or not a line is printed under it, and the sentence stays
 exactly as it was: the flip's refusal and `--dry-run` print that same sentence and have no
@@ -278,35 +374,45 @@ when it is run as the user that performs flips.
 
 | Test | Rule |
 |---|---|
-| `test_tokens_split_the_shell_way_a_command_line_is_read` | quoting, spacing, empty tokens |
-| `test_a_quoted_glob_is_not_exposed_and_an_unquoted_one_is` | `glob_exposed` on the token and nowhere else |
-| `test_a_backslash_escapes_on_posix_and_is_a_path_separator_on_windows` | the platform split, asserted per platform |
-| `test_status_is_derived_from_the_flip_command_with_the_program_quoted` | the derivation, verb for verb |
-| `test_signal_names_the_program_after_the_signal` | `signal HUP` does not mistake `HUP` for the program |
-| `test_a_command_that_names_no_program_has_nothing_to_ask_about` | `reread && update` |
-| `test_a_command_that_is_not_supervisorctl_is_recognised_as_such` | `invokes()` |
-| `test_supervisorctl_is_recognised_under_a_directory_and_any_extension` | `/usr/bin/supervisorctl`, `…\supervisorctl.exe`, `.bat`, `.cmd` |
-| `test_an_absolute_path_that_is_not_runnable_does_not_resolve` | path form, not PATH search |
-| `test_a_bare_name_is_searched_on_path_and_the_directories_are_reported` | `searched` is directories, not candidates |
+| `test_a_quoted_name_is_one_token_with_its_quotes_stripped`, `test_single_quotes_are_quotes_too` | quoting, spacing, empty tokens |
+| `test_an_unquoted_pattern_character_is_marked_as_reaching_the_command` | `glob_exposed` on the token and nowhere else |
+| `test_a_backslash_escapes_the_next_character_where_the_shell_would`, `test_a_windows_path_keeps_its_backslashes` | the platform split, asserted per platform |
+| `test_the_read_only_command_keeps_the_binary_and_gets_a_status_verb` | the derivation, verb for verb |
+| `test_the_flip_command_is_shown_with_the_program_quoted` | the quoted form the same derivation hands back |
+| `test_supervisorctl_without_a_program_has_nothing_to_ask_about` | `reread && update` |
+| `test_a_command_that_is_not_supervisorctl_has_nothing_to_ask_about` | `invokes()` |
+| `test_a_path_qualified_binary_stays_path_qualified` | `/usr/bin/supervisorctl`, `…\supervisorctl.exe`, `.bat`, `.cmd` |
+| `test_a_path_that_is_not_there_does_not_resolve`, `test_a_path_that_is_a_file_resolves`, `test_a_file_without_the_executable_bit_does_not_resolve` | path form, not PATH search |
+| `test_a_bare_name_is_looked_for_on_the_path`, `test_a_name_nothing_answers_to_reports_the_directories_it_searched` | `searched` is directories, not candidates |
 | `test_a_windows_script_counts_as_runnable` | `.bat`/`.cmd` under `is_executable()` |
-| `test_the_runner_is_handed_the_command_unchanged` | the injectable runner, so no test spawns a process |
+| `test_the_runner_is_handed_the_command_and_nothing_else` | the injectable runner, so no test spawns a process |
+| `test_the_discovery_command_is_the_same_binary_with_a_bare_status` | the second question is derived from the first, not configured |
+| `test_the_programs_are_the_lines_whose_second_word_is_a_state` | what a program line is, and that a program is named once |
+| `test_a_line_that_is_not_a_program_is_not_read_as_one` | the socket-error line, and `supervisor`'s own name |
+| `test_the_nearest_name_is_the_one_the_configured_name_relates_to_most_directly` | the ranking order, not supervisor's print order |
+| `test_only_names_close_to_the_configured_one_are_offered_and_never_more_than_three` | the cap, and that an unrelated name is not a candidate |
+| `test_a_refusal_names_what_supervisor_is_running_and_which_name_is_nearest` | both commands run, the context, and the sentence a reader gets |
+| `test_a_near_miss_that_is_the_group_already_asked_about_gets_no_group_line` | no "did you mean the thing you wrote" |
+| `test_a_program_name_that_is_really_a_group_gets_the_group_line` | a bare `pgcat` asking about `pgcat:pgcat_00` is told the wildcard, because a bare name reads as one program |
+| `test_the_discovery_offers_no_name_when_no_running_program_is_close` | a list with no repair in it says so |
+| `test_supervisor_is_asked_nothing_further_when_the_first_answer_is_not_an_unknown_program` | the second command is asked for one fault only |
 
 `tests/Unit/Console/DbDoctorTest.php` — the row, with a fake supervisor:
 
 | Test | Rule |
 |---|---|
-| `test_the_supervisor_row_passes_when_supervisorctl_knows_the_program` | the pass, and that the recorded command is the derived `status` one |
-| `test_the_supervisor_row_runs_nothing_but_the_derived_status_command` | the read-only guarantee: exactly one command ran, and it was a `status` |
-| `test_the_supervisor_row_fails_on_an_unquoted_program_and_runs_nothing` | fault 2, and the shell is never given the chance |
-| `test_the_supervisor_row_fails_when_the_executable_does_not_resolve` | fault 1, and names where it looked |
-| `test_the_supervisor_row_fails_when_a_bare_name_is_not_on_path` | the same, through the real PATH search |
+| `test_the_supervisor_row_passes_when_supervisor_knows_the_program` | the pass, and the read-only guarantee: the recorded command is the derived `status` one, and a program supervisor knows is never asked a second question |
+| `test_the_supervisor_row_fails_an_unquoted_program_name` | fault 2, and the shell is never given the chance |
+| `test_the_supervisor_row_fails_a_binary_that_does_not_resolve` | fault 1, and names where it looked |
+| `test_the_supervisor_row_fails_a_binary_that_is_not_on_the_path` | the same, through the real PATH search |
 | `test_the_supervisor_row_fails_when_supervisor_does_not_know_the_program` | fault 3, with supervisor's own words |
-| `test_the_supervisor_row_fails_when_supervisorctl_cannot_reach_supervisord` | fault 4, kept apart from fault 3 |
-| `test_the_supervisor_row_fails_when_supervisorctl_does_not_answer_in_time` | the timeout path |
+| `test_the_supervisor_row_fails_when_supervisorctl_cannot_answer` | fault 4, kept apart from fault 3 |
+| `test_the_supervisor_row_fails_a_command_that_never_answered` | the timeout path |
 | `test_the_supervisor_row_fails_when_the_command_is_empty` | the empty command |
-| `test_the_supervisor_row_passes_when_the_flipper_is_not_armed` | moot means moot |
-| `test_the_supervisor_row_passes_when_the_command_is_not_supervisorctl` | no program to ask about |
-| `test_the_supervisor_row_passes_when_supervisorctl_names_no_program` | `reread && update` |
+| `test_the_supervisor_row_is_moot_while_the_flipper_is_not_armed` | moot means moot |
+| `test_the_supervisor_row_checks_resolution_for_a_command_that_is_not_supervisorctl` | no program to ask about |
+| `test_the_supervisor_row_says_when_a_supervisor_command_names_no_program` | `reread && update` |
+| `test_the_supervisor_row_names_the_running_program_without_printing_a_repair_line` | the row reports the nearest names and still prints no `suggestion`, so the two columns keep their meanings |
 
 A live run of the row against a real application is recorded in the pull request that
 added it: five configurations, one stand-in supervisorctl, and a log showing that the
@@ -370,6 +476,11 @@ a plain failure.
 
 ## Known limitations
 
+- **A near miss is a name, not an assignment.** `nearMisses()` answers "which running
+  program is this name most like", which on a host running several pools can name a program
+  the flip was never meant to touch — the ranking is why the row offers a short list, and
+  why the offer is in the sentence and not in a `suggestion` line. The row cannot see the
+  operator's intent, and does not claim to.
 - **It does not prove the *next* read.** The row checks that supervisor knows the
   program. Whether pgcat then re-reads the right file is `pgcat files`, and whether the
   pools in that file are correct is the deploy's business.
@@ -415,8 +526,9 @@ a plain failure.
 
 ## Files
 
-- `src/Pgcat/SupervisorStep.php` — tokenizer, derivation, resolution and the injectable
-  runner; the only class that decides what the inspection may run.
+- `src/Pgcat/SupervisorStep.php` — tokenizer, derivation, resolution, the discovery and
+  ranking of the running programs, and the injectable runner; the only class that decides
+  what the inspection may run.
 - `src/Pgcat/PgcatConfigFlipper.php` — `supervisorCommand()`: the command the flip runs,
   and the one the row inspects; `suggestionForSupervisor()`: the line a row prints for the
   two faults that reduce to a command, and the documented commands it prints;
@@ -425,5 +537,6 @@ a plain failure.
 - `src/Providers/WeightedDatabaseServiceProvider.php` — the one inspector per application
   that the row, the flip and `--dry-run` all resolve.
 - `config/db-manager.php` — the quoted defaults, with the reason in a comment.
-- `tests/Support/FakeSupervisor.php` — a runner that records instead of running.
+- `tests/Support/FakeSupervisor.php` — a runner that records instead of running, with
+  per-command answers for the faults that ask twice.
 - `tests/Unit/Pgcat/SupervisorStepTest.php`, `tests/Unit/Console/DbDoctorTest.php`.

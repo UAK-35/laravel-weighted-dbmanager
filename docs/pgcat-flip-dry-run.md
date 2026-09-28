@@ -141,10 +141,11 @@ part that is not in doubt.
 | the lock           | performed | the lock file, taken and released                              |
 | read the source    | performed | the source path and its byte count                             |
 | the supervisor check | performed | supervisor's own answer, or the fault a flip would refuse on   |
+| the start          | reported  | only when supervisord answers that pgcat is not running: the `start` command a repair runs, beside the state that made it one |
 | write the temp     | performed | the temp path and the bytes written                            |
 | remove the temp    | performed | that the rehearsal leaves nothing behind                       |
 | the rename         | reported  | `→ target`, and what it would do to the target's bytes         |
-| the supervisor     | reported  | the exact command `supervisorCommand()` returns                 |
+| the supervisor     | reported  | the exact command `supervisorCommand()` returns — `startCommand()` instead when the check found pgcat down |
 | the state write    | reported  | the state path and its writability                             |
 
 The gates are not re-implemented. A scheduled rehearsal asks `disabledReason()` and a
@@ -156,8 +157,10 @@ before it looks at the mode, so a rehearsal answers "would *this* poll flip" rat
 The supervisor check is performed for the same reason the write is: a flip makes it, it
 changes nothing, and a rehearsal that skipped it would predict a flip the flipper would
 refuse. It is read-only by construction — the command is derived with `status` in the verb
-position, never the configured one — so the one process a rehearsal starts is a question,
-not a signal. When it fails, the rehearsal stops there and says so:
+position, never the configured one — so the processes a rehearsal starts are questions and
+not signals: that one, and the bare `supervisorctl status` a refusal over an unknown program
+asks so it can name the names nearest the configured one. When it fails, the rehearsal stops
+there and says so:
 
 ```
 [dry run] a flip would fail (mode=readers): supervisor does not know "pgcat:*": … — a flip refuses before it swaps the file, so nothing would be replaced

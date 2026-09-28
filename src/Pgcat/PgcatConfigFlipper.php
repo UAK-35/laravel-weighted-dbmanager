@@ -35,7 +35,10 @@ use DateTimeZone;
  *   1. Read source file contents into memory
  *   2. Write to {target}.tmp.{pid}
  *   3. rename() → atomic on the same filesystem (POSIX guarantees)
- *   4. supervisorctl restart "pgcat:*"
+ *   4. supervisorctl restart "pgcat:*" — or `start` when supervisord reports the program is
+ *      not running, which is the case where the file being replaced is the reason it is down:
+ *      the swap is then a repair, it is not rolled back, and the mode stays unrecorded so the
+ *      next poll tries again.
  *
  * The program name is quoted because the command is a shell command line: an unquoted
  * `pgcat:*` is a glob, and the shell decides what supervisorctl receives. `pgcat:*`
@@ -119,6 +122,26 @@ final class PgcatConfigFlipper
 
     private const DEFAULT_RELOAD_COMMAND = 'supervisorctl signal HUP "pgcat:*"';
 
+    /**
+     * The command a repair runs when the config does not name one: what the other two would do,
+     * with the only verb that acts on a program that is *not* up. `restart` and `signal HUP`
+     * both need a running program — supervisor answers `ERROR (not running)` otherwise — so a
+     * flip that finds pgcat STARTING or FATAL and runs either has replaced a file and left the
+     * daemon exactly as it was.
+     */
+    private const DEFAULT_START_COMMAND = 'supervisorctl start "pgcat:*"';
+
+    /**
+     * How many times a repair starts pgcat before it reports the failure. More than one because
+     * the first start is what a crash-looping program needs — supervisor's own `startretries`
+     * continue after it — and because the state is read back after each attempt, so a pgcat
+     * that is merely inside its `startsecs` window on the first read is not a failure.
+     */
+    private const START_ATTEMPTS_DEFAULT = 3;
+
+    /** How long a repair waits between two attempts, in milliseconds. */
+    private const START_RETRY_DELAY_MS_DEFAULT = 2000;
+
     /** @var \Closure(string $from, string $to): bool */
     private \Closure $fileCopier;
 
@@ -134,6 +157,16 @@ final class PgcatConfigFlipper
     private DateTimeZone $timezone;
 
     private SupervisorStep $supervisorStep;
+
+    /**
+     * How long this container is allowed to get pgcat into a working shape, and whether that
+     * has run out. Built from the config slice when not injected so a host that has not heard
+     * of it gets the documented default rather than no bound at all.
+     */
+    private readonly FlipWindow $window;
+
+    /** @var \Closure(int): void */
+    private \Closure $sleeper;
 
     /**
      * @param array<string, mixed> $config pgcat config slice (see config/db-manager.php)
@@ -155,7 +188,17 @@ final class PgcatConfigFlipper
         // `database.default` — so the mismatch sentence points an operator at the setting that
         // actually decided this connection instead of guessing `database.default`.
         private readonly string $connectionSource = ActiveConnection::DEFAULT_SOURCE,
+        // How a repair waits between two attempts at starting pgcat. Injected so a test does
+        // not spend the delay, and so an installation that would rather not sleep inside a
+        // poll has one place to change it.
+        ?\Closure $sleeper = null,
+        // The container's boot window. Injected so a test can close it without waiting ten
+        // minutes; defaulted from the same config slice a host passes in, so `boot_file` and
+        // `flip_window_seconds` are read in exactly one place.
+        ?FlipWindow $window = null,
     ) {
+        $this->window = $window ?? FlipWindow::fromConfig($config);
+
         $this->fileCopier = $fileCopier ?? static function (string $from, string $to): bool {
             $tmp = $to . '.tmp.' . getmypid();
             $bytes = file_put_contents($tmp, file_get_contents($from));
@@ -197,6 +240,10 @@ final class PgcatConfigFlipper
         // replaced it for the check as well — the check has to run the way the flip will.
         $this->supervisorStep = $supervisorStep ?? new SupervisorStep($this->commandRunner);
 
+        $this->sleeper = $sleeper ?? static function (int $micros): void {
+            usleep($micros);
+        };
+
         $this->timezone = new DateTimeZone($timezone ?? 'UTC');
     }
 
@@ -217,6 +264,18 @@ final class PgcatConfigFlipper
             );
         }
 
+        // The window is checked before the lock, because a closed window has nothing to
+        // serialise: nothing is read, written or run, and taking the lock only to release it
+        // would make a stopped flipper look busy. A run that lands here is not recorded
+        // either — the convergence verdict is about what happened *inside* the window, so a
+        // run after it has closed must not be able to change the answer.
+        if ($this->window->closed()) {
+            return FlipResult::windowClosed(
+                currentMode: $this->resolver->currentModeName(),
+                reason: $this->windowClosedReason(),
+            );
+        }
+
         [$acquired, $fp] = ($this->lockAcquirer)($this->lockFile);
         if (!$acquired) {
             return FlipResult::skipped(
@@ -234,6 +293,11 @@ final class PgcatConfigFlipper
             // "unchanged" from, so a first run is reported as a flip whose
             // previousMode is null.
             if ($lastMode === $currentMode) {
+                // A run that changes nothing is still a run: it is the ordinary outcome of a
+                // per-minute schedule, and it is exactly the evidence `/health/db` needs to
+                // say this container converged rather than merely that it booted.
+                $this->recordRun(FlipResult::KIND_NO_CHANGE, $currentMode);
+
                 return FlipResult::noChange(
                     mode: $currentMode,
                     reason: 'mode unchanged since last flip',
@@ -243,12 +307,18 @@ final class PgcatConfigFlipper
             $this->swap($currentMode);
 
             $this->writeLastMode($currentMode, $lastMode);
+            $this->recordRun(FlipResult::KIND_FLIPPED, $currentMode);
 
             return FlipResult::flipped(
                 newMode: $currentMode,
                 previousMode: $lastMode,
             );
         } catch (\Throwable $e) {
+            // Recorded as well: a convergence verdict that only counted successes would read
+            // the same whether the flip was failing or never ran at all, and telling those two
+            // apart is most of the point of the window.
+            $this->recordRun(FlipResult::KIND_FAILED, $this->resolver->currentModeName());
+
             return FlipResult::failed(
                 currentMode: $this->resolver->currentModeName(),
                 error: $e->getMessage(),
@@ -459,6 +529,11 @@ final class PgcatConfigFlipper
         // follow: what can be done without changing anything, is done.
         $verdict = $this->supervisorStep->inspect($this->supervisorCommand());
 
+        // The rehearsal has to name the command the flip would really run: a pgcat that is not
+        // running turns the last step into a `start`, and a rehearsal that printed the reload
+        // would be predicting a flip that does something else.
+        $repair = $verdict['fault'] === SupervisorStep::FAULT_NOT_RUNNING;
+
         if (!$verdict['usable']) {
             return DryRunResult::failed(
                 mode: $mode,
@@ -480,6 +555,18 @@ final class PgcatConfigFlipper
             'outcome' => DryRunResult::STEP_DONE,
             'detail' => $verdict['detail'],
         ];
+
+        if ($repair) {
+            $steps[] = [
+                'step' => 'start',
+                'outcome' => DryRunResult::STEP_WOULD,
+                'detail' => sprintf(
+                    '%s — pgcat is %s, so the flip starts it instead of reloading it',
+                    $this->startCommand(),
+                    $verdict['state'] ?? 'not RUNNING',
+                ),
+            ];
+        }
 
         $temporary = $target.'.tmp.'.getmypid();
         $written = @file_put_contents($temporary, $contents);
@@ -529,7 +616,7 @@ final class PgcatConfigFlipper
         $steps[] = [
             'step' => 'supervisor',
             'outcome' => DryRunResult::STEP_WOULD,
-            'detail' => $this->supervisorCommand(),
+            'detail' => $repair ? $this->startCommand() : $this->supervisorCommand(),
         ];
 
         if (!$this->stateFileWritable()) {
@@ -598,7 +685,12 @@ final class PgcatConfigFlipper
      * applies to the current connection's driver. `configured_enabled` is what
      * `swrr.pgcat.enabled` says on its own.
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, config_path: string, readers_path: string, no_readers_path: string, restart_command: string, reload_command: string, use_reload: bool, state_file: string, lock_file: string}
+     * `window` is the boot window block `healthSummary()` already carries, restated here because
+     * this method is written as a spread of that array plus the path and command settings — and a
+     * reader of this shape (or `db:pgcat-flip --status`, which renders it) would not otherwise
+     * know the window is in there.
+     *
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, config_path: string, readers_path: string, no_readers_path: string, restart_command: string, reload_command: string, use_reload: bool, start_command: string, start_attempts: int, start_retry_delay_ms: int, state_file: string, lock_file: string}
      */
     public function status(): array
     {
@@ -616,6 +708,12 @@ final class PgcatConfigFlipper
                 self::DEFAULT_RELOAD_COMMAND,
             ),
             'use_reload' => $this->useReload(),
+            // What a repair would run, and how hard it would try — reported beside the other two
+            // commands because a report that named only the reload would not say what happens
+            // when pgcat is down, which is the case a flip now also covers.
+            'start_command' => $this->startCommand(),
+            'start_attempts' => max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT)),
+            'start_retry_delay_ms' => max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT)),
             'state_file' => $this->stateFile,
             'lock_file' => $this->lockFile,
         ];
@@ -696,6 +794,14 @@ final class PgcatConfigFlipper
      * one a flip reads — `commandKey()`, not a guess between the two — so a repair can never
      * send an operator to the setting their flip is not using.
      *
+     * An unknown program is the closest of those, and the line stays absent deliberately. The
+     * step can now name what supervisord *is* running — the verdict's `near_misses` — and a row
+     * prints that in its sentence for an operator to read. A line is a different thing: it is
+     * written to be applied, by a gate or a checklist, without anyone judging it. Replacing a
+     * program name with the nearest running one is a judgement — `pgcat_x:pgcat_00` is the
+     * closest *name*, not evidence that this flip belongs to that pool — so it belongs in the
+     * sentence, where it is offered as the probable answer, and not in the value column.
+     *
      * @param array{fault: string|null, flip_command: string} $verdict what `SupervisorStep::inspect()` returned
      */
     public function suggestionForSupervisor(array $verdict): ?string
@@ -726,7 +832,12 @@ final class PgcatConfigFlipper
      * flags the configuration that reads as armed but can never act, and
      * `warning` carries the sentence for it (or for an incomplete arming).
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null}
+     * `window` is the container's boot window — when it booted, how long it had, whether that
+     * has run out, and whether a flip converged inside it. It is part of this block rather
+     * than a separate accessor because `/health/db` and `--status` must not be able to read
+     * two different answers to "did this container ever work".
+     *
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>}
      */
     public function healthSummary(): array
     {
@@ -742,7 +853,84 @@ final class PgcatConfigFlipper
             'armed_reason' => $this->armedReason(),
             'mismatch' => $this->isMismatched(),
             'warning' => $this->armingWarning(),
+            'window' => $this->windowStatus(),
         ];
+    }
+
+    /**
+     * The container's boot window as one block: the window itself, plus what the recorded runs
+     * inside it say about convergence.
+     *
+     * `failed` is the field `/health/db` acts on, and it is deliberately only ever true *after*
+     * the window has closed: while a container is still inside its window, a flip that has not
+     * converged yet is a container still starting, not a broken one. The three ways to be
+     * `failed` are told apart in `reason`, because they call for different work — a scheduler
+     * that never ran the flip, a flip that ran and kept failing, and a flip that succeeded
+     * outside the window (which means the container was too slow, not that anything is broken).
+     *
+     * `converged` is sticky for the container's life: it is set by the first run that reached a
+     * usable mode, and never cleared, so a later failure cannot retroactively un-work a
+     * container that did come up. `runs` counts every recorded run, which is what makes "the
+     * flip is scheduled" observable at all.
+     *
+     * @return array<string, mixed>
+     */
+    public function windowStatus(): array
+    {
+        $window = $this->window->toArray();
+        $state = $this->readState();
+        $convergedAt = $this->stateTime($state, 'converged_at');
+
+        $converged = $convergedAt !== null && $this->window->contains($convergedAt);
+        $runs = ConfigValue::int($state['runs'] ?? null, 0);
+        $closed = (bool) $window['closed'];
+
+        $reason = null;
+
+        if ($closed && !$converged) {
+            $reason = match (true) {
+                $runs === 0 => 'the flip never ran inside this container\'s window: db:pgcat-flip is not being scheduled, or it cannot reach the flipper',
+                $convergedAt !== null => 'every flip run inside the window failed',
+                default => 'the flip has not reached a usable mode inside the window',
+            };
+        }
+
+        return [
+            ...$window,
+            'runs' => $runs,
+            'last_run_at' => $state['last_run_at'] ?? null,
+            'last_kind' => $state['last_kind'] ?? null,
+            'converged' => $converged,
+            'converged_at' => $state['converged_at'] ?? null,
+            'converged_mode' => $state['converged_mode'] ?? null,
+            'failed' => $closed && !$converged,
+            'failed_reason' => $reason,
+        ];
+    }
+
+    /**
+     * The window itself, for a caller that only needs the bounds — `db:doctor` and the deploy
+     * rehearsal both ask "would a flip act", and the bounds answer it without reading state.
+     */
+    public function window(): FlipWindow
+    {
+        return $this->window;
+    }
+
+    /**
+     * Why a flip stopped: the two numbers that decided it, so the sentence can be checked
+     * against the container rather than taken on trust.
+     */
+    private function windowClosedReason(): string
+    {
+        $window = $this->window->toArray();
+
+        return sprintf(
+            'the flip window closed: this container booted at %s and had %d seconds, so no '
+            .'further attempts are made until it is replaced',
+            $window['booted_at'] ?? '(an unrecorded time)',
+            $window['window_seconds'],
+        );
     }
 
     /**
@@ -803,7 +991,7 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * Both pgcat switches, in the one place they are read.
+     * Both pgcat switches in a `swrr.pgcat` block, in the one place they are read.
      *
      * Four call sites used to read `enabled` — two through `ConfigValue::bool()` and two
      * through a bare `(bool)` cast — and the two idioms disagreed about an array, so one
@@ -819,15 +1007,22 @@ final class PgcatConfigFlipper
      * file prints beside the setting — and `refused` carries what was written, for the boot
      * audit and the preflight to report.
      *
+     * Static and taking a block rather than reading `$this->config`, because a block can be
+     * judged before it is installed: `db:doctor --config-file` reports the switches a candidate
+     * `config/db-manager.php` would have refused, with no flipper built and nothing read from
+     * the application's own configuration. One method answers both callers, so a value a
+     * pipeline passes and a value a boot refuses cannot be two readings of the same rule.
+     *
+     * @param array<string, mixed> $pgcat the `swrr.pgcat` block as written
      * @return array{on: array{enabled: bool, use_reload: bool}, refused: array<string, string>}
      */
-    private function switchReadings(): array
+    public static function switchReadingsIn(array $pgcat): array
     {
         $on = [];
         $refused = [];
 
         foreach (['enabled' => self::ENABLED_DEFAULT, 'use_reload' => self::USE_RELOAD_DEFAULT] as $key => $default) {
-            $reading = SwitchValue::read($this->config[$key] ?? null, $default);
+            $reading = SwitchValue::read($pgcat[$key] ?? null, $default);
 
             $on[$key] = $reading['on'];
 
@@ -837,6 +1032,16 @@ final class PgcatConfigFlipper
         }
 
         return ['on' => $on, 'refused' => $refused];
+    }
+
+    /**
+     * The block this flipper was built with, classified by `switchReadingsIn()`.
+     *
+     * @return array{on: array{enabled: bool, use_reload: bool}, refused: array<string, string>}
+     */
+    private function switchReadings(): array
+    {
+        return self::switchReadingsIn($this->config);
     }
 
     /**
@@ -966,6 +1171,15 @@ final class PgcatConfigFlipper
      * restart, or pgcat would not come back up — the previous file is put back. A new file
      * on disk with the old processes running is precisely the state this ordering exists
      * to prevent, and it is the one an operator cannot see.
+     *
+     * The one verdict that is not a refusal is `SupervisorStep::FAULT_NOT_RUNNING`: supervisord
+     * knows the program and the answer says it is STARTING, BACKOFF or FATAL. There the ordering
+     * above is inverted on purpose, because the daemon being down is what makes the swap a
+     * *repair*: the file being replaced is the one pgcat could not start on, so it goes in
+     * first, and `start` follows — the reload and restart commands act on a program that is
+     * already up, and supervisor answers `ERROR (not running)` for one that is not. If the start
+     * never takes, the new file stays: putting the old one back would restore exactly the config
+     * that could not boot, which is the failure this path exists to end.
      */
     private function swap(string $mode): void
     {
@@ -988,6 +1202,9 @@ final class PgcatConfigFlipper
 
         $verdict = $this->supervisorStep->inspect($this->supervisorCommand());
 
+        // A pgcat supervisord knows and is not running: the flip is the repair, not a hot swap.
+        $repair = $verdict['fault'] === SupervisorStep::FAULT_NOT_RUNNING;
+
         if (!$verdict['usable']) {
             throw new \RuntimeException(
                 $verdict['detail'].' — a flip refuses before it swaps the file, so nothing was replaced and no mode was recorded'
@@ -1004,6 +1221,25 @@ final class PgcatConfigFlipper
         $copied = ($this->fileCopier)($source, $target);
         if ($copied !== true) {
             throw new \RuntimeException("Failed to copy {$source} → {$target}");
+        }
+
+        if ($repair) {
+            try {
+                $this->startAndWait();
+            } catch (\Throwable $e) {
+                // No rollback here, deliberately: rollBack() exists to keep the disk in step with
+                // a process that is already running the old mode, and there is no such process —
+                // the file just written is the repair and the one it replaced is the config
+                // pgcat could not start on. The mode is left unrecorded for the same reason, so
+                // the next poll writes the same file again and retries the start.
+                throw new \RuntimeException(sprintf(
+                    '%s — the new config was left in place (%s) and no mode was recorded, so the next flip retries',
+                    $e->getMessage(),
+                    $target,
+                ));
+            }
+
+            return;
         }
 
         try {
@@ -1073,40 +1309,199 @@ final class PgcatConfigFlipper
         }
     }
 
-    private function readLastMode(): ?string
+    /**
+     * The command a repair runs to bring pgcat up on the file that was just written.
+     *
+     * `swrr.pgcat.start_command` when an installation starts pgcat some other way; otherwise
+     * derived from the command a flip would have run, so the binary, the group name and the
+     * quoting are the ones `SupervisorStep` already judged to resolve and to reach supervisord.
+     */
+    private function startCommand(): string
+    {
+        $configured = ConfigValue::string($this->config['start_command'] ?? null);
+
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return SupervisorStep::startCommand($this->supervisorCommand()) ?? self::DEFAULT_START_COMMAND;
+    }
+
+    /**
+     * Start pgcat and read its state back, up to a bounded number of attempts.
+     *
+     * The read-back is what makes this self-healing rather than a single optimistic command: a
+     * program that is inside supervisor's `startsecs` window answers `STARTING` for a few
+     * seconds after a start that is going to succeed, and a program in a crash loop answers the
+     * same thing after one that is not. Only a state read after the start separates the two, and
+     * it is also what lets the retry be bounded — an attempt that ends in RUNNING is the end of
+     * the repair, whatever the exit code said.
+     *
+     * Throws when the attempts run out, naming each one: the caller does not roll back, so the
+     * message is the only record of the failure — and the state file is left unwritten, which is
+     * what makes the next poll try again.
+     */
+    private function startAndWait(): void
+    {
+        $command = $this->startCommand();
+        $attempts = max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT));
+        $delayMs = max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT));
+        $failures = [];
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            [$exitCode, $stdout, $stderr] = ($this->commandRunner)($command);
+
+            if ($exitCode === 0) {
+                $verdict = $this->supervisorStep->inspect($this->supervisorCommand());
+
+                if ($verdict['usable'] && $verdict['fault'] === null) {
+                    return;
+                }
+
+                $failures[] = sprintf('attempt %d: %s', $attempt, $verdict['detail']);
+            } else {
+                $failures[] = sprintf(
+                    'attempt %d: %s exited %d: %s',
+                    $attempt,
+                    $command,
+                    $exitCode,
+                    trim($stdout.' '.$stderr),
+                );
+            }
+
+            // No sleep after the last attempt: the caller is about to report the failure, and
+            // a poll that has given up has nothing left to wait for.
+            if ($attempt < $attempts && $delayMs > 0) {
+                ($this->sleeper)($delayMs * 1000);
+            }
+        }
+
+        throw new \RuntimeException(sprintf(
+            'pgcat did not come up after %d attempt(s) of "%s": %s',
+            $attempts,
+            $command,
+            implode('; ', $failures),
+        ));
+    }
+
+    /**
+     * The state file as an array — every key, not just the last mode, because the file now
+     * carries the run bookkeeping the window is judged on as well as the mode a flip applied.
+     *
+     * @return array<string, mixed>
+     */
+    private function readState(): array
     {
         if (!is_file($this->stateFile)) {
-            return null;
+            return [];
         }
+
         $raw = @file_get_contents($this->stateFile);
+
         if ($raw === false || $raw === '') {
-            return null;
+            return [];
         }
+
+        /** @var array<string, mixed>|null $decoded */
         $decoded = json_decode($raw, true);
 
-        if (!is_array($decoded)) {
-            return null;
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Merge keys into the state file.
+     *
+     * A merge rather than a rewrite, and that is the whole reason this method replaced the
+     * `file_put_contents` the old `writeLastMode` did: the file now holds facts written at
+     * different moments — the last applied mode, the run counters, and the one-time record of
+     * when this container converged — and a flip that overwrote the file with its own four keys
+     * would erase the convergence the window is judged on. On a later flip that would move
+     * `converged_at` forward, which could put it *outside* the window and fail a container that
+     * had in fact come up in time.
+     *
+     * @param array<string, mixed> $state
+     */
+    private function writeState(array $state): void
+    {
+        $dir = dirname($this->stateFile);
+
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
         }
 
-        $lastMode = $decoded['last_mode'] ?? null;
+        @file_put_contents(
+            $this->stateFile,
+            json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+        );
+    }
+
+    private function readLastMode(): ?string
+    {
+        $lastMode = $this->readState()['last_mode'] ?? null;
 
         return is_string($lastMode) ? $lastMode : null;
     }
 
     private function writeLastMode(string $mode, ?string $previousMode): void
     {
-        $payload = [
+        $this->writeState([
+            ...$this->readState(),
             'last_mode' => $mode,
             'previous_mode' => $previousMode,
-            'last_flipped_at' => (new DateTimeImmutable('now', $this->timezone))->format(DATE_ATOM),
+            'last_flipped_at' => $this->nowIso(),
             'flipped_by' => 'pgcat-flipper',
-        ];
+        ]);
+    }
 
-        $dir = dirname($this->stateFile);
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0755, true);
+    /**
+     * Record one run of the flip, whether or not it changed anything.
+     *
+     * Called inside the lock, on every path that got that far, because "the flip ran and had
+     * nothing to do" and "the flip never ran" are the two states a booting container can be in
+     * and only one of them is healthy. `converged_at` is written once and never moved: the first
+     * run that reached a usable mode is what this container's window is judged on, and a later
+     * failure must not be able to un-work a container that did come up.
+     */
+    private function recordRun(string $kind, string $mode): void
+    {
+        $state = $this->readState();
+        $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE], true);
+
+        $state['runs'] = ConfigValue::int($state['runs'] ?? null, 0) + 1;
+        $state['last_run_at'] = $this->nowIso();
+        $state['last_kind'] = $kind;
+        $state['last_mode_active'] = $mode;
+
+        if ($usable && !isset($state['converged_at'])) {
+            $state['converged_at'] = $this->nowIso();
+            $state['converged_mode'] = $mode;
         }
 
-        @file_put_contents($this->stateFile, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $this->writeState($state);
+    }
+
+    /**
+     * A timestamp in the state file as unix seconds, or null when it is absent or unreadable.
+     * The values are DATE_ATOM, which carries its own offset, so this parses to an absolute
+     * moment rather than to whatever the reading process' timezone happens to be.
+     *
+     * @param array<string, mixed> $state
+     */
+    private function stateTime(array $state, string $key): ?float
+    {
+        $raw = $state[$key] ?? null;
+
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        $parsed = strtotime($raw);
+
+        return $parsed === false ? null : (float) $parsed;
+    }
+
+    private function nowIso(): string
+    {
+        return (new DateTimeImmutable('now', $this->timezone))->format(DATE_ATOM);
     }
 }

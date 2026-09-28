@@ -3,6 +3,8 @@
 namespace Uak35\WeightedDbManager\Tests\Unit\Pgcat;
 
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
+use Uak35\WeightedDbManager\Pgcat\FlipResult;
+use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
@@ -110,7 +112,7 @@ class PgcatConfigFlipperTest extends TestCase
     {
         return array_values(array_filter(
             $this->cmdLog,
-            static fn (array $entry): bool => !str_contains($entry[0], ' status '),
+            static fn (array $entry): bool => !self::isSupervisorCheck($entry[0]),
         ));
     }
 
@@ -124,8 +126,22 @@ class PgcatConfigFlipperTest extends TestCase
     {
         return array_values(array_filter(
             $this->cmdLog,
-            static fn (array $entry): bool => str_contains($entry[0], ' status '),
+            static fn (array $entry): bool => self::isSupervisorCheck($entry[0]),
         ));
+    }
+
+    /**
+     * Whether a command is one of the read-only questions a flip asks before it swaps a file:
+     * `supervisorctl status "<program>"`, and — after an unknown program — the bare
+     * `supervisorctl status` that lists what supervisord is running.
+     *
+     * Both are checks and neither is the flip's own command, which is what the two filters above
+     * are for: a flip that never ran its reload must not look as though it did because the
+     * refusal asked supervisor one more question.
+     */
+    private static function isSupervisorCheck(string $command): bool
+    {
+        return str_contains($command, ' status ') || str_ends_with(trim($command), ' status');
     }
 
     /**
@@ -460,19 +476,48 @@ class PgcatConfigFlipperTest extends TestCase
      */
     public function test_a_flip_refuses_before_the_swap_when_supervisor_does_not_know_the_program(): void
     {
-        $flipper = $this->build('readers', runner: fn (string $command): array => str_contains($command, ' status ')
-            ? [2, 'pgcat: ERROR (no such group)', '']
-            : [0, '', '']);
+        // Two answers: the program is not supervisor's, and the list of what is — the second
+        // question the refusal asks, because the repair for this fault is a name.
+        $flipper = $this->build('readers', runner: fn (string $command): array => match (true) {
+            self::isSupervisorCheck($command) && !str_ends_with(trim($command), ' status') => [2, 'pgcat: ERROR (no such group)', ''],
+            self::isSupervisorCheck($command) => [0, "pgcat_primary   RUNNING   pid 1\n", ''],
+            default => [0, '', ''],
+        });
 
         $result = $flipper->applyCurrentState();
 
         $this->assertSame('failed', $result->kind());
         $this->assertStringContainsString('no such group', (string) $result->error);
         $this->assertStringContainsString('refuses before it swaps the file', (string) $result->error);
+        $this->assertStringContainsString('the closest is "pgcat_primary", which is the name to write', (string) $result->error, 'the refusal an operator acts on names the program to write instead');
         $this->assertCount(0, $this->copyLog, 'the target was never replaced');
         $this->assertCount(0, $this->flipCommands(), 'the command was never run');
         $this->assertSame("pool = 'unknown'\n", file_get_contents($this->tmp . '/pgcat.toml'));
-        $this->assertFileDoesNotExist($this->stateFile, 'no mode was recorded, so the next poll tries again');
+        $this->assertNoModeRecorded('no mode was recorded, so the next poll tries again');
+    }
+
+    /**
+     * The invariant behind "no mode was recorded": `last_mode` is what makes the next poll skip,
+     * so a run that did not apply one must not write it — whatever else the run records.
+     *
+     * The file itself may exist without `last_mode`, and since the boot window landed it usually
+     * does: a failed run records its own bookkeeping (`runs`, `last_kind`, `last_run_at`) so
+     * `/health/db` can tell "the flip ran and kept failing" from "the flip was never scheduled",
+     * which is the whole difference between a broken pooler and a broken cron. Asserting on the
+     * key rather than on the file's absence is what keeps both facts testable at once.
+     */
+    private function assertNoModeRecorded(string $message = ''): void
+    {
+        if (!is_file($this->stateFile)) {
+            $this->assertFileDoesNotExist($this->stateFile, $message);
+
+            return;
+        }
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertIsArray($state, $message);
+        $this->assertArrayNotHasKey('last_mode', $state, $message);
     }
 
     public function test_a_flip_refuses_before_the_swap_when_the_program_name_is_unquoted(): void
@@ -542,7 +587,7 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertCount(1, $this->copyLog, 'the swap did happen — the rollback undoes it');
         $this->assertCount(1, $this->flipCommands());
         $this->assertSame("pool = 'unknown'\n", file_get_contents($this->tmp . '/pgcat.toml'), 'the old variant is back');
-        $this->assertFileDoesNotExist($this->stateFile);
+        $this->assertNoModeRecorded('a rollback puts the config back, so no mode was applied');
         $this->assertSame([], glob($this->tmp . '/pgcat.toml.tmp.*') ?: [], 'the rollback leaves no temp file');
     }
 
@@ -559,6 +604,115 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame('failed', $result->kind());
         $this->assertStringContainsString('did not exist before the swap either, so it was removed again', (string) $result->error);
         $this->assertFileDoesNotExist($this->tmp . '/pgcat.toml');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A pgcat that is known and down: the flip repairs it instead of refusing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The case that stopped a deployment: pgcat is crash-looping, so
+     * `supervisorctl status "pgcat:*"` exits non-zero, and reading that as "supervisorctl could
+     * not answer" refuses the flip in the one situation where the file it would write is the
+     * fix — leaving a dead pooler and a config nothing will replace.
+     *
+     * The repair has to be the other verb as well: `restart` and `signal HUP` act on a program
+     * that is up, so the flip starts pgcat and then reads its state back.
+     */
+    public function test_a_flip_starts_a_pgcat_that_is_fatal_instead_of_refusing(): void
+    {
+        $state = 'FATAL';
+        $starts = 0;
+
+        $flipper = $this->build('readers', runner: function (string $command) use (&$state, &$starts): array {
+            if (self::isSupervisorCheck($command)) {
+                return [strtoupper($state) === 'RUNNING' ? 0 : 3, "pgcat:pgcat_00   {$state}   Exited too quickly (process log may have details)", ''];
+            }
+
+            $starts++;
+            $state = 'RUNNING';
+
+            return [0, 'pgcat:pgcat_00: started', ''];
+        });
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame('flipped', $result->kind());
+        $this->assertSame(1, $starts, 'the repair starts pgcat once');
+        $this->assertCount(1, $this->copyLog, 'the writer-only file goes in first — it is the repair');
+        $this->assertSame("pool = 'readers'\n", file_get_contents($this->tmp . '/pgcat.toml'));
+        $this->assertSame('supervisorctl start "pgcat"', $this->flipCommands()[0][0], 'start, not the configured restart');
+        $this->assertSame(
+            'readers',
+            json_decode((string) file_get_contents($this->stateFile), true)['last_mode'],
+            'a repair that comes up is a flip like any other',
+        );
+    }
+
+    /**
+     * The failure half, and the one place the rollback is deliberately not taken: the file on
+     * disk *is* the repair, so putting the previous config back would restore exactly the variant
+     * pgcat could not start on. The state file stays unwritten too, which is what makes the next
+     * poll retry instead of concluding the mode is already in place.
+     */
+    public function test_a_repair_that_cannot_start_pgcat_keeps_the_new_config(): void
+    {
+        $flipper = $this->build('readers', [
+            'start_attempts' => 2,
+            'start_retry_delay_ms' => 0,
+        ], runner: fn (string $command): array => self::isSupervisorCheck($command)
+            ? [3, 'pgcat:pgcat_00   BACKOFF   Exited too quickly (process log may have details)', '']
+            : [1, '', 'ERROR (spawn error)']);
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame('failed', $result->kind());
+        $this->assertStringContainsString('did not come up after 2 attempt(s)', (string) $result->error);
+        $this->assertStringContainsString('the new config was left in place', (string) $result->error);
+        $this->assertStringNotContainsString('the previous config was put back', (string) $result->error);
+
+        $this->assertCount(1, $this->copyLog);
+        $this->assertSame("pool = 'readers'\n", file_get_contents($this->tmp . '/pgcat.toml'), 'the repair is not undone');
+        $this->assertNoModeRecorded('no mode recorded, so the next poll tries again');
+        $this->assertCount(2, $this->flipCommands(), 'both attempts ran');
+    }
+
+    /**
+     * `STARTING` is a program on its way up, not a broken one — and the read-back after each
+     * start is the only thing that tells the two apart, which is why the attempts exist rather
+     * than a single optimistic command.
+     */
+    public function test_a_repair_retries_until_pgcat_reads_back_as_running(): void
+    {
+        $starts = 0;
+        $running = false;
+
+        $flipper = $this->build('readers', [
+            'start_attempts' => 3,
+            'start_retry_delay_ms' => 0,
+        ], runner: function (string $command) use (&$starts, &$running): array {
+            if (self::isSupervisorCheck($command)) {
+                return $running
+                    ? [0, 'pgcat:pgcat_00   RUNNING   pid 4242', '']
+                    : [3, 'pgcat:pgcat_00   STARTING', ''];
+            }
+
+            $starts++;
+
+            if ($starts >= 3) {
+                $running = true;
+
+                return [0, 'pgcat:pgcat_00: started', ''];
+            }
+
+            return [1, '', 'ERROR (spawn error)'];
+        });
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame('flipped', $result->kind());
+        $this->assertSame(3, $starts, 'the attempts are bounded, and the third one is the one that took');
+        $this->assertFileExists($this->stateFile);
     }
 
     /**
@@ -1447,5 +1601,193 @@ class PgcatConfigFlipperTest extends TestCase
 
         $this->assertSame($supported, $flipper->status()['driver_supported']);
         $this->assertSame($supported, $flipper->isEnabled());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The boot window: bounded attempts, and the verdict that outlives them
+
+    /**
+     * Write the container's boot stamp the way `entrypoint.sh` writes it — bare unix seconds —
+     * and answer the path the flipper was configured with.
+     */
+    private function stampBoot(float $when): string
+    {
+        $file = $this->tmp . '/container-booted-at';
+        file_put_contents($file, (string) (int) $when);
+
+        return $file;
+    }
+
+    /**
+     * A closed window is a decision, not a bad run: the command exits 0, nothing is written, and
+     * supervisor is not even asked. That last one is the point of checking the window before the
+     * lock — a container that has stopped trying must not look busy, and a minute of every one of
+     * its remaining minutes must not be spent on a question whose answer cannot change.
+     */
+    public function test_a_closed_window_stops_the_flip_without_touching_anything(): void
+    {
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ]);
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_WINDOW_CLOSED, $result->kind());
+        $this->assertSame(0, $result->exitCode(), 'the run did what it should, so a scheduler must not see a failure');
+        $this->assertStringContainsString('window closed (mode=readers)', $result->summary());
+        $this->assertStringContainsString('no further attempts are made until it is replaced', $result->summary());
+
+        $this->assertSame([], $this->copyLog, 'no config was copied');
+        $this->assertSame([], $this->cmdLog, 'supervisor was asked nothing at all');
+        $this->assertSame([], $this->lockLog, 'the lock is not taken by a run that cannot act');
+        $this->assertFileDoesNotExist($this->stateFile, 'a run after the window must not record a mode or a run');
+    }
+
+    /**
+     * The case most likely to be broken by a window: a container with no stamp. A local run, and
+     * an image whose entrypoint predates the stamp, both land here, and both have to keep flipping
+     * — "no boot time" is not "a boot time that has passed".
+     */
+    public function test_a_window_without_a_boot_stamp_is_not_judged_and_the_flip_still_runs(): void
+    {
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->tmp . '/never-written',
+            'flip_window_seconds' => 480,
+        ]);
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertNotSame([], $this->copyLog, 'the flip ran');
+        $this->assertFalse($flipper->windowStatus()['failed'], 'nothing was recorded, so nothing is judged');
+        $this->assertSame(FlipWindow::SOURCE_NO_STAMP, $flipper->windowStatus()['source']);
+    }
+
+    /**
+     * A run inside the window reaching a usable mode is convergence, and convergence is what
+     * makes a closed window not a failure. `runs` is asserted too: it is the only field that makes
+     * "the flip is scheduled at all" observable from inside the container, which is the difference
+     * between a pooler that cannot come up and a cron nobody wired.
+     */
+    public function test_a_run_inside_the_window_converges_the_container(): void
+    {
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time()),
+            'flip_window_seconds' => 480,
+        ]);
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $flipper->applyCurrentState()->kind());
+
+        $window = $flipper->windowStatus();
+
+        $this->assertTrue($window['converged']);
+        $this->assertSame('readers', $window['converged_mode']);
+        $this->assertSame(1, $window['runs']);
+        $this->assertSame(FlipResult::KIND_FLIPPED, $window['last_kind']);
+        $this->assertFalse($window['closed'], 'the window is measured from boot, and this container just booted');
+        $this->assertFalse($window['failed']);
+        $this->assertNull($window['failed_reason'], 'a container still inside its window is starting up, not broken');
+    }
+
+    /**
+     * The verdict `/health/db` acts on, told apart from "not scheduled": no run was ever recorded, so
+     * the reason names the schedule rather than the pooler.
+     */
+    public function test_a_window_that_closed_with_no_runs_blames_the_missing_schedule(): void
+    {
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ]);
+
+        $window = $flipper->windowStatus();
+
+        $this->assertTrue($window['closed']);
+        $this->assertTrue($window['failed']);
+        $this->assertFalse($window['converged']);
+        $this->assertSame(0, $window['runs']);
+        $this->assertStringContainsString('never ran', (string) $window['failed_reason']);
+        $this->assertStringContainsString('is not being scheduled', (string) $window['failed_reason']);
+    }
+
+    /**
+     * Runs that happened and never reached a usable mode: the pooler is the problem, and the reason
+     * says so instead of repeating the scheduler's sentence.
+     */
+    public function test_a_window_that_closed_with_failing_runs_says_the_pooler_is_the_problem(): void
+    {
+        $booted = time() - 3600;
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot($booted),
+            'flip_window_seconds' => 480,
+        ]);
+
+        file_put_contents($this->stateFile, (string) json_encode([
+            'last_mode' => null,
+            'runs' => 4,
+            'last_run_at' => gmdate(DATE_ATOM, $booted + 240),
+            'last_kind' => FlipResult::KIND_FAILED,
+        ]));
+
+        $window = $flipper->windowStatus();
+
+        $this->assertTrue($window['failed']);
+        $this->assertSame(4, $window['runs']);
+        $this->assertStringContainsString('has not reached a usable mode', (string) $window['failed_reason']);
+        $this->assertStringNotContainsString('is not being scheduled', (string) $window['failed_reason']);
+    }
+
+    /**
+     * A flip that succeeded, but only after the window had closed. The container did come up — and
+     * that is exactly why this is a failure rather than a pass: the window is about whether the
+     * pooler was serving while it mattered, and a late success does not un-fail the minutes it was
+     * not. `converged_at` is written once and never moved for the same reason.
+     */
+    public function test_a_flip_that_only_converged_after_the_window_does_not_pass_the_container(): void
+    {
+        $booted = time() - 3600;
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot($booted),
+            'flip_window_seconds' => 480,
+        ]);
+
+        file_put_contents($this->stateFile, (string) json_encode([
+            'last_mode' => 'readers',
+            'runs' => 3,
+            'last_run_at' => gmdate(DATE_ATOM, $booted + 1800),
+            'last_kind' => FlipResult::KIND_FLIPPED,
+            'converged_at' => gmdate(DATE_ATOM, $booted + 1800),
+            'converged_mode' => 'readers',
+        ]));
+
+        $window = $flipper->windowStatus();
+
+        $this->assertFalse($flipper->window()->contains((float) ($booted + 1800)));
+        $this->assertFalse($window['converged'], 'converged_at outside the window is not convergence');
+        $this->assertTrue($window['failed']);
+        $this->assertStringContainsString('every flip run inside the window failed', (string) $window['failed_reason']);
+    }
+
+    /**
+     * The window the flipper was built with is the one `db:doctor` and a deploy rehearsal read
+     * through `window()`, rather than each surface re-deriving it from the config — which is how
+     * two readers end up answering one question differently.
+     */
+    public function test_the_configured_window_is_the_one_the_flipper_carries(): void
+    {
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(1000000),
+            'flip_window_seconds' => 600,
+        ]);
+
+        $this->assertSame(600, $flipper->window()->seconds());
+        $this->assertSame($this->tmp . '/container-booted-at', $flipper->window()->bootFile());
+
+        // And the default when the published config predates the key, which is how every install
+        // that has not republished arrives.
+        $this->assertSame(480, $this->build('readers')->window()->seconds());
     }
 }

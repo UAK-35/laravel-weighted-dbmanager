@@ -111,6 +111,19 @@ answer depends on what happens to be running — for a fault whose repair is gen
 supervisor's side of the fence. The row says what supervisor does not know, which is the fact
 the operator acts on.
 
+**The asking half of D has since been adopted, and the line half has not.** The `pgcat
+supervisor` row now runs that second command and reports the programs nearest the configured
+name in its *sentence* (see [pgcat-supervisor-preflight.md](pgcat-supervisor-preflight.md),
+"An unknown program asks a second question"). Both objections were addressed rather than
+overridden: the ranking replaces "whichever program came first" with the relations an operator
+would think of — the same name, the group it belongs to, a prefix, a name that holds it, a
+close spelling — capped at three and offered as a list, and the second command runs only after
+the program has been found missing, so the ordinary flip still asks one question. What did not
+change is the `suggestion`: a line is written to be applied by a gate that does not read it, and
+"the closest name" is a judgement about intent, which is exactly what candidate D was rejected
+for offering as a value. The row now says what supervisor *is* running, which is the fact the
+operator needs to work out what they meant.
+
 ### E — suggest `database.default` instead of `enabled`
 
 The mismatch sentence names both repairs, and for an installation whose pgcat is genuinely
@@ -148,7 +161,8 @@ tests rather than by taste.
 | `pgcat files` | a missing, unreadable or unwritable file, or a directory that will not take the temp file | none |
 | `pgcat supervisor` | `unquoted` | `swrr.pgcat.<key> = '<the command, program name quoted>'` |
 | `pgcat supervisor` | `empty` | `swrr.pgcat.<key> = '<the command that key documents>'` |
-| `pgcat supervisor` | `unresolved`, `unknown_program`, `unanswered`, `errored` | none |
+| `pgcat supervisor` | `unknown_program` | none — the sentence names the running programs nearest the configured name; a ranked near miss is not a value to apply |
+| `pgcat supervisor` | `unresolved`, `unanswered`, `errored` | none |
 | `pgcat supervisor` | `not_supervisorctl`, `no_program` | none — these pass |
 
 ### The line comes from the flipper, not from the row
@@ -236,8 +250,9 @@ Mutations this decision has been checked against, run against the two test class
   `swrr.pgcat.enabled = false`. Nothing checks that they agree, so a future edit to one could
   contradict the other.
 - **`unknown_program` is the fault most likely to deserve a line, and does not get one.** The
-  name supervisor knows is discoverable (candidate D) but not that it names pgcat's pool, and the
-  row stops there deliberately.
+  name supervisor knows is now discovered (half of candidate D) and the row names the closest
+  ones in its sentence, but "closest" is not "meant": the line is the value a gate applies
+  without reading, so the ranking stays where a human reads it.
 - **`pgcat files` is the only row in the whole command that never prints a line.** That is a
   property of the faults, not of the row, and it would change the moment a fault there reduced to
   a value — see below.

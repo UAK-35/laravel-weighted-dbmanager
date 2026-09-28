@@ -86,11 +86,51 @@ return [
             // by its own name. `php artisan db:doctor` checks both.
             'restart_command' => 'supervisorctl restart "pgcat:*"',
             'reload_command' => 'supervisorctl signal HUP "pgcat:*"',
+            // What a flip runs when supervisord reports pgcat is *not running* (STARTING, BACKOFF,
+            // EXITED, FATAL). Neither command above can help there — `restart` and `signal HUP`
+            // both answer `ERROR (not running)` for a program that is down — so the flip starts it
+            // instead, and this is the one command it can run. Left unset, it is derived from the
+            // command above with `start` in the verb position, which keeps the binary, the group
+            // name and the quoting that were already judged to resolve.
+            'start_command' => env('SWRR_PGCAT_START_COMMAND', 'supervisorctl start "pgcat:*"'),
+            // How hard the repair tries: `start_attempts` starts, `start_retry_delay_ms` between
+            // them, with pgcat's state read back after each one. More than one attempt because a
+            // crash-looping program needs the start *and* the seconds supervisor's own
+            // `startsecs` takes to bring it up; the file stays in place if they all fail, and no
+            // mode is recorded, so the next poll tries again.
+            'start_attempts' => (int) env('SWRR_PGCAT_START_ATTEMPTS', 3),
+            'start_retry_delay_ms' => (int) env('SWRR_PGCAT_START_RETRY_DELAY_MS', 2000),
             // Read as a switch too, so 'yes'/'no' work and a value that is neither is
             // refused rather than cast. true = the reload command, false = the restart one.
             'use_reload' => true, // use reload command (true) or restart command (false)
             'state_file' => sys_get_temp_dir() . '/pgcat-flip-state.json',
             'lock_file' => sys_get_temp_dir() . '/pgcat-flip.lock',
+
+            // ── The boot window ─────────────────────────────────────────────────────
+            //
+            // How long this container may spend getting pgcat into a working shape before the
+            // flip stops trying and `/health/db` reports the container as failed. Without a
+            // bound, a pooler that will never come up is retried every minute for as long as
+            // the container lives, and a container nobody replaced looks busy instead of broken.
+            //
+            // `flip_window_seconds` is the window *in seconds* — the shipped value is 480 (eight
+            // minutes) and `SWRR_PGCAT_FLIP_WINDOW_SECONDS=600` raises it to ten. Eight because
+            // ECS reports a healthy container within six or seven minutes of task start, so a
+            // shorter window would declare a container failed while it was still legitimately
+            // coming up, and because eight per-minute attempts is far more than a working flip
+            // needs — a failing container gets its 7 or 8 tries, a working one converges on the
+            // first or second. Change it here, or in the class that owns the default —
+            // `Uak35\WeightedDbManager\Pgcat\FlipWindow::DEFAULT_SECONDS`, which is where the
+            // reasoning behind the number is written down. A zero or negative value is refused
+            // and replaced by that default rather than meaning "no window".
+            'flip_window_seconds' => (int) env('SWRR_PGCAT_FLIP_WINDOW_SECONDS', 480),
+
+            // Where `entrypoint.sh` stamps the container's boot time (`date +%s`), which is what
+            // the window is measured from. Deliberately not the PHP process start: every Octane
+            // and queue worker has its own, and the whole point is a moment the container cannot
+            // re-begin. With no stamp the window is *not judged* — `closed()` stays false and
+            // nothing fails — so a local run or an older image is quiet instead of guessing.
+            'boot_file' => env('SWRR_PGCAT_BOOT_FILE', sys_get_temp_dir() . '/container-booted-at'),
         ],
 
         // ── Boot self-audit (optional) ───────────────────────────────────────────
@@ -107,6 +147,23 @@ return [
         'audit' => [
             'file' => env('SWRR_AUDIT_FILE', sys_get_temp_dir() . '/swrr-audit.json'),
             'store_probe_seconds' => (int) env('SWRR_AUDIT_STORE_PROBE_SECONDS', 60),
+        ],
+
+        // ── Health endpoint (optional) ───────────────────────────────────────────
+        //
+        // /health/db runs one real query — `select 1` — on the connection this package
+        // follows ('connection' above, else database.default) and answers `ok` only when
+        // it comes back. Without that query the endpoint's verdict is the state store's,
+        // which can be healthy while every application query fails, and a deploy gate
+        // that promotes on it is promoting on the wrong fact.
+        //
+        // Set this off only where there is no database behind the connection at all —
+        // a unit-test fixture, a configuration inspection. Off, the endpoint says
+        // `"pinned":{"checked":false,"ok":null}` and nothing more about reachability,
+        // so anything reading it must read that flag rather than the status. A value
+        // this is not a switch itself resolves to the documented default, on.
+        'health' => [
+            'pinned_query' => env('SWRR_HEALTH_PINNED_QUERY', true),
         ],
     ],
 
