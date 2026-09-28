@@ -12,6 +12,7 @@ use Throwable;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
+use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
@@ -21,10 +22,11 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
 use Uak35\WeightedDbManager\Support\RedisAccess;
+use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Support\SwitchValue;
 
 /**
- * php artisan db:doctor [connection] [--strict] [--json]
+ * php artisan db:doctor [connection] [--strict] [--json] [--config-file=path]
  *
  * One command that answers "will this installation do what it is configured to
  * do", before traffic arrives. Eleven things can be wrong while the application
@@ -48,7 +50,10 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     program name is an unquoted glob the shell may rewrite, or
  *                     supervisor does not know the program — so the flip refuses
  *                     before it swaps anything, and this row is the preflight that
- *                     says so before the window rather than at it
+ *                     says so before the window rather than at it. A program
+ *                     supervisor does not know is the one fault repaired by a name, so
+ *                     the row asks what supervisord is running and names the programs
+ *                     nearest the configured one
  *   replica metadata  replicas carry no weight metadata, so the resolver picks at
  *                     random while the table looks weighted — or a replica's weight,
  *                     cores or memory is a value the resolver cannot read, which
@@ -85,7 +90,11 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * Every other failure is repaired somewhere a config line cannot reach — a PATH, a permission,
  * a `[program:]` section on the supervisor side, a path only the installation knows — and
  * those rows print no line rather than a plausible-looking one. That is the same line the
- * reader-window refusal draws for a value it will not re-spell, applied to a whole row.
+ * reader-window refusal draws for a value it will not re-spell, applied to a whole row. The
+ * nearest case is a program supervisord does not know: the row discovers what it *is* running
+ * and its sentence names the names nearest the configured one, and it still prints no line,
+ * because a near miss is a ranked answer for a reader and a line is a value a gate may apply
+ * without reading it.
  *
  * READ ONLY
  * ---------
@@ -93,9 +102,11 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * written, no replica is probed with a query and no flip is attempted, so the
  * command is safe in a deploy pipeline and against a live database. PING is the
  * only network call; an unreachable store costs one connect timeout. The one other
- * process this command starts is the read-only `supervisorctl status` that
+ * processes this command starts are the read-only `supervisorctl status` commands that
  * `pgcat supervisor` derives from the flip's own command — the same binary, the same
- * program name, `status` in the verb position — so nothing is restarted or signalled. For which
+ * program name, `status` in the verb position, plus the bare `supervisorctl status` that
+ * lists what supervisord runs when the program it was asked about is not one of them — so
+ * nothing is restarted or signalled. For which
  * replica answers what, see db:probe-replicas. The pgcat file check judges
  * readability and writability from filesystem metadata (is_readable/is_writable);
  * it never creates a probe file to prove a directory is writable, so it leaves no
@@ -139,6 +150,38 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * gateFailed() computed, and nothing is written either way. It composes with `--strict`,
  * which is how a pipeline will pass it, and there is no combination to refuse — a doctor is
  * not a daemon, so a report cannot be untrue of the run that produced it.
+ *
+ * CONFIG FILE MODE
+ * ----------------
+ * `--config-file=path` judges one `config/db-manager.php` instead of the installation: the
+ * switches and reader settings in it that the package would *refuse*, reported with the same
+ * sentences, suggestions and exit rule, and read out of the file alone.
+ *
+ * It exists for the one moment the eleven rows above cannot serve. A pipeline vetting a config
+ * on a branch has the *old* configuration installed — the provider swap, the gate, the files,
+ * the replica metadata and the store are all question about the running application, and every
+ * one of them would be answered about the incumbent and printed next to the candidate's name.
+ * This mode is therefore not a quieter doctor, it is a different question: no container binding,
+ * no `db-manager` repository, no boot audit, no database and no Redis are touched, so it answers
+ * even when the package cannot boot, and it answers about the file rather than about the host.
+ *
+ * What it reports is the refusals — a value the package will not read — and not the "reads as on
+ * but can never act" warnings the installation rows also carry. Those need the resolver built
+ * over the value, which is a fact about a running installation's routing; `db:doctor --strict`
+ * on a real deployment is where they fail a pipeline. The line is drawn there rather than at
+ * "anything a file can be asked" so this mode stays honest about what it has not looked at.
+ *
+ * Three rows: `config file` (readable, an array, a `swrr` block, nothing printed while it was
+ * read), `switch values`, and `reader windows`. The last two are the same rule the installation
+ * rows apply — `Support\SwitchValue`, `Support\ReaderWindows`/`ReaderDays`, and the flipper's
+ * `switchReadingsIn()` classifying a block that has never been installed — so a value this mode
+ * passes is a value the next boot will not refuse. Nothing is dated: a boot record holds
+ * findings about this installation, and the candidate has never been booted.
+ *
+ * The exit rule, `--strict` and `--json` are the ones above, unchanged. The object's first keys
+ * name the subject — `config_file` where an installation run names `connection` and
+ * `default_connection` — and the rest of the key set is the same, so a gate written against one
+ * mode reads the other.
  */
 class DbDoctor extends Command
 {
@@ -181,14 +224,24 @@ class DbDoctor extends Command
     protected $signature = 'db:doctor
                             {connection=pgsql : Connection whose weighted replicas are inspected}
                             {--strict : Treat warnings as failures, for a deploy gate}
-                            {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}';
+                            {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
+                            {--config-file= : Judge a config file instead of this installation: read the file, report the switch and reader-window refusals it holds, and read nothing from the running package — so a pipeline can vet a config before it is deployed}';
 
-    protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability';
+    protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — or vet one config file without the installation, with --config-file';
 
     public function handle(): int
     {
         $argument = $this->argument('connection');
         $connection = is_string($argument) ? $argument : 'pgsql';
+
+        // The one flag that changes what is inspected rather than how it is reported: the
+        // argument below is the connection of an installation, and a file being vetted is not
+        // an installation at all. Nothing after this point is reached in that mode.
+        $candidate = $this->option('config-file');
+
+        if (is_string($candidate) && $candidate !== '') {
+            return $this->vetConfigFile($candidate);
+        }
 
         [$manager, $resolutionError] = $this->weightedManager();
 
@@ -209,6 +262,32 @@ class DbDoctor extends Command
             $rows[] = $this->storeReachability($manager, $connection);
         }
 
+        return $this->conclude(
+            $rows,
+            ['connection' => $connection, 'default_connection' => $this->followedConnection()],
+            'Connection inspected: <comment>' . $connection . '</comment>, followed connection is <comment>'
+                . $this->followedConnection() . '</comment>',
+        );
+    }
+
+    /**
+     * The tally, the exit code and the two ways of printing them, from the rows a run produced.
+     *
+     * Shared by the installation run and the config-file vet because the rule a pipeline
+     * depends on has to be one rule: the code is `gateFailed()`'s — a failure, or any warning
+     * under `--strict` — and the object carries that same code, so a run cannot be read one way
+     * and acted on another. What differs between the two runs is the *subject*, and that is what
+     * the caller passes: the keys that name what was inspected (`connection`, or `config_file`)
+     * and the banner line above the table, which is the prose spelling of the same thing.
+     *
+     * The subject keys are the only ones that vary. Everything a gate selects on — `verdict`,
+     * `exit_code`, `counts`, `checks` — is present, in that order, in both shapes.
+     *
+     * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
+     * @param array<string, string> $subject
+     */
+    private function conclude(array $rows, array $subject, string $banner): int
+    {
         $counts = $this->counts($rows);
         $strict = (bool) $this->option('strict');
 
@@ -217,12 +296,285 @@ class DbDoctor extends Command
             : self::SUCCESS;
 
         if ($this->option('json')) {
-            return $this->report($rows, $connection, $strict, $counts, $exitCode);
+            return $this->report($rows, $subject, $strict, $counts, $exitCode);
         }
 
-        $this->render($rows, $connection, $counts);
+        $this->render($rows, $banner, $counts, $this->vetting());
 
         return $exitCode;
+    }
+
+    /**
+     * Whether this run is judging a file rather than an installation, which decides the closing
+     * sentence and nothing else — the rows, the tally and the code are the same either way.
+     */
+    private function vetting(): bool
+    {
+        $candidate = $this->option('config-file');
+
+        return is_string($candidate) && $candidate !== '';
+    }
+
+    /**
+     * A config file judged on its own: the switches and the reader settings it would be refused
+     * for, read out of the file and nothing else.
+     *
+     * This is the whole of `--config-file`, and it is deliberately not a second doctor. The rows
+     * above — the provider swap, the factory, the gate, the files, the supervisor step, the store
+     * — are questions about a *running installation*, and every one of them would be answered
+     * about the installation the command happens to be running in rather than the file being
+     * considered. That is the confusion the mode exists to avoid: a pipeline vetting the config on
+     * a branch has the old configuration installed, so a report that mixed the two would judge
+     * the candidate with the incumbent's values and call it a review.
+     *
+     * Three rows, and the last two are the two the package refuses values *in*, both read from
+     * the block alone:
+     *
+     *   - `config file` — the file itself: readable, an array, a `swrr` block, and nothing printed
+     *     while it was read;
+     *   - `switch values` — `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` and
+     *     `swrr.allow_local_fallback`;
+     *   - `reader windows` — `swrr.reader_windows` and `swrr.reader_days`.
+     *
+     * Both of the last two are the *same rule* the installation rows apply, not a copy of it:
+     * `Support\SwitchValue` and `Support\ReaderWindows`/`ReaderDays` own the reading, the sentences
+     * come from `switchProblems()` and `readerRefusals()`, and the flipper's own
+     * `switchReadingsIn()` classifies its two switches from a block rather than from `$this->config`
+     * — so a value this mode passes is a value the next boot will not refuse. No container binding, no
+     * repository, no boot audit, no database and no Redis are touched: the file is the subject and
+     * the only thing read.
+     *
+     * What it reports is the *refusals* — the values the package will not read — and not the
+     * "reads as on but can never act" warnings the installation rows also carry. Those need the
+     * resolver built over the value (a window whose start is not before its end, a day list with no
+     * day in 1…7): they are facts about a running installation's routing, and `db:doctor --strict`
+     * on a real deployment is where they fail a pipeline. The line is drawn there rather than at
+     * "everything a file can be asked" so that this mode stays honest about what it has not looked
+     * at.
+     */
+    private function vetConfigFile(string $path): int
+    {
+        $file = $this->readConfigFile($path);
+        $rows = [$file['row']];
+
+        if ($file['swrr'] !== null) {
+            $rows[] = $this->switchValuesIn($file['swrr']);
+            $rows[] = $this->readerWindowsIn($file['swrr']);
+        }
+
+        return $this->conclude(
+            $rows,
+            ['config_file' => $path],
+            'Config file vetted: <comment>' . $path . '</comment> — the values it would be refused for, read without the installation',
+        );
+    }
+
+    /**
+     * The file a vet run was pointed at: the row that reports it, and the `swrr` block to judge —
+     * null when there is nothing to judge, which is every way the file itself can be wrong.
+     *
+     * The file is `require`d in an isolated closure and its output is captured, so a config file
+     * that echoes or prints cannot corrupt the report it is being judged in: what it printed is
+     * reported as its own problem, because `config:cache` would write that output into the cached
+     * file too. A file that throws is a result rather than a stack trace, the same way every other
+     * check in this command treats a failure as a row.
+     *
+     * Every wrong shape names the mistake rather than only the symptom, including the one a
+     * reader of these docs is most likely to make: pointing at the `swrr` block itself instead of
+     * the file that returns it.
+     *
+     * @return array{
+     *     row: array{status: string, name: string, detail: string, suggestions: list<string>},
+     *     swrr: array<string, mixed>|null,
+     * }
+     */
+    private function readConfigFile(string $path): array
+    {
+        if (!is_file($path)) {
+            return [
+                'row' => $this->row('config file', self::FAIL, sprintf(
+                    '%s is not a file that can be read — name the candidate config/db-manager.php this host can open',
+                    $path,
+                )),
+                'swrr' => null,
+            ];
+        }
+
+        $printed = '';
+
+        try {
+            ob_start();
+            $loaded = (static fn (string $file): mixed => require $file)($path);
+            $printed = (string) ob_get_clean();
+        } catch (Throwable $e) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            return [
+                'row' => $this->row('config file', self::FAIL, sprintf('%s could not be read: %s', $path, $e->getMessage())),
+                'swrr' => null,
+            ];
+        }
+
+        if (!is_array($loaded)) {
+            return [
+                'row' => $this->row('config file', self::FAIL, sprintf(
+                    '%s returned %s, not an array — the vet reads the file the way config:cache does, as whatever it returns',
+                    $path,
+                    get_debug_type($loaded),
+                )),
+                'swrr' => null,
+            ];
+        }
+
+        if (!array_key_exists('swrr', $loaded)) {
+            $blockKeys = array_values(array_intersect(['pgcat', 'reader_windows', 'reader_days', 'allow_local_fallback'], array_keys($loaded)));
+
+            return [
+                'row' => $this->row('config file', self::FAIL, $blockKeys === []
+                    ? sprintf('%s returns an array without a "swrr" key, so there is nothing to judge', $path)
+                    : sprintf(
+                        '%s holds %s at the top level, not under a "swrr" key — name the config file that returns it (the array is read under "swrr"), not the block inside it',
+                        $path,
+                        implode(', ', $blockKeys),
+                    )),
+                'swrr' => null,
+            ];
+        }
+
+        $swrr = $loaded['swrr'];
+
+        if (!is_array($swrr)) {
+            return [
+                'row' => $this->row('config file', self::FAIL, sprintf(
+                    '%s holds "swrr" as %s, not a block of settings',
+                    $path,
+                    get_debug_type($swrr),
+                )),
+                'swrr' => null,
+            ];
+        }
+
+        $detail = sprintf('%s read as an array holding a "swrr" block — its switches and reader settings are judged below', $path);
+
+        if ($printed !== '') {
+            return [
+                'row' => $this->row('config file', self::WARN, sprintf(
+                    '%s also printed %d byte(s) while being read, which config:cache writes into the cached file — the report below is unaffected',
+                    $detail,
+                    strlen($printed),
+                )),
+                'swrr' => ConfigValue::assoc($swrr),
+            ];
+        }
+
+        return ['row' => $this->row('config file', self::PASS, $detail), 'swrr' => ConfigValue::assoc($swrr)];
+    }
+
+    /**
+     * The switches a `swrr` block holds, as the package would read them: what each resolves to,
+     * and which of them would be refused.
+     *
+     * The block is all it takes, which is the point — the flipper classifies its two from a block
+     * (`switchReadingsIn()`) and the provider's own switch reader takes the value, so the same
+     * three readings are available for a file that has never been installed.
+     *
+     * @param array<string, mixed> $swrr
+     * @return array{
+     *     on: array{enabled: bool, use_reload: bool, fallback: bool},
+     *     refused: array<string, string>,
+     * }
+     */
+    private static function switchesIn(array $swrr): array
+    {
+        $pgcat = PgcatConfigFlipper::switchReadingsIn(ConfigValue::assoc($swrr['pgcat'] ?? null));
+        $fallback = WeightedDatabaseServiceProvider::allowLocalFallback($swrr['allow_local_fallback'] ?? null);
+
+        $refused = $pgcat['refused'];
+
+        if ($fallback['refused'] !== null) {
+            $refused['swrr.allow_local_fallback'] = $fallback['refused'];
+        }
+
+        return [
+            'on' => [
+                'enabled' => $pgcat['on']['enabled'],
+                'use_reload' => $pgcat['on']['use_reload'],
+                'fallback' => $fallback['on'],
+            ],
+            'refused' => $refused,
+        ];
+    }
+
+    /**
+     * The three switches as one line: what each reads as, and that nothing is refused.
+     *
+     * One sentence for both modes, because "this switch reads as off" is the same fact about a
+     * value whether the value is installed or proposed — and a file that passes the vet and a boot
+     * that obeys the switch must not be able to say it differently.
+     *
+     * @param array{enabled: bool, use_reload: bool, fallback: bool} $on
+     */
+    private static function switchSentence(array $on): string
+    {
+        return implode(', ', [
+            'swrr.pgcat.enabled '.self::switchWord($on['enabled']),
+            'swrr.pgcat.use_reload '.self::switchWord($on['use_reload']),
+            'swrr.allow_local_fallback '.self::switchWord($on['fallback']),
+        ]).' — each reads as on or off, so nothing is refused';
+    }
+
+    /**
+     * `switch values` for a config file: the same problems as the installation row, from the
+     * file's block, with nothing to date them from.
+     *
+     * No boot record is consulted, and that is not an omission: a record holds findings written by
+     * boots of *this installation*, and the file has never been booted — dating a candidate value
+     * from the incumbent's history would be a claim about when the wrong value started, made about
+     * a value that has never been read.
+     *
+     * @param array<string, mixed> $swrr
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function switchValuesIn(array $swrr): array
+    {
+        $switches = self::switchesIn($swrr);
+
+        if ($switches['refused'] === []) {
+            return $this->row('switch values', self::PASS, self::switchSentence($switches['on']));
+        }
+
+        return $this->datedRow('switch values', self::switchProblems($switches['refused']), []);
+    }
+
+    /**
+     * `reader windows` for a config file: the two refusals, from the file's values.
+     *
+     * A pass says what it read, because "nothing refused" and "nothing configured" are different
+     * facts and only one of them means the fallback is deliberately off — the same distinction the
+     * installation row draws when it passes with the reason stated.
+     *
+     * @param array<string, mixed> $swrr
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function readerWindowsIn(array $swrr): array
+    {
+        $refusals = self::readerRefusals($swrr['reader_windows'] ?? null, $swrr['reader_days'] ?? null);
+
+        if ($refusals['problems'] !== []) {
+            return $this->datedRow('reader windows', $refusals['problems'], []);
+        }
+
+        $detail = $refusals['windows'] === []
+            ? 'no swrr.reader_windows set — the documented opt-out, so every read uses the replica pool'
+            : sprintf(
+                '%d window(s) and %d day(s) read as written — nothing is refused',
+                count($refusals['windows']),
+                count($refusals['days']),
+            );
+
+        return $this->row('reader windows', self::PASS, $detail);
     }
 
     /**
@@ -560,8 +912,11 @@ class DbDoctor extends Command
      *
      * The command is the flipper's own — `PgcatConfigFlipper::supervisorCommand()`, the
      * one swap() runs — so the row cannot describe a different command than the flip
-     * performs. The only process this row starts is derived from that command with
-     * `status` in the verb position: no restart, no signal, no stop.
+     * performs. The processes this row starts are both derived from that command with
+     * `status` in the verb position: no restart, no signal, no stop. The second one is
+     * conditional — a program supervisor does not know is the one fault whose repair is a
+     * *name*, so the row asks what supervisord is running and the sentence names the programs
+     * nearest the configured one, which is what the operator has to see to repair it.
      *
      * Moot while the flipper is inert, exactly like `pgcat files`: nothing swaps a file,
      * so nothing restarts supervisor either.
@@ -725,6 +1080,12 @@ class DbDoctor extends Command
      * `weight: 0` is the one difference the package means: it is how a replica is disabled, so the
      * row passes, and names the replica so that "2 replicas" is never mistaken for the read list.
      *
+     * Which replicas are missing and why comes from `poolExclusions()` — the resolver's own report
+     * of what it did not put in the pool — rather than from this row looking at the read list and
+     * working it out. The refused *values* are still classified here, because a refused core count
+     * or memory figure does not remove a replica and never appears in an exclusion list; what
+     * changed is that the consequence is read rather than predicted. See `docs/pool-exclusions.md`.
+     *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
     private function replicaMetadata(WeightedDatabaseManager $manager, string $connection): array
@@ -752,17 +1113,43 @@ class DbDoctor extends Command
         // the pool would report a smaller installation as the installation. This runs before the
         // "no metadata at all" warning, because metadata that is present and unreadable is a
         // different fault from metadata that is absent.
-        $problems = [];
-        $drops = false;
+        //
+        // The reading is `ReplicaMetadata`'s, which is also what the boot audit refuses on, so
+        // this row and the refusal logged at boot cannot call the same value by two different
+        // names — see docs/replica-metadata-refusal.md.
+        // What the pool does not hold, from the resolver: `replicaStatus()` above is the pool,
+        // `poolExclusions()` is everything missing from it, and the two partition the read list.
+        // So the clause below states what happened to a refused weight rather than predicting it —
+        // a replica the resolver dropped is one this row cannot mis-describe as still in play, and
+        // a replica it kept is one this row cannot blame for a pool that shrank.
+        $excluded = $manager->poolExclusions($connection);
 
-        foreach ($replicas as $replica) {
-            [$sentences, $leaves] = $this->metadataProblems($replica);
-            $drops = $drops || $leaves;
+        $dropped = [];
+        $disabled = [];
 
-            foreach ($sentences as $sentence) {
-                $problems[] = '['.$manager->replicaKey($replica).'] '.$sentence;
+        foreach ($excluded as $exclusion) {
+            if ($exclusion['reason'] === WeightResolver::EXCLUDED_DISABLED) {
+                $disabled[] = $exclusion['key'];
+
+                continue;
+            }
+
+            if ($exclusion['reason'] === WeightResolver::EXCLUDED_REFUSED) {
+                $dropped[] = $exclusion['key'];
             }
         }
+
+        $problems = [];
+
+        foreach ($replicas as $replica) {
+            $named = $manager->replicaKey($replica);
+
+            foreach (ReplicaMetadata::refusals($replica) as $refusal) {
+                $problems[] = '['.$named.'] '.$refusal['sentence'];
+            }
+        }
+
+        $drops = $dropped !== [];
 
         if ($problems !== []) {
             return $this->row(
@@ -804,21 +1191,21 @@ class DbDoctor extends Command
 
         // `weight: 0` is the documented way to disable a replica, so one that is missing from the
         // pool is a decision rather than a fault — but the pool is then smaller than the read
-        // list, and saying which replica left is the difference between a count an operator can
-        // trust and one that quietly shrank.
-        $disabled = $this->disabledReplicas($manager, $replicas);
-
+        // list, and naming the replica that left is the difference between a count an operator can
+        // trust and one that quietly shrank. The names are the resolver's, so this row cannot name
+        // a replica the pool actually holds.
         if ($disabled !== []) {
             return $this->row(
                 'replica metadata',
                 self::PASS,
                 sprintf(
-                    'the pool on [%s] holds %d of the %d configured replicas (total weight %d): %s disabled with weight 0',
+                    'the pool on [%s] holds %d of the %d configured replicas (total weight %d): %s — %s',
                     $connection,
                     count($rows),
                     count($replicas),
                     $total,
                     implode(', ', $disabled),
+                    ReplicaMetadata::DISABLED,
                 ),
             );
         }
@@ -828,148 +1215,6 @@ class DbDoctor extends Command
             self::PASS,
             sprintf('%d replicas on [%s], total weight %d', count($rows), $connection, $total),
         );
-    }
-
-    /**
-     * The metadata on one replica that the resolver does not read as written.
-     *
-     * The judgement is the resolver's own arithmetic rather than a second opinion about it.
-     * `WeightResolver::resolveWeight()` reads a weight through `max(0, ConfigValue::int(…))`,
-     * a core count through `max(1, ConfigValue::int(…, 1))` and memory through
-     * `max(0.0, ConfigValue::float(…))`, and `ConfigValue` falls back — to 0, or to 1 for cores —
-     * for anything that is not a number. So there are exactly two ways a value stops being the
-     * value routing uses:
-     *
-     *   1. it is not a number, so the fallback is read instead; or
-     *   2. it is a number under the floor its key is read at.
-     *
-     * `weight` is the key with a floor a value is *meant* to sit on: 0 disables the replica, which
-     * is the one difference between what was written and what is used that the package means. So
-     * for that key the second condition is stated as its opposite — a reading of 0 out of a value
-     * that is not 0 — and an explicit 0 is left to the row's count rather than reported here. A
-     * negative weight, a `weight: 0.5` the resolver truncates to 0, and a weight that is not a
-     * number all read as 0 and all leave the pool, which is why they are one condition.
-     *
-     * @param array<string, mixed> $replica
-     * @return array{0: list<string>, 1: bool} the sentences, and whether a replica leaves the pool
-     */
-    private function metadataProblems(array $replica): array
-    {
-        $problems = [];
-        $leaves = false;
-
-        if (array_key_exists('weight', $replica)) {
-            $written = $replica['weight'];
-            $read = max(0, ConfigValue::int($written));
-
-            if (!self::isNumeric($written) || ($read <= 0 && ConfigValue::float($written) !== 0.0)) {
-                $leaves = true;
-
-                $problems[] = sprintf(
-                    'weight is %s, which the resolver reads as %d',
-                    self::describeMetadata($written),
-                    $read,
-                );
-            }
-        }
-
-        // The floors here are the resolver's own: `max(1, …)` for cores, `max(0.0, …)` for memory.
-        // A core count below one is read as one core, so a replica declared with none is weighted
-        // like a one-core box; memory below zero is read as none at all.
-        if (array_key_exists('cpu_cores', $replica) && !self::aboveFloor($replica['cpu_cores'], 1.0)) {
-            $read = max(1, ConfigValue::int($replica['cpu_cores'], 1));
-
-            $problems[] = sprintf(
-                'cpu_cores is %s, which the resolver reads as %d core%s',
-                self::describeMetadata($replica['cpu_cores']),
-                $read,
-                $read === 1 ? '' : 's',
-            );
-        }
-
-        if (array_key_exists('ram_gb', $replica) && !self::aboveFloor($replica['ram_gb'], 0.0)) {
-            $problems[] = sprintf(
-                'ram_gb is %s, which the resolver reads as %s GB',
-                self::describeMetadata($replica['ram_gb']),
-                max(0.0, ConfigValue::float($replica['ram_gb'])),
-            );
-        }
-
-        return [$problems, $leaves];
-    }
-
-    /**
-     * A metadata value as the row reads it: the number it is, or the shape it is instead.
-     *
-     * `ReaderWindows::describe()` is the package's describer for a value a setting will not read —
-     * strings quoted, arrays counted, anything else named by its type — and it is right for every
-     * non-number here. A number is printed as itself, because "weight is int" says nothing about
-     * *which* int, and the numbers this row reports are the ones the resolver changed. A bool is a
-     * number to `ConfigValue`, so it is printed as the number it is read as rather than as "bool".
-     */
-    private static function describeMetadata(mixed $value): string
-    {
-        if (!self::isNumeric($value)) {
-            return ReaderWindows::describe($value);
-        }
-
-        $number = ConfigValue::float($value);
-
-        return $number === floor($number) ? (string) (int) $number : (string) $number;
-    }
-
-    /**
-     * Whether `ConfigValue` reads a number out of a value rather than falling back.
-     *
-     * The accepted set is `ConfigValue`'s own — an int, a float, a bool, or the string form of a
-     * number — because the question this asks is "does the resolver substitute something for this
-     * value", and a value `ConfigValue` reads is one it does not substitute for. A bool is
-     * therefore readable: `weight: true` is read as 1 and `weight: false` as the documented 0, and
-     * neither is a value anything was substituted for.
-     */
-    private static function isNumeric(mixed $value): bool
-    {
-        return is_int($value) || is_float($value) || is_bool($value)
-            || (is_string($value) && is_numeric($value));
-    }
-
-    /**
-     * Whether a value is a number at or above the floor its key is read at — the same question as
-     * isNumeric(), plus the clamp the resolver applies on top of the read.
-     */
-    private static function aboveFloor(mixed $value, float $floor): bool
-    {
-        return self::isNumeric($value) && ConfigValue::float($value) >= $floor;
-    }
-
-    /**
-     * The replicas the read list disables on purpose: `weight: 0`, read as written.
-     *
-     * One value only, because it is the one the package documents as meaning something other than
-     * a size — so a replica absent from the pool because of it is named rather than failed on. A
-     * weight that is negative, unreadable, or a fraction the read truncates to 0 is not this, and
-     * reaches the row as a value the resolver could not read.
-     *
-     * @param list<array<string, mixed>> $replicas
-     * @return list<string>
-     */
-    private function disabledReplicas(WeightedDatabaseManager $manager, array $replicas): array
-    {
-        $disabled = [];
-
-        foreach ($replicas as $replica) {
-            if (!array_key_exists('weight', $replica)) {
-                continue;
-            }
-
-            if (max(0, ConfigValue::int($replica['weight'])) !== 0 || ConfigValue::float($replica['weight']) !== 0.0) {
-                continue;
-            }
-
-            $disabled[] = $manager->replicaKey($replica);
-        }
-
-        return $disabled;
     }
 
     /**
@@ -1022,7 +1267,38 @@ class DbDoctor extends Command
             $refused['swrr.allow_local_fallback'] = $fallback['refused'];
         }
 
-        /** @var list<array{status: string, key: string|null, sentence: string, suggestion: string|null}> $problems */
+        $problems = self::switchProblems($refused);
+
+        if ($problems === []) {
+            return $this->row('switch values', self::PASS, self::switchSentence([
+                'enabled' => $status['configured_enabled'],
+                'use_reload' => $status['use_reload'],
+                'fallback' => $fallback['on'],
+            ]));
+        }
+
+        return $this->datedRow('switch values', $problems, $recorded);
+    }
+
+    /**
+     * The problems a set of refused switches makes: one per setting, in the order the table
+     * lists them, each in the sentence the boot audit and this command share.
+     *
+     * Extracted from the row so the *file* vet can make the same claim about the same rule
+     * without duplicating it. Which settings there are, what each is called and what a refusal
+     * leaves behind is one table (`SWITCH_KEYS`, `SWITCH_CONSEQUENCES`); a value refused on the
+     * way to a deploy and a value refused at boot are the same value, and would otherwise be
+     * two descriptions of one refusal with nothing checking that they agree.
+     *
+     * Nothing here dates a problem or assembles a row: the installation row has a boot record
+     * to date findings from and the file vet does not, so that difference stays where it is —
+     * in the caller that has a record.
+     *
+     * @param array<string, string> $refused setting => the value as written
+     * @return list<array{status: string, key: string|null, sentence: string, suggestion: string|null}>
+     */
+    private static function switchProblems(array $refused): array
+    {
         $problems = [];
 
         foreach (self::SWITCH_KEYS as $setting => $key) {
@@ -1042,15 +1318,119 @@ class DbDoctor extends Command
             ];
         }
 
-        if ($problems === []) {
-            return $this->row('switch values', self::PASS, implode(', ', [
-                'swrr.pgcat.enabled '.self::switchWord($status['configured_enabled']),
-                'swrr.pgcat.use_reload '.self::switchWord($status['use_reload']),
-                'swrr.allow_local_fallback '.self::switchWord($fallback['on']),
-            ]).' — each reads as on or off, so nothing is refused');
+        return $problems;
+    }
+
+    /**
+     * A reader setting the package will not read at all, and what is left of the other one.
+     *
+     * The two refusals `reader windows` reports, extracted so the config-file vet can report the
+     * same two about a file — same sentences, same shapes, same suggestions — while the row goes
+     * on to the resolver's warnings about values that *can* be read. That split is the whole
+     * reason this is a method: a refusal is a fact about the value alone (`ReaderWindows` and
+     * `ReaderDays` decide it and know nothing else), while "read, but can never act" needs the
+     * resolver built over the value — and a vet that must not touch the running package has the
+     * first and not the second.
+     *
+     * The usable windows and days come back with the problems because the caller that reports
+     * one setting's refusal has to say what the refusal leaves behind, and both sentences are
+     * written from both lists: a refused window list beside usable days still applies on those
+     * days, and a refused day list beside no windows cannot put a read anywhere.
+     *
+     * `days_refused` is false for a day list that was never configured: the `[1, 2, 3, 4, 5]`
+     * default is the package's own, and only a value somebody wrote can be their mistake.
+     *
+     * @param mixed $configuredWindows the raw `swrr.reader_windows` value
+     * @param mixed $configuredDays the raw `swrr.reader_days` value, null when it is not set
+     * @return array{
+     *     problems: list<array{status: string, key: string|null, sentence: string, suggestion: string|null}>,
+     *     windows: list<array{start?: string, end?: string}>,
+     *     days: list<int>,
+     *     windows_refused: bool,
+     *     days_refused: bool,
+     * }
+     */
+    private static function readerRefusals(mixed $configuredWindows, mixed $configuredDays): array
+    {
+        $split = ReaderWindows::split($configuredWindows);
+        $splitDays = ReaderDays::split($configuredDays ?? [1, 2, 3, 4, 5]);
+
+        $windows = $split['usable'];
+        $days = $splitDays['usable'];
+
+        $windowsRefused = $split['shape'] !== null || $split['rejected'] !== [];
+        $daysRefused = $configuredDays !== null && ($splitDays['shape'] !== null || $splitDays['rejected'] !== []);
+
+        /** @var list<array{status: string, key: string|null, sentence: string, suggestion: string|null}> $problems */
+        $problems = [];
+
+        // A value the package will not read as windows. Refusing it is the point: the flat
+        // string '10:00-14:20' is how a person naturally writes a window, so interpreting it
+        // (or dropping it) turns a typo into the opposite behaviour without a word. This one is
+        // a failure rather than a warning — the value is rejected, not merely unable to act —
+        // and it names the entry and the shape the setting reads.
+        if ($windowsRefused) {
+            $offending = $split['shape'] !== null
+                ? 'swrr.reader_windows is '.$split['shape'].', not a list of windows'
+                : ReaderWindows::describeRejected($split['rejected']);
+
+            $consequence = $windows === []
+                ? 'nothing is left to apply, so reads use the replica pool at every hour'
+                : sprintf('%d well-formed window(s) still apply', count($windows));
+
+            $suggestion = ReaderWindows::suggestion($configuredWindows);
+
+            $problems[] = [
+                'status' => self::FAIL,
+                'key' => WeightedDatabaseServiceProvider::KEY_READER_WINDOWS_REFUSED,
+                'sentence' => $offending.' — '.ReaderWindows::ACCEPTED.'. Refused: '.$consequence.'.',
+                // The repair, when the refused value re-spells into one. The sentence above
+                // already names what is wrong; this is the half an operator can paste.
+                'suggestion' => $suggestion === null ? null : 'swrr.reader_windows = '.$suggestion,
+            ];
         }
 
-        return $this->datedRow('switch values', $problems, $recorded);
+        // The days setting, one key over and the same rule. A list written as a string is the
+        // `.env` spelling of a list and the one thing this setting cannot read, and dropping it
+        // silently is worse than refusing it: the resolver is permissive with no day left, so a
+        // restrictive day list reads as its opposite. Only a configured value is refused — the
+        // `[1, 2, 3, 4, 5]` default is the package's own.
+        if ($daysRefused) {
+            $offending = $splitDays['shape'] !== null
+                ? 'swrr.reader_days is '.$splitDays['shape'].', not a list of days'
+                : ReaderDays::describeRejected($splitDays['rejected']);
+
+            // The same order the audit applies, because the two share a setting: nothing
+            // usable left is the permissive case whatever the windows say, then the days that
+            // survive, then the two ways there is no window to go with them — refused (named
+            // above, in this row) or never configured.
+            $consequence = match (true) {
+                $days === [] => 'nothing is left to apply, so reads use the replica pool on every day',
+                $windows !== [] => sprintf('%d well-formed day(s) still apply', count($days)),
+                $windowsRefused => 'no window can be used either — see the reader_windows problem above — so neither list can put a read on the replica pool',
+                default => 'no reader_windows are configured, so the fallback is off whatever the day list says',
+            };
+
+            $suggestion = ReaderDays::suggestion($configuredDays);
+
+            $problems[] = [
+                'status' => self::FAIL,
+                'key' => WeightedDatabaseServiceProvider::KEY_READER_DAYS_REFUSED,
+                'sentence' => $offending.' — '.ReaderDays::ACCEPTED.'. Refused: '.$consequence.'.',
+                // `'1,2,3'` is the one spelling that reduces to an exact replacement; an entry
+                // that is not a day number and not a list of them gets no line, because the
+                // package does not guess at what a name meant.
+                'suggestion' => $suggestion === null ? null : 'swrr.reader_days = '.$suggestion,
+            ];
+        }
+
+        return [
+            'problems' => $problems,
+            'windows' => $windows,
+            'days' => $days,
+            'windows_refused' => $windowsRefused,
+            'days_refused' => $daysRefused,
+        ];
     }
 
     /**
@@ -1118,78 +1498,17 @@ class DbDoctor extends Command
         $configured = $swrr['reader_windows'] ?? null;
         $configuredDays = $swrr['reader_days'] ?? null;
 
-        $split = ReaderWindows::split($configured);
-        $splitDays = ReaderDays::split($configuredDays ?? [1, 2, 3, 4, 5]);
+        $refusals = self::readerRefusals($configured, $configuredDays);
         $recorded = $this->recordedFindings();
 
-        $windows = $split['usable'];
-        $days = $splitDays['usable'];
-
-        $windowsRefused = $split['shape'] !== null || $split['rejected'] !== [];
-        $daysRefused = $configuredDays !== null && ($splitDays['shape'] !== null || $splitDays['rejected'] !== []);
-
         /** @var list<array{status: string, key: string|null, sentence: string, suggestion: string|null}> $problems */
-        $problems = [];
+        $problems = $refusals['problems'];
 
-        // A value the package will not read as windows. Refusing it is the point: the flat
-        // string '10:00-14:20' is how a person naturally writes a window, so interpreting it
-        // (or dropping it) turns a typo into the opposite behaviour without a word. This one is
-        // a failure rather than a warning — the value is rejected, not merely unable to act —
-        // and it names the entry and the shape the setting reads.
-        if ($windowsRefused) {
-            $offending = $split['shape'] !== null
-                ? 'swrr.reader_windows is '.$split['shape'].', not a list of windows'
-                : ReaderWindows::describeRejected($split['rejected']);
+        $windows = $refusals['windows'];
+        $days = $refusals['days'];
 
-            $consequence = $windows === []
-                ? 'nothing is left to apply, so reads use the replica pool at every hour'
-                : sprintf('%d well-formed window(s) still apply', count($windows));
-
-            $suggestion = ReaderWindows::suggestion($configured);
-
-            $problems[] = [
-                'status' => self::FAIL,
-                'key' => WeightedDatabaseServiceProvider::KEY_READER_WINDOWS_REFUSED,
-                'sentence' => $offending.' — '.ReaderWindows::ACCEPTED.'. Refused: '.$consequence.'.',
-                // The repair, when the refused value re-spells into one. The sentence above
-                // already names what is wrong; this is the half an operator can paste.
-                'suggestion' => $suggestion === null ? null : 'swrr.reader_windows = '.$suggestion,
-            ];
-        }
-
-        // The days setting, one key over and the same rule. A list written as a string is the
-        // `.env` spelling of a list and the one thing this setting cannot read, and dropping it
-        // silently is worse than refusing it: the resolver is permissive with no day left, so a
-        // restrictive day list reads as its opposite. Only a configured value is refused — the
-        // `[1, 2, 3, 4, 5]` default is the package's own.
-        if ($daysRefused) {
-            $offending = $splitDays['shape'] !== null
-                ? 'swrr.reader_days is '.$splitDays['shape'].', not a list of days'
-                : ReaderDays::describeRejected($splitDays['rejected']);
-
-            // The same order the audit applies, because the two share a setting: nothing
-            // usable left is the permissive case whatever the windows say, then the days that
-            // survive, then the two ways there is no window to go with them — refused (named
-            // above, in this row) or never configured.
-            $consequence = match (true) {
-                $days === [] => 'nothing is left to apply, so reads use the replica pool on every day',
-                $windows !== [] => sprintf('%d well-formed day(s) still apply', count($days)),
-                $windowsRefused => 'no window can be used either — see the reader_windows problem above — so neither list can put a read on the replica pool',
-                default => 'no reader_windows are configured, so the fallback is off whatever the day list says',
-            };
-
-            $suggestion = ReaderDays::suggestion($configuredDays);
-
-            $problems[] = [
-                'status' => self::FAIL,
-                'key' => WeightedDatabaseServiceProvider::KEY_READER_DAYS_REFUSED,
-                'sentence' => $offending.' — '.ReaderDays::ACCEPTED.'. Refused: '.$consequence.'.',
-                // `'1,2,3'` is the one spelling that reduces to an exact replacement; an entry
-                // that is not a day number and not a list of them gets no line, because the
-                // package does not guess at what a name meant.
-                'suggestion' => $suggestion === null ? null : 'swrr.reader_days = '.$suggestion,
-            ];
-        }
+        $windowsRefused = $refusals['windows_refused'];
+        $daysRefused = $refusals['days_refused'];
 
         try {
             $resolver = $this->laravel->make(TimeWindowResolver::class);
@@ -1586,22 +1905,28 @@ class DbDoctor extends Command
      * number a deploy step branches on, in the same artefact as the rows that explain it, so a
      * run cannot be read one way and acted on another.
      *
+     * The one exception is the pair of keys that name the *subject*, and it is the exception
+     * rather than a loose end: an installation run names a `connection` and the
+     * `default_connection` it followed, while a config-file run names the `config_file` it
+     * read. Both spellings sit in the same slot, second in the object, in front of `strict` and
+     * everything a gate selects on — see `conclude()`, which is where the two runs meet.
+     *
      * `checks` is the rows themselves — the same names, the same verdicts and the same
      * suggestions the table prints, including the repairs a row can name — and each key is
      * renamed only where the table's word is the wrong one for a machine: a row's `status` is
      * published as `verdict`, which is what the table calls it and what decides the run.
      *
      * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
+     * @param array<string, string> $subject the keys naming what was inspected
      * @param array{checks: int, passed: int, warnings: int, failed: int} $counts
      */
-    private function report(array $rows, string $connection, bool $strict, array $counts, int $exitCode): int
+    private function report(array $rows, array $subject, bool $strict, array $counts, int $exitCode): int
     {
         $this->output->writeln(
             (string) json_encode(
                 [
                     'command' => 'db:doctor',
-                    'connection' => $connection,
-                    'default_connection' => $this->followedConnection(),
+                    ...$subject,
                     'strict' => $strict,
                     'verdict' => $this->runVerdict($rows),
                     'exit_code' => $exitCode,
@@ -1738,15 +2063,21 @@ class DbDoctor extends Command
     }
 
     /**
+     * The run as a table: a banner naming what was inspected, a line per row with its repairs
+     * beneath it, the tally, and one closing sentence.
+     *
+     * The rows, the tally and the exit rule are the installation's and the config file's alike —
+     * the closing sentence is not. "Installation looks healthy" is a claim about a boot, and a run
+     * that read one file has not seen a boot; the two spellings are close enough that a reader
+     * skimming two reports could take the wrong one for the other, so the subject is named in
+     * them rather than implied by the banner above.
+     *
      * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
      * @param array{checks: int, passed: int, warnings: int, failed: int} $counts
      */
-    private function render(array $rows, string $connection, array $counts): void
+    private function render(array $rows, string $banner, array $counts, bool $vetting): void
     {
-        $this->line(
-            'Connection inspected: <comment>' . $connection . '</comment>, followed connection is <comment>'
-            . $this->followedConnection() . '</comment>',
-        );
+        $this->line($banner);
         $this->newLine();
 
         foreach ($rows as $row) {
@@ -1789,19 +2120,26 @@ class DbDoctor extends Command
         ));
 
         if ($counts['failed'] === 0 && $counts['warnings'] === 0) {
-            $this->line('<fg=green>Installation looks healthy.</>');
+            $this->line($vetting
+                ? '<fg=green>Nothing in this file would be refused.</>'
+                : '<fg=green>Installation looks healthy.</>');
         } elseif ($counts['failed'] === 0) {
             // A warning became a failure on purpose, so the run is not the thing that
             // broke — and the rows above, all PASS and WARN, cannot say that on their own.
+            // The sentence names the subject, because "this run" is the only thing the two
+            // modes have in common: the gate is the same gate, the thing behind it is not.
             $this->line($this->gateFailed($counts['failed'], $counts['warnings'])
                 ? sprintf(
-                    '<fg=yellow>No failures — but </><fg=red>--strict counts the %d warning%s above as failures: this run exits 1 as a release gate, not because the installation is broken.</>',
+                    '<fg=yellow>No failures — but </><fg=red>--strict counts the %d warning%s above as failures: this run exits 1 as a release gate, not because %s.</>',
                     $counts['warnings'],
                     $counts['warnings'] === 1 ? '' : 's',
+                    $vetting ? 'the file is unusable' : 'the installation is broken',
                 )
                 : '<fg=yellow>No failures — review the warnings above.</>');
         } else {
-            $this->line('<fg=red>This installation will not behave as configured.</>');
+            $this->line($vetting
+                ? '<fg=red>A value in this file would be refused: a boot of it runs on the defaults, and logs the refusals above.</>'
+                : '<fg=red>This installation will not behave as configured.</>');
         }
     }
 }

@@ -20,9 +20,11 @@ use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
 use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
 use Uak35\WeightedDbManager\Tests\Support\Readme;
+use Uak35\WeightedDbManager\Tests\Support\NumberWords;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
 /**
@@ -641,10 +643,9 @@ class DbDoctorTest extends TestCase
         // would have succeeded and the flip would still report a failure.
         $paths = $this->armPgcat();
         $binary = $paths['supervisorctl'];
-        $supervisor = $this->bindSupervisor(new FakeSupervisor(
-            exit: 2,
-            stdout: '',
-            stderr: 'pgcat:*: ERROR (no such group)',
+        $supervisor = $this->bindSupervisor($this->supervisorThatRuns(
+            'pgcat:*: ERROR (no such group)',
+            "pgcat:pgcat_00   RUNNING   pid 4242, uptime 0:12:34\n",
         ));
 
         [$output, $exit] = $this->doctor();
@@ -655,8 +656,38 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('ERROR (no such group)', $row);
         $this->assertStringContainsString('a group called pgcat is addressed as "pgcat:*"', $row);
         $this->assertStringContainsString('a flip refuses before it swaps the file', $row);
+
+        // The name is the repair, so the row asks the one authority on it: the same binary
+        // without a program, which lists what supervisord is running.
+        $this->assertSame([$binary . ' status "pgcat:*"', $binary . ' status'], $supervisor->ran);
+        $this->assertStringContainsString('says supervisord runs 1 program(s): pgcat:pgcat_00', $row);
+        $this->assertStringContainsString('the closest is "pgcat:pgcat_00", which is the name to write', $row);
         $this->assertSame(1, $exit);
-        $this->assertSame([$binary . ' status "pgcat:*"'], $supervisor->ran);
+    }
+
+    /**
+     * The row names the running program it thinks the configuration meant — and still prints no
+     * repair line for it, which is the difference between the two columns. A sentence can carry
+     * a ranked answer ("the closest is …"), and a suggestion is a value to paste: one that a
+     * gate may apply without reading. `pgcat_x:pgcat_00` is the nearest *name*, not a statement
+     * that this flip belongs to that pool.
+     */
+    public function test_the_supervisor_row_names_the_running_program_without_printing_a_repair_line(): void
+    {
+        $paths = $this->armPgcat();
+        $binary = $paths['supervisorctl'];
+        $this->bindSupervisor($this->supervisorThatRuns(
+            'pgcat:*: ERROR (no such group)',
+            "pgcat_x:pgcat_01   RUNNING   pid 2\npgcat_x:pgcat_00   RUNNING   pid 1\n",
+        ));
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat supervisor');
+
+        $this->assertStringContainsString('the closest are "pgcat_x:pgcat_00", "pgcat_x:pgcat_01"', $row);
+        $this->assertStringContainsString('or the whole group "pgcat_x:*"', $row);
+        $this->assertSame([], $this->suggestions($output), 'a near miss is a name to consider, not a value to apply');
+        $this->assertSame(1, $exit);
     }
 
     /**
@@ -1027,7 +1058,11 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringStartsWith('PASS  replica metadata', $row);
         $this->assertStringContainsString('holds 1 of the 2 configured replicas (total weight 10)', $row);
-        $this->assertStringContainsString('10.1.0.2:5432 disabled with weight 0', $row);
+        // The name comes from the resolver's own exclusion report, and the sentence from the
+        // classifier — so the row says which replica left and what the value meant, and neither is
+        // this row's opinion of the read list.
+        $this->assertStringContainsString('10.1.0.2:5432', $row);
+        $this->assertStringContainsString(ReplicaMetadata::DISABLED, $row);
     }
 
     public function test_the_reader_windows_row_fails_a_flat_string_and_names_the_entry(): void
@@ -1870,6 +1905,119 @@ class DbDoctorTest extends TestCase
     }
 
     /**
+     * The rows the README documents are the rows the command builds — by name, not by count.
+     *
+     * Three numbers in the records describe this list and nothing compared them with it: the
+     * README's "Eleven things can be wrong", `docs/documented-exit-codes.md`'s "the eleven-row
+     * description of what each check judges", and `docs/db-doctor-json.md`'s "eleven ... and six
+     * where it does not". The exit tables already have a guard for this class of drift one level
+     * up; this is the same guard for the row list, and the comparison is by name because a count
+     * can be right while the list is wrong — and it is the names a reader selects on.
+     *
+     * The unweighted half is the same claim from the other side: the six rows that do not need a
+     * weighted manager are what an installation with a broken swap produces, and the record counts
+     * them separately for exactly that reason.
+     */
+    public function test_the_readme_check_table_is_the_rows_the_command_builds(): void
+    {
+        $documented = $this->documentedChecks();
+
+        $this->assertNotSame([], $documented, 'the README table has to be readable for this to assert anything');
+
+        [$json] = $this->doctorJson();
+
+        $this->assertSame(
+            $documented,
+            array_column($this->report($json)['checks'], 'name'),
+            'the README documents the rows the command builds, in the order it builds them',
+        );
+
+        $this->assertSame(
+            count($documented),
+            $this->numberClaim('README.md', '/(\w+) things can be wrong/'),
+            'the README counts the rows its own table lists',
+        );
+
+        $this->assertSame(
+            count($documented),
+            $this->numberClaim('docs/db-doctor-json.md', '/That is (\w+) on an installation where `db` resolves/'),
+            'db-doctor-json.md counts the weighted run the README documents',
+        );
+
+        $unweighted = $this->unweightedChecks();
+
+        $this->assertSame(
+            count($unweighted),
+            $this->numberClaim('docs/db-doctor-json.md', '/and \*\*(\w+)\*\* where it does not/'),
+            'db-doctor-json.md counts the rows a run without the weighted manager asks',
+        );
+
+        $this->assertSame(
+            count($unweighted),
+            $this->numberClaim('README.md', '/(\w+) configuration rows/'),
+            'the README counts the rows a run asks without the weighted manager too',
+        );
+
+        $this->assertSame(
+            [],
+            array_values(array_diff($unweighted, $documented)),
+            'the rows a run asks without the weighted manager are a subset of the documented list',
+        );
+    }
+
+    /**
+     * The record's claim about which rows can carry a repair, checked against runs that produce one.
+     *
+     * `docs/db-doctor-json.md` states "three rows can offer one" and names the classes each line
+     * comes from. Three states produce one each — a refused reader window, an unquoted supervisor
+     * command, and the switch armed where pgcat cannot act — and the union of the rows carrying a
+     * non-empty `suggestions` across them is the set that sentence is about. The states accumulate,
+     * so a row that stops offering one is still counted from the step that produced it. The limit is
+     * the fixtures rather than the code: a row that could offer a line under some state none of
+     * these three reaches would not be counted, which `docs/prose-numbers.md` records.
+     */
+    public function test_the_record_says_which_rows_can_carry_a_repair(): void
+    {
+        $carrying = [];
+
+        // A refused reader window: the one spelling the package can repair without guessing.
+        $this->useReaderFallback(['10:00-14:20'], [1, 2, 3, 4, 5]);
+        $carrying += $this->rowsCarryingARepair();
+        $this->assertArrayHasKey('reader windows', $carrying);
+
+        // An unquoted program name: the flip's own command, re-quoted.
+        $paths = $this->armPgcat();
+        config()->set('db-manager.swrr.pgcat.reload_command', $paths['supervisorctl'].' signal HUP pgcat:*');
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+        $this->bindSupervisor();
+        $carrying += $this->rowsCarryingARepair();
+        $this->assertArrayHasKey('pgcat supervisor', $carrying);
+
+        // The switch armed where pgcat cannot act: the one pgcat value a gate may apply.
+        config()->set('database.connections.mysql_app', ['driver' => 'mysql', 'database' => 'app']);
+        config()->set('database.default', 'mysql_app');
+        config()->set('db-manager.swrr.pgcat', ['enabled' => true]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+        $carrying += $this->rowsCarryingARepair();
+        $this->assertArrayHasKey('pgcat gate', $carrying);
+
+        $rows = array_keys($carrying);
+        sort($rows);
+
+        $this->assertSame(
+            ['pgcat gate', 'pgcat supervisor', 'reader windows'],
+            $rows,
+            'the rows that carry a repair are the ones the record says can, and no others: ' . implode(', ', $rows),
+        );
+
+        $this->assertSame(
+            count($carrying),
+            $this->numberClaim('docs/db-doctor-json.md', '/(\w+) rows can offer one/'),
+            'the record counts the rows that can carry a suggestion line',
+        );
+    }
+
+    /**
      * The repairs travel in the object, on the row that names the problem they repair.
      *
      * A suggestion is the half of a row a gate can act on — the setting line to paste — and it is
@@ -2361,6 +2509,290 @@ class DbDoctorTest extends TestCase
         return [$buffer->fetch(), $exit];
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // --config-file: a config vetted before it is installed
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The whole point of the mode: the refusals the package would raise are readable from the
+     * file, in the same sentences and with the same repairs the installation row prints — so a
+     * pipeline can fail a candidate config before anything is deployed with it.
+     */
+    public function test_the_config_file_flag_reports_the_refusals_a_candidate_config_holds(): void
+    {
+        $path = $this->configFile([
+            'pgcat' => ['enabled' => 'flase'],
+            'allow_local_fallback' => 'nope',
+            'reader_windows' => '10:00-14:20',
+            'reader_days' => '1,2,3',
+        ]);
+
+        [$output, $exit] = $this->vetConfig($path);
+
+        $this->assertStringContainsString('Config file vetted: ' . $path, $output);
+        $this->assertStringStartsWith('PASS  config file', $this->rowContaining($output, 'config file'));
+
+        $switches = $this->rowContaining($output, 'switch values');
+        $this->assertStringStartsWith('FAIL  switch values', $switches);
+        $this->assertStringContainsString('swrr.pgcat.enabled is "flase"', $switches);
+        $this->assertStringContainsString('swrr.allow_local_fallback is "nope"', $switches);
+        $this->assertStringContainsString('the flipper is inert', $switches, 'the consequence of the refused value travels with the refusal');
+
+        $windows = $this->rowContaining($output, 'reader windows');
+        $this->assertStringStartsWith('FAIL  reader windows', $windows);
+        $this->assertStringContainsString('swrr.reader_windows is "10:00-14:20", not a list of windows', $windows);
+        $this->assertStringContainsString('swrr.reader_days is "1,2,3", not a list of days', $windows);
+
+        // The repairs the installation row names, from the same classes — a refused value that
+        // reduces to an exact replacement is re-spelled here too, or the pipeline would have to
+        // know which refusals have one.
+        $this->assertStringContainsString('swrr.reader_windows = ', $output);
+        $this->assertStringContainsString('swrr.reader_days = ', $output);
+
+        $this->assertStringContainsString('A value in this file would be refused', $output);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The claim that makes this a preflight rather than a second opinion: the file is the subject.
+     * Here the *installed* configuration refuses two switches while the candidate is clean, and the
+     * vet passes it — the same run judged as an installation fails.
+     */
+    public function test_the_config_file_flag_judges_the_file_rather_than_the_installation(): void
+    {
+        $redis = $this->bindRedis(reachable: true);
+
+        config()->set('db-manager.swrr.pgcat', [
+            'enabled' => 'off (in the installed config)',
+            'use_reload' => 'maybe',
+        ]);
+
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+        $this->bindSupervisor();
+
+        $path = $this->configFile([
+            'pgcat' => ['enabled' => false, 'use_reload' => true],
+            'allow_local_fallback' => 'on',
+            'reader_windows' => [['start' => '10:00:00', 'end' => '14:20:00']],
+        ]);
+
+        [$vetted, $vtExit] = $this->vetConfig($path);
+
+        $this->assertStringStartsWith('PASS  switch values', $this->rowContaining($vetted, 'switch values'));
+        $this->assertStringContainsString('swrr.pgcat.enabled off', $vetted);
+        $this->assertStringNotContainsString('in the installed config', $vetted, 'the installed value is not the file');
+        $this->assertSame(0, $vtExit);
+
+        // And no part of the installation was consulted: the vet reads a file, so the store is
+        // never reached for, and no provider or factory row is invented for a file that has none.
+        $this->assertSame([], $redis->asked, 'a config file is not a store to probe');
+        $this->assertStringNotContainsString('store reachability', $vetted);
+        $this->assertStringNotContainsString('provider swap', $vetted);
+
+        // The same installation, judged as an installation, refuses the two switches it holds —
+        // which is what the vet above would have reported had it read the running configuration.
+        [$installed, $installedExit] = $this->doctor();
+        $this->assertStringStartsWith('FAIL  switch values', $this->rowContaining($installed, 'switch values'));
+        $this->assertSame(1, $installedExit);
+    }
+
+    public function test_the_config_file_flag_passes_a_config_whose_values_are_all_readable(): void
+    {
+        $path = $this->configFile([
+            'pgcat' => ['enabled' => 'on', 'use_reload' => 'off'],
+            'allow_local_fallback' => 1,
+            'reader_windows' => [
+                ['start' => '10:00:00', 'end' => '14:20:00'],
+                ['start' => '17:00:00', 'end' => '20:30:00'],
+            ],
+            'reader_days' => [1, 2, 3, 4, 5],
+        ]);
+
+        [$output, $exit] = $this->vetConfig($path);
+
+        $this->assertStringStartsWith('PASS  switch values', $this->rowContaining($output, 'switch values'));
+        $this->assertStringContainsString('swrr.pgcat.use_reload off', $output);
+
+        $windows = $this->rowContaining($output, 'reader windows');
+        $this->assertStringStartsWith('PASS  reader windows', $windows);
+        $this->assertStringContainsString('2 window(s) and 5 day(s) read as written', $windows);
+
+        $this->assertStringContainsString('Nothing in this file would be refused.', $output);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The opt-out and the refusal are told apart on the same row: no windows at all is how the
+     * fallback is turned off on purpose, and saying "nothing refused" without saying which of the
+     * two states that is would leave a reader unable to tell them apart.
+     */
+    public function test_the_config_file_flag_tells_a_deliberate_opt_out_from_a_refusal(): void
+    {
+        $path = $this->configFile(['pgcat' => ['enabled' => false]]);
+
+        [$output, $exit] = $this->vetConfig($path);
+
+        $windows = $this->rowContaining($output, 'reader windows');
+
+        $this->assertStringStartsWith('PASS  reader windows', $windows);
+        $this->assertStringContainsString('no swrr.reader_windows set — the documented opt-out', $windows);
+        $this->assertSame(0, $exit, 'a config that asks for no fallback is not a config with a mistake');
+    }
+
+    /**
+     * A day list that is not written is not a mistake — the `[1, 2, 3, 4, 5]` default is the
+     * package's own — so only a refused window is reported when that is all the file got wrong.
+     */
+    public function test_the_config_file_flag_refuses_only_what_the_file_wrote(): void
+    {
+        $path = $this->configFile(['reader_windows' => ['10:00-14:20']]);
+
+        [$output, $exit] = $this->vetConfig($path);
+        $row = $this->rowContaining($output, 'reader windows');
+
+        $this->assertStringStartsWith('FAIL  reader windows', $row);
+        $this->assertStringContainsString('reader_windows[0] is "10:00-14:20"', $row);
+        $this->assertStringNotContainsString('reader_days', $row, 'the default day list is not the file\'s value to be wrong about');
+        $this->assertSame(1, $exit);
+    }
+
+    public function test_the_config_file_flag_fails_a_path_it_cannot_read(): void
+    {
+        $missing = $this->tempDir() . '/not-there.php';
+
+        [$output, $exit] = $this->vetConfig($missing);
+        $row = $this->rowContaining($output, 'config file');
+
+        $this->assertStringStartsWith('FAIL  config file', $row);
+        $this->assertStringContainsString($missing . ' is not a file that can be read', $row);
+        $this->assertSame(1, $exit);
+
+        // Nothing was judged, so nothing claims to have been: the two rows that need a `swrr`
+        // block are absent rather than passing on an empty one.
+        $this->assertStringNotContainsString('switch values', $output);
+        $this->assertStringNotContainsString('reader windows', $output);
+    }
+
+    public function test_the_config_file_flag_fails_a_file_that_is_not_a_config(): void
+    {
+        [$output, $exit] = $this->vetConfig($this->rawConfigFile("<?php\n\nreturn 'swrr';\n"));
+
+        $this->assertStringContainsString('returned string, not an array', $output);
+        $this->assertStringContainsString('the vet reads the file the way config:cache does', $output);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The mistake this mode has to name for itself: the docs publish the `swrr` block, so the
+     * most likely wrong path is the block rather than the file that returns it — and a refusal
+     * that only said "no `swrr` key" would send the reader looking for the wrong problem.
+     */
+    public function test_the_config_file_flag_names_the_swrr_block_passed_as_the_file(): void
+    {
+        $path = $this->configFile([
+            'pgcat' => ['enabled' => 'flase'],
+            'reader_windows' => ['10:00-14:20'],
+        ], wrap: false);
+
+        [$output, $exit] = $this->vetConfig($path);
+
+        $this->assertStringContainsString('holds pgcat, reader_windows at the top level, not under a "swrr" key', $output);
+        $this->assertStringContainsString('not the block inside it', $output);
+        $this->assertSame(1, $exit);
+    }
+
+    public function test_the_config_file_flag_reports_a_file_that_printed_and_still_judges_it(): void
+    {
+        $path = $this->rawConfigFile("<?php\n\necho 'debug';" . "\n\nreturn ['swrr' => [" . "'pgcat' => ['enabled' => false], " . "'reader_windows' => [['start' => '10:00:00', 'end' => '14:20:00']]]];\n");
+
+        [$output, $exit] = $this->vetConfig($path);
+        $row = $this->rowContaining($output, 'config file');
+
+        // A warning, not a failure: the file is usable and the output it produced is a fact about
+        // it — `config:cache` would write those bytes into the cached file.
+        $this->assertStringStartsWith('WARN  config file', $row);
+        $this->assertStringContainsString('printed 5 byte(s) while being read', $row);
+        $this->assertSame(0, $exit);
+
+        // ...and the bytes are the report's own problem, not the report: the rows below are
+        // judged, and the output starts with the banner rather than with 'debug'.
+        $this->assertStringStartsWith('Config file vetted:', $output);
+        $this->assertStringStartsWith('PASS  switch values', $this->rowContaining($output, 'switch values'));
+        $this->assertStringStartsWith('PASS  reader windows', $this->rowContaining($output, 'reader windows'));
+
+        // `--strict` is what a pipeline would pass, and it turns that warning into a failure.
+        [, $strictExit] = $this->vetConfig($path, strict: true);
+        $this->assertSame(1, $strictExit);
+    }
+
+    /**
+     * The object is the same envelope with the subject named: `config_file` where an installation
+     * run carries `connection` and `default_connection`, and every key a gate selects on unchanged.
+     */
+    public function test_the_config_file_flag_reports_through_the_json_envelope(): void
+    {
+        $path = $this->configFile(['pgcat' => ['enabled' => 'flase']]);
+
+        [$output, $exit] = $this->vetConfig($path, json: true);
+        $report = json_decode($output, true);
+
+        $this->assertIsArray($report, "The object did not parse:\n" . $output);
+        $this->assertSame(['command', 'config_file', 'strict', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame($path, $report['config_file']);
+        $this->assertSame('FAIL', $report['verdict']);
+        $this->assertSame(1, $report['exit_code']);
+        $this->assertSame(1, $exit);
+        $this->assertSame(['checks' => 3, 'passed' => 2, 'warnings' => 0, 'failed' => 1], $report['counts']);
+        $this->assertSame(['config file', 'switch values', 'reader windows'], array_column($report['checks'], 'name'));
+        $this->assertStringStartsWith('swrr.pgcat.enabled is "flase"', $report['checks'][1]['detail']);
+    }
+
+    /**
+     * A config file for the vet: the shape a published `config/db-manager.php` returns, written
+     * out with `var_export` so the values are PHP literals rather than a second parser's idea of
+     * them.
+     *
+     * @param array<string, mixed> $swrr
+     */
+    private function configFile(array $swrr, bool $wrap = true): string
+    {
+        $body = $wrap ? ['swrr' => $swrr] : $swrr;
+
+        return $this->rawConfigFile("<?php\n\nreturn " . var_export($body, true) . ";\n");
+    }
+
+    /**
+     * Any file, verbatim — for the ways a file can be wrong before its values are read at all.
+     */
+    private function rawConfigFile(string $body): string
+    {
+        $path = $this->tempDir() . '/db-manager.php';
+
+        file_put_contents($path, $body);
+
+        return $path;
+    }
+
+    /**
+     * The command in config-file mode, reported the way the two `doctor()` helpers report it —
+     * read from a real buffer, because the rows carry colour tags and the point is what an
+     * operator or a pipeline would see.
+     *
+     * @return array{0: string, 1: int}
+     */
+    private function vetConfig(string $path, bool $strict = false, bool $json = false): array
+    {
+        $buffer = new BufferedOutput();
+
+        $exit = $this->app->make(Kernel::class)->call(
+            'db:doctor',
+            ['connection' => self::CONNECTION, '--config-file' => $path, '--strict' => $strict, '--json' => $json],
+            $buffer,
+        );
+
+        return [$buffer->fetch(), $exit];
+    }
+
     /**
      * The same run, reported as data rather than rendered. Only the flag differs from `doctor()`
      * above, which is what makes one call in each style comparable: `--json` is a report, not a
@@ -2449,6 +2881,80 @@ class DbDoctorTest extends TestCase
             'findings' => $entries,
             'store_probed_at' => null,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * The README's `db:doctor` table: the rows an operator reads about the preflight.
+     *
+     * @return list<string>
+     */
+    private function documentedChecks(): array
+    {
+        return array_map(
+            [Readme::class, 'plain'],
+            array_column(Readme::table('### Preflight: `db:doctor`', 'Row'), 'Row'),
+        );
+    }
+
+    /**
+     * The rows a run builds when `db` is not the weighted manager: the six that do not ask it.
+     *
+     * @return list<string>
+     */
+    private function unweightedChecks(): array
+    {
+        // Something else has replaced `db` and `db.factory` — the state where reads are
+        // unweighted — so only the rows that do not need the manager are built.
+        $this->app->instance('db.factory', new ConnectionFactory($this->app));
+        $this->app->instance('db', new DatabaseManager($this->app, $this->app->make('db.factory')));
+        DB::clearResolvedInstance('db');
+
+        [$json] = $this->doctorJson();
+
+        return array_column($this->report($json)['checks'], 'name');
+    }
+
+    /**
+     * The rows of this run whose `suggestions` list is not empty, keyed by the row's name.
+     *
+     * @return array<string, true>
+     */
+    private function rowsCarryingARepair(): array
+    {
+        [$json] = $this->doctorJson();
+
+        $carrying = [];
+
+        foreach ($this->report($json)['checks'] as $check) {
+            if ($check['suggestions'] !== []) {
+                $carrying[$check['name']] = true;
+            }
+        }
+
+        return $carrying;
+    }
+
+    /**
+     * The number a record states as a word, read out of the record.
+     *
+     * A claim's *presence* is asserted first: a sentence that has been reworded away would
+     * otherwise compare nothing with nothing and pass, which is how a guard becomes a decoration.
+     * The spellings and the words live in `NumberWords`, so both halves of the guard accept the
+     * same ones — and the renderer writes the same words back.
+     */
+    private function numberClaim(string $record, string $pattern): int
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3).'/'.$record);
+
+        $this->assertGreaterThanOrEqual(
+            1,
+            preg_match_all($pattern, $source),
+            "{$record} no longer states the claim this guard is pinned to ({$pattern})",
+        );
+
+        preg_match($pattern, $source, $match);
+
+        return NumberWords::toInt($match[1]);
     }
 
     /**
@@ -2586,6 +3092,21 @@ class DbDoctorTest extends TestCase
         $this->app->instance(SupervisorStep::class, new SupervisorStep($supervisor->runner()));
 
         return $supervisor;
+    }
+
+    /**
+     * A fake that answers the two questions an unknown program produces: supervisor does not
+     * know the program, and then — asked what it is running at all — answers `running`.
+     *
+     * The distinction is the bare command, which is the derived `status` with nothing after it.
+     */
+    private function supervisorThatRuns(string $unknown, string $running): FakeSupervisor
+    {
+        return new FakeSupervisor(answers: static function (string $command) use ($unknown, $running): array {
+            return str_ends_with($command, ' status')
+                ? [0, $running, '']
+                : [2, '', $unknown];
+        });
     }
 
     private function removeTree(string $dir): void

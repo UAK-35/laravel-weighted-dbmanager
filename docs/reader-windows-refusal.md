@@ -155,7 +155,7 @@ pipeline that does.
 
 ## The chosen mechanism, in full
 
-### One classifier, two callers
+### One classifier, three callers
 
 `Support\ReaderWindows::split()` is the only place that decides what a window is. It
 returns three fields:
@@ -169,6 +169,15 @@ returns three fields:
 The provider builds the resolver from `usable` and reports from `rejected` /
 `shape`; `db:doctor` reports from the same three fields. Neither re-derives what a
 window is, so a log line and a row cannot disagree with the resolver.
+
+The third caller is `db:doctor --config-file=path`, which judges a candidate
+`config/db-manager.php` before it is deployed: it classifies the file's `reader_windows` and
+`reader_days` through the same `split()` calls, reports the same refusals with the same
+sentences and the same printed replacements, and builds no resolver at all. A value refused
+on a branch and a value refused at boot are therefore the same answer from the same code —
+which is the property that lets the mode skip the installation and still be worth gating on.
+The refusals are the part of this mechanism that is a fact about the *value*; what a usable
+window set can never do is a fact about routing, and stays with the installation's row.
 
 ### What is refused is shape, not content
 
@@ -265,6 +274,10 @@ rather than about routing, so both of them are reported whatever the resolver wo
 | both settings refused in the same run                  | one `FAIL` row naming both, with a `suggestion` line per repair |
 | unset or empty — the documented opt-out                | `PASS`   |
 | a fallback that can apply                              | `PASS`   |
+
+The two `FAIL` shapes are also the two rows `db:doctor --config-file=path` prints for a file
+that has never been installed — same sentences, same suggestions, no age clause and no
+resolver, because there is no boot record for a candidate and no routing to describe.
 
 `--strict` fails on the warnings, so a release gate rejects every state in which the
 setting cannot do what it says — not only the refused one.
@@ -476,7 +489,13 @@ fallback, exactly as with windows.
   the days half of this record would reduce to the array cases.
 - **If a deploy-time schema check existed elsewhere.** If configuration were validated
   by something that fails the pipeline before the image is built, the boot could stay
-  quiet and candidate G would be enough. The package has no such hook of its own.
+  quiet and candidate G would be enough. The package now has half such a hook —
+  `db:doctor --config-file=path` fails a pipeline over a candidate `config/db-manager.php`,
+  and it reports exactly these refusals — but half is the honest word: it judges the file it
+  is handed, on the machine that runs it, and a boot is the only thing that sees the
+  *environment* a value will finally be read in (`env()` in the file is resolved at boot, and
+  a value can come from a `.env` no pipeline has). So the boot finding stays, and the vet is
+  an earlier place to hear about the same mistake rather than a replacement for it.
 - **If the audit were allowed to stop a boot.** Then F would be on the table, and the
   refusal could be an exception. That would contradict the property the audit is built
   around — a diagnostic never takes the process down — and it would have to be decided

@@ -218,6 +218,15 @@ On a pass the row still says something, because "no refusals" is worth reading: 
 the value of each switch. It reads the two pgcat switches through the flipper, so a row
 that cannot build the flipper fails rather than reporting a pass it could not establish.
 
+The same three switches are what `db:doctor --config-file=path` reports for a *candidate*
+`config/db-manager.php` — the file a deploy is about to install, judged before anything is
+installed. The reading is the same one (`SwitchValue`, through the flipper's
+`switchReadingsIn()` and the provider's `allowLocalFallback()`), so a file this mode passes
+is a file no boot will refuse; the differences are deliberate and two: there is no finding
+to date a problem from, because no boot has read the file, and the "reads as on but cannot
+act" half of these switches — the gate on a connection pgcat cannot front — is not judged,
+because that is a fact about the installation's driver rather than about the value.
+
 ---
 
 ## What this changed besides the refusal
@@ -272,7 +281,7 @@ asserting.
 | `DbDoctorTest::test_the_switch_values_row_names_every_switch_it_refuses`  | one row, every problem, one check                           |
 | `DbDoctorTest::test_the_switch_values_row_dates_each_refusal_from_its_own_finding` | one date per setting, from its own key             |
 | `DbDoctorTest::test_the_switch_values_row_does_not_date_a_switch_it_is_not_reporting` | a date is never a claim about another setting       |
-| `DbDoctorTest::test_the_switch_values_row_prints_no_repair`               | a guess is not a suggestion                                 |
+| `DbDoctorTest::test_the_switch_values_row_fails_a_value_that_is_not_on_or_off` | the typo, and that no suggestion is printed for it — a guess is not a suggestion |
 | `DbDoctorTest::test_the_switch_values_row_reports_nothing_when_the_flipper_cannot_be_built` | the row fails rather than inventing a pass     |
 
 ---
@@ -281,11 +290,19 @@ asserting.
 
 - **Only three settings are covered.** They are the three switches the package has; a
   fourth would have to be added to `WeightedDatabaseServiceProvider::SWITCHES`,
-  `DbDoctor::SWITCH_KEYS` and `SWITCH_CONSEQUENCES`, and the row would gain a sentence. The
-  two tables restate the same three relationships, and nothing checks that they agree — a
-  switch added to one and not the other would be a setting with a finding and no row, or a
-  row with a key that is never written. `DbDoctorTest` would catch the second case only if
-  a test happened to refuse that switch.
+  `DbDoctor::SWITCH_KEYS` and `SWITCH_CONSEQUENCES`, and the row would gain a sentence — and
+  then the config-file vet, which reports the same three from the same two tables, would
+  report it too. The two tables restate the same three relationships, and they are compared
+  rather than trusted: `ProseNumbersTest::test_the_three_switch_tables_list_the_same_settings`
+  asserts that the provider's `SWITCHES`, the row's `SWITCH_KEYS` and its `SWITCH_CONSEQUENCES`
+  name the same settings, so a switch added to one and not the other fails there instead of
+  becoming a setting with a finding and no row, or a row with a key that is never written.
+  Before that guard existed, `DbDoctorTest` would have caught the second case only if a test
+  happened to refuse that switch. Not covered by either, and worth
+  stating where the four switches are counted: `swrr.health.pinned_query` is read by
+  `SwitchValue` too, and its refusal is surfaced in the `/health/db` payload as
+  `pinned.refused` — but it has no finding key and no row, so a config-file vet that reported
+  it would be reporting a refusal the boot and the doctor do not.
 - **A switch nested deeper is not discovered.** The three are named by hand, not found by
   walking the config block, so a switch inside another block is invisible until someone
   adds it.
@@ -329,7 +346,7 @@ asserting.
 | `src/Support/SwitchValue.php`                                  | the classifier, `ACCEPTED`, `describeRefused()`            |
 | `src/Pgcat/PgcatConfigFlipper.php`                             | reads its two switches once, `refusedSwitches()`, the documented defaults |
 | `src/Providers/WeightedDatabaseServiceProvider.php`            | the three finding keys, `SWITCHES`, `allowLocalFallback()`, `switchFindings()` |
-| `src/Console/Commands/DbDoctor.php`                            | the `switch values` row, `SWITCH_KEYS`, `SWITCH_CONSEQUENCES`, `datedRow()` |
+| `src/Console/Commands/DbDoctor.php`                            | the `switch values` row, `SWITCH_KEYS`, `SWITCH_CONSEQUENCES`, `datedRow()`, and the `--config-file` vet that reports the same three for a file |
 | `config/db-manager.php`                                        | the switches handed over as written, and the documented defaults beside them |
 | `tests/Unit/Support/SwitchValueTest.php`                       | the classifier's contract                                  |
 | `tests/Unit/Pgcat/PgcatConfigFlipperTest.php`                  | the flipper's half                                         |
