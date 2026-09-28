@@ -4,6 +4,26 @@
 
 ### Fixed
 
+- **`db:doctor`'s `replica metadata` row names a drained replica in every branch now, rather than
+  only in the one that passes.** The row reports two kinds of thing and they are not the same kind: a
+  *value* the resolver cannot read, which is what fails a deploy, and a *replica* the pool does not
+  hold, which is what an operator acts on. The disable — `weight: 0`, the documented way to take a
+  replica out — was named only where nothing else was wrong, because the row's other two branches
+  return before the pool is described at all: a weight the resolver could not read returned a
+  sentence about the value while the replica somebody had switched off went unmentioned until the
+  deploy *after* that repair, and a pool in which every replica is disabled printed `every replica on
+  [pgsql] resolves to weight 0 — reads cannot be routed` without saying which replicas they were.
+  Both branches now carry the same clause, spelled once: `Also drained on purpose: 10.1.0.2:5432 —
+  weight is 0, which is how the read list takes a replica out of the pool.` The rule underneath all
+  three branches is asserted as a property rather than case by case —
+  `DbDoctorTest::test_the_metadata_row_names_every_replica_the_pool_does_not_hold` runs five read
+  lists, asks the resolver which replicas its pool does not hold, and requires the row to name every
+  one of them whatever it left over and whatever verdict the row reached — and two cases pin the
+  wording: `test_the_metadata_row_names_a_drained_replica_beside_the_value_it_cannot_read` and
+  `test_the_metadata_row_names_every_replica_when_every_one_is_drained`. Removing the clause from the
+  refusal branch fails four tests and from the empty-pool branch two, so neither branch can go back
+  to reporting a value while the replica that is not answering reads goes unnamed.
+
 - **The boot audit's record is now safe under genuinely concurrent boots rather than merely loud
   about them.** The record is one file shared by every boot of an installation, and a boot writes it
   from the copy it read near its start — with the store probe in between, which is a network call, so

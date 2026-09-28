@@ -1079,6 +1079,11 @@ class DbDoctor extends Command
      *
      * `weight: 0` is the one difference the package means: it is how a replica is disabled, so the
      * row passes, and names the replica so that "2 replicas" is never mistaken for the read list.
+     * It names it in every branch rather than only the passing one, because the other two are about
+     * *values*: a refusal returns before the pool is described at all, so a drain beside one is a
+     * replica that is invisible until the run after the refusal is repaired, and a pool in which
+     * every replica is disabled used to be reported as a fact about the pool rather than as the
+     * list of replicas somebody switched off.
      *
      * Which replicas are missing and why comes from `poolExclusions()` — the resolver's own report
      * of what it did not put in the pool — rather than from this row looking at the read list and
@@ -1151,17 +1156,26 @@ class DbDoctor extends Command
 
         $drops = $dropped !== [];
 
+        // Every replica the resolver left out of the pool on purpose, in the classifier's words,
+        // named wherever this row has a verdict to give rather than only where the pool is healthy.
+        // A drain is not a value the resolver refused: it is a replica that is not answering reads,
+        // and the branches below are about values — so a refusal used to hide a drain until the run
+        // after the refusal was repaired, and a pool with nothing left in it named nobody at all.
+        // One spelling of the clause, because three branches state it.
+        $drained = $disabled === [] ? '' : implode(', ', $disabled).' — '.ReplicaMetadata::DISABLED;
+
         if ($problems !== []) {
             return $this->row(
                 'replica metadata',
                 self::FAIL,
                 sprintf(
-                    'replica metadata the resolver cannot read on [%s]: %s — %s',
+                    'replica metadata the resolver cannot read on [%s]: %s — %s.%s',
                     $connection,
                     implode('; ', $problems),
                     $drops
                         ? 'a replica weighted 0 leaves the pool, so reads are routed over a smaller pool than the read list describes and nothing else reports that it happened'
                         : 'the replica stays in the pool, weighted as something other than what the read list describes',
+                    $drained === '' ? '' : ' Also drained on purpose: '.$drained.'.',
                 ),
             );
         }
@@ -1181,11 +1195,19 @@ class DbDoctor extends Command
 
         $total = (int) array_sum(array_column($rows, 'weight'));
 
+        // Nothing left in the pool, and nothing the resolver refused — every exclusion that got
+        // here is a disable, because a refused weight is reported above. The sentence named no
+        // replica, and "every replica is drained" is a fact an operator cannot act on without
+        // knowing which replicas they switched off.
         if ($total <= 0) {
             return $this->row(
                 'replica metadata',
                 self::FAIL,
-                "every replica on [{$connection}] resolves to weight 0 — reads cannot be routed",
+                sprintf(
+                    'every replica on [%s] resolves to weight 0 — reads cannot be routed%s',
+                    $connection,
+                    $drained === '' ? '' : ': '.$drained,
+                ),
             );
         }
 
@@ -1199,13 +1221,12 @@ class DbDoctor extends Command
                 'replica metadata',
                 self::PASS,
                 sprintf(
-                    'the pool on [%s] holds %d of the %d configured replicas (total weight %d): %s — %s',
+                    'the pool on [%s] holds %d of the %d configured replicas (total weight %d): %s',
                     $connection,
                     count($rows),
                     count($replicas),
                     $total,
-                    implode(', ', $disabled),
-                    ReplicaMetadata::DISABLED,
+                    $drained,
                 ),
             );
         }

@@ -207,13 +207,34 @@ PASS  replica metadata    the pool on [pgsql] holds 1 of the 2 configured replic
 `2 replicas on [pgsql]` on an installation with three is the same quiet shrink through the front
 door, whichever mechanism produced it.
 
+That name is not the passing branch's alone. The row's other two branches are about *values*, and
+one of them returns before the pool is described at all, so a drain was named only when nothing else
+was wrong: a weight that cannot be read hid a replica somebody had switched off until the deploy
+after the repair, and a pool whose every replica is `weight: 0` was reported as a fact about the
+pool. Both carry the same clause now, from one spelling of it:
+
+```
+replica metadata the resolver cannot read on [pgsql]: [10.1.0.3:5432] weight is "heavy", which the
+resolver reads as 0 — a replica weighted 0 leaves the pool, so reads are routed over a smaller pool
+than the read list describes and nothing else reports that it happened. Also drained on purpose:
+10.1.0.2:5432 — weight is 0, which is how the read list takes a replica out of the pool.
+
+every replica on [pgsql] resolves to weight 0 — reads cannot be routed: 10.1.0.1:5432, 10.1.0.2:5432
+— weight is 0, which is how the read list takes a replica out of the pool
+```
+
+The rule under all three branches is one sentence, and it is asserted as one: every replica the pool
+does not hold is named in the row.
+
 ### The symptom stops being blamed for the cause
 
 With every replica's weight unreadable, the row used to print `every replica on [pgsql] resolves to
 weight 0 — reads cannot be routed`. True, and useless: "every replica is deliberately drained" and
 "every replica's weight is a typo" are the same picture without the values, and the values are the
 repair. The unreadable case is now reported before that sentence can be reached, and a test asserts
-both halves — the value is named, the symptom is not.
+both halves — the value is named, the symptom is not. The sentence is still reachable, and rightly
+so, when the replicas really were switched off on purpose — and there it names them, because a
+disable is not a value an operator repairs but a replica they chose to take out.
 
 ### Naming a replica the pool has dropped
 
@@ -276,6 +297,9 @@ three.
 | an unreadable value is blamed, not the weight it reads as | `test_the_metadata_row_blames_the_unreadable_value_rather_than_the_weight_it_reads` |
 | every replica and every value is named | `test_the_metadata_row_names_every_replica_and_every_value_it_cannot_read` |
 | `weight: 0` passes and is named, with the read list as its denominator | `test_the_metadata_row_names_a_disabled_replica_without_failing` |
+| a drain is named beside a value the resolver cannot read | `test_the_metadata_row_names_a_drained_replica_beside_the_value_it_cannot_read` |
+| a pool whose every replica is drained names them | `test_the_metadata_row_names_every_replica_when_every_one_is_drained` |
+| every replica the pool does not hold is named, whatever it left over | `test_the_metadata_row_names_every_replica_the_pool_does_not_hold` (five read lists) |
 | no metadata at all is still the row's warning | `test_it_warns_when_the_replicas_carry_no_weight_metadata` |
 | the reading itself, and the identity: which values are readable, which are the documented disable, what each refusal says, and how a replica is keyed | `ReplicaMetadataTest` (nine cases) |
 | the floors are one boundary, not two: the resolver is driven to each constant and asked at `floor - 1` and at `floor`, and the classifier is asked the same values | `WeightResolverTest::test_the_floors_the_classifier_reads_at_are_the_floors_the_resolver_clamps_at` |
@@ -294,7 +318,9 @@ naming of a documented disable (one failure, the disabled case), reporting only 
 floor clause goes (two failures — the negative weight and the truncation), reporting no unreadable
 metadata at all (seven failures; the disabled case survives, which is the point of it being a
 separate branch), and blaming a smaller pool in every case rather than only when a weight was read
-as 0 (one failure, the memory case, whose sentence says the replica stays).
+as 0 (one failure, the memory case, whose sentence says the replica stays). Reverting the drained
+clause out of the refusal branch fails four tests, and out of the empty-pool branch two, so neither
+branch can go back to reporting a value while the replica that is not answering reads goes unnamed.
 
 The two halves have since been checked against each other, which is the property this decision is
 now built on: dropping the boot's call into the findings list fails five boot tests, and making

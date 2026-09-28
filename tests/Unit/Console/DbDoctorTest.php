@@ -16,6 +16,7 @@ use Uak35\WeightedDbManager\Database\Weighted\AtomicStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\RedisAtomicStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
+use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
@@ -1063,6 +1064,123 @@ class DbDoctorTest extends TestCase
         // this row's opinion of the read list.
         $this->assertStringContainsString('10.1.0.2:5432', $row);
         $this->assertStringContainsString(ReplicaMetadata::DISABLED, $row);
+    }
+
+    /**
+     * The other half of naming a drain: a replica switched off on purpose is named even when the
+     * row has a refusal to report, because a refusal is about *values* and the row returns there.
+     * Fixing the typo this run is about used to be the only repair an operator could read, and the
+     * pool was still one short afterwards — a drained replica hidden behind a refusal, which is the
+     * same quiet shrink the count-with-a-denominator branch was written for, one branch over.
+     */
+    public function test_the_metadata_row_names_a_drained_replica_beside_the_value_it_cannot_read(): void
+    {
+        config()->set('database.connections.'.self::CONNECTION.'.read', [
+            ['host' => '10.1.0.1', 'weight' => 10],
+            ['host' => '10.1.0.2', 'weight' => 0],
+            ['host' => '10.1.0.3', 'weight' => 'heavy'],
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'replica metadata');
+
+        $this->assertStringStartsWith('FAIL  replica metadata', $row);
+        $this->assertStringContainsString('[10.1.0.3:5432] weight is "heavy", which the resolver reads as 0', $row);
+        $this->assertStringContainsString('Also drained on purpose: 10.1.0.2:5432', $row);
+        $this->assertStringContainsString(ReplicaMetadata::DISABLED, $row);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * And when every replica is switched off, the sentence that says reads cannot be routed names
+     * them. "Every replica on [pgsql] resolves to weight 0" without a list leaves the operator to
+     * work out which replicas they drained — and this row is the only place that knows what the
+     * pool did not take. The unreadable half of that sentence is reported before it can be reached,
+     * so what is named here is a pool somebody switched off on purpose.
+     */
+    public function test_the_metadata_row_names_every_replica_when_every_one_is_drained(): void
+    {
+        config()->set('database.connections.'.self::CONNECTION.'.read', [
+            ['host' => '10.1.0.1', 'weight' => 0],
+            ['host' => '10.1.0.2', 'weight' => 0],
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'replica metadata');
+
+        $this->assertStringStartsWith('FAIL  replica metadata', $row);
+        $this->assertStringContainsString('every replica on ['.self::CONNECTION.'] resolves to weight 0', $row);
+        $this->assertStringContainsString('10.1.0.1:5432', $row);
+        $this->assertStringContainsString('10.1.0.2:5432', $row);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The rule under all of it, over the read lists that drain a replica rather than one case at a
+     * time: **every replica the pool does not hold is named in the row**, whatever it left over and
+     * whatever verdict the row reaches for it. That is the claim the naming exists for — a drained
+     * replica that is only a smaller total is the shrink this row was written to catch — and it is
+     * asserted against the resolver's own exclusion list rather than re-derived here, so a reason
+     * this row has not been taught about fails rather than passing quietly.
+     *
+     * @param list<array<string, mixed>> $read
+     */
+    #[DataProvider('readListsThatDrain')]
+    public function test_the_metadata_row_names_every_replica_the_pool_does_not_hold(array $read): void
+    {
+        config()->set('database.connections.'.self::CONNECTION.'.read', $read);
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'replica metadata');
+
+        $manager = DB::getFacadeRoot();
+        $this->assertInstanceOf(WeightedDatabaseManager::class, $manager);
+
+        $excluded = $manager->poolExclusions(self::CONNECTION);
+
+        $this->assertNotSame(
+            [],
+            $excluded,
+            'this read list is meant to drain something, so a row that names nothing would not be tested by it',
+        );
+
+        foreach ($excluded as $exclusion) {
+            $this->assertStringContainsString(
+                $exclusion['key'],
+                $row,
+                "the row does not name {$exclusion['key']}, which the pool does not hold ({$exclusion['reason']})",
+            );
+        }
+    }
+
+    /**
+     * @return array<string, array{0: list<array<string, mixed>>}>
+     */
+    public static function readListsThatDrain(): array
+    {
+        return [
+            'a drain in an otherwise healthy pool' => [[
+                ['host' => '10.1.0.1', 'weight' => 10],
+                ['host' => '10.1.0.2', 'weight' => 0],
+            ]],
+            'a drain beside a weight that cannot be read' => [[
+                ['host' => '10.1.0.1', 'weight' => 10],
+                ['host' => '10.1.0.2', 'weight' => 0],
+                ['host' => '10.1.0.3', 'weight' => 'heavy'],
+            ]],
+            'a drain beside a weight that truncates to 0' => [[
+                ['host' => '10.1.0.1', 'weight' => 0],
+                ['host' => '10.1.0.2', 'weight' => 0.5],
+            ]],
+            'a drain beside a core count that cannot be read' => [[
+                ['host' => '10.1.0.1', 'weight' => 0],
+                ['host' => '10.1.0.2', 'cpu_cores' => 'eight'],
+            ]],
+            'every replica drained on purpose' => [[
+                ['host' => '10.1.0.1', 'weight' => 0],
+                ['host' => '10.1.0.2', 'weight' => 0],
+            ]],
+        ];
     }
 
     public function test_the_reader_windows_row_fails_a_flat_string_and_names_the_entry(): void

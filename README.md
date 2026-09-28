@@ -1319,7 +1319,12 @@ because the resolver substitutes rather than drops it (`cpu_cores` becomes one c
 `ram_gb` none). The nearest case the rule has to get exactly right is `weight: 0` itself,
 which *is* the documented disable: that replica is meant to be absent, so the row passes —
 and names it, because a pool reported as "1 replica, total weight 10" on an installation
-with two is the same quiet shrink through the front door. The rule is the resolver's own
+with two is the same quiet shrink through the front door. That name is in every branch and
+not only the passing one, because the other two are about *values*: a refusal returns
+before the pool is described at all, so a `weight: 0` beside one used to be a replica
+nothing said was gone until the deploy after the repair, and a pool in which every replica
+is disabled is reported as the replicas somebody switched off rather than as a fact about
+the pool. The rule is the resolver's own
 arithmetic rather than a restatement of it — its floors included, since the row reads them
 from the same three constants the resolver clamps at, so a boundary that moved fails a test
 rather than a routing decision — which is what makes a negative weight, a `weight: 0.5`
