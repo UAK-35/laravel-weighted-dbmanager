@@ -7,6 +7,7 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Console;
 use Illuminate\Support\Facades\Artisan;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand;
+use Uak35\WeightedDbManager\Console\JsonEnvelope;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Tests\Support\Readme;
 use Uak35\WeightedDbManager\Pgcat\DryRunResult;
@@ -88,6 +89,10 @@ final class DbFlipPgcatCommandTest extends TestCase
                 'preset' => 'locked', 'options' => [], 'exit' => 0,
                 'kind' => 'skipped', 'line' => 'skipped (mode=readers): another flipper instance holds the lock', 'target' => $untouched, 'recorded' => false,
             ],
+            'the boot window had closed before the flip converged, so it stopped trying' => [
+                'preset' => 'expired', 'options' => [], 'exit' => 0,
+                'kind' => FlipResult::KIND_WINDOW_CLOSED, 'line' => 'window closed (mode=readers): the flip window closed', 'target' => $untouched, 'recorded' => false,
+            ],
             'the supervisor command cannot work, so the flip fails' => [
                 'preset' => 'unknown-program', 'options' => [], 'exit' => 1,
                 'kind' => 'failed', 'line' => 'a flip refuses before it swaps the file', 'target' => $untouched, 'recorded' => false,
@@ -168,7 +173,7 @@ final class DbFlipPgcatCommandTest extends TestCase
         bool $recorded,
     ): void {
         $installation = $this->installation($preset);
-        $recordBefore = $installation->stateContents();
+        $recordBefore = $this->recordedMode($installation);
 
         $actual = Artisan::call('db:pgcat-flip', $options);
         $output = Artisan::output();
@@ -183,7 +188,17 @@ final class DbFlipPgcatCommandTest extends TestCase
         if ($recorded) {
             $this->assertTrue($installation->stateRecorded(), 'a flip that reported success recorded the mode');
         } else {
-            $this->assertSame($recordBefore, $installation->stateContents(), 'a run that did not flip must not write the record');
+            // The *mode* is what makes the next poll skip, so that is the thing that must not
+            // move. The file itself may still be written, and since the boot window landed it
+            // usually is: a run records its own bookkeeping (`runs`, `last_kind`, `last_run_at`)
+            // so `/health/db` can tell "the flip ran and kept failing" from "the flip was never
+            // scheduled" — the difference between a broken pooler and a broken cron. Asserting
+            // on the mode keeps the rule under test while allowing both facts to coexist.
+            $this->assertSame(
+                $recordBefore,
+                $this->recordedMode($installation),
+                'a run that did not flip must not record a mode',
+            );
         }
     }
 
@@ -212,7 +227,7 @@ final class DbFlipPgcatCommandTest extends TestCase
         bool $recorded,
     ): void {
         $installation = $this->installation($preset);
-        $recordBefore = $installation->stateContents();
+        $recordBefore = $this->recordedMode($installation);
 
         $actual = Artisan::call('db:pgcat-flip', $options + ['--json' => true]);
         $output = Artisan::output();
@@ -223,9 +238,11 @@ final class DbFlipPgcatCommandTest extends TestCase
         $report = $this->report($output);
 
         $this->assertSame(
-            ['command', 'kind', 'exit_code', 'mode', 'previous_mode', 'reason', 'error', 'steps', 'status'],
+            [...array_keys(JsonEnvelope::CORE), 'mode', 'previous_mode', 'steps', 'status'],
             array_keys($report),
-            'the keys are always present, so a rule never has to guard for a missing one',
+            'the keys are always present, so a rule never has to guard for a missing one — and the '
+            .'report begins with the envelope\'s own keys, read from the class rather than restated, '
+            .'so this command cannot drift out of the shape the other two write',
         );
         $this->assertSame('db:pgcat-flip', $report['command']);
         $this->assertSame($kind, $report['kind'], "The {$preset} row's verdict");
@@ -271,7 +288,17 @@ final class DbFlipPgcatCommandTest extends TestCase
         if ($recorded) {
             $this->assertTrue($installation->stateRecorded(), 'a flip that reported success recorded the mode');
         } else {
-            $this->assertSame($recordBefore, $installation->stateContents(), 'a run that did not flip must not write the record');
+            // The *mode* is what makes the next poll skip, so that is the thing that must not
+            // move. The file itself may still be written, and since the boot window landed it
+            // usually is: a run records its own bookkeeping (`runs`, `last_kind`, `last_run_at`)
+            // so `/health/db` can tell "the flip ran and kept failing" from "the flip was never
+            // scheduled" — the difference between a broken pooler and a broken cron. Asserting
+            // on the mode keeps the rule under test while allowing both facts to coexist.
+            $this->assertSame(
+                $recordBefore,
+                $this->recordedMode($installation),
+                'a run that did not flip must not record a mode',
+            );
         }
     }
 
@@ -447,10 +474,13 @@ final class DbFlipPgcatCommandTest extends TestCase
      */
     public function test_only_a_failed_flip_or_rehearsal_is_non_zero(): void
     {
-        $this->assertSame([0, 0, 0, 1], [
+        $this->assertSame([0, 0, 0, 0, 1], [
             FlipResult::flipped('readers', null)->exitCode(),
             FlipResult::noChange('readers', 'unchanged')->exitCode(),
             FlipResult::skipped('readers', 'locked')->exitCode(),
+            // A closed window is the flipper deciding not to try again, which is the run doing
+            // exactly what it was asked to — the container's failure is `/health/db`'s to report.
+            FlipResult::windowClosed('readers', 'the window closed')->exitCode(),
             FlipResult::failed('readers', 'broken')->exitCode(),
         ]);
 
@@ -467,7 +497,7 @@ final class DbFlipPgcatCommandTest extends TestCase
      *
      * The table is written for an operator and the matrix for the code, so they do not line up
      * one to one: the three ways a flip can politely do nothing are one documented case, and
-     * the two ways a command can be refused are another. This map is the correspondence, and
+     * the three ways a command can be refused are another. This map is the correspondence, and
      * it is the only thing either side has to keep in step —
      * `test_the_matrix_agrees_with_the_readme_exit_table()` reads the table and fails when the
      * two disagree in either direction.
@@ -486,6 +516,7 @@ final class DbFlipPgcatCommandTest extends TestCase
             'a rehearsal of a forced flip is the flip it would apply' => 'a rehearsal, whether it would flip, would not, or was forced',
             'the flipper is not armed for this driver, so nothing runs' => 'the flipper is not armed for this connection',
             '--status reports and never flips' => '--status: a state report was asked for',
+            'the boot window had closed before the flip converged, so it stopped trying' => "the container's boot window had closed",
             'the supervisor command cannot work, so the flip fails' => 'a step a flip needs did not work, or a rehearsal of one',
             'the source config is not there, so the flip fails' => 'a step a flip needs did not work, or a rehearsal of one',
             'a rehearsal a flip would refuse exits one' => 'a step a flip needs did not work, or a rehearsal of one',
@@ -543,6 +574,76 @@ final class DbFlipPgcatCommandTest extends TestCase
     }
 
     /**
+     * The boot window as the `--status` table prints it — the facts an operator reads when a
+     * container is about to be declared failed, from the same block `/health/db` publishes so the
+     * two cannot say different things.
+     *
+     * The rows are asserted one by one because the interesting states are combinations: closed with
+     * no runs is a scheduler that never fired, closed with runs is a pooler that cannot come up, and
+     * open is a container still starting. A single sentence would collapse those, and this report is
+     * read exactly when they disagree.
+     */
+    public function test_the_status_table_reports_the_boot_window_and_why_the_container_fails(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+
+        $stamp = dirname($installation->path('state_file')).'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 3600));
+
+        $installation->install([
+            'boot_file' => $stamp,
+            'flip_window_seconds' => 480,
+        ]);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('flip_window', $output);
+        $this->assertStringContainsString('480s from boot', $output);
+        $this->assertStringContainsString('flip_window_state', $output);
+        $this->assertStringContainsString('closed at', $output);
+        $this->assertStringContainsString('flip_converged', $output);
+        $this->assertStringContainsString('never ran', $output, 'the repair differs: a missing schedule is not a pooler that will not start');
+        $this->assertStringContainsString('0 recorded (last never at never)', $output);
+
+        // And the same block in the report a machine reads, unsubstituted.
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--json' => true]));
+
+        $window = $this->report(Artisan::output())['status']['window'];
+
+        $this->assertTrue($window['closed']);
+        $this->assertTrue($window['failed']);
+        $this->assertFalse($window['converged']);
+        $this->assertSame(480, $window['window_seconds']);
+        $this->assertSame(0, $window['runs']);
+    }
+
+    /**
+     * The other half of the same report: a container with no stamp is *not judged*, and says so
+     * rather than reporting a window it cannot measure. That is the state a local run arrives in, so
+     * it has to be quiet — a status command that failed a developer's machine over a boot file its
+     * container never wrote would be the check nobody keeps.
+     */
+    public function test_the_status_table_says_when_no_boot_stamp_was_read(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+
+        $installation->install([
+            'boot_file' => dirname($installation->path('state_file')).'/never-written',
+            'flip_window_seconds' => 480,
+        ]);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('no boot stamp was read', $output);
+        $this->assertStringContainsString('unknown (no boot stamp)', $output);
+        $this->assertStringNotContainsString('closed at', $output);
+    }
+
+    /**
      * Build the installation a row starts from, and answer the one question its kind depends
      * on: what supervisor says, or whether the lock is free.
      */
@@ -558,6 +659,19 @@ final class DbFlipPgcatCommandTest extends TestCase
             ? new FakeSupervisor(exit: 2, stdout: '', stderr: 'pgcat:*: ERROR (no such group)')
             : new FakeSupervisor();
 
+        // The boot window as `entrypoint.sh` stamps it: this container booted an hour ago and
+        // the flipper is allowed eight minutes, so the window has closed and the run has nothing
+        // left to try.
+        $windowOverrides = [];
+
+        if ($preset === 'expired') {
+            file_put_contents($dir.'/container-booted-at', (string) (time() - 3600));
+            $windowOverrides = [
+                'boot_file' => $dir.'/container-booted-at',
+                'flip_window_seconds' => 480,
+            ];
+        }
+
         if ($preset === 'mysql') {
             config()->set('database.connections.mysql_app', ['driver' => 'mysql', 'database' => 'app']);
             config()->set('database.default', 'mysql_app');
@@ -565,7 +679,7 @@ final class DbFlipPgcatCommandTest extends TestCase
             config()->set('database.default', self::CONNECTION);
         }
 
-        $installation->install([], $supervisor);
+        $installation->install($windowOverrides, $supervisor);
 
         // The guard's own state: the container answers the flipper's name with something that
         // is not a flipper, which is the only way that branch is reachable — a key nothing is
@@ -636,5 +750,33 @@ final class DbFlipPgcatCommandTest extends TestCase
 
         @rmdir($dir.'/bin');
         @rmdir($dir);
+    }
+
+    /**
+     * The mode the state file records, or null when it records none — which is the fact
+     * "the next poll will try again" actually rests on.
+     *
+     * Read as the mode rather than as the file's bytes because the file now also carries the
+     * run bookkeeping the boot window is judged on (`runs`, `last_kind`, `last_run_at`, and a
+     * one-time `converged_at`). Those change on every run without changing the mode, so a
+     * byte comparison would fail a run that behaved exactly as documented.
+     */
+    private function recordedMode(PgcatInstallation $installation): ?string
+    {
+        $contents = $installation->stateContents();
+
+        if ($contents === null || $contents === '') {
+            return null;
+        }
+
+        $state = json_decode($contents, true);
+
+        if (!is_array($state)) {
+            return null;
+        }
+
+        $mode = $state['last_mode'] ?? null;
+
+        return is_string($mode) ? $mode : null;
     }
 }

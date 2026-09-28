@@ -12,7 +12,9 @@ that owns a matrix: `DbProbeReplicasCommandTest::test_the_matrix_agrees_with_the
 
 The README's exit-code tables are parsed as data and compared, cell by cell, with the same
 data providers the matrices are written as — so a number in the documentation that the code
-does not produce fails the suite.
+does not produce fails the suite. The counts *this* record states about those matrices are not
+written down at all: they are rendered from the same providers by `bin/counts.php`, and checked by
+the gate and by the suite.
 
 ## Why this needed deciding at all
 
@@ -36,7 +38,7 @@ table: the question is only interesting where several states have to map onto on
 |---|---|---|
 | `db:doctor` | anything failed, anything warned, `--strict` — three inputs into `gateFailed()` | a fourteen-cell matrix (`test_the_exit_code_is_a_function_of_the_rows_and_the_strict_flag`), the closing sentence from the same rule, and this guard |
 | `db:probe-replicas` | whether the read list held a replica at all, versus whether any of them answered — two ways to reach `1` | a nine-cell matrix, and this guard |
-| `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a sixteen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
+| `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a seventeen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
 | `db:replica-status` | one input: is the weighted manager bound | not a matrix. It exits `0` on every path the suite drives; the single `1` is the same guard the probe's matrix pins as its own row |
 
 `bin/checks.php` also exits non-zero from more than one check, but it is the gate that runs the
@@ -53,7 +55,7 @@ are, and read back the same way.
 |---|---|---|
 | A. A documentation test that *runs* the command per documented row | The behaviour of each row of the table, driven from the table | Duplicates the matrix, and worse: the fixtures it needs (a pgcat installation, a reachable store, a real probe) already exist in the matrix's own file, and the row-to-fixture mapping would have to be rebuilt and maintained per documented case — a second matrix, not a guard |
 | B. Compare the provider with the parsed table | That the cells the matrix enforces are the numbers the table documents, and that the two describe the same set of cases | Chosen |
-| C. Assert that every documented code is one a cell produces (a set comparison) | Little: three of the probe's five rows document `0` and two document `1`, so the sets match while a specific case is documented as the wrong one | A guard that passes when a case flips is not a guard |
+| C. Assert that every documented code is one a cell produces (a set comparison) | Little: two of the probe's five rows document `0` and three document `1`, so the sets match while a specific case is documented as the wrong one | A guard that passes when a case flips is not a guard |
 | D. Put the provider's key in the table | An exact one-to-one link | The README is read by operators; test keys in it are for the wrong reader, and the command's rows were deliberately not written one-to-one with the documented cases |
 | E. Generate the table from the provider | That the two cannot disagree, by construction | The table is not derivable from the provider: the documented rows are the cases an operator recognises (`at least one replica answered`), and the provider's rows are the fixtures that produce them. Generating the table would move the operator-facing wording into the test file, where it would be written for the wrong reason |
 | F. Leave it to review | Nothing | This is the state the package was in; the drift it allows is a wrong exit code in the one place an operator looks first |
@@ -69,7 +71,7 @@ column, a row with a different number of cells — throws, because a guard that 
 nothing reports agreement with a table it never found.
 
 The heading parameter matters for `db:doctor` in particular: that section's first table is
-the ten-row description of what each check judges, not the exit-code table, so "first table
+the eleven-row description of what each check judges, not the exit-code table, so "first table
 under the heading" would bind the wrong thing. Selecting by column is what makes the guard
 say what it is about.
 
@@ -91,7 +93,7 @@ did anything warn), and every cell of the matrix is a point in it, so no map is 
 `documentedRow()` derives the documented case from the counts the matrix test already asserts,
 and the same comparison runs — the cell's number in the column its `$strict` selects.
 
-**The flip's sixteen cells.** The flip's table is eight documented cases against sixteen
+**The flip's seventeen cells.** The flip's table is nine documented cases against seventeen
 cells: the three ways a flip can politely do nothing are one case, the three ways a command can
 be refused are another, and the rehearsals are one case however they end. Its map lives in
 `DbFlipPgcatCommandTest::documentedSituations()`, and the same two directional checks run.
@@ -110,13 +112,48 @@ documentation; the provider's own agreement with the running command stays where
 the matrix test. The chain is therefore complete — code ↔ provider ↔ README — and each link
 fails on its own terms.
 
+## The counts in this record are rendered
+
+The numbers above that describe a matrix or a table are not written by hand. They are derived in
+`tests/Support/DocumentedExitCounts` — from the provider that pins the matrix, from the map from
+each cell to the documented case it is an instance of, or from the README table the commands are
+documented in — and `bin/counts.php` writes them into this file. `php bin/counts.php` renders;
+`php bin/counts.php --check` compares and writes nothing; `bin/checks.php` runs that check, so a
+matrix that grew a cell fails the gate rather than leaving a sentence behind. `ProseNumbersTest`
+reads the same derivations, so the suite fails on the same drift even when nobody has run the
+renderer.
+
+Two of the counts are stated in two files: here, in the paragraph explaining why the flip's table
+has fewer documented cases than cells, and in the docblock of the map itself, in
+`DbFlipPgcatCommandTest`. Both are rendered from the one derivation, and the docblock is the half
+that needed it — it said *two* ways a
+command can be refused until the renderer's first run over it, and the map it describes has assigned
+more cells than that to the row, and had done since it was written. That is the shape of the defect
+this record is about: the number was wrong in the file a reader of the *map* opens, and right in the
+file a reader of the *record* opens.
+
+That is not a tidiness measure, and the first run of the renderer is the evidence. This record had
+the probe's breakdown backwards: the candidate-C row stated the two codes in the wrong order, and
+had done since it was written. It is wrong in the direction that reads as a real argument — the
+sentence's point, that the sets of codes match while a case is documented as the wrong one, holds
+either way — and nothing read it, because this record's own guard bound the count beside it (how
+many rows the sweep's table has) and not the split. Both halves now come from the table's `exit`
+column, where a reader can check them.
+
+Three numbers here are deliberately *not* rendered, and [prose-numbers.md](prose-numbers.md) names
+them among the ones no guard can hold: the four failure modes and the two behaviours that are still
+prose each count a list the same sentence writes, so a generator of them would be counting the
+sentence's own commas rather than a fact about the code; and the historical counts in the known
+limitations are about a version of this package that no longer exists — rendering those would be
+the drift rather than the repair.
+
 ## Tests that pin the rules
 
 | Test | Pins |
 |---|---|
 | `DbProbeReplicasCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the sweep's five documented cases, their numbers, and that every one of its nine cells is an instance of one |
 | `DbDoctorTest::test_the_matrix_agrees_with_the_readme_exit_table` | the doctor's three documented cases, both `--strict` columns, and that the two sets of cases are the same |
-| `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's eight documented cases, their numbers, and that every one of its sixteen cells is an instance of one |
+| `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's nine documented cases, their numbers, and that every one of its seventeen cells is an instance of one |
 | `DbFlipPgcatCommandTest::test_status_wins_when_a_rehearsal_is_asked_for_at_the_same_time` | the one rule the flip's table names that a row cannot hold |
 
 All three are checked by mutation rather than by argument: reverting `every replica failed` to
@@ -129,19 +166,29 @@ and deleting one cell's assignment each produce exactly one failure naming the c
 - **A reworded documented case is a failing test.** That is deliberate — the label is how the
   case is identified — but it means polishing the README's exit tables is a two-file change.
   The comparison is insensitive to backticks, spacing and case, so a reflow is not.
-- **The cell counts in this record are prose, and nothing checks them.** The guard counts cells
-  because it iterates the provider; this document counts them because somebody last edited it.
-  The flip's count sat at "fifteen" from the day the JSON work added a sixteenth cell, and the
-  sentence beside it still said *two* ways a command can be refused when there were three. Both
-  files were correct about everything the suite asserts, which is what makes that drift quiet:
-  the numbers are a restatement, and a restatement is not a guard.
+- **The cell counts in this record were prose, and are now rendered.** The guard in
+  `DbFlipPgcatCommandTest` counts cells because it *iterates* the provider; this document counted
+  them because somebody last edited it, and for a while nothing compared the two. That is the
+  drift this record is named after: the flip's count sat at "fifteen" from the day the JSON work
+  added a sixteenth cell, and the sentence beside it still said *two* ways a command can be
+  refused when there were three. That sentence was not in this record: it is the docblock of
+  `documentedSituations()` in `DbFlipPgcatCommandTest`, which said *two* until the renderer's first
+  run over it — the two "ways" counts are now rendered in both places, so the copy beside the map
+  cannot drift while this record stays right. Both files were correct about everything the suite
+  asserts, which is what makes it quiet. This record's counts are now written by `bin/counts.php`
+  from `tests/Support/DocumentedExitCounts` and checked in the gate, with `ProseNumbersTest`
+  asserting the same numbers in the suite — see the section above, and
+  [prose-numbers.md](prose-numbers.md).
 - **Two documented behaviours of `db:pgcat-flip` are still prose.** A disabled flipper
   returning before the `--watch` loop, rather than entering it, is a claim about control flow in
   a daemon: the only way to run it is to run the loop, and a matrix row that regressed would
   hang the suite rather than fail it. It stays in the README's flag table, unpinned. The other
   is the exit code the command would use for a flag combination nobody has written yet.
-- **Only tables that state a code are bound.** The README's other tables (what each check
-  judges, what a rehearsal does not do) carry no exit code and are not read.
+- **Only tables that state a code are bound by this record's own guard.** The README's other
+  tables (what each check judges, what a rehearsal does not do) carry no exit code and are not
+  read here; the check table is bound by its row *names* elsewhere — `DbDoctorTest` compares it
+  with the rows the command builds and `ProseNumbersTest` binds the counts the records state
+  about it.
 - **The parser is a parser.** It reads the first table under a heading with a named column, so
   restructuring the README so that a different table has that column first would bind the
   wrong one — which fails loudly (the labels would not match) rather than silently.
@@ -175,3 +222,5 @@ and deleting one cell's assignment each produce exactly one failure naming the c
 | `tests/Unit/Console/DbDoctorTest.php` | the doctor's matrix, its provider, and the case each cell's counts belong to |
 | `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the flip's matrix, its provider, and the map from each cell to its documented case |
 | `README.md` | the three tables, and the sentences naming the test that reads each one |
+| `tests/Support/DocumentedExitCounts.php` | the counts this record states, each derived from its provider |
+| `bin/counts.php` | the renderer: writes this record from those derivations, or checks it without writing |

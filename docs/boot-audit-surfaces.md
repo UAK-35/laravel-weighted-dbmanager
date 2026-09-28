@@ -80,7 +80,7 @@ says?* — and the decision is where it can be asked without overwriting either 
 | A | leave them to the boot log | nothing to find them with; already the status quo | **rejected** — the defect |
 | B | a dedicated `db:audit` command | one more surface to know about, and none of them are visited by default | **rejected** — the finding has to find the operator, not the other way round |
 | C | a dedicated `/health/audit` endpoint | a second payload to keep in step with the health one | **rejected** — the audit is a property of the installation, which is what `/health/db` already is |
-| D | fold them into the `pgcat` block | the block is one producer's snapshot; the findings are cross-cutting | **rejected** — pgcat is one of eight keys |
+| D | fold them into the `pgcat` block | the block is one producer's snapshot; the findings are cross-cutting | **rejected** — pgcat is one of fifteen keys |
 | E | make the endpoint `degraded` and `503` while a finding stands | a load balancer evicts an instance over a setting it is not using | **rejected** — see below |
 | F | make `db:replica-status` exit non-zero | scripts that print a table start failing over a config typo | **rejected** — the gate belongs to `db:doctor` |
 | G | have `db:doctor` read the log instead of the record | log rotation and interleaving by workers; no keyed lookup, no first sighting | **rejected** — the record is the thing that survives the process |
@@ -109,8 +109,8 @@ for you.
 `/health/audit` would keep the health payload's shape untouched, which is a real
 advantage: `status` would then never be asked to mean anything new. It loses on the shape
 of the question. The audit's findings are a property of *the installation*, and
-`/health/db` is already the installation-level document — it carries pgcat, replicas,
-the store and the formula for the same reason. A second endpoint means a second URL for a
+`/health/db` is already the installation-level document — it carries pgcat, the followed
+connection's replicas, the store and the formula for the same reason. A second endpoint means a second URL for a
 dashboard to know about, a second payload that can drift from the first, and two places
 where "what does this installation say about itself" is answered.
 
@@ -123,10 +123,14 @@ feature: is flipping armed, and can it act. The audit is the opposite: its keys 
 `swrr.allow_local_fallback.refused`, `swrr.pgcat.gate`, `swrr.reader_windows.refused`,
 `swrr.reader_days.refused`, `swrr.reader_fallback.always_readers`,
 `swrr.reader_fallback.always_writer`, `swrr.reader_fallback.unmatchable_windows`,
-`swrr.primary_store.unknown`, `swrr.primary_store.unreachable` and
-`swrr.default_weight_formula.unknown`. Filing those under `pgcat` would put twelve keys'
-worth of claims inside one feature's block, and a finding about the weight formula would
-disappear for an installation that has no pgcat wiring at all.
+`swrr.primary_store.unknown`, `swrr.primary_store.unreachable`,
+`swrr.default_weight_formula.unknown`, `database.read.weight.refused`,
+`database.read.cpu_cores.refused` and `database.read.ram_gb.refused` — the last three being
+the replica settings, which are the connection's rather than `swrr`'s, so their keys name
+the path an operator edits and the connection is in the finding's context instead. Filing
+all of those under `pgcat` would put fifteen keys' worth of claims inside one feature's
+block, and a finding about the weight formula would disappear for an installation that has
+no pgcat wiring at all.
 
 ### E — let the findings move the endpoint's status
 
@@ -191,16 +195,26 @@ same record, and a rule added to one is a rule added to both.
 
 ## The chosen mechanism, in full
 
-### One accessor, three readers
+### One accessor, and who reads what
 
 | reader | reads | why not `standing()` |
 |---|---|---|
 | `GET /health/db` | `standing()`, embedded as the `audit` block | — |
 | `db:replica-status` | `standing()`, printed as an `Audit:` list | — |
-| `db:doctor` | `BootAudit::read()['findings'][$key]` | it judges one setting at a time and needs that key's first sighting: a mismatch the record still holds can fail — or warn about — a row even when this run's own verdict is clean. `standing()` is the presentation; one key at a time is the judgement |
+| `db:doctor` | `BootAudit::read()['findings'][$key]` | it judges one setting at a time and needs that key's first sighting: a mismatch the record still holds can fail — or warn about — a row even when this run's own verdict is clean. `standing()` is the presentation; one key at a time is the judgement. It also adds a *clause* to a row it is already printing and falls back to its own verdict, so an unreadable record is not a claim it has to make — which is why the tolerant reader is the right one for it |
+| the boot itself (`report()`) | `read()`, the tolerant reader | it is the only writer: a record it cannot read is one it cannot carry over or close out, and a diagnostic never stops a boot. So it reads "nothing recorded" and then writes over the file — the repair the two surfaces never have to do, because neither of them writes anything |
 
 `standing()` returns, per finding: `key`, `level`, `warning`, `resolution`,
 `first_reported_at`, `age_seconds`, `age` and `context`.
+
+It throws `UnreadableRecord` for a file that is there and is not a record, and `read()` is the
+`catch` around it. That split is what makes `available: false` with `error` *set* reachable at
+all. While one tolerant reader served both callers, a half-written record arrived at the surfaces
+as an empty one — so the record's own three readers could not tell an installation that had fixed
+everything it was told about from one nothing could be told, and the terminal printed the good
+news over the bad. The shapes refused are the file-level ones (not a file, unreadable bytes,
+empty, not JSON, not a JSON object, `findings` that is not a map); entries *inside* a readable
+record keep their old tolerance, because the record around them can still be read.
 
 ### Oldest first, and an age in words
 
@@ -365,6 +379,13 @@ restarts anything.
 | the same choice is in the log: every line names the level it was written at | `assertSeverityStamped()` (over the finding, collision and lost-update lines), in `test_a_refused_value_is_selectable_from_the_log_by_its_severity` | audit |
 | a finding's context cannot overwrite the line's level | `test_the_line_names_the_level_it_was_written_at_even_when_a_finding_context_carries_the_key` | audit |
 | with no record to read, the block makes no claim and `error` names the reason | `test_the_audit_block_makes_no_claim_when_there_is_no_record_to_read` | provider |
+| an unreadable record is not rounded to "nothing standing" — `available: false`, `error` set, and `severity: none` because nothing is *known* to stand | `test_a_record_that_cannot_be_read_is_not_rounded_to_nothing_standing` | audit |
+| each unreadable shape is named for what it is, and `standing()` throws the message the block carries | `test_each_shape_of_unreadable_record_is_named_for_what_it_is` (six data sets) | audit |
+| a record that is *gone* is still nothing standing rather than a failure | `test_a_record_that_is_not_there_is_nothing_standing_rather_than_a_failure` | audit |
+| the boot reads an unreadable record as nothing and writes over it, while a surface refuses to — the reader split, in one process | `test_the_boot_reads_an_unreadable_record_as_nothing_while_a_surface_refuses_to` | audit |
+| the payload names the unreadable record in `audit.error` and leaves `status` alone | `test_an_unreadable_audit_record_is_named_in_the_payload_and_leaves_the_status_alone` | health |
+| the terminal's `unreadable` line, with the file and the reason, and not `nothing standing` | `test_a_record_that_cannot_be_read_is_a_line_rather_than_nothing_standing` | command |
+| a record that *was* read and holds nothing says so, and is not the `unreadable` line | `test_a_record_with_nothing_standing_is_not_reported_as_unreadable` | command |
 | the command prints the findings, and exits `0` doing it | `test_the_replica_status_command_prints_the_standing_findings` | provider |
 | the command prints them on the no-replicas path too | `test_the_replica_status_command_reports_the_audit_without_replicas` | provider |
 | both surfaces say an unregistered audit, and agree on the payload's `available`/`error` pair | `test_both_surfaces_say_when_the_boot_audit_is_not_registered` | provider |
@@ -397,23 +418,28 @@ restarts anything.
    the finding to reach anyone who is not reading a terminal — and the alert is the host
    application's to write, because only it knows who should be woken up.
 4. **The age is only as good as the record.** `first_reported_at` is the first sighting by
-   any boot that writes that `swrr.audit.file`, and an unreadable or deleted record reads
-   as "nothing standing" — the failure mode is one line too few, never an invented claim.
-   Deleting the record therefore clears the dashboard and resets the age on the next boot
-   that reports the same finding, without a resolution line in between.
+   any boot that writes that `swrr.audit.file`. *Deleting* the record therefore clears the
+   dashboard and resets the age on the next boot that reports the same finding, without a
+   resolution line in between — and a deleted record is indistinguishable from one that was
+   never written, which is the honest reading: the file is where the installation keeps this,
+   and an installation that removed it is not claiming anything. An *unreadable* record is the
+   other case and is not rounded into it: the block says `available: false` with the reason,
+   so a record nobody can open cannot be mistaken for an installation with nothing to say.
 5. **The record is per installation, not per environment.** Two environments sharing an
    audit file would share the date, the resolved/unresolved state and the age — the same
    limitation the reader-windows finding carries.
 6. **The order is by first *recording*, not by the first time the installation was wrong.**
    A finding that was introduced before this audit existed, or before the record's
    directory became writable, is dated from the first boot that could write it down.
-7. **`unreadable` is defensive on both surfaces.** `standing()` cannot throw on any record:
-   `read()` turns every unreadable state — a missing file, truncated JSON, a hand-edited
-   entry — into "nothing recorded", by design. So the terminal's `unreadable` line and the
-   payload's non-null `error` are reachable only by a `standing()` that starts throwing
-   later, and nothing in the test suite drives them. They are kept because the alternative is
-   a surface that assumes it cannot fail, which would answer the first such failure with a
-   blank line — and a blank line is the one answer that cannot be told from the state above.
+7. **Every unreadable shape is named, and one of them cannot be driven from a test.**
+   `standing()` throws for six states and the suite drives five: a path with a directory on
+   it, an empty file, text that is not JSON, a JSON list, and an object whose `findings` is
+   not a map. The sixth is a read that fails outright — the file removed between the check
+   and the read, which `persist()` does whenever a boot finds nothing left to remember — and
+   there is no seam to hold a writer inside, so it stays a guard. A missing file is
+   deliberately *not* one of the six: it is what an installation with nothing standing leaves
+   behind, and it still reads as `available: true` with an empty list, which is a fact about
+   the installation rather than a failure of the reader.
 8. **A key two branches agree on keeps one of the two sentences.** The record is keyed by
    finding key, so the audit logs every finding a boot produced, names the collision as the
    package defect it is, and remembers the louder one. The payload therefore shows one
@@ -452,11 +478,14 @@ restarts anything.
 |---|---|
 | `src/Support/BootAudit.php` | the record, `standing()` — ordering, ages, the fields a surface renders — `reported()`, the block both surfaces publish and the one place either decides whether there is a record, `standingSummary()` with the severity vocabulary, and `fold()`, where a boot's findings become that record |
 | `src/Support/BootAuditFinding.php` | one finding: key, warning, resolution, context, level |
+| `src/Support/UnreadableRecord.php` | the state that made the branch reachable: the record is there and is not a record, and the reason is the message both surfaces publish |
 | `src/Http/Controllers/DatabaseHealthController.php` | the `audit` block — `reported()`, embedded — and the status it deliberately does not move |
 | `src/Console/Commands/DbReplicaStatus.php` | the `Audit:` list in its four states, on both the table and the no-replicas path |
 | `src/Console/Commands/DbDoctor.php` | the gate: `recordedFinding()` reads the record by key, adds the age clause, and fails under `--strict` — and `recordedFindings()`, which the `reader windows` row uses to date each of the problems it names from its own key |
 | `src/Providers/WeightedDatabaseServiceProvider.php` | the finding keys, `reportBootAudit()`, `readerRecordKeys()` |
-| `tests/Unit/Support/BootAuditTest.php` | the record and the view over it |
+| `tests/Unit/Support/BootAuditTest.php` | the record and the view over it, including the two readers either side of `decode()`, every unreadable shape, and the boundary a missing file sits on |
 | `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | both surfaces, and that the payload stays `ok` |
+| `tests/Unit/Http/DatabaseHealthControllerTest.php` | the payload's own block: the unreadable record's `error`, and that it does not move `status` |
+| `tests/Unit/Console/DbReplicaStatusTest.php` | the terminal's `Audit:` lines, including the `unreadable` one and the `nothing standing` it must not be confused with |
 | `tests/Unit/Console/DbDoctorTest.php` | the gate's half: the age clause (including that a finding for another problem is not quoted) and the failing rows |
 | `README.md` | the user-facing shape of the block, next to the endpoint's other sections |

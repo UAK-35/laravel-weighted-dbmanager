@@ -8,7 +8,8 @@ declare(strict_types=1);
  *
  * One entry point for every check this package can run: PHP syntax, an
  * independent AST parse of the same files, the composer.json schema, the
- * platform requirements, the workflow YAML, PHPStan, Pint and PHPUnit.
+ * platform requirements, the workflow YAML, the counts the records render from
+ * their derivations, PHPStan, Pint and PHPUnit.
  *
  * WHY THIS EXISTS IN ADDITION TO `composer test`
  * ----------------------------------------------
@@ -111,6 +112,11 @@ $phpFiles = phpFiles([$root . '/src', $root . '/tests', $root . '/config', $root
 $composer = composerCommand($root);
 $yamlFiles = yamlFiles($root);
 
+// Whether this repository contains composer.lock. It is asked once, here, because the
+// schema check is the only one that can be answered differently for a lock the checkout
+// has and the repository does not — see composerValidateCommand().
+$lockIsShipped = commitsLockFile($root);
+
 $tools = [
     'pint' => $root . '/vendor/laravel/pint/builds/pint',
     'phpstan' => $root . '/vendor/phpstan/phpstan/phpstan.phar',
@@ -129,8 +135,8 @@ $checks = [
         'title' => 'PHP syntax (php -l)',
         'skip' => $phpFiles === [] ? 'no PHP files found' : null,
         'run' => static fn (): array => checkSyntax($root, $phpFiles),
-        'note' => static function (string $output) use ($phpFiles): string {
-            $failed = preg_match_all('/Errors parsing/', $output);
+        'note' => static function (array $result) use ($phpFiles): string {
+            $failed = preg_match_all('/Errors parsing/', $result['output']);
 
             return $failed === 0
                 ? count($phpFiles) . ' files, no syntax errors'
@@ -145,17 +151,28 @@ $checks = [
     'schema' => [
         'title' => 'composer.json schema (validate --strict)',
         'skip' => $composer === null ? 'composer is not available (set COMPOSER_BINARY)' : null,
-        'run' => static fn (): array => runCommand([...$composer ?? [], 'validate', '--strict'], $root),
+        'run' => static fn (): array => runCommand(composerValidateCommand($composer, $lockIsShipped), $root),
+        'note' => static function (array $result) use ($lockIsShipped): string {
+            // composer prints its lock-file section whether or not it was asked to check
+            // it, so a run that deliberately skipped the lock would otherwise summarise
+            // itself with a warning nothing acted on. The verdict is the exit code's; the
+            // note says what the check actually covered.
+            if ($lockIsShipped || $result['exit'] !== 0) {
+                return lastLine($result['output']);
+            }
+
+            return 'composer.json is valid; composer.lock is not part of this repository, so it is not checked';
+        },
     ],
     'platform' => [
         'title' => 'Platform requirements (check-platform-reqs)',
         'skip' => $composer === null ? 'composer is not available (set COMPOSER_BINARY)' : null,
         'run' => static fn (): array => runCommand([...$composer ?? [], 'check-platform-reqs'], $root),
-        'note' => static function (string $output): string {
-            $satisfied = preg_match_all('/\bsuccess\b/', $output);
+        'note' => static function (array $result): string {
+            $satisfied = preg_match_all('/\bsuccess\b/', $result['output']);
 
             return $satisfied === 0
-                ? lastLine($output)
+                ? lastLine($result['output'])
                 : "{$satisfied} platform requirements satisfied";
         },
     ],
@@ -170,6 +187,14 @@ $checks = [
             [PHP_BINARY, $tools['yaml-lint'], '--no-ansi', ...$yamlFiles],
             $root,
         ),
+    ],
+    'counts' => [
+        'title' => 'Rendered record counts (bin/counts.php --check)',
+        // The renderer reads the claims out of the test support classes, so it needs the
+        // autoloader the same way phpstan and pint need their own tools: without it every other
+        // check skips too, and this one would fail with the reason the skip already states.
+        'skip' => is_file($root . '/vendor/autoload.php') ? null : 'composer install has not been run',
+        'run' => static fn (): array => runCommand([PHP_BINARY, $root . '/bin/counts.php', '--check'], $root),
     ],
     'phpstan' => [
         'title' => "Static analysis (phpstan, level {$level})",
@@ -257,8 +282,13 @@ foreach ($checks as $key => $check) {
         echo $result['output'];
     }
 
+    // A check may lend a `note` of its own, for a summary line clearer than the last line
+    // of its output. It is handed the whole result — the verdict as well as the output — so
+    // a note can say what was and was not checked rather than guess it from the prose. The
+    // output arrives stripped of ANSI: a note that counts words would otherwise miss them,
+    // because a colour reset ends in `m` and `m` is a word character.
     $note = isset($check['note'])
-        ? $check['note'](stripAnsi($result['output']))
+        ? $check['note'](['exit' => $result['exit'], 'output' => stripAnsi($result['output'])])
         : null;
 
     $results[$key] = [
@@ -407,6 +437,56 @@ function composerCommand(string $root): ?array
     // Composer installed globally: `composer --version` decides whether it is
     // really reachable, so an absent binary becomes a skip rather than a fail.
     return runCommand(['composer', '--version'], $root)['exit'] === 0 ? ['composer'] : null;
+}
+
+/**
+ * `composer validate --strict`, asking the same question CI asks.
+ *
+ * `--strict` fails on warnings as well as errors, and the one warning this package meets
+ * locally and never in CI is the stale lock file. `.gitignore` excludes `composer.lock`,
+ * so a checkout has one only because it was installed into, while CI has one only because
+ * `composer install` wrote it moments earlier — which is why CI's lock cannot be out of
+ * date and a developer's can be, on the same commit, over a file the repository does not
+ * contain. Editing `composer.json` then turns this check red on the machine that edited
+ * it, and `bin/release.php` moving `extra.branch-alias` does it too, without anyone
+ * touching a manifest by hand.
+ *
+ * So the lock is checked only when the repository contains one. A branch that ships a lock
+ * has something to keep in step with the manifest; a branch that ignores it has nothing
+ * for a local one to disagree with, and what is validated there is the manifest — the same
+ * question, and the same answer, as CI's.
+ *
+ * @param list<string>|null $composer  the composed `validate` invocation's prefix, or null
+ * @param bool              $lockIsShipped whether the repository contains a composer.lock
+ * @return list<string>
+ */
+function composerValidateCommand(?array $composer, bool $lockIsShipped): array
+{
+    $command = [...$composer ?? [], 'validate', '--strict'];
+
+    if (!$lockIsShipped) {
+        $command[] = '--no-check-lock';
+    }
+
+    return $command;
+}
+
+/**
+ * Whether `composer.lock` is part of the repository rather than a local install artefact.
+ *
+ * git is asked about the file instead of `.gitignore` being read, because the question is
+ * whether the repository contains it: a tracked lock is in the repository even where a
+ * pattern would ignore it, and an untracked one is the checkout's own however it got
+ * there.
+ *
+ * A machine with no git — or with `composer.lock` in a checkout that is not a repository —
+ * answers `false`. There is then no repository to have shipped a lock, so the only lock a
+ * run could be comparing is this checkout's own, which is the case the manifest-only
+ * question exists for.
+ */
+function commitsLockFile(string $root): bool
+{
+    return runCommand(['git', 'ls-files', '--error-unmatch', '--', 'composer.lock'], $root)['exit'] === 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

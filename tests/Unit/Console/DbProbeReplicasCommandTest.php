@@ -8,6 +8,8 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Artisan;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
+use Uak35\WeightedDbManager\Console\Commands\DbProbeReplicas;
+use Uak35\WeightedDbManager\Console\JsonEnvelope;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Tests\Support\FakeWeightedManager;
 use Uak35\WeightedDbManager\Tests\Support\Readme;
@@ -63,10 +65,16 @@ final class DbProbeReplicasCommandTest extends TestCase
      * health monitor. A row whose fixture drifted fails on its own line instead of leaving
      * the exit code standing as evidence about a question nobody asked.
      *
+     * `kind` is the row's verdict in the JSON vocabulary, asserted by the JSON half of this
+     * matrix and bound to the README's kind table by the test below. It is a column of the row
+     * rather than something the JSON test works out, because the two halves of the matrix are
+     * two claims about one run: a row that says which route it took says it for both channels.
+     *
      * @return array<string, array{
      *     preset: string,
      *     connection: string|null,
      *     exit: int,
+     *     kind: string,
      *     line: string,
      *     absent: string,
      *     marks: list<array{host: string, port: int, healthy: bool, reason: string|null}>
@@ -86,6 +94,7 @@ final class DbProbeReplicasCommandTest extends TestCase
             // ── the guard before the sweep ────────────────────────────────────────────
             'the manager is not the weighted one, so there was no sweep' => [
                 'preset' => 'unweighted', 'connection' => 'probe_writer', 'exit' => 1,
+                'kind' => DbProbeReplicas::KIND_UNBOUND,
                 'line' => 'WeightedDatabaseManager is not registered.',
                 // The counterfactual: if the guard did not come first, this connection
                 // would have been asked for its read list and found none — which exits 0.
@@ -96,12 +105,14 @@ final class DbProbeReplicasCommandTest extends TestCase
             // ── nothing to probe ─────────────────────────────────────────────────────
             'the connection asked for has no read list' => [
                 'preset' => 'no-read-list', 'connection' => 'probe_writer', 'exit' => 0,
+                'kind' => DbProbeReplicas::KIND_NO_READ_LIST,
                 'line' => 'No replicas configured for [probe_writer].',
                 'absent' => 'No replica answered',
                 'marks' => [],
             ],
             'the connection the command defaults to has no read list' => [
                 'preset' => 'no-read-list', 'connection' => null, 'exit' => 0,
+                'kind' => DbProbeReplicas::KIND_NO_READ_LIST,
                 'line' => 'No replicas configured for [pgsql].',
                 'absent' => 'No replica answered',
                 'marks' => [],
@@ -110,6 +121,7 @@ final class DbProbeReplicasCommandTest extends TestCase
             // ── a sweep that reached nothing ──────────────────────────────────────────
             'the read list holds no replica map, so nothing could be probed' => [
                 'preset' => 'no-replica-array', 'connection' => 'probe_flat', 'exit' => 1,
+                'kind' => DbProbeReplicas::KIND_NO_REPLICA_MAPS,
                 'line' => 'Nothing could be probed: the read list on [probe_flat] holds no replica array, so nothing was marked healthy.',
                 // Nothing was probed, so nothing failed: this row is not the all-failed one.
                 'absent' => 'No replica answered',
@@ -117,6 +129,7 @@ final class DbProbeReplicasCommandTest extends TestCase
             ],
             'every replica fails, so the sweep reached nothing' => [
                 'preset' => 'all-fail', 'connection' => 'probe_dead', 'exit' => 1,
+                'kind' => DbProbeReplicas::KIND_NONE_ANSWERED,
                 'line' => 'No replica answered: 2 probed, all failed — nothing was marked healthy.',
                 'absent' => 'Nothing could be probed',
                 'marks' => [$failed('10.9.0.6', self::DEFAULT_PORT), $failed('10.9.0.7', 6432)],
@@ -125,12 +138,14 @@ final class DbProbeReplicasCommandTest extends TestCase
             // ── a sweep that reached something ────────────────────────────────────────
             'one replica fails and one answers, which is still a sweep' => [
                 'preset' => 'partial', 'connection' => 'probe_partial', 'exit' => 0,
+                'kind' => DbProbeReplicas::KIND_ANSWERED,
                 'line' => 'Probed probe_partial: 1 healthy, 1 failed',
                 'absent' => 'No replica answered',
                 'marks' => [$healthy('10.9.0.5', 6432), $failed('10.9.0.6', self::DEFAULT_PORT)],
             ],
             'every replica answers' => [
                 'preset' => 'all-answer', 'connection' => 'probe_all', 'exit' => 0,
+                'kind' => DbProbeReplicas::KIND_ANSWERED,
                 'line' => 'Probed probe_all: 2 healthy, 0 failed',
                 'absent' => 'No replica answered',
                 'marks' => [$healthy('10.9.0.5', 6432), $healthy('10.9.0.8', self::DEFAULT_PORT)],
@@ -139,12 +154,14 @@ final class DbProbeReplicasCommandTest extends TestCase
             // ── shapes of `read` that are not a list of replica maps ─────────────────
             'a read list that is one config map is one replica, and it is probed' => [
                 'preset' => 'single-map', 'connection' => 'probe_single', 'exit' => 0,
+                'kind' => DbProbeReplicas::KIND_ANSWERED,
                 'line' => 'Probed probe_single: 1 healthy, 0 failed',
                 'absent' => 'Nothing could be probed',
                 'marks' => [$healthy('10.9.0.5', 6432)],
             ],
             'an entry that is not a replica map beside one that is' => [
                 'preset' => 'mixed-entries', 'connection' => 'probe_mixed', 'exit' => 0,
+                'kind' => DbProbeReplicas::KIND_ANSWERED,
                 'line' => 'Probed probe_mixed: 1 healthy, 0 failed',
                 'absent' => 'No replica answered',
                 // The counts are of replicas, not of list entries: a flat host string is not
@@ -165,6 +182,7 @@ final class DbProbeReplicasCommandTest extends TestCase
         string $preset,
         ?string $connection,
         int $exit,
+        string $kind,
         string $line,
         string $absent,
         array $marks,
@@ -202,6 +220,163 @@ final class DbProbeReplicasCommandTest extends TestCase
             $manager === null ? [] : $manager->purged,
             'a probe purges the throwaway connection once per attempt, after it reports',
         );
+    }
+
+    /**
+     * The same matrix again, read as JSON — the envelope `db:pgcat-flip` and `db:replica-status`
+     * write, with this command's evidence after the five keys they share.
+     *
+     * `--json` changes the report and nothing else, so every cell keeps its code and its marks; the
+     * whole output is decoded rather than searched for an object, because that is the assertion
+     * that fails when a rendered line is written beside the report. `-v` is passed on purpose: the
+     * per-replica rows a verbose run prints are this mode's `replicas`, so the row that writes
+     * `Probed …` on a terminal writes one object here — the detail is a field, not a channel.
+     *
+     * What the object has to carry is the verdict, the code, and the evidence: the counts of what
+     * was attempted, and one entry per replica with the reason a failed one failed — which is the
+     * half of this command that is otherwise invisible, since the probe's own connection is purged
+     * after every attempt.
+     */
+    #[DataProvider('exitCodeProvider')]
+    public function test_the_json_report_is_the_same_run_as_one_object(
+        string $preset,
+        ?string $connection,
+        int $exit,
+        string $kind,
+        string $line,
+        string $absent,
+        array $marks,
+    ): void {
+        $this->layOut($preset, $connection);
+        $manager = $this->bindManager($preset);
+
+        $actual = Artisan::call(
+            'db:probe-replicas',
+            ($connection === null ? [] : ['connection' => $connection]) + ['--json' => true, '-v' => true],
+        );
+        $output = Artisan::output();
+
+        $this->assertSame($exit, $actual, "--json is a report, not a rule: the {$preset} row exits the same code either way");
+        $this->assertStringStartsWith('{', ltrim($output), 'the object is the report, and the report is the object');
+
+        // The rendered channels, asserted absent by the labels they print: a route that wrote its
+        // sentence beside the object as well would leave a consumer parsing prose out of a stream.
+        $this->assertStringNotContainsString('ERROR', $output);
+        $this->assertStringNotContainsString('WARNING', $output);
+        $this->assertStringNotContainsString('Probed ', $output, 'the summary line is not written beside the object');
+        $this->assertStringNotContainsString('✓', $output, 'the per-replica rows are a field in this mode');
+        $this->assertStringNotContainsString('✗', $output);
+
+        $report = $this->report($output);
+
+        $this->assertSame(
+            [...array_keys(JsonEnvelope::CORE), 'connection', 'counts', 'replicas'],
+            array_keys($report),
+            'the envelope\'s keys first, read from the class rather than restated, then this command\'s evidence',
+        );
+        $this->assertSame('db:probe-replicas', $report['command']);
+        $this->assertSame($kind, $report['kind'], "The {$preset} row's verdict");
+        $this->assertSame($exit, $report['exit_code'], 'the code travels inside the report, so nothing has to be read apart');
+        $this->assertSame($connection ?? 'pgsql', $report['connection']);
+
+        $counts = $report['counts'];
+        $this->assertIsArray($counts);
+        $this->assertSame(['probed', 'answered', 'failed'], array_keys($counts));
+        $this->assertSame(count($marks), $counts['probed'], 'one count per replica the sweep attempted');
+        $this->assertSame(
+            count(array_filter($marks, static fn (array $mark): bool => $mark['healthy'])),
+            $counts['answered'],
+            'the counts are of replicas, and a partial sweep is a sweep',
+        );
+        $this->assertSame(
+            count(array_filter($marks, static fn (array $mark): bool => ! $mark['healthy'])),
+            $counts['failed'],
+        );
+
+        $replicas = $report['replicas'];
+        $this->assertIsArray($replicas);
+        $this->assertCount(count($marks), $replicas, 'one row per attempt, in the order the read list gives them');
+
+        foreach ($marks as $index => $mark) {
+            $row = $replicas[$index];
+            $this->assertIsArray($row);
+            $this->assertSame(['host', 'port', 'healthy', 'error'], array_keys($row));
+            $this->assertSame($mark['host'], $row['host']);
+            $this->assertSame($mark['port'], $row['port']);
+            $this->assertSame($mark['healthy'], $row['healthy']);
+
+            if ($mark['healthy']) {
+                $this->assertNull($row['error'], 'a replica that answered has nothing to explain');
+
+                continue;
+            }
+
+            $this->assertIsString($row['error']);
+            $this->assertNotSame('', $row['error'], 'the row names why the probe failed, which the summary counts but cannot');
+        }
+
+        // A route that swept nothing answers with the sentence; a sweep answers with its counts and
+        // rows, and a sentence beside them would be the summary the object does not need.
+        if ($kind === DbProbeReplicas::KIND_ANSWERED) {
+            $this->assertNull($report['reason']);
+        } else {
+            $this->assertSame($line, $report['reason'], 'a route that did not sweep says why in the object, not only on the terminal');
+        }
+
+        // The same marks reached the health monitor: the flag is not a second way to run.
+        $this->assertSame($marks, $manager === null ? [] : $manager->marks, "--json probes the same replicas in the {$preset} row");
+    }
+
+    /**
+     * The JSON vocabulary is closed and documented, and the code beside each kind is the code the
+     * matrix asserts for the rows that produce it.
+     *
+     * This is the same guard the exit table has, one level in: a scheduler that branches on `kind`
+     * is broken by a kind that appears without being written down, and misled by a documented one
+     * that nothing produces. The README's kind table is read by its `kind` column rather than its
+     * `exit` column, because the exit table above it has one of those too — and the two tables are
+     * about different things: five cases an operator schedules on, and five verdicts a job reads.
+     */
+    public function test_every_json_kind_is_documented_with_its_exit_code(): void
+    {
+        $rows = Readme::table('### Probing: `db:probe-replicas`', 'kind');
+
+        $produced = [];
+
+        foreach (self::exitCodeProvider() as $cell) {
+            $produced[$cell['kind']] = $cell['exit'];
+        }
+
+        $this->assertEqualsCanonicalizing(
+            array_keys($produced),
+            array_map([Readme::class, 'plain'], array_column($rows, 'kind')),
+            'a kind the report can carry is documented, and every documented kind is one the report carries',
+        );
+
+        foreach ($rows as $row) {
+            $kind = Readme::plain($row['kind']);
+
+            $this->assertSame(
+                $produced[$kind],
+                Readme::code($row['exit']),
+                sprintf('The README documents `%s` as exiting %s, while the matrix asserts %d.', $kind, $row['exit'], $produced[$kind]),
+            );
+        }
+    }
+
+    /**
+     * The report a run printed, decoded. `JSON_THROW_ON_ERROR` turns "the output is not JSON" into
+     * this test's failure, which is the one thing a consumer of this mode has to be told.
+     *
+     * @return array<string, mixed>
+     */
+    private function report(string $output): array
+    {
+        $decoded = json_decode(trim($output), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertIsArray($decoded, 'a report is one object');
+
+        return $decoded;
     }
 
     /**

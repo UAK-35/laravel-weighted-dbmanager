@@ -35,9 +35,9 @@ of a rendering.
 That is the same problem `db:pgcat-flip --json` was built for, and the reasoning transfers unchanged
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
-here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has ten
-verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as likely to
-care that `store probe` **passed** as that `reader windows` failed.
+here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
+eleven verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
 
@@ -78,7 +78,7 @@ depends on the state is a rule a gate can write wrong once and keep: `jq -e '.ch
 
 ### F — `kind` for the run, to match the flip
 
-The flip's `kind` is a verdict about *what happened* — `flipped`, `would_flip`, `refused`, one of ten
+The flip's `kind` is a verdict about *what happened* — `flipped`, `would_flip`, `refused`, one of eleven
 values a run can reach. The doctor's run verdict is the loudest of its rows, drawn from the same three
 strings the rows use, and the table already prints them in its left column. Naming the run's verdict
 `kind` would put two vocabularies on one page for no gain: a gate would have to learn that a `WARN`
@@ -125,6 +125,16 @@ The keys are written on every run, an empty list where a run has nothing for one
 the health payload's `counts` follows: a rule that has to check whether a field exists is a rule that
 can be written wrong once and stay wrong. `exit_code` is inside the object because the two halves of
 the answer travel together.
+
+### The pair of keys that name the subject
+
+`connection` and `default_connection` are not two more readings of the run: they are what the object
+says it is *about*, and every other key is a fact about that subject. A vet run —
+`db:doctor --config-file=path` — keeps the same envelope, the same key order and the same rules, and
+names a different subject in the one position: `config_file` where the installation run writes those
+two keys. That is why the pair belongs in the key list rather than beside it, and why a gate reading
+`.checks[]` or `.exit_code` does not have to know which mode produced the object. A file has no
+`default_connection` to report, and an installation has no file it was judged from.
 
 ## The chosen mechanism, in full
 
@@ -213,6 +223,7 @@ the two tables look alike would be a table the matrix could not check.
 | the repairs are on the row that carries them, and an empty list where there are none | `DbDoctorTest::test_the_json_report_carries_the_suggestions_the_table_prints` |
 | a pgcat repair travels as data too: the line the table prints is the string the object carries, and a row that can name none carries `[]` rather than omitting the key | `DbDoctorTest::test_the_json_report_carries_the_pgcat_repair_line_the_table_prints` |
 | a verdict the report can carry is documented, and vice versa | `DbDoctorTest::test_every_json_verdict_is_documented` |
+| a vet run keeps the envelope and swaps the subject key for `config_file`, so one gate reads both modes | `DbDoctorTest::test_the_config_file_flag_reports_through_the_json_envelope` |
 
 Mutations this decision has been checked against, run against the matrix test unless noted: the
 envelope's `checks` renamed to `rows` (14 of 14 cells fail on the key list), the row's `verdict`
@@ -224,35 +235,41 @@ and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails namin
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Six rows when `db` does not resolve, ten otherwise. A gate
+- **The row set is not a fixed length.** Six rows when `db` does not resolve, eleven otherwise. A gate
   must select by `name`; nothing in the object states how many rows there "should" be, so a gate that
   expects a particular row to exist has to decide what its absence means on its own.
 - **`detail` is prose, and platform-shaped.** It carries real paths, real commands and supervisor's
   own output, with the separators of the platform that ran it. Assert on `name`, `verdict` and
   `exit_code`, which are the contract; `suggestions` is the one string-shaped value meant to be acted
   on, and it is the package's own spelling of a setting.
-- **`--strict` is the only flag, so the object does not record that a run was a gate.** A report
-  saved from a non-strict run and one from a strict run of the same installation differ in `strict`
-  and `exit_code` and nowhere else, which is intended — but a gate that stores one and compares it to
-  the other has to say which it ran.
+- **`--strict` is the only flag that moves the verdict, so the object does not record that a run was
+  a gate.** `--json` produces the object and `--config-file` swaps the subject it is about; neither
+  changes a verdict. A report saved from a non-strict run and one from a strict run of the same
+  installation differ in `strict` and `exit_code` and nowhere else, which is intended — but a gate that
+  stores one and compares it to the other has to say which it ran.
 - **The envelope is not versioned.** Keys are added deliberately (the test states the list), but a
   consumer that rejects unknown keys would break on an addition rather than ignore it.
 - **`verdict` is upper case and the health payload's `status` is not.** The doctor's three strings are
   the table's own, and the health endpoint's `ok`/`degraded`/`misconfigured` are a different
   vocabulary for a different question asked of a different reader. A package-wide envelope would
   settle it; there is not one (see below).
-- **Half the gap is still open.** `db:probe-replicas` and `db:replica-status` render tables and lines
-  with no machine-readable form. `db:doctor` was the one a release gate needed, which is why it went
-  first.
+- **The gap this record opened with is closed, and one difference is left on purpose.** When it was
+  written, `db:probe-replicas` and `db:replica-status` had no machine-readable form at all; both now
+  write the five keys `db:pgcat-flip` defines, from one class
+  ([command-json-envelope.md](command-json-envelope.md)). What remains is the name of the run's
+  verdict: `verdict` here, `kind` in the three command reports. See candidate F, and the bullet
+  below about adopting the shared envelope.
 
 ## What would change this decision
 
-- **If a shared package envelope appeared.** The health payload's `audit` block, the flip's object and
-  this one answer the same kind of question for different readers, and they now differ in ways that
-  are only defensible as local: `kind` versus `verdict`, `ok`/`degraded` versus `PASS`/`WARN`/`FAIL`,
-  a flat object versus one with a list in it. A package-wide envelope is the better home for the
-  vocabulary, and it would want one place that defines it — which is the same conclusion
-  [pgcat-flip-json.md](pgcat-flip-json.md) reached from the other end.
+- **If the three command reports' envelope became this one's too.** It partly has: `command`,
+  `exit_code` and a documented, bound key set are in all four objects, and the five keys themselves
+  are one class now ([command-json-envelope.md](command-json-envelope.md)). What a `kind` here would
+  still buy a gate is one name for the run's verdict across all four commands, and what it costs is
+  this record's candidate F: `verdict` is one word at two scopes on a doctor, and a row's `WARN`
+  making a run's `WARN` is the sentence it would have to keep. The health payload's own
+  `ok`/`degraded`/`misconfigured` is a third reading of the same question, for a poller rather than
+  a gate, and it is not a command report at all.
 - **If a second format were needed.** `--format` becomes the flag and `--json` an alias, as it would
   for the flip; the object's shape is what the decision is about.
 - **If the row set became variable in more ways.** A row that is only asked under some
@@ -277,3 +294,4 @@ and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails namin
 | `README.md` | the envelope, the sample object, the `jq` examples, and the verdict table |
 | `docs/documented-exit-codes.md` | the same idea one level up: documenting a code and enforcing it |
 | `docs/pgcat-flip-json.md` | the flip's object, whose flag, key-set rule and "the code travels inside it" this follows |
+| `docs/command-json-envelope.md` | the five keys as one class, shared with `db:probe-replicas` and `db:replica-status`, and why this object does not take them |

@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace Uak35\WeightedDbManager\Console\Commands;
 
+use Uak35\WeightedDbManager\Console\JsonEnvelope;
 use Uak35\WeightedDbManager\Pgcat\DryRunResult;
 use Uak35\WeightedDbManager\Pgcat\FlipResult;
+use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Illuminate\Console\Command;
-use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * php artisan db:pgcat-flip [options]
@@ -58,6 +59,22 @@ class DbFlipPgcatCommand extends Command
     public const KIND_REFUSED = 'refused';
 
     public const KIND_UNBOUND = 'unbound';
+
+    /**
+     * The evidence a flip's report carries, and the value an absent one takes — the envelope's
+     * rule, declared once instead of assembled per route.
+     *
+     * `mode` and `previous_mode` are the modes the run is about. `status` is the flipper's own
+     * `status()` array, not the table's substitutions: `(not set)` is how a table prints a `null`,
+     * and a machine has to be able to test a path for being unset without matching an English
+     * sentence. `steps` is a rehearsal's pipeline, and empty on every other route.
+     */
+    private const EVIDENCE = [
+        'mode' => null,
+        'previous_mode' => null,
+        'steps' => [],
+        'status' => null,
+    ];
 
     protected $signature = 'db:pgcat-flip
                             {--watch : Run continuously, polling every --interval seconds}
@@ -292,10 +309,86 @@ class DbFlipPgcatCommand extends Command
                 ['use_reload',        $s['use_reload'] ? 'yes (HUP signal)' : 'no (full restart)'],
                 ['state_file',        $s['state_file']],
                 ['lock_file',         $s['lock_file']],
+                ...$this->windowRows($s['window']),
             ],
         );
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The boot window as table rows — the four facts that answer "is this container going to be
+     * reported as failed, and why", read from the same block `/health/db` publishes.
+     *
+     * The rows are separate rather than one sentence because the interesting states are
+     * combinations: a window that is still open with no runs yet is a container two seconds into
+     * its life, a closed one with no runs is a scheduler that never fired, and a closed one with
+     * runs that converged is every healthy container in production. One line would have to
+     * collapse those, and this report exists to be read when they disagree.
+     *
+     * @param array<mixed> $window the `window` block of the status array, as it arrives
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function windowRows(array $window): array
+    {
+        if ($window === []) {
+            return [['flip_window', '(unavailable — no window block in the status array)']];
+        }
+
+        // Read through one small formatter rather than casting each value at the point of use:
+        // this is somebody else's array — `PgcatConfigFlipper::windowStatus()` — so a key that
+        // arrived with an unexpected type has to print the placeholder the rows document rather
+        // than `Array` in the middle of a sentence, and `is_scalar` is what makes the cast safe
+        // for the reader as well as for the analyser.
+        $text = static fn (mixed $value, string $fallback): string => is_scalar($value)
+            ? (string) $value
+            : $fallback;
+
+        $seconds = $text($window['window_seconds'] ?? null, '?');
+        $stamped = ($window['source'] ?? null) === FlipWindow::SOURCE_STAMPED;
+        $closed = ($window['closed'] ?? false) === true;
+        $converged = ($window['converged'] ?? false) === true;
+
+        $rows = [[
+            'flip_window',
+            $stamped
+                ? sprintf('%ss from boot (%s)', $seconds, $text($window['booted_at'] ?? null, '?'))
+                : sprintf('%ss configured, but no boot stamp was read — the window is not judged', $seconds),
+        ]];
+
+        $rows[] = ['flip_window_state', match (true) {
+            !$stamped => 'unknown (no boot stamp)',
+            $closed => is_string($window['deadline'] ?? null)
+                ? sprintf('closed at %s', $window['deadline'])
+                : 'closed',
+            default => sprintf('open — %ss left', $text($window['remaining_seconds'] ?? null, '?')),
+        }];
+
+        if ($closed) {
+            $rows[] = [
+                'flip_converged',
+                $converged
+                    ? sprintf(
+                        'yes at %s (mode %s)',
+                        $text($window['converged_at'] ?? null, '?'),
+                        $text($window['converged_mode'] ?? null, '?'),
+                    )
+                    : 'no — '.$text($window['failed_reason'] ?? null, 'the window closed without a usable mode'),
+            ];
+        }
+
+        $rows[] = [
+            'flip_runs',
+            sprintf(
+                '%s recorded (last %s at %s)',
+                $text($window['runs'] ?? null, '0'),
+                $text($window['last_kind'] ?? null, 'never'),
+                $text($window['last_run_at'] ?? null, 'never'),
+            ),
+        ];
+
+        return $rows;
     }
 
     private function match(string $kind, \Closure $noChange, \Closure $flipped, \Closure $skipped, \Closure $failed): void
@@ -303,7 +396,11 @@ class DbFlipPgcatCommand extends Command
         match ($kind) {
             FlipResult::KIND_NO_CHANGE => $noChange(),
             FlipResult::KIND_FLIPPED => $flipped(),
-            FlipResult::KIND_SKIPPED => $skipped(),
+            // A closed window is the flipper declining to act, not a run that went wrong: it did
+            // exactly what it was built to do at that point. Printed as a warning rather than as
+            // an error for that reason, and the container's failure is `/health/db`'s to report.
+            FlipResult::KIND_SKIPPED,
+            FlipResult::KIND_WINDOW_CLOSED => $skipped(),
             // KIND_FAILED, plus anything a newer version might write.
             default => $failed(),
         };
@@ -347,9 +444,9 @@ class DbFlipPgcatCommand extends Command
     }
 
     /**
-     * The run as one JSON object on stdout, and nothing else — written raw, so a detail that
-     * happens to contain angle brackets is not read as a console tag and dropped on the way
-     * out of a machine-readable channel.
+     * The run as one JSON object on stdout, and nothing else — written by `JsonEnvelope`, which is
+     * the same five keys in the same positions that `db:probe-replicas --json` and
+     * `db:replica-status --json` write, and the command's own evidence after them.
      *
      * The key set is fixed and always present, `null` or empty where a route has nothing for a
      * key, so a job can write `jq -e '.kind == "would_flip"'` without first asking whether the
@@ -366,24 +463,6 @@ class DbFlipPgcatCommand extends Command
      */
     private function report(array $payload, int $exitCode): int
     {
-        $this->output->writeln(
-            (string) json_encode(
-                [
-                    'command' => 'db:pgcat-flip',
-                    'kind' => $payload['kind'] ?? null,
-                    'exit_code' => $exitCode,
-                    'mode' => $payload['mode'] ?? null,
-                    'previous_mode' => $payload['previous_mode'] ?? null,
-                    'reason' => $payload['reason'] ?? null,
-                    'error' => $payload['error'] ?? null,
-                    'steps' => $payload['steps'] ?? [],
-                    'status' => $payload['status'] ?? null,
-                ],
-                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-            ),
-            OutputInterface::OUTPUT_RAW,
-        );
-
-        return $exitCode;
+        return JsonEnvelope::write($this->output, 'db:pgcat-flip', self::EVIDENCE, $payload, $exitCode);
     }
 }

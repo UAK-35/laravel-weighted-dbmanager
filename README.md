@@ -238,6 +238,7 @@ next to the `read` list being weighted.
 | `swrr.reader_days`               | —                              | `[1,2,3,4,5]`                | ISO-8601 days readers are allowed on; one day number, or an array of them (`'1,2,3'` as a single string is refused) |
 | `swrr.timezone`                  | —                              | `UTC`                        | Timezone for window evaluation                                                        |
 | `swrr.pgcat`                     | `SWRR_PGCAT_*`                 | *(see [Pgcat](#pgcat))*      | Pgcat flipper settings — **PostgreSQL connections only**                              |
+| `swrr.health.pinned_query`       | `SWRR_HEALTH_PINNED_QUERY`     | `true`                       | Whether `GET /health/db` runs one real query — `select 1` — on the connection the package follows before it is allowed to answer `ok` (see [Health endpoint](#health-endpoint)). Read as a **switch**; a value that is not one resolves to the documented default — on — and is reported as `pinned.refused`. Turn it off only where no database exists behind that connection at all — a test fixture, a configuration inspection — because with it off the endpoint's status is the state store's again, and `pinned.checked` is `false` |
 
 The sample sets two weekday windows — `10:00–14:20` and `17:00–20:30`, read
 in `swrr.timezone` (UTC) — so reads are served by the weighted replica pool
@@ -646,9 +647,10 @@ the Redis provider registered.
 
 ## Health endpoint
 
-The package ships `DatabaseHealthController`, which reports per-connection replica
-weights, share %, health, the active formula, store state and whether pgcat
-flipping is active. Route it yourself and protect it:
+The package ships `DatabaseHealthController`, which runs one real query on the
+connection it follows and reports that connection's replica weights, share %, health,
+the active formula, store state and whether pgcat flipping is active. Route it
+yourself and protect it:
 
 ```php
 use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
@@ -657,13 +659,87 @@ Route::get('/health/db', [DatabaseHealthController::class, 'index'])
     ->middleware('auth.basic');
 ```
 
-Alongside the per-connection `replicas` map it carries one `pgcat` block — the same
+### It is about one connection: the one the package follows
+
+The subject is `db-manager.swrr.connection` — else `database.default` — resolved once for the whole
+payload, so the connection summarised and the connection queried are the same name, and it is the
+same name the pgcat gate, the flipper, `db:replica-status` and `db:doctor` read. It is deliberately
+*not* every key of `database.connections`: a host application with eight profiles does not have
+eight weighted connections, and seven of them are not this package's to report on. Walking that
+list also made the endpoint's own status depend on them — each connection with a declared `read`
+list was probed with `getPdo()`, so a replica behind any *other* profile that did not answer turned
+a healthy followed connection into a `degraded` payload, and a monitoring rule on `status` paged for
+a database the package has nothing to do with.
+
+Two fields answer "which connection is this about": `pinned.connection`, and `pinned.source` — the
+config key the name came from, so an operator can tell an installation that named one from the
+package falling back. `replicas` keeps its shape (a map keyed by connection name) and now holds
+that one entry, so a gate reading `.replicas.<name>` is unaffected. To ask about a connection the
+package does not follow, ask the command that takes one: `php artisan db:replica-status
+{connection=…}`.
+
+### The status is a query, not a store
+
+Every other field of this payload is a reading — of configuration, of the weighted
+resolver's bookkeeping, of the state store — and all of them can be well while the
+database is not. The endpoint was observed answering `200 "status":"ok"` with every
+`replicas` array empty, because the connection it follows declares no `read` list for
+the replica probe to open, while application queries were failing with
+`SQLSTATE[08006]`. A Redis store that answers is not a database that answers, and a
+deploy gate promoting on it is promoting on the wrong fact.
+
+So the controller runs one statement — `select 1` — on the connection
+`ActiveConnection::resolve()` names (`db-manager.swrr.connection`, else
+`database.default`, the same call the pgcat gate and `db:doctor` make), through the
+application's own path, so a failure is the failure a request would have had. The
+answer is the `pinned` block, `status` is `ok` only when it came back, and the block
+carries the connection, its driver, the config key the name came from, the query, the
+latency, and the driver's own error when there is one:
+
+```json
+{
+    "status": "degraded",
+    "pinned": {
+        "connection": "pgsql_proxy",
+        "driver": "pgsql",
+        "source": "db-manager.swrr.connection",
+        "query": "select 1",
+        "checked": true,
+        "refused": null,
+        "ok": false,
+        "latency_ms": 48.41,
+        "error": "SQLSTATE[08006] [7] connection to server at \"localhost\" (::1), port 5432 failed: fe_sendauth: no password supplied (Connection: pgsql_proxy, SQL: select 1)"
+    }
+}
+```
+
+`swrr.health.pinned_query` turns the query off — its default is on, and `checked` is
+what says whether it ran: `false` with `ok: null` means *no query was asked*, which is
+a different statement from *the query passed*, and anything reading this endpoint as a
+signal should read that flag rather than the status. A switch written as something that
+is neither on nor off resolves to the default and is reported as `refused`, so a typo
+cannot be what silences the check. On a large installation the query is one statement on
+one connection per poll, which is the cost this endpoint is worth: the alternative is a
+load balancer promoting a revision that cannot reach its database.
+
+Alongside it the payload carries one `pgcat` block — the same
 snapshot `db:replica-status` prints and `db:pgcat-flip --status` shows, so the three
 cannot disagree about whether flipping is active:
 
 ```json
 {
     "status": "ok",
+    "pinned": {
+        "connection": "pgsql",
+        "driver": "pgsql",
+        "source": "database.default",
+        "query": "select 1",
+        "checked": true,
+        "refused": null,
+        "ok": true,
+        "latency_ms": 1.21,
+        "error": null
+    },
     "replicas": {
         "pgsql": {
             ".": "."
@@ -726,6 +802,10 @@ two kinds of finding is one field:
 | ticket — a setting reads as on but cannot act | `severity == "warning"` |
 | the audit stopped reporting | `available == false` |
 
+The rest of it — the same three rules as paste-able patterns, what a load balancer's status
+code does and does not cover, and how to tell an installation's fault from the package's once
+a page has fired — is in [Alerting: a cookbook](#alerting-a-cookbook).
+
 `counts` carries the same distinction per level, with both keys always present so a rule
 can be written as `counts.error > 0` rather than as a lookup that might be missing. Levels
 are compared exactly: the audit logs at two of them, and anything else in a hand-edited
@@ -749,15 +829,21 @@ The decision, and the seven shapes it was weighed against, are in
 `available` is `false` when no record could be read, and `error` — present either way,
 `null` whenever the record was read — says which of the two that was: `null` with
 `available` `false` means the package's provider is not registered, and a set `error` means
-the file could not be read. Neither is a claim about the installation, so the summary stays
-`severity: none`.
+the file is there and is not a record. The message names the file and what is wrong with it
+(`…/audit.json is not JSON (Syntax error)`, `…/audit.json is empty`, `…/audit.json does not
+hold a map of findings`), because an operator who is told only "unreadable" has been sent to
+a file to guess. Neither is a claim about the installation, so the summary stays
+`severity: none` — nothing is *known* to stand rather than nothing being wrong.
 
 The same list is printed by `db:replica-status`, so a misconfiguration is visible from
 a terminal as well as from a dashboard — and both surfaces render one accessor,
 `BootAudit::reported()`, so they cannot disagree about the record either, including when
 there is none: the command prints `Audit: not registered` where the payload answers
-`available: false` with `error: null`, instead of the silence that used to leave "no audit
-installed" and "an audit with nothing to say" indistinguishable in a terminal. It
+`available: false` with `error: null`, and `Audit: unreadable — <file> is not JSON …` where
+the payload answers with a set `error`, instead of the silence that used to leave "no audit
+installed" and "an audit with nothing to say" indistinguishable in a terminal. A record that
+cannot be read is not rounded into "nothing standing" either, which would have been the one
+answer the file contradicts. It
 deliberately does not move this endpoint's
 `status`: a configuration that cannot act is not the same claim as a database that
 cannot answer, and whatever polls this route should keep believing the second one.
@@ -795,7 +881,104 @@ sentence:
 
 A flipper that cannot act does **not** make the endpoint unhealthy — on MySQL there
 is nothing to flip, so `status` stays `ok` — and when the provider is not registered
-the block is `null`.
+the block is `null`. Neither does the boot audit: a configuration that cannot act is not
+a database that cannot answer. The query above is the only field that decides the status,
+which is why the endpoint is safe to point a deploy gate at.
+
+## Alerting: a cookbook
+
+Nothing here pages anybody by itself: `severity`, `status` and the blocks around them are
+readings, and the alert is the application's to write, because only the application knows who
+should be woken. This is the whole of it — the comparisons to paste, and the one question a
+page has to answer before anything is done about it.
+
+### The log: three rules, written against the payload
+
+Every line the boot audit writes carries `severity` — the level it was written at — and
+`finding`, the setting it is about, in the payload beside the message. So a rule selects on
+the payload rather than on the message, and rather than on whatever the channel calls its
+level. Under a JSON handler the line is:
+
+```json
+{"message":"[WeightedDB] reader_windows[0] is \"10:00-14:20\". Refused: …","context":{"severity":"error","finding":"swrr.reader_windows.refused"}}
+```
+
+| what to do | the condition | what it means |
+|---|---|---|
+| page | `severity == "error"` | a value the package refused to interpret is standing: the installation is running without it |
+| ticket | `severity == "warning"`, no `resolved` | a setting that reads as on but cannot act |
+| stop the page | `severity == "warning"`, `resolved == true` | the finding cleared — the line the pager stops on. It is logged on every boot while it stands, so the last line per `finding` is the state, and no other state is needed |
+
+The two patterns below are the same rule, and which one applies is the handler's shape: a
+JSON channel makes the payload the line, while the default line handler appends it, so there
+the rule is a substring match. The substring is also the one you can test by hand:
+
+```
+{ $.context.severity = "error" }                  # CloudWatch metric filter, JSON channel
+{app="api"} | json | context_severity="error"     # Loki — the JSON parser flattens context
+```
+
+```sh
+grep -c '"severity":"error"' storage/logs/laravel.log    # the page, default line handler
+grep -c '"resolved":true' storage/logs/laravel.log       # and the clears
+```
+
+### The endpoint: the status code, then the six things it does not cover
+
+Point a load balancer, an ECS health check or a deploy gate at the route and read the status
+code: `200` means the one real query on the pinned connection answered, `503` means it did
+not. Nothing else in the payload moves it, deliberately — which is what makes the route safe
+to gate on, and also why everything else has to be its own rule. The first row below is the
+status code's own fact, spelled out again because a rule that reads it can say *why*:
+
+| the rule | what it means | what to do |
+|---|---|---|
+| `pinned.checked == false` | the query is switched off (`swrr.health.pinned_query`), so the status code is answering a question nobody asked | ticket: a monitor believes this route is protected when it is not |
+| `pinned.ok == false` | the connection cannot answer — the status code says this too, but a rule that reads it can name the driver's own `error` | page |
+| `replicas.*.degraded == true` | this worker is serving reads from the in-process store: its rotation is no longer shared with its siblings | page |
+| `replicas.*.store_healthy == false` | the primary store is unhealthy — reads are falling back, one pick at a time | page |
+| `audit.severity == "error"` | a refused value is standing: the same comparison as the log rule, polled instead of streamed | page |
+| `audit.available == false` | nothing could be read at all — `error` null is a provider that is not registered, a set `error` is a record that is not a record | ticket / page, and the next table says which |
+| `pgcat.mismatch == true` | flipping is armed where it can never act: there is no pool to swap | ticket |
+
+The whole of it as one gate, for a cron job, a sidecar or a deploy step. `curl` without
+`--fail`, because the body is what the rules read — and the audit is left out on purpose rather
+than by omission, which is the one commented line:
+
+```sh
+curl -sS "$HEALTH_URL" | jq -e '
+  .pinned.checked and .pinned.ok
+  and ([.replicas[].degraded] | any | not)
+  and ([.replicas[].store_healthy] | all)
+  and (.pgcat.mismatch != true)
+  # and (.audit.severity != "error")   # a page, not a reason to hold a deploy
+'
+```
+
+With no monitor at all, the same facts are on the terminal: `php artisan db:replica-status`
+prints the store state and the audit list, and `php artisan db:doctor --strict` is a release
+gate that exits non-zero on any row that warns or fails.
+
+### The page: the installation's fault or the package's?
+
+A refused value and a defect in the package both arrive at `severity: "error"` — deliberately,
+because a defect nobody reports is worse than a page somebody triages. Triage is mechanical,
+and it is three fields: a `finding` key names an owner, and the payload either carries a
+setting's own evidence or the two keys that mean something else happened.
+
+| what arrives | how you know | whose it is |
+|---|---|---|
+| a `swrr.*` setting was refused | the message quotes the value, and the context carries neither `levels` nor `discarded` | the installation's: the fix is `config/db-manager.php` |
+| "Two findings this boot share the key …" | the context carries `levels` — two branches of the package produced one key | the package's: no configuration can repair it, and the record keeps the louder of the two |
+| "The audit record changed while this boot was running …" | the context carries `discarded` and `keys_on_disk` | the file's: two boots wrote one `swrr.audit.file`, so the entry is lost rather than wrong |
+| `audit.available: false` with `error` set | the message names the file and what is wrong with it (`… is not JSON (Syntax error)`, `… is empty`, `… does not hold a map of findings`) | the installation's: a path, a permission, or half a write |
+| `audit.available: false` with `error: null` | there is no record and no reason — nothing was read because nothing is registered | the installation's: the package's provider is not registered |
+| a line with **no** `finding` key | `[WeightedDB] Degraded to the in-process SWRR store.` and its siblings, which carry `connection`, `store` and a `reason`/`error` instead | the store's: no boot audit is involved, and this is the degradation described above |
+
+A refused value is the only row whose repair is a configuration change, and the repair is
+reported rather than inferred: the record keeps a finding until a boot stops reporting the key,
+and that boot logs the resolution at `warning` with `resolved: true` — so the page on a setting
+closes itself, and a page that never closes is a defect or a file.
 
 ## Artisan commands
 
@@ -803,21 +986,113 @@ All four are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| `php artisan db:doctor {connection=pgsql} [--strict] [--json]`               | Preflight: check an installation end to end before traffic arrives                                            |
-| `php artisan db:replica-status {connection=pgsql}`                           | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
-| `php artisan db:probe-replicas {connection=pgsql}`                           | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
+| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path]` | Preflight: check an installation end to end before traffic arrives — or vet one config file before it is installed |
+| `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
+| `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL |
 
 ```php
 // routes/console.php
 Schedule::command('db:probe-replicas')->everyThirtySeconds()->withoutOverlapping()->runInBackground();
-Schedule::command('db:pgcat-flip')->everyMinute()->withoutOverlapping(60)->runInBackground();
+
+// The flipper is container-local — it replaces /etc/pgcat/pgcat.toml and talks to the
+// supervisord in its own container — so its overlap protection has to be per container
+// too, and two Laravel conveniences are wrong here:
+//
+//   * `onOneServer()` would let exactly one container flip per minute and skip every
+//     other, leaving the rest running a configuration nobody maintains;
+//   * the mutex `withoutOverlapping()` names by itself is `sha1(expression + command)`,
+//     which is the *same name in every container* when the cache store is shared — so
+//     one slow container holds the lock for all of them.
+//
+// `createMutexNameUsing()` scopes the name to the container. The authoritative
+// serialisation is still the flipper's own `flock` on `swrr.pgcat.lock_file`, which is
+// container-local and needs no shared cache: a concurrent run returns `skipped` rather
+// than queueing. Not `runInBackground()` for the same reason it is not for a doctor run —
+// a failure belongs in the schedule's own log, not in a detached process nobody reads.
+Schedule::command('db:pgcat-flip')
+    ->everyMinute()
+    ->withoutOverlapping(2)
+    ->createMutexNameUsing(fn (): string => 'framework/schedule-pgcat-flip-'.gethostname())
+    ->appendOutputTo(storage_path('logs/scheduled_tasks/pgcat_flip.log'));
 ```
 
 Each probe opens a throwaway single-host connection (the pooled `read`/`write`
 lists are stripped) and purges it afterwards, so probing never feeds the weighted
 pool it is measuring. Diagnostics go to the replica's own `host:port` key, the
 same key `WeightResolver` uses.
+
+### How long the flip keeps trying: the boot window
+
+The flip is scheduled every minute and stops at the end of a window measured from the
+container's own boot — `swrr.pgcat.flip_window_seconds`, 480 (eight minutes) by default.
+Without a bound, a pooler that will never come up is retried every minute for as long as the
+container lives, and a container nobody replaced looks busy instead of broken.
+
+Eight is the number the window is chosen in: ECS reports a healthy container within six or seven
+minutes of task start, so the window must not close before that, and eight per-minute attempts is
+far more than the first or second attempt a working flip needs. By the end of it the container has
+either flipped to the writer-only configuration — the database that is always up — or the pooler
+cannot be made to serve at all, and one more attempt cannot tell those apart.
+
+- **Where the clock starts.** A file `entrypoint.sh` writes before the pooler is started, holding
+  `date +%s` (`swrr.pgcat.boot_file`). Deliberately not the PHP process start, which is a different
+  moment for every Octane and queue worker, and not "when the first flip ran", which cannot happen
+  at all if the schedule is the thing that is broken.
+- **What stops.** At the deadline `db:pgcat-flip` returns `window_closed` and exits `0` without
+  reading, writing, running or recording anything — the run did what it should have, and a
+  scheduler must not see an error line every minute forever.
+- **What fails.** `/health/db` reports `flip.failed: true` (HTTP 503) when the window closed and no
+  run inside it reached a usable mode, and it logs the failure with the window beside it. The
+  `reason` names which of the three ways it failed, because the repairs differ: the flip never ran
+  (`db:pgcat-flip` is not scheduled, or cannot reach the flipper), every run inside the window
+  failed (the pooler is the problem), or the flip only converged after the window had closed (the
+  container was too slow).
+- **What does not fail.** A window that is still open, a container with no boot stamp at all
+  (`window.source: no_stamp` — a local run, or an image whose entrypoint predates the stamp), and
+  an installation where pgcat does not apply. `db:pgcat-flip --status` prints the whole window as
+  `flip_window` / `flip_window_state` / `flip_converged` / `flip_runs` rows, and `--status --json`
+  carries it under `status.window`, so the same four facts are readable without an HTTP endpoint.
+
+The window says nothing about `--dry-run`: a rehearsal answers what a flip *would* do, and a
+container that has stopped flipping is exactly the container a deploy wants to rehearse against.
+
+### Reading the distribution: `db:replica-status`
+
+Prints each weighted replica's host, port, CPU cores, RAM, resolved weight, share of reads, health
+and failure count — then the formula in force, the pool cache size, the store backend and whether
+it is healthy, pgcat's state, and the boot audit's standing findings. Nothing it prints moves an
+exit code: it reports, and `db:doctor --strict` is the gate.
+
+`--json` writes the same run as one object, in the envelope `db:pgcat-flip` and
+`db:probe-replicas` write: the command, the verdict, the exit code, and the evidence after them.
+The evidence is the manager's own `healthSummary()` under `status`, the flipper's under `pgcat`,
+and the audit's block under `audit` — the last two are the same arrays `/health/db` embeds under
+the same two names, so a job reading a terminal report, a saved one and the endpoint is reading
+one vocabulary:
+
+```bash
+php artisan db:replica-status weighted --json > distribution.json
+jq -e '.kind == "distribution" and .exit_code == 0' distribution.json
+jq -e '.status.degraded == false and .status.store_healthy' distribution.json
+jq -e '[.status.replicas[] | select(.healthy == false)] | length == 0' distribution.json
+jq -e '.audit.available and .audit.count == 0' distribution.json
+```
+
+| `kind`         | what it means                                              | exit |
+|----------------|------------------------------------------------------------|------|
+| `distribution` | the weighted replicas were read                            | `0`  |
+| `no_replicas`  | the connection has no weighted read replica to describe    | `0`  |
+| `unbound`      | the container has no weighted manager, so nothing was read | `1`  |
+
+Degradation is a field rather than a verdict: `status.degraded` says the primary store is down and
+reads are being served from this process's own store, and the command still exits `0` — the number
+is not what a deploy should branch on, the field is.
+
+Every route is reported, including the two that found nothing to describe, and the
+`README`'s table is bound the same way the other commands' tables are:
+`DbReplicaStatusTest::test_every_json_kind_is_documented_with_its_exit_code` reads it and asserts
+that the kinds a run can reach are exactly the kinds written here, with the code each one exits.
 
 ### Probing: `db:probe-replicas`
 
@@ -844,6 +1119,32 @@ answered: 2 probed, all failed …` is reachability.
 which is what routing does with it. Reading it as nothing would make the command
 exit `1` every thirty seconds on an installation whose single replica is serving
 fine, and an exit code that is always non-zero is an exit code nobody reads.
+
+`--json` writes the same sweep as one object, in the envelope `db:pgcat-flip` and
+`db:replica-status` write — and the per-replica rows `-v` prints are its `replicas`, so `--json -v`
+is one object rather than two channels. The counts are of the replicas the sweep attempted, and a
+*partial* sweep is still `answered`, which is the asymmetry the exit table documents: the object
+says which replica failed and why, and the code says whether the run did its job.
+
+```bash
+php artisan db:probe-replicas weighted --json > sweep.json
+jq -e '.kind == "answered" and .exit_code == 0' sweep.json
+jq -e '[.replicas[] | select(.healthy == false)] | length == 0' sweep.json
+jq -e '.counts.probed == (.counts.answered + .counts.failed)' sweep.json
+```
+
+| `kind`            | what it means                                                    | exit |
+|-------------------|------------------------------------------------------------------|------|
+| `answered`        | at least one replica answered — a partial sweep is still this     | `0`  |
+| `no_read_list`    | the connection has no `read` list at all                          | `0`  |
+| `no_replica_maps` | no entry in `read` is a replica map, so nothing could be probed   | `1`  |
+| `none_answered`   | every replica failed                                              | `1`  |
+| `unbound`         | the container has no weighted manager, so there was no sweep      | `1`  |
+
+The kinds are the cases the exit table above documents, one to one — a case that exits differently
+has to be a different verdict, or `kind` would be a word a scheduler cannot branch on — and
+`DbProbeReplicasCommandTest::test_every_json_kind_is_documented_with_its_exit_code` reads this
+table back to assert exactly that.
 
 Every row is pinned by
 `DbProbeReplicasCommandTest::test_the_exit_code_is_a_function_of_what_the_sweep_reached`,
@@ -872,8 +1173,8 @@ the application still boots and answers requests, and each one is a row:
 | `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value) |
 | `pgcat gate`         | `swrr.pgcat.enabled` is on where pgcat cannot act, or armed while a path a flip needs is unset. Reads the boot record as well as this boot's verdict, so it also fails with the age of a mismatch an earlier boot recorded, and warns when one is on record for a connection this run does not inspect. Prints `swrr.pgcat.enabled = false` as a `suggestion` for the switch armed where pgcat cannot act, and nothing for the other two failures: the paths it names are this installation's to choose |
 | `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. The only row that never prints a `suggestion`: every problem here is a path or a permission, and the right value is whatever this installation's pgcat and supervisor actually use |
-| `pgcat supervisor`   | the flipper is armed and the command it runs *after* the swap cannot work: its executable does not resolve for this user (not an absolute path, not on `PATH`), the program name is an unquoted glob the shell may rewrite, supervisorctl cannot answer, or supervisor does not know the program. Read-only: the only command it runs is the flip's own with `status` in the verb position. Prints the setting line to paste as a `suggestion` for the two faults that reduce to a command — an unquoted program name, and a command left empty — and nothing for the rest, which are repaired in a `PATH`, a running supervisord or a `[program:]` section |
-| `replica metadata`   | *fails* when a replica's `weight`/`cpu_cores`/`ram_gb` is a value the resolver does not read as written — not a number, or a number under the floor that key is read at — naming the replica and what the resolver reads instead. A weight it cannot read is read as `0`, and `0` is how a replica is disabled, so that replica leaves the pool: without this the row reports the smaller pool as the installation. Also names a replica disabled with `weight: 0`, which is a choice and does not fail. *Warns* when the replicas carry no metadata at all, so the resolver picks at random while the table still looks weighted |
+| `pgcat supervisor`   | the flipper is armed and the command it runs *after* the swap cannot work: its executable does not resolve for this user (not an absolute path, not on `PATH`), the program name is an unquoted glob the shell may rewrite, supervisorctl cannot answer, or supervisor does not know the program. Read-only: the flip's own command with `status` in the verb position, plus — only when supervisor does not know the program, the one fault whose repair is a name — the bare `supervisorctl status` that lists what supervisord is running, whose nearest names the row then reports. Prints the setting line to paste as a `suggestion` for the two faults that reduce to a command — an unquoted program name, and a command left empty — and nothing for the rest, which are repaired in a `PATH`, a running supervisord or a `[program:]` section; an unknown program is named in the row's sentence rather than printed as a line, because a near miss is a ranked answer and a `suggestion` is a value a gate may apply without reading it |
+| `replica metadata`   | *fails* when a replica's `weight`/`cpu_cores`/`ram_gb` is a value the resolver does not read as written — not a number, or a number under the floor that key is read at — naming the replica and what the resolver reads instead. A weight it cannot read is read as `0`, and `0` is how a replica is disabled, so that replica leaves the pool: without this the row reports the smaller pool as the installation. Also names a replica disabled with `weight: 0`, which is a choice and does not fail. The pool's own arithmetic comes from the resolver rather than from this row: `replicaStatus()` is the pool, `poolExclusions()` is what it does not hold and why, and the two partition the read list. *Warns* when the replicas carry no metadata at all, so the resolver picks at random while the table still looks weighted |
 | `switch values`      | **Fails** when `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` or `swrr.allow_local_fallback` is written as something that is not on or off — `'false'`, `'off'` and `'no'` are how off is written, and a cast reads every one of them as *on*, which on the pgcat switch arms the file swap. The row quotes the value, quotes the accepted spellings, and names the value the setting falls back to. Names **every** switch it refuses rather than the first, and dates each from its own finding in the boot record. Nothing is suggested: re-spelling `'flase'` would be guessing at what was meant |
 | `reader windows`     | `swrr.reader_windows` holds an entry that is not a window — the flat `'10:00-14:20'` is the one everyone writes first — or is not a list of windows at all, or `swrr.reader_days` is not a list of day numbers — `'1,2,3'` written as one string is the same mistake one key over. **Fails** on both, naming the entry and quoting the shape the setting reads: reading a typo as "nothing" is what inverts the setting, so the package refuses it instead. *Warns* on the three ways a well-formed setting still cannot act — an empty day list (permissive), days outside 1…7 (the pool is never used), and windows whose start is not before their end (never entered). When the refused value names its own replacement — the flat string, `'1,2,3'` — the row also prints the setting line to paste as a `suggestion` under it. Names **every** problem it finds rather than the first, and dates each from its own finding in the boot record |
 | `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them |
@@ -994,12 +1295,14 @@ inspect, the row warns instead of passing silently, and `--strict` fails it.
 `replica metadata` is the row whose question is easiest to get wrong. It is not "does
 this installation look weighted" — a replica with `'weight' => 'heavy'` looks weighted
 and is not — but "is the pool the read list describes". The pool is what the resolver
-*kept*, and the resolver reads a weight through `max(0, ConfigValue::int(…))` and a core
-count through `max(1, …)`, so a value that is not a number becomes 0 — which is exactly
-how a replica is switched off. An installation whose weight was a typo therefore lost
-that replica from the pool without a word, and the row used to report the pool that was
-left: a count short by one, with nothing to say which replica went or why. It now reads
-the *configured* replicas and fails, naming each one and the value:
+*kept*, and the resolver reads each setting at a floor declared once —
+`ReplicaMetadata::WEIGHT_FLOOR`, `CORES_FLOOR` and `RAM_FLOOR`, the arguments its own
+`max()` reads — so a value that is not a number is read as the floor for its key, and for
+a weight that floor is 0, which is exactly how a replica is switched off. An installation
+whose weight was a typo therefore lost that replica from the pool without a word, and the
+row used to report the pool that was left: a count short by one, with nothing to say which
+replica went or why. It now reads the *configured* replicas and fails, naming each one and
+the value:
 
 ```
 FAIL  replica metadata    replica metadata the resolver cannot read on [pgsql]:
@@ -1016,10 +1319,44 @@ because the resolver substitutes rather than drops it (`cpu_cores` becomes one c
 which *is* the documented disable: that replica is meant to be absent, so the row passes —
 and names it, because a pool reported as "1 replica, total weight 10" on an installation
 with two is the same quiet shrink through the front door. The rule is the resolver's own
-arithmetic rather than a restatement of it, which is what makes a negative weight, a
-`weight: 0.5` that truncates to 0, and a `weight: null` all reportable;
+arithmetic rather than a restatement of it — its floors included, since the row reads them
+from the same three constants the resolver clamps at, so a boundary that moved fails a test
+rather than a routing decision — which is what makes a negative weight, a `weight: 0.5`
+that truncates to 0, and a `weight: null` all reportable;
 `docs/replica-metadata-refusal.md` records which values are refused, which are named, and
 why `weight: true` is left alone.
+
+The same value is refused **at boot**, which is the half that was missing: the row answers
+when somebody runs a preflight, while the replicas are read when the process reads its
+configuration, usually long before anyone looks. Every boot reads the configured metadata
+through the same rule the row does — one class, so a log line and a preflight cannot describe
+the same value two ways — and a value the resolver does not read as written is logged at
+`error` level, remembered, and reported with the other findings under one key per setting:
+`database.read.weight.refused`, `database.read.cpu_cores.refused` and
+`database.read.ram_gb.refused`. One key each, because the three read differently and cost
+differently — the weight is the one that removes a replica from the pool, and its sentence
+says so, while a core count and a memory figure leave the replica there, sized as something
+the read list does not describe. The keys are the setting's own path
+(`database.connections.*.read.*.weight`) rather than one of the `swrr.*` names, because the
+read list belongs to the connection and that is what an operator greps for; which connection
+the package followed is in the finding's context. Nothing is repaired and nothing throws —
+the value is still read exactly the way the resolver reads it — so an installation with a
+typo boots and serves, and what has changed is that the shrink is no longer silent:
+`/health/db` reports `severity: "error"` for it, and the finding closes out on the boot that
+reads a readable value, whether it was fixed, dropped from the read list, or removed with the
+whole list.
+
+What the refusal *costs* the pool is no longer predicted by anything. The resolver is the thing
+that builds it, so it reports the replicas it did not use and the reason for each —
+`resolveWithExclusions()`, whose `pool` and `excluded` partition the read list — and
+`poolExclusions()` is the manager's read of it: the other half of `replicaStatus()`, deliberately
+without a health filter, because which replicas are out of rotation *right now* is the health
+monitor's to report per replica. So the row can say which replica left and why instead of
+comparing lengths, and the read path's own warning on an empty pool names the replicas it was
+about rather than saying "all replicas" into a log with no other evidence in it. The three
+reasons are `refused` (a weight the package will not read), `disabled` (`weight: 0`, which the
+read list means) and `filtered` (the caller's health filter, for that call only). That decision
+is in [docs/pool-exclusions.md](docs/pool-exclusions.md).
 
 `reader windows` answers a configuration typo rather than a configuration gap. An entry
 that is not an array — the flat `'10:00-14:20'` — used to be dropped in silence, which
@@ -1098,19 +1435,30 @@ FAIL  pgcat supervisor    a flip would run supervisorctl signal HUP pgcat:*, but
 FAIL  pgcat supervisor    supervisor does not know "pgcat:*": pgcat:*: ERROR (no such
                           group). The name has to match what supervisord runs: a group
                           called pgcat is addressed as "pgcat:*", a single program by
-                          its own name — a flip refuses before it swaps the file, so
-                          nothing is replaced and no mode is recorded
+                          its own name. supervisorctl status says supervisord runs 2
+                          program(s): pgcat_x:pgcat_00, pgcat_x:pgcat_01 — the closest
+                          are "pgcat_x:pgcat_00", "pgcat_x:pgcat_01", which are the
+                          names to write, or the whole group "pgcat_x:*" — a flip
+                          refuses before it swaps the file, so nothing is replaced and
+                          no mode is recorded
 ```
 
 The first of those two carries a `suggestion` and the second does not, which is the whole rule
 in one screen: the unquoted name reduces to a command the package can write down exactly (and
 names the key a flip reads — `reload_command` here, because `use_reload` is on), while "the
-program supervisor does not know" is repaired in supervisord's own `[program:]` sections. The
-row states the fault either way, and the file is not swapped either way.
+program supervisor does not know" is repaired somewhere the package cannot write down. It
+can name that repair's *candidate*, though: a name is what this fault costs, so the row asks
+supervisor the one question that answers it — what it is running at all — and reports the
+programs nearest the configured name, nearest first. The line stays absent because a close
+name is a ranked answer for a reader, and a `suggestion` is a value a gate may apply without
+reading it. The row states the fault either way, and the file is not swapped either way.
 
 The row asks supervisor rather than guessing, and asks it read-only: the command it runs
 is the flip's own with `status` in the verb position, `supervisorctl status "pgcat:*"`,
-so nothing is restarted or signalled. The command itself comes from
+so nothing is restarted or signalled. When that answer is `no such group`/`no such
+process` — the fault whose repair is a name — it asks once more, `supervisorctl status`
+with no program, which lists every program supervisord is running; nothing else ever runs
+that second command, so a command that works costs one process as before. The command itself comes from
 `PgcatConfigFlipper::supervisorCommand()`, the method `swap()` uses, so the row cannot
 describe a different command than the flip performs — including which of the two it
 picks: the reload command when `use_reload` is true, the restart command otherwise.
@@ -1266,12 +1614,66 @@ platform that ran it; assert on `name`, `verdict` and `exit_code`, which are the
 `--json` changes the report and nothing else: the same checks run, the code is the one `gateFailed()`
 computed, and nothing is written either way. It composes with `--strict`, which is how a pipeline will
 pass it, and there is no combination to refuse — a doctor is not a daemon, so a report cannot be
-untrue of the run that produced it. The verdicts above are read back out of this table by
+untrue of the run that produced it. Every key a gate selects on is the same in both modes; the only
+difference is the pair that names the *subject* — `connection` and `default_connection` for a run of an
+installation, `config_file` for a run of a file (see below). The verdicts above are read back out of this table by
 `DbDoctorTest::test_every_json_verdict_is_documented`, the same guard the flip's kind table has, so a
 verdict cannot be introduced without documenting it or documented without something producing it. The
 decision — including the three candidates it shares with the flip's record, and the two that are the
 doctor's own, a rows-free envelope and a per-row exit code — is in
 [docs/db-doctor-json.md](docs/db-doctor-json.md).
+
+### Vetting a config before it is deployed: db:doctor --config-file
+
+A deploy that changes `config/db-manager.php` has one moment the preflight above cannot serve: the
+branch's config is a candidate, and the configuration installed on the host is the *old* one. Every
+row of the preflight is a question about a running installation — which provider binds `db`, whether
+the gate can act, whether the files exist, what the replicas weigh, whether the store answers — and one
+run against a candidate on a host running the incumbent would answer all of them about the incumbent
+and print the candidate's name above them.
+
+`--config-file=path` asks the other question. It reads one `config/db-manager.php`, reports the values
+the package would *refuse* in it — the switches, and the reader windows and days — and exits `1` if
+there are any, so a pipeline can fail the build before anything is deployed with that file:
+
+```bash
+php artisan db:doctor --config-file=config/db-manager.php
+php artisan db:doctor --config-file=config/db-manager.php --json | jq -e '.exit_code == 0'
+```
+
+```
+Config file vetted: config/db-manager.php — the values it would be refused for, read without the installation
+
+PASS  config file         config/db-manager.php read as an array holding a "swrr" block — its switches and reader settings are judged below
+FAIL  switch values       swrr.pgcat.enabled is "flase" — a switch is on or off — true/false, 1/0, or the strings '1'/'0', 'true'/'false', 'on'/'off', 'yes'/'no'. Refused: the switch falls back to off — the value this setting documents — so the flipper is inert and no pgcat file is swapped.; swrr.pgcat.use_reload is "maybe" — …; swrr.allow_local_fallback is "nope" — …
+FAIL  reader windows      swrr.reader_windows is "10:00-14:20", not a list of windows — each window must be an array like ['start' => '10:00:00', 'end' => '14:20:00'] — a string such as '10:00-14:20' is not a window. Refused: nothing is left to apply, so reads use the replica pool at every hour.; swrr.reader_days is "1,2,3", not a list of days — …
+      suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]
+      suggestion          swrr.reader_days = [1, 2, 3]
+
+3 checks: 1 passed, 0 warnings, 2 failed
+A value in this file would be refused: a boot of it runs on the defaults, and logs the refusals above.
+```
+
+It is not a quieter doctor, it is a different subject: read the file and nothing else. No container
+binding, no `db-manager` repository, no boot audit, no database and no Redis are touched — the store is
+never probed, there is no provider row to pass, and the mode answers even when the package cannot boot
+at all. The rows it does print are the same rule the installation rows apply, from the same classes
+(`Support\SwitchValue`, `Support\ReaderWindows`/`ReaderDays`, and the flipper's own reader for its two
+switches), so a value this mode passes is a value the next boot will not refuse. Nothing is dated: a
+boot record holds findings about the installation, and the candidate has never been booted.
+
+What it reports is the **refusals** — the values the package will not read. The rest of what `reader
+windows` says on a running installation, "this reads as a window but can never be entered", needs the
+resolver built over the value, and the switch warnings need the boot: `db:doctor --strict` on a real
+deployment is where those fail a pipeline. The line is drawn there rather than at "anything a file can
+be asked" so the mode stays honest about what it has not looked at.
+
+The three rows are `config file` (readable, an array, a `swrr` block, and nothing printed while it was
+read — a config file that echoes is a warning, because `config:cache` would bake those bytes into the
+cached file), `switch values` and `reader windows`. `--strict` and `--json` work as they do everywhere,
+and `config_file` replaces the connection pair in the object. A file that is not there, is not an
+array, or holds the `swrr` block itself instead of returning it fails the run with the mistake named —
+a vet that reported no refusal for a file it never read would be worse than no vet at all.
 
 ### Flipping: `db:pgcat-flip`
 
@@ -1283,6 +1685,7 @@ way:
 |---------------------------------------------------------------|------|
 | a flip applied, nothing to do, or skipped by another instance | `0` |
 | a flip that was forced                                        | `0` |
+| the container's boot window had closed                        | `0` |
 | a rehearsal, whether it would flip, would not, or was forced  | `0` |
 | the flipper is not armed for this connection                  | `0` |
 | `--status`: a state report was asked for                      | `0` |
@@ -1323,10 +1726,10 @@ $ php artisan db:pgcat-flip --dry-run --json
     "command": "db:pgcat-flip",
     "kind": "would_flip",
     "exit_code": 0,
-    "mode": "readers",
-    "previous_mode": null,
     "reason": "the mode has never been applied, so a first flip would run",
     "error": null,
+    "mode": "readers",
+    "previous_mode": null,
     "steps": [
         {"step": "lock", "outcome": "done", "detail": "taken and released: /…/pgcat-flip.lock"},
         {"step": "read source", "outcome": "done", "detail": "/…/pgcat-readers.toml (35 bytes)"},
@@ -1342,7 +1745,15 @@ $ php artisan db:pgcat-flip --dry-run --json
 ```
 
 *The report pretty-prints each step over several lines and names real paths; they are shown one
-per line here.* The key set is fixed and always present — `null`, or an empty list, where a route
+per line here.* `db:pgcat-flip`, `db:probe-replicas` and `db:replica-status` all write this
+envelope: the same five keys in the same positions — `command`, `kind`, `exit_code`, `reason`,
+`error` — and then the evidence of whichever command and route produced the object. It is defined
+once, in `Console\JsonEnvelope`, so there is one place that says what a report leads with;
+`db:doctor --json` is the exception, and says so in [its own
+record](docs/db-doctor-json.md) — what a gate asserts of a preflight is *rows*, and a run of a
+flip or a sweep is one verdict.
+
+The key set is fixed and always present — `null`, or an empty list, where a route
 has nothing for a key — so a rule never has to check whether a field exists:
 
 ```bash
@@ -1358,6 +1769,7 @@ jq -e '[.steps[].outcome] | all(. == "done" or . == "would")' rehearsal.json
 | `flipped`                                                                                                                 | a flip applied                                                               | `0`  |
 | `no_change`                                                                                                               | the mode on record already matched, so nothing was done                      | `0`  |
 | `skipped`                                                                                                                 | another flipper instance held the lock                                       | `0`  |
+| `window_closed`                                                                                                           | the boot window had closed before the flip converged                         | `0`  |
 | `disabled`                                                                                                                | flipping is off, or pgcat cannot front this driver                           | `0`  |
 | `status`                                                                                                                  | a state report was asked for (`--status`)                                    | `0`  |
 | `would_flip`                                                                                                              | a rehearsal proved a flip would apply                                        | `0`  |
@@ -1399,15 +1811,19 @@ retried afterwards.
 ## Layout
 
 ```
-src/Database/Weighted/   SWRR algorithm, weight resolver, health monitor, state stores,
-                         connection factory, window resolver, manager
+src/Database/Weighted/   SWRR algorithm, weight resolver (and the exclusions it reports),
+                         health monitor, state stores, connection factory, window resolver,
+                         manager
 src/Pgcat/               pgcat.toml flipper, the supervisor step it runs afterwards,
                          and the two result value objects (a flip, and a rehearsal)
 src/Providers/           WeightedDatabaseServiceProvider (replaces the framework's)
 src/Console/Commands/    db:doctor, db:replica-status, db:probe-replicas, db:pgcat-flip
 src/Http/Controllers/    DatabaseHealthController
 src/Support/             ConfigValue (typed config reads), ReaderWindows/ReaderDays (what the
-                         reader fallback may contain), BootAudit — findings and their record
+                         reader fallback may contain), ReplicaMetadata (what a replica's
+                         weight/cpu_cores/ram_gb may be, the floors the resolver clamps at,
+                         and which replica a report is naming),
+                         BootAudit — findings and their record
 config/db-manager.php    the sample config — `vendor:publish` copies it into the app,
                          which then owns and edits its own copy
 config/app.php           Laravel 12 skeleton + the provider-swap block above
@@ -1424,10 +1840,14 @@ docs/                    design records for decisions that are not obvious from 
                          window, how the flip's supervisor step is checked without
                          taking it, which half of a flip can be rehearsed and how a
                          pipeline reads its verdict, what a deploy gate reads out of the
-                         preflight, what the preflight does with replica metadata it
-                         cannot read, and how the documented exit codes are kept in step
-                         with the code
+                         preflight, what the package does with replica metadata it cannot
+                         read — at boot and in the preflight — what a resolver reports about
+                         the replicas it did not use, how the documented exit codes are
+                         kept in step with the code, and how a number a record states is
+                         kept equal to the number the code has — rendered by a command
+                         where that is possible, checked where it is not
 bin/checks.php           every local check, summed up in one summary
+bin/counts.php           writes the counts a record states from the code that owns them
 bin/release.php          tag-driven releases (see RELEASING.md)
 bin/surface.php          the symbol reader and differ both release commands share
 bin/inventory.php        writes files.tsv and methods.tsv from the working tree
@@ -1446,10 +1866,42 @@ composer checks                   # everything that can be checked, in one summa
 vendor/bin/phpunit --testdox
 ```
 
+The records under `docs/` are read by the suite as well as by people: the exit tables are compared
+cell by cell with the matrices the commands are written as, the test names they cite are checked
+against the classes that declare them, and every count they state about this package's code is
+compared with the number the code has — see [docs/prose-numbers.md](docs/prose-numbers.md).
+
+The counts in `docs/documented-exit-codes.md` go one step further and are not written by hand at
+all: `php bin/counts.php` renders them from the providers, `php bin/counts.php --check` reports
+drift without writing, and `composer checks` runs that check — so after adding a matrix cell, run
+the renderer rather than editing the sentence.
+
+### Composer on Windows behind a TLS scanner
+
+If `composer install` fails with `curl error 60 ... SSL certificate problem: unable to
+get local issuer certificate` while `git` and `curl` keep working, a local antivirus or
+proxy is scanning TLS and PHP does not trust its root. Run Composer through
+`bin\composer-ca.ps1` instead of a bare `composer`:
+
+```powershell
+pwsh -File .\bin\composer-ca.ps1 install
+pwsh -File .\bin\composer-ca.ps1 test
+```
+
+It rebuilds a CA bundle from Git's `ca-bundle.crt` plus every intercepting root in the
+Windows trust store, points Composer at it with `COMPOSER_CAFILE`, and passes the
+Windows-only `ext-*` platform requirements to `install` / `update` / `require` /
+`remove`. The diagnosis, the manual recipe, and why the two TLS stacks disagree are in
+[docs/composer-tls-windows.md](docs/composer-tls-windows.md).
+
 `composer checks` (`bin/checks.php`) runs every applicable check and prints one
 summary with one exit code: `php -l` over every file (including `bin/`), an
 independent AST parse of the same files, `composer validate --strict`,
-`check-platform-reqs`, the workflow YAML, PHPStan, Pint and PHPUnit. It prints only failures by default (`--verbose` streams everything), takes
+`check-platform-reqs`, the workflow YAML, PHPStan, Pint and PHPUnit. The schema
+check asks about `composer.lock` only when the repository contains one — it is
+gitignored here, so a lock a local `composer.json` edit has made stale cannot turn
+the gate red over a file no clone has, which is the same question CI answers after
+writing its own. It prints only failures by default (`--verbose` streams everything), takes
 `--only=syntax,tests` to narrow, reports
 a missing tool as a skip rather than crashing on it (`--require-all` turns that
 into a failure), and can add `composer audit` with `--audit`.
@@ -1483,7 +1935,13 @@ forbids it, so a breaking change cannot be shipped as a patch. It then promotes
 `## Unreleased` to the released heading with a compare link, refreshes both
 inventory files in the same commit, keeps both dev-lane branch aliases
 (`dev-main`, `dev-dev`) on the line being developed, and refuses to continue on a
-dirty tree, the wrong branch, an existing tag or an empty release section. A
+dirty tree, the wrong branch, an existing tag, an empty release section, or a
+commit CI has not verified — the tip of the branch has to be on the remote with a
+finished, passing workflow run for it, since the release commit itself cannot have
+one yet; `--skip-ci` tags anyway and says so in the plan. An empty `## Unreleased`
+is the one rail `--weigh --dry-run` is let past: the notes are what a release
+publishes, and a plan publishes nothing, so it reports the bump the other three
+signals weigh and says in the plan that a real run refuses there. A
 version may also be a prerelease — `--version=0.0.1-alpha1`, cut from `dev` — which
 promotes the notes and stamps the inventory exactly as a release does; a consumer
 opts in with `minimum-stability: alpha` or a constraint like `"^0.0.1@alpha"`. The

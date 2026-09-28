@@ -2,6 +2,433 @@
 
 ## Unreleased
 
+### Added
+
+- **`db:probe-replicas` and `db:replica-status` report as data, in the envelope `db:pgcat-flip`
+  defined — extracted into one class so the three commands a pipeline branches on are read by one
+  rule.** Both earlier JSON records ended by naming this as the thing that would change their
+decision: "a package-wide envelope would be the better home for the vocabulary, and it would want one
+place that defines it". It has one now. `Console\JsonEnvelope` owns the five keys every report leads
+with — `command`, `kind`, `exit_code`, `reason`, `error`, in that order — and each command declares
+its own evidence as a constant of `key => the value an absent one takes`: the flip's `mode`,
+`previous_mode`, `steps` and `status`; the sweep's `connection`, its `counts` (`probed`, `answered`,
+`failed`) and its `replicas`, one entry per attempted replica carrying the reason a failed one
+failed — the half of a probe that is otherwise invisible, because the probe's own connection is
+purged after every attempt; the distribution's `status` (the manager's own `healthSummary()`),
+`pgcat` and `audit`, which are the two blocks `/health/db` embeds under those same two names, so a
+job reading a terminal report, a saved one and the endpoint is reading one vocabulary. A default is
+the key's *shape* rather than a guess — a list key defaults to `[]`, `counts` to a zeroed map, so
+`.counts.failed` is readable on every route of a command that runs on a schedule every thirty
+seconds. The envelope also refuses the two ways a command can write its own report wrong, both of
+which would otherwise be invisible: a route supplying a key its command did not declare (a mistyped
+`replica` publishes less than the route meant to while producing perfectly well-formed JSON), and a
+command declaring one of the five core keys as its own evidence. `kind` stays the command's own
+closed vocabulary — the sweep's five are the five cases its exit table documents, one to one,
+because a case that exits differently has to be a different verdict — and the word `unbound` is
+shared deliberately: "the container has no weighted manager" is the same repair whether the missing
+dependency is the manager or the flipper. Each command's kind table is now in the README beside its
+exit table and bound the same way, by a test that reads it back and asserts the codes. Nothing about
+a run changes: every matrix runs twice, once for the rendered report and once for the object, and
+asserts the same code, marks, files and records — `--json` is not refused beside anything here,
+because neither command has a flag it could contradict, and the detail `-v` prints is the object's
+`replicas` rather than a second channel. `db:doctor --json` deliberately keeps its own envelope
+(`verdict`, rows) — its record's candidate F is the reason, and the new record answers it rather
+than leaving it implied. The decision is recorded in
+[docs/command-json-envelope.md](docs/command-json-envelope.md), and the two older records' "a shared
+envelope" bullets now point at it.
+
+- **Every count `docs/documented-exit-codes.md` states is now rendered from the provider that owns
+  it, including the ones stated a second time — and one of those second copies had been wrong for
+  as long as the map existed.** The renderer below covered the counts that were in the record's
+  sentences and in the tables; what it did not cover was every *place* a count is written. Three
+  were left: the two bold headings that open the probe's and the flip's paragraphs ("**The probe's
+  nine cells.**") restated their cell counts without being bound to anything — the sentence right
+  under each one was rendered, the heading above it was prose — and the flip's paragraph states the
+  probe's arithmetic for its own table, that sixteen cells are eight documented cases, by naming the
+  groups: "the three ways a flip can politely do nothing are one case, the three ways a command can
+  be refused are another". Those numbers are not a second fact either: they are how many cells
+  `DbFlipPgcatCommandTest::documentedSituations()` assigns to one README row, so the phrase each one
+  is a shorthand for is declared once, in `DocumentedExitCounts::FLIP_WAYS`, and the count is read
+  from the map — a phrase the declaration does not know, or a row no cell is assigned to, fails
+  rather than passing quietly. The same two counts are written in a *second* file: the docblock of
+  the map itself, which said **two** ways a command can be refused while the map assigned three
+  cells to that row — a number that had been wrong for as long as the map existed, in the file a
+  reader of the map opens, with the record a reader of the record opens saying three. A claim is one
+  file and one pattern, so a count written twice is two claims over one derivation, which is also
+  why the renderer writes two files here: `bin/counts.php` now fixes a docblock as well as a record,
+  and its first run over the map did exactly that (`two -> three`). Two consequences worth naming:
+  the record's refused phrase is anchored on the words that follow the number, because the record
+  states the same phrase again a few lines down describing the state *before* the guard — a
+  historical "two" the renderer must not touch — and the pattern allows the whitespace where the
+  record's own line wrap falls, so a claim is pinned to the record's wording rather than to its
+  column width. `docs/prose-numbers.md` gained the four rows, and its boundary lists now say why
+  the historical statement is prose, what the first "ways" phrase actually names (the row is wider
+  than the phrase sounds, and which row it is, is the declaration), and that a number written in two
+  files is rendered wherever it is written rather than only where the record is.
+
+- **The counts `docs/documented-exit-codes.md` states are rendered from the providers that own
+  them, and the first render found one of them had been wrong since it was written.** The record
+  was the one that named this problem — the flip's matrix sat at "fifteen" from the day the JSON
+  work added a sixteenth cell — and the previous entry below answered it by *checking* every count
+  against its derivation. Checking still leaves the number written by hand, and one of them was
+  wrong in a way the check could not see: the candidate-C row said the probe's table documents `0`
+  on three rows and `1` on two, and the README's table has it the other way round. It reads as a
+  real argument, because the sentence's point — the sets of codes match while a case is documented
+  as the wrong one — holds either way, and nothing had compared the split with the table's own
+  `exit` column. So the counts this record states are no longer written at all:
+  `tests/Support/DocumentedExitCounts` derives each one — the three matrices from
+  `exitCodeProvider()`, the documented-case counts from the maps from each cell to its README row,
+  the doctor's tables from the README, and the probe's split by code from the table's `exit` column
+  — and `bin/counts.php` renders them into the record. `php bin/counts.php` writes,
+  `php bin/counts.php --check` compares and writes nothing, and `bin/checks.php` gained a check that
+  runs it, so a matrix that grows a cell fails the gate instead of leaving a sentence behind. The
+  renderer is safe because the guard makes it so: `ProseNumbersTest` asserts that *every* place a
+  pattern matches states the derived number, so a pattern that also matched an unrelated sentence
+  would already be a failing test — and the patterns are anchored on words around the number, never
+  on a number another claim owns, so a rendered count cannot unbound a neighbouring claim's
+  occurrence. Nothing is written unless every claim resolves: a reworded sentence, an unreadable
+  record or two claims on one word is reported and the run stops, because a half-rendered record is
+  worse than a stale one. The vocabulary moved to `tests/Support/NumberWords`, in both directions —
+  the guard reads a record's word, the renderer writes it — and a rewrite keeps the record's own
+  capitalisation, which is how "Three keys, not one `switches.refused`" stays a sentence that opens
+  with a number. `ProseNumbersTest` now merges the rendered claims with the checked ones, so the two
+  halves read one table rather than two that can disagree, and `docs/prose-numbers.md` records which
+  records are rendered, which are checked, and the three numbers in this record that are
+  deliberately neither (the failure modes and the two prose behaviours count a list their own
+  sentence writes; the historical counts are about a version of the package that no longer exists).
+
+- **Every number the records state about the code is now derived from it or compared with it, so a
+  count that is true when it is written cannot quietly stop being true.** A number in a sentence is
+  a second copy of a fact the code holds, and nothing in the suite read the sentences: the flip's
+  matrix sat at "fifteen" from the day the JSON work added a sixteenth cell, a sentence beside it
+  still said *two* ways a command can be refused when there were three, and three records carried
+  counts and test names that later work had overtaken — each one consistent with everything the
+  suite asserted, which is what made the drift quiet. The repair is not to delete the numbers
+  ("the six methods whose lists are spread into one boot's findings" is how a reader learns the
+  shape of the surface) but to give each one a reader: `tests/Unit/Docs/ProseNumbersTest.php` pins
+  every claim to the sentence it is written in and compares it with the number the code has —
+  counted from a constant, a class's own data provider, the source file the thing is implemented
+  in, or a record's own candidate headings — and the two claims that need the command to have run
+  (the README's check table, and the rows that can carry a repair) are bound the same way in
+  `DbDoctorTest`, where the fixtures are. Three properties make it a guard rather than a
+  restatement: the pattern must still match, so a reworded sentence fails instead of passing
+  vacuously; every statement of a claim is compared, so a record saying "three" in one paragraph
+  and "four" in another fails on the second; and no expectation in the guard is a literal. Two
+  cross-table claims that records had been carrying as "nothing checks them" are now compared as
+  well — the provider's `SWITCHES`, the doctor's `SWITCH_KEYS` and its `SWITCH_CONSEQUENCES` must
+  name the same settings, so a switch added to one table cannot become a finding with no row or a
+  row whose key nothing writes. The same defect with a name instead of a number is guarded too, and
+  it had already bitten: twenty-two of the tests the records cite did not exist under those names,
+  so the reader checking a claim was sent to an empty search. `tests/Unit/Docs/DocCitationsTest.php`
+  reads the records as data and checks every `test_…` citation against the classes that declare it —
+  and, where the record names the class, against *that* class, because a name that resolves to the
+  wrong class sends the reader to a real test that pins a different rule. The record of the rule, the claim table, and the numbers that are
+  deliberately *not* bound (a design shape no list holds, a partition that is a judgement, a
+  historical state, a budget for a sized installation) are in
+  [docs/prose-numbers.md](docs/prose-numbers.md); the guard reads that table back, so a claim added
+  here without being written down there fails, and a number typed into the record that the code
+  disagrees with fails with the sentence named.
+
+- **The resolver's metadata floors are three constants, so the report and the arithmetic read one
+  boundary instead of two that happened to match.** `WeightResolver::resolveWeight()` clamped a
+  weight, a core count and a memory figure with `max(0, ConfigValue::int(…))`,
+  `max(1, ConfigValue::int(…, 1))` and `max(0.0, ConfigValue::float(…))`, and the classifier that
+  decides whether a written value is the one routing uses stated the same three boundaries a second
+  time — one rule with two readers, agreeing only by inspection. A report that restates the
+  arithmetic it is judging is a report that can go on passing after the arithmetic moves, which is
+  exactly the hole `docs/replica-metadata-refusal.md` had been carrying as "no test can catch this
+  without reading the resolver". The boundaries are now `ReplicaMetadata::WEIGHT_FLOOR`,
+  `CORES_FLOOR` and `RAM_FLOOR`, public constants that the resolver's own `max()` reads, so where a
+  boundary is has one definition and the row reads the resolver's numbers rather than its own. They
+  are declared in the classifier rather than in `WeightResolver` because the boot audit classifies a
+  read list without the manager ever being resolved — and because the resolver already reads the
+  classifier, for the refusals and for a replica's identity, so the reverse direction would be a
+  cycle for a number. The weight floor is also the value that means *disabled*, so `refusals()` and
+  `disables()` now read that one boundary from both of its sides and are non-overlapping by
+  construction: a weight is refused exactly when the resolver reads it as the floor and it is not
+  the disable the read list means, which is the property the resolver reads to say why a replica
+  left its pool. Declaring the floors once is not enough on its own — a constant can still be
+  ignored — so a new test drives the resolver to each constant and asks both halves about `floor -
+  1` and about `floor`, written against the weight the floor *produces* rather than against the
+  replica sitting on it, because a clamp moved by one would move both of those together and an
+  equality between them would keep passing. The one number in `resolveWeight()` that is deliberately
+  *not* a floor — the formula's final `max(1, $weight)`, a replica that declares hardware is never
+  weighted nothing — stays a literal, because nothing outside that method has an opinion about it.
+
+- **The resolver reports the replicas it does not use, and why, so an exclusion is read rather than
+  inferred from a shorter list.** A pool is a shorter list than the read config that produced it,
+  and three different things take a replica out of it: `weight: 0`, which the read list means as a
+  disable; a weight the package refuses to read, which `ConfigValue` falls back to `0` for and which
+  therefore removes the replica as well; and the health filter the caller supplied. `resolve()`
+  returned the survivors and nothing else, so `db:doctor`'s `replica metadata` row classified the
+  read list a second time to work out which replicas were missing, and `pickReplica()`'s warning on
+  an empty pool read `All replicas in cool-down; resetting health circuits` with the connection in
+  its context and not one replica named — a log line about a shorter list, written by the code that
+  knew every entry in it. `resolveWithExclusions()` now returns the pair: the pool, and every
+  replica it did not use with its config, its stable `host:port`, the weight it would have carried,
+  one of three reasons and the sentence for that reason. The pair *partitions* the read list — every
+  configured replica appears exactly once across the two — which is what turns "the pool is one
+  shorter than the config" into a question with an answer instead of an inference. The reasons are a
+  closed vocabulary, because a reason a reader has to interpret is a reason nothing can select on:
+  `refused` for a weight the package will not read, `disabled` for `weight: 0` written on purpose,
+  and `filtered` for the caller's own health filter. Which of the first two a departure was is not a
+  second rule: a weight the resolver reads as `0` is either the documented disable or a value it
+  refuses, never both and never neither, so the resolver reads the refusals and what falls through
+  is the drain — a fact the classifier's tests assert over every spelling of `0` and everything that
+  is not a number. The configuration half is cached with the pool and the filter half is computed per
+  call, so a filtered exclusion is never remembered as a property of the installation and a
+  preflight cannot fail on a replica that is momentarily in cool-down; `resolve()` is unchanged for
+  the read path and is now the pair's first half, out of the same cached computation either way.
+  `WeightedDatabaseManager::poolExclusions()` exposes the configuration half as the deliberate
+  counterpart of `replicaStatus()` — that method is the pool, this is what it does not hold, and the
+  two together are the read list — and `db:doctor`'s row now reads both instead of re-deriving
+  anything. Reading the consequence rather than predicting it is what removed `ReplicaMetadata`'s
+  `leaves` flag (a prediction of the pool's shape, made by the classifier rather than by the thing
+  that acts) and `DbDoctor::disabledReplicas()` (a second reader of a decision the resolver had
+  already made). Pinned by five resolver tests (each reason, the partition, the ordering, the cache,
+  and `resolve()` as the first half), the manager's two halves of a read list, the cool-down boundary
+  that keeps a failing replica out of the configuration answer, and the row's existing cases, whose
+  clause now states what happened to a refused value. The decision, its candidates and the
+  alternatives are in `docs/pool-exclusions.md`.
+
+- **Replica metadata the resolver cannot read is refused at boot, so a pool that quietly lost a
+  replica says so.** The resolver reads `weight` through `max(0, ConfigValue::int(…))` and
+  `cpu_cores`/`ram_gb` through floors of its own, and `ConfigValue` falls back rather than
+  throwing — so `'weight' => 'heavy'` is read as `0`, which is how a replica is *disabled*, and
+  `buildPool()` drops it. The read list described a replica the pool no longer held, and nothing
+  said which one went: `db:doctor`'s `replica metadata` row failed on it, but only when somebody
+  ran a preflight, which is usually long after the reads got thinner. Every boot now reads the
+  configured replicas through that same rule and refuses every value the resolver does not read as
+  written, at `error` level — input the package will not interpret on the operator's behalf, the
+  same claim `swrr.reader_windows` and the three switches make — under one key per setting, because
+  the three read differently and cost differently: `database.read.weight.refused` for the setting
+  that removes a replica from the pool, and `database.read.cpu_cores.refused` /
+  `database.read.ram_gb.refused` for the two that leave it there, sized as something the read list
+  does not describe. The keys are the setting's own path
+  (`database.connections.*.read.*.weight`) rather than one of the `swrr.*` names, because the read
+  list belongs to the connection and that is what an operator greps for; the connection the package
+  followed is in the finding's context instead, since a key carrying the name would resolve the
+  wrong warning the day the name changed. Each key is checked clean or not on every boot, so a
+  resolution closes it out on the boot that reads a readable value — the value fixed, the replica
+  dropped from the read list, or the whole list removed — and the sentence is written to be true of
+  all three. Nothing throws and nothing is repaired: the value is still read exactly the way the
+  resolver reads it, so an installation with a typo boots and serves, which is the boundary that
+  keeps this from being the throw candidate `docs/replica-metadata-refusal.md` had already
+  rejected, and it is why the refusal reports the shrink rather than preventing it. The reading
+  moved into `Support\ReplicaMetadata`, which both halves now call — the row and the boot refusal —
+  so a log line and a preflight cannot describe one value two ways, and the sentence is built
+  there too. The replica's identity moved with it: `ReplicaMetadata::key()` is the one spelling of
+  "which replica", read by the health monitor's failure counts, the resolver's pool keys and a boot
+  naming a replica the pool is about to drop, where the previous two copies (`WeightResolver` and
+  `WeightedDatabaseManager` each built `host:port` themselves) would have become three. The row's
+  own rule is unchanged — `weight: 0` is still a drain rather than a fault, a negative or truncated
+  weight is still reported as the value it was read as, and a cores or memory value still says the
+  replica stayed — which is what the row's existing tests prove about the class they now go
+  through. Pinned by `ReplicaMetadataTest` (the reading, the documented disable, the identity) and
+  by boot tests for the key, the level, the sentence, the resolution, and the configuration that
+  must *not* be refused.
+
+- **`db:doctor --config-file` vets a candidate `config/db-manager.php` without booting the
+  package, so a pipeline can refuse a config before it is deployed.** The installation run
+  answers questions about a *running* installation — the provider swap, the weighted factory,
+  the published config, the gate, the files, the supervisor step, the store — and every one of
+  those would be answered about the installation the command happens to be running in rather
+  than the file being considered: a pipeline vetting a branch has the old configuration
+  installed, so a report that mixed the two would judge the candidate with the incumbent's
+  values and call it a review. `--config-file=path` asks the other question and reads the file
+  and nothing else — no container binding, no repository, no boot audit, no database and no
+  Redis. It prints three rows. `config file` is the file itself: readable, an array, holding a
+  `swrr` block, and printing nothing while it is read; each wrong shape names the mistake — a
+  file that throws is a row rather than a stack trace, what a file prints is captured in an
+  isolated closure and reported as a `WARN` because `config:cache` would write it into the
+  cached file too, and an array carrying `pgcat`/`reader_windows` at the top level is named as
+  the `swrr` block passed instead of the file that returns it. `switch values` and
+  `reader windows` then report the *refusals* — the values the package will not read — reusing
+  the installation rows' own rules rather than copies of them: `Support\SwitchValue` and
+  `Support\ReaderWindows`/`ReaderDays` own the reading, the sentences come from the shared
+  `switchProblems()`/`readerRefusals()`, and `PgcatConfigFlipper::switchReadingsIn()` classifies
+  its two switches from a block rather than from the flipper's own config, so a value this mode
+  passes is a value the next boot will not refuse. It reports refusals only, and deliberately
+  not the "reads as on but can never act" warnings: those need the resolver built over the
+  value — a window whose start is not before its end, a day list with no day in 1…7 — which is
+  a fact about a running installation's routing. Nothing is dated either, because a boot record
+  holds findings about *this* installation and a candidate has never been booted. The JSON
+  envelope is the one installation mode already emits, with the subject key naming what was
+  judged — `config_file` here, `connection` and `default_connection` there — and every other
+  key in the same order, so one gate can read both. `DbDoctorTest` covers the mode end to end:
+  the refusals a candidate holds, that it judges the file rather than the installation, a config
+  that reads clean, a deliberate opt-out told apart from a refusal, that it refuses only what
+  the file wrote, an unreadable path, a file that is not a config, the `swrr` block passed as
+  the file, a file that printed and was still judged, and the JSON envelope.
+
+- **The `pgcat supervisor` row discovers what supervisord actually runs when it does not know the configured program, and names the near miss.** Three of the four faults a flip's last step can have are repaired at the thing the command *is* — install the binary, quote the name, start or unmask supervisord — and the fourth is repaired at a *name*: supervisor does not know `pgcat:*`, and nothing on that host could tell the operator what it should be instead. So that fault, and only that fault, now asks a second read-only question. After `supervisorctl status "pgcat:*"` answers `no such group`, the step derives the bare `supervisorctl status` from the same binary and reads what supervisord is running. The answer is parsed the way supervisor writes it — one line per program, accepted only when its second word is one of supervisor's states, because the same command prints a socket error whose second word is `no` and `supervisord` is a plausible program name — and the running names are ranked against the configured one: the same name, the group that name belongs to (`pgcat` and `pgcat:pgcat_00`), a prefix (`pgcat-1`), a name that holds it (`lpr-pgcat-a`), and last an edit distance within a third of the longer name. A name with nothing in common is not offered, since pointing an operator at a program that was never going to match is a guess dressed as an answer, and the sentence then says so and names the `[program:]` section instead. At most three are named, the group line comes with them when there is one to give (`or the whole group "pgcat_x:*"`), and the wording covers one and several: "the closest is …", "the closest are …". A command that works is unaffected — the second question runs only once the first has already been found missing, so the ordinary flip and the ordinary `db:doctor` still spawn one process. The refusal an operator reads now carries the name to write, which is the half of a `[program:]` repair this host can see; `inspect()`'s verdict gains `running`, `near_misses`, `discovery_command`, `discovery_exit` and `discovery_answer` for a surface that would rather read the list than the sentence. The `suggestion` column stays empty for this fault, and deliberately: the row's sentence offers a ranked near miss to a human, while a suggestion line is a value a gate applies without reading it — the two halves of the fault are documented in `docs/pgcat-suggestion-lines.md`, where the ask was adopted without the line.
+
+- **The README has an alerting cookbook: the rules to paste, and how to tell an installation's fault from the package's once a page has fired.** The package documented *that* something has to alert — the audit's `severity`, the endpoint's `status`, the degradation note — and left the alert itself to the reader, which is the right advice and no help at 03:00. The new section is the whole of it. Three log rules written against the payload rather than the message, because every line the boot audit writes carries `severity` and `finding` in it and how a level is spelled is the handler's business: a refused value standing is a page, a setting that reads as on but cannot act is a ticket, and the resolution line — `warning` with `resolved: true` — is where the page stops. The same rule is given as a CloudWatch metric filter for a JSON channel, as a Loki query, and as the substring match that the default line handler makes of it, which is also the one a reader can test by hand. Then the endpoint: the status code answers one question (did a real query come back on the pinned connection), and six readings it deliberately does not move are spelled out — `pinned.checked` switched off, a worker serving from the in-process store, an unhealthy primary store, the audit's own two conditions, and pgcat armed where it can never act — with the whole lot as one paste-able `curl | jq -e` gate for a cron job, a sidecar or a deploy step. The closing table is the question the cookbook exists for: a refused value and a defect in the package both arrive at `severity: "error"`, and the triage is mechanical — a `finding` key names an owner, and the payload either carries a setting's own evidence or the `levels` / `discarded` keys that mean two branches collided or two boots wrote one record, while a line with no `finding` at all is the store's. The recipes are run rather than reviewed: `ReadmeAlertingTest` extracts the gate from the fenced block and runs it through `jq` against real `/health/db` payloads — healthy, failing, and one per condition the fixture can reach — and resolves every field path the section names against a real payload, so a renamed field is a build failure instead of a rule that silently never fires.
+
+- **The release suite drives the rails it was silent about, and RELEASING.md's table now names the test that proves each row.** Five rails had no test at all — a tree that is not a git repository, a missing `CHANGELOG.md` or `composer.json`, a changelog with no `## Unreleased` heading, a dirty tree, and a shell with no terminal to answer the one question the script asks — and the documented behaviours around two of them had none either: `--dry-run` warning about a dirty tree instead of refusing, and `--allow-dirty` releasing the files a release *writes* without sweeping the uncommitted edit into the tag, which is the rail's own defect one flag away if it ever did. The steps of a release *itself* are covered too, because they fail differently from a rail: a rail refuses before anything is written, while a `CHANGELOG.md`, inventory or `composer.json` that cannot be written, an index git will not take, or a push that cannot run leaves the promoted notes on disk — and the push is the one failure that leaves a version behind, because the commit and the tag happen first. Every one of those is a state of the tree rather than an argument, so each is produced rather than mocked: the fixture gained `drop()` and `makeReadOnly()`, and git is asked to fail the way it fails (a path taken by a directory, a lock file, a remote that is not there). The inventory paths got the case neither half had: a **stale** `files.tsv`/`methods.tsv` on a release that *proceeds*, which is where the file's fate is decided — a release replaces it with the stamp of the tag it just cut, so "stale" is a state the next run recovers from. RELEASING.md's rails table grew a `Proved by` column, and `ReleasingDoc`/`ReleasingDocTest` read the table and the suite back: a row with no test in it, or a test name that no class under `tests/` declares, fails the build — the table is the contract, so a rename is a doc failure rather than a row that quietly stops proving anything.
+
+- **`bin/release.php` refuses to tag a commit CI has not verified.** A tag is a version, and
+  publishing one is not undoable, so the commit a release is cut from has to be one the
+  workflow has built and passed: HEAD must be the tip of the remote branch, and the run for
+  it — a push run on that branch — must have finished green. The rail asks two questions in
+  that order because they fail differently: a commit that was never pushed is not one CI can
+  have an opinion about, and answering "no run found" for it would send a reader to the
+  wrong place. Only runs for a push on the branch being released count, because one commit
+  carries several — the `v0.1.0-alpha1` commit has one for `dev` and one for the tag, and
+  the tag run reports its head branch as the *tag name* — and a pull request's run does not
+  vouch for the branch tip even though it runs the same steps. A run still going is not a
+  pass either, and a failure beside a success is not verified, because this rail is only
+  allowed to be wrong in one direction. The commit the script then goes on to create is
+  bookkeeping (the CHANGELOG, the inventory, the branch alias) and cannot have a run of its
+  own yet — it reaches the remote in the push at the end — so the workflow's `v*` tag trigger
+  is what records it. A dry run reports the state instead of refusing, because "push this
+  first" is the answer the plan exists to give, and the plan's `ci` line says which state it
+  found. The question goes to `gh run list --commit <sha>`, which is the same data branch
+  protection reads; `RELEASE_CI_COMMAND` overrides the command, for a machine whose `gh`
+  lives somewhere else and for a test that has to answer without a network.
+- **`--skip-ci` releases without asking.** Nothing verified means no tag, so a machine with
+  no `gh`, no token or no network needs an explicit way through rather than a rail that
+  quietly reads nothing. It asks nothing at all — it will release on a repository with no
+  remote — and the plan prints `not checked (--skip-ci)`, so a release that skipped the
+  question says so where the version is being read.
+
+### Changed
+
+- **`db:pgcat-flip`'s `--json` object now writes the envelope's five keys first, with its evidence
+  after them.** The keys are the same nine and the values are unchanged; the order is `command`,
+  `kind`, `exit_code`, `reason`, `error`, then `mode`, `previous_mode`, `steps`, `status`. The order
+  is now a package-wide rule rather than this command's own, because two more commands write the
+  same five in the same positions — and it is the reason the envelope can be one class: a reader
+  looking at a failing step's output sees the verdict and the code before anything else, whichever
+  command produced the object. JSON object order carries no meaning to a consumer, and a consumer
+  that did depend on it was depending on something no document promised; the test states the list,
+  read from `JsonEnvelope::CORE` rather than restated, and the README's sample and
+  [docs/pgcat-flip-json.md](docs/pgcat-flip-json.md) were updated to match.
+
+- **`db:replica-status` prints pgcat's two lines on the route where the connection has no replicas.**
+  That route used to print the warning and the audit block and nothing else, which meant the object
+  could not carry pgcat's state without the terminal saying something different from the report —
+  and pgcat's state is a fact about the installation, not about the replicas being described. Both
+  channels now carry the same blocks on every route that read the manager.
+
+- **`--weigh --dry-run` reports the next bump from an empty `## Unreleased`, and says why a
+  release of the same tree still refuses.** The empty-notes rail is about what a release
+  *publishes* — the notes are the version's record, and a version with none is one nobody can
+  read — while the weighing is a question about the *changes*, of which the notes are only one
+  of four signals. A plan publishes nothing, so it is now let past the rail to answer the
+  second question: it prints the weighed bump whatever the section holds, its `CHANGELOG` plan
+  line reads `nothing to promote — ## Unreleased is empty, so a real run refuses here; this plan
+  weighs the changes in it instead`, and the weighing table names the empty section instead of
+  the generic `no ### heading the policy knows` — an empty section and one written in a
+  vocabulary the policy cannot weigh are now distinguishable. Every run that could tag still
+  refuses, and the refusal names the flag that reports instead. `--minor --dry-run` is
+  unaffected: a declared bump is a check on the weighing rather than a question the changes
+  answer, so it is refused like any other.
+- **`bin/release.php` ends on one line, and the same line on every run.** The closing note
+  used to branch on whether the tree already had a tag, reading that as proof the package had
+  been submitted to packagist.org: a first release was told the submission comes first, later
+  ones were told Packagist would pick the tag up. Neither is true of every run — a package can
+  be tagged repeatedly without ever being submitted, which is a state a tag cannot reveal,
+  because a tag on GitHub and a version on Packagist are two different events. The note now
+  names the tag being released and both ways the gap closes — submit the package if it never
+  was, or trigger a crawl — and points at RELEASING.md's *Publishing* section for which one
+  applies. (The 0.1.0-alpha1 entry below describes the branching this replaces.)
+- **`GET /health/db` answers `ok` only when one real query has answered.** The endpoint's
+  verdict used to be the state store's: a Redis store that replied, together with replica
+  lists that were healthy or not declared at all, produced `200 "status":"ok"` — observed
+  while application queries were failing with `SQLSTATE[08006]`, because the connection it
+  followed declares no `read` list for the replica probe to open. The controller now runs
+  one statement — `select 1` — on the connection `ActiveConnection::resolve()` names
+  (`swrr.connection`, else `database.default`, so it is the connection the pgcat gate and
+  `db:doctor` already judge), through the application's own path so a failure is the failure
+  a request would have had, and reports it as a new `pinned` block: connection, driver, the
+  config key the name came from, the query, `checked`, the latency and the driver's own
+  error. `status` is `ok` only when that query came back; the `replicas` and `audit` blocks
+  keep their meaning and no longer decide it. `swrr.health.pinned_query`
+  (`SWRR_HEALTH_PINNED_QUERY`, default **on**) turns the query off for the one environment
+  where it is not a question worth asking — a fixture or an inspection with no database
+  behind the connection — and `pinned.checked` is what distinguishes *no query was asked*
+  from *the query passed*. A switch written as neither on nor off is refused, resolves to
+  the documented default, and is reported as `pinned.refused`, so a typo cannot be what
+  silences the check. Anything that treats this endpoint as a signal — a deploy gate does —
+  can now read the status rather than the store, and a caller that needs to know how much was
+  asked reads `pinned.checked` beside it.
+
+### Fixed
+
+- **A pgcat that is down is now repaired by the flip instead of refusing it, so the one case where the
+  file swap *is* the fix is no longer the one case the flip declines to perform.** `supervisorctl
+  status` exits non-zero as soon as a program it was asked about is not RUNNING, so `pgcat:pgcat_00
+  FATAL   Exited too quickly` reached the preflight looking exactly like a supervisorctl that could
+  not reach supervisord at all: `errored`, `usable: false`, the flip refusing before it touched the
+  file. A crash-looping pgcat is crashing on the config that is in place, so the variant the flip
+  would write is the repair — and the refusal left a dead pooler holding the config that killed it,
+  with nothing on the host willing to replace it. The answer is now its own verdict (`not_running`),
+  and it is one the flip proceeds on: it carries the state the answer named (`STARTING`, `BACKOFF`,
+  `EXITED`, `FATAL`, with `RUNNING` winning whenever any program of the group is up) and the command
+  the repair needs. That command is `start`, not the configured `reload_command`/`restart_command`:
+  `signal HUP` and `restart` act on a program that is already up and supervisor answers `ERROR (not
+  running)` for one that is not, which is why a flip that found pgcat FATAL would previously have
+  replaced a file and changed nothing. `SupervisorStep::startCommand()` derives it from the command
+  the flip was already judged on, so the binary, the group name and the quoting cannot drift apart
+  from it. The ordering is inverted on purpose for this verdict — file first, then `start`, then the
+  state read back up to `swrr.pgcat.start_attempts` times with `swrr.pgcat.start_retry_delay_ms`
+  between them, because a program inside supervisor's `startsecs` window answers `STARTING` after a
+  start that will succeed and a crash loop answers the same thing after one that will not. If the
+  attempts run out the new file stays, since rolling it back would restore exactly the config pgcat
+  could not start on, and no mode is recorded — so the next poll writes the same file again and
+  tries again, which is the whole self-healing loop. A supervisorctl that cannot reach supervisord
+  is still a refusal, and the `errored` branch keeps its own tests: a socket that is not there names
+  no program, so there is no state to read and no start that could help.
+
+- **`/health/db` reported on every connection profile in the host application instead of the one
+  the package follows, so an unrelated profile could make a healthy installation look degraded.**
+  The controller walked `database.connections` and summarised each key, which is the host app's
+  inventory rather than the package's subject: the endpoint exists to answer "is the connection I
+  route reads and writes through healthy", and the rest of the payload — the replica weights, the
+  share %, the store, the formula — was never per-connection data anyway, it is `healthSummary()`
+  read once per name. On an installation whose `config/database.php` holds eight profiles that
+  produced eight summaries and, worse, eight probes: every connection with a declared `read` list
+  was opened with `getPdo()`, so a replica behind a legacy mirror, a per-tenant profile or any
+  other connection the package does not follow would fail and turn `status` into `degraded` on a
+  machine whose PostgreSQL path was answering, with the failure in `errors` under a connection
+  nothing on the page was about. The payload now resolves `ActiveConnection::resolve()` once —
+  `db-manager.swrr.connection`, else `database.default`, the same call the pgcat gate, the
+  flipper's snapshot, `db:replica-status` and `db:doctor` make — and both halves of the report use
+  that one name, so what is summarised and what is queried cannot drift apart. `replicas` keeps
+  its shape (a map keyed by connection name) and holds that single entry, so a gate reading
+  `.replicas.<name>` is unaffected; with nothing named at all there is no summary to write and the
+  map is empty, which is the same fact `pinned` already reports as a failure. Two tests fail
+  against the old behaviour — an eight-profile installation whose other seven declare `read` lists
+  nothing answers on still reports one connection, `ok`, and an empty `errors`; and the subject is
+  `swrr.connection` rather than `database.default` when the two differ — and the two `latency_ms`
+  assertions stopped being `assertIsFloat`, which failed whenever a probe rounded to a whole
+  millisecond and JSON handed the number back as an int.
+
+- **An unreadable audit record was reported as an installation with nothing standing, because the state the two surfaces had a branch for could not be reached.** `BootAudit::reported()`'s failure branch could only be entered by a `standing()` that threw, and `standing()` could not: every unreadable file — truncated by a `kill` between the write and the rename, hand-edited, or left by a version whose schema differed — was rounded to "nothing recorded", so `/health/db` answered `available: true, count: 0` with `severity: none` and `db:replica-status` printed `nothing standing`, both asserting it about a file the reader had just failed to open. `db:replica-status`'s `Audit: unreadable — <message>` line and the payload's `audit.error` field were therefore defensive code by construction: two surfaces carrying the one branch nothing could drive, while the state it describes is the one an operator most needs named, because a record nobody can read is not a record that says the installation is fine. `standing()` now refuses the rounding — it throws `UnreadableRecord` naming which shape the file is: a path with something other than a file on it, bytes that could not be read, an empty file, text that is not JSON, a JSON list rather than the object a record is, or an object whose `findings` is not the map it claims to hold. The tolerance stays where it belongs: `read()`, the boot's reader, catches it and still reads "nothing recorded", because a record a boot cannot read is one it cannot carry over or close out, the boot is the only writer, and a diagnostic must never stop an application from booting. The split is one parse in one place — `decode()` — with the boot and the surfaces either side of it, and a *missing* file is not one of the six: it is what `persist()` leaves behind when a boot finds nothing left to remember, so it is the one state that is a fact about the installation rather than a failure of the reader, and it still reports `available: true` with an empty list. `reported()` catches the throw into `available: false` with the reason in `error`, so the block finally distinguishes the three states it always had the fields for: nothing registered (`available: false`, `error` null), a record that could not be read (`available: false`, `error` naming it), and a record that was read and holds nothing (`available: true`, `count: 0`). Nothing was added to the surfaces — the terminal line and the payload field were already written and are now reachable — and each is covered by a test that fails if the tolerant reading comes back: six unreadable shapes named in `BootAuditTest`, the boot-writes-while-a-surface-refuses case in one process, the payload's `audit.error` with the check that it leaves `status` alone, and `tests/Unit/Console/DbReplicaStatusTest.php` for the command's four `Audit:` lines.
+
+- **Reads served by the writer outside a reader window kept the address declared in `write[]`.**
+  The windowed fallback merged `ConfigValue::assoc($config['write'])` into the connection config,
+  and `write` is a *list* of server entries — Laravel's shape for a write connection, and the shape
+  a real installation declares — so `assoc()`, which builds a map, returned `['0' => [$entry]]`
+  instead of the entry. The address therefore arrived at key `0`, `read` and `write` were dropped by
+  the merge, and a connection that declares its address only inside those lists (no top-level
+  `host`) reached the connector with no host and no port at all. Laravel took its without-hosts
+  path, the connector built `pgsql:dbname=''`, and libpq dialled its default address — a local
+  socket, port 5432 — instead of the configured one, so every read outside every reader window
+  failed with `SQLSTATE[08006] connection to server on socket "/var/run/postgresql/.s.PGSQL.5432"`
+  while writes, which the framework merges itself, kept working: an application that serves
+  `/health-check` and answers on the writer, and fails on the first read of an authenticated
+  request. Both branches that fall back to the writer now narrow the write side to one entry with
+  `pickUnweighted()` — the same pick the read pool already used, and the one the framework's own
+  `getReadWriteConfig()` makes with `Arr::random()` — so a list of writers and a single write map
+  resolve identically. The branch for a connection with no read list is fixed the same way, and it
+  is a no-op without a write config. A merge that still produces neither `host` nor `unix_socket`
+  now logs a `[WeightedDB]` warning rather than failing, because omitting both on purpose, to reach
+  a local socket, is a legitimate configuration. The suite did not see any of this: both
+  writer-fallback fixtures declare `write` as a single map, the one shape `assoc()` wraps
+  correctly, and the new test declares the list shape instead.
+
 ## 0.1.0-alpha3 (pre-release) - 2026-09-27
 
 ### Fixed

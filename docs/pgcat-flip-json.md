@@ -103,14 +103,20 @@ beside the object, so the whole of stdout is the report:
     "command": "db:pgcat-flip",
     "kind": "would_flip",
     "exit_code": 0,
-    "mode": "readers",
-    "previous_mode": null,
     "reason": "the mode has never been applied, so a first flip would run",
     "error": null,
+    "mode": "readers",
+    "previous_mode": null,
     "steps": [{"step": "lock", "outcome": "done", "detail": "…"}],
     "status": null
 }
 ```
+
+The five keys that come first are no longer this command's alone: they are `Console\JsonEnvelope`,
+written in that order by `db:probe-replicas` and `db:replica-status` as well, with each command's
+evidence after them — see [command-json-envelope.md](command-json-envelope.md). What is this
+command's own is the evidence (`mode`, `previous_mode`, `steps`, `status`) and the `kind`
+vocabulary below.
 
 The keys are written on every route, `null` or an empty list where the route has nothing for one,
 which is the same rule the health payload's `counts` follows: a rule that has to check whether a
@@ -154,15 +160,16 @@ rendered report and once for the object, and asserts both the process's code and
 ### The vocabulary
 
 `kind` is the verdict, and it is one namespace rather than two nested questions. A flip's kinds
-come from `FlipResult` (`flipped`, `no_change`, `skipped`, `failed`), a rehearsal's from
-`DryRunResult` (`would_flip`, `would_not_flip`, `skipped`, `failed`), and four routes answer
-without asking the flipper at all:
+come from `FlipResult` (`flipped`, `no_change`, `skipped`, `failed`, `window_closed`), a
+rehearsal's from `DryRunResult` (`would_flip`, `would_not_flip`, `skipped`, `failed`), and four
+routes answer without asking the flipper at all:
 
 | constant | `kind` | what it means | exit |
 |---|---|---|---|
 | — | `flipped` | a flip applied | `0` |
 | — | `no_change` | the mode on record already matched | `0` |
 | — | `skipped` | another instance held the lock | `0` |
+| `KIND_WINDOW_CLOSED` | `window_closed` | the container's boot window had closed, so the flipper stopped trying until it is replaced | `0` |
 | `KIND_STATUS` | `status` | a state report was asked for | `0` |
 | `KIND_DISABLED` | `disabled` | flipping is off, or pgcat cannot front this driver | `0` |
 | — | `would_flip` | a rehearsal proved a flip would apply | `0` |
@@ -176,19 +183,29 @@ versus a deployment whose provider never registered — and because the exit-cod
 documents them as two cases. `disabled` is separate from `failed` for the opposite reason: the
 flipper has said it will not act, which is a statement rather than a fault, and it exits `0`.
 
+`window_closed` is separate for the same reason as `disabled`, one level further out: the run did
+exactly what it should have, so the *command* exits `0` and a scheduler never sees a failure it
+would have to interpret. What failed is the container, and `/health/db` is where that is reported
+(`flip.failed`, with `pgcat.window.failed_reason` naming which of the three ways it failed). A
+kind that exited non-zero would put an error line in a scheduler's log every minute for the rest of
+the container's life — the one line that says why, buried by sixty repetitions an hour of the
+sentence "it still has not worked".
+
 ### The four command-level kinds and the routes that produce them
 
-`report()` writes the object, and each route calls it with its own evidence:
+Each route calls `report()` with its own evidence, and `report()` hands it to the shared envelope:
 
 - `status` — the flipper's `status()` array under `status`, exit `0`.
 - `disabled` — `disabledReason()` in `reason`, exit `0`.
+- `window_closed` — the two numbers that decided it (when the container booted and how long it
+  had) in `reason`, exit `0`.
 - `refused` — a flag combination, or an unknown `--force-mode`, in `reason`, exit `1`.
 - `unbound` — a `PgcatConfigFlipper` that is not one, in `reason`, exit `1`.
 
-`report()` writes with `OutputInterface::OUTPUT_RAW`, not through `line()`: a machine-readable
-channel must not have angle brackets in a path or a supervisor message read as a console tag.
-Pretty-printed, because a failing CI step's output is read by a person as often as by a script,
-and `jq` does not care either way.
+`JsonEnvelope::write()` writes with `OutputInterface::OUTPUT_RAW`, not through `line()`: a
+machine-readable channel must not have angle brackets in a path or a supervisor message read as a
+console tag. Pretty-printed, because a failing CI step's output is read by a person as often as by
+a script, and `jq` does not care either way.
 
 ### What the flag does not change
 
@@ -239,14 +256,14 @@ kind table documenting `failed` as exiting `0` (the binding test fails).
   case is documented as one.
 - **The envelope is not versioned.** Keys are added deliberately (the test states the list), but
   a consumer that rejects unknown keys would break on an addition rather than ignore it.
-- **Two commands have it, two do not.** `db:probe-replicas` and `db:replica-status` render tables
-  and lines with no machine-readable form. `db:doctor` has one as well, decided separately with the
-  same flag, the same key-set rule and the same "the code travels inside it"
-  ([db-doctor-json.md](db-doctor-json.md)) — decided separately because what a gate asserts of a
-  preflight is *rows*, and a run of a flip is one verdict. The two envelopes disagree where they
-  could have agreed: this one names the verdict `kind`, the doctor's names it `verdict`, and the
-  health payload names its own `status`. Each is right for its reader and none of the three is a
-  package-wide contract.
+- **`db:doctor` does not write this envelope.** The gap this record used to name is closed —
+  `db:probe-replicas` and `db:replica-status` write the same five keys this one does, from the same
+  class ([command-json-envelope.md](command-json-envelope.md)) — but the doctor's object still leads
+  with `verdict`, `connection` and `counts` instead. That is a decision with [its own
+  record](db-doctor-json.md): what a gate asserts of a preflight is *rows*, and its run verdict is
+  one word at two scopes, so renaming it `kind` would put two names for one word on one page. A job
+  that reads all four still has one thing to remember, and it is the same thing here: `command`,
+  `exit_code`, and a key set that is documented and bound.
 
 ## What would change this decision
 
@@ -254,11 +271,13 @@ kind table documenting `failed` as exiting `0` (the binding test fails).
   which is a rename rather than a redesign — the object's shape is what the decision is about.
 - **If a streaming consumer appeared.** NDJSON under `--watch`, one object per pass with the pass
   in it, is additive: the one-object-per-run contract is about runs that end.
-- **If the package gained a shared report envelope.** The health payload's `audit` block, this
-  object and `db:doctor`'s answer the same kind of question for different readers, and they now
-  differ in ways that are only defensible as local: `kind` beside `verdict`, `ok`/`degraded` beside
-  `PASS`/`WARN`/`FAIL`, a flat object beside one carrying a list of rows. A common envelope would be
-  a package-wide decision, and it would want one place that defines the vocabulary.
+- **If the flip's envelope moved again.** It has, once: the five keys this record defined inline are
+  now `Console\JsonEnvelope`, shared with `db:probe-replicas` and `db:replica-status`
+  ([command-json-envelope.md](command-json-envelope.md)), and the evidence stayed where it was. That
+  was the move this bullet anticipated, and it cost one key order — the five first, evidence after —
+  which a consumer does not depend on and the tests state.
+- **If the doctor adopted the same envelope.** Then `verdict` becomes `kind` in its object, and the
+  reason it does not today (one word at two scopes; see its record) is the thing to answer.
 - **If the exit codes moved into the objects.** Today `exitCode()` lives on `FlipResult` and
   `DryRunResult` and the command adds its own four; the JSON's `exit_code` is the command's
   answer, which is right while the command owns the refusals. If the value objects ever described
@@ -270,7 +289,9 @@ kind table documenting `failed` as exiting `0` (the binding test fails).
 
 | File | Role |
 |---|---|
-| `src/Console/Commands/DbFlipPgcatCommand.php` | `--json`, the four `KIND_*` constants, `report()` (the envelope and the raw write), and a JSON branch in each route |
+| `src/Console/Commands/DbFlipPgcatCommand.php` | `--json`, the four `KIND_*` constants, its `EVIDENCE` table, `report()`, and a JSON branch in each route |
+| `src/Console/JsonEnvelope.php` | the five keys, the raw write and the refusals, shared with the other two commands |
+| `docs/command-json-envelope.md` | the envelope as a package-wide decision, which this record's `--json` follows |
 | `src/Pgcat/FlipResult.php` | `toArray()` — the flip's evidence, already in the shape the envelope carries |
 | `src/Pgcat/DryRunResult.php` | `toArray()` — the rehearsal's evidence, `steps` included |
 | `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the JSON half of the exit matrix, the two focused reports, and the kind-table binding |
