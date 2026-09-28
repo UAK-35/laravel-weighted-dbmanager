@@ -8,6 +8,7 @@ use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 
 /**
  * WeightedDatabaseManager — Laravel DatabaseManager with weighted read replica routing.
@@ -329,8 +330,11 @@ class WeightedDatabaseManager extends DatabaseManager
     {
         [$cpuFactor, $ramFactor, $formula] = $this->weightTunables($connectionConfig);
 
-        // 1. Resolve weights (cached) and apply health filter.
-        $pool = $this->resolver->resolve(
+        // 1. Resolve weights (cached) and apply health filter. The exclusions come back with the
+        // pool, so the warning below can name what was dropped: "all replicas in cool-down"
+        // without the replicas is a log line about a shorter list, which is exactly the shape
+        // this report exists to replace.
+        $resolved = $this->resolver->resolveWithExclusions(
             $connectionName,
             $replicas,
             $cpuFactor,
@@ -339,10 +343,19 @@ class WeightedDatabaseManager extends DatabaseManager
             healthFilter: fn (array $r) => !$this->health->isFailing($this->replicaKey($r)),
         );
 
+        $pool = $resolved['pool'];
+
         // 2. Every replica failed — reset circuits and retry once.
         if (empty($pool)) {
             Log::warning('[WeightedDB] All replicas in cool-down; resetting health circuits.', [
                 'connection' => $connectionName,
+                'excluded' => array_map(
+                    static fn (array $exclusion): array => [
+                        'replica' => $exclusion['key'],
+                        'reason' => $exclusion['reason'],
+                    ],
+                    $resolved['excluded'],
+                ),
             ]);
 
             $this->health->resetAll();
@@ -560,6 +573,39 @@ class WeightedDatabaseManager extends DatabaseManager
     }
 
     /**
+     * The replicas a connection's read list declares that its pool does not hold, and why.
+     *
+     * The other half of `replicaStatus()`, and deliberately the same shape of answer: that method
+     * returns the pool, this returns what is missing from it, and the two together are the read
+     * list — every configured replica appears exactly once across them. A report can therefore say
+     * "the pool holds one of the two replicas, and here is the one it does not hold and why"
+     * without re-deriving the reason from a shorter list, which is what `db:doctor`'s
+     * `replica metadata` row used to do and what nothing else could do at all.
+     *
+     * The health filter is not applied, for the reason `replicaStatus()` does not apply it either:
+     * which replicas are *out of rotation right now* is a per-read fact about the health monitor,
+     * reported per replica by that method's `healthy` flag and by `healthSummary()`'s
+     * `failure_count`. Nothing here is inferred from the pool's size, so what is left is exactly
+     * the configuration: `weight: 0`, and weights the package refuses to read.
+     *
+     * @return list<array{config: array<string, mixed>, key: string, weight: int, reason: string, detail: string}>
+     */
+    public function poolExclusions(string $connectionName): array
+    {
+        $config = ConfigValue::assoc($this->configuration($connectionName));
+        $replicas = ConfigValue::assocList($config['read'] ?? []);
+
+        if ($replicas === []) {
+            return [];
+        }
+
+        [$cpuFactor, $ramFactor, $formula] = $this->weightTunables($config);
+
+        return $this->resolver
+            ->resolveWithExclusions($connectionName, $replicas, $cpuFactor, $ramFactor, $formula)['excluded'];
+    }
+
+    /**
      * Top-level health summary for /health/db and db:replica-status.
      *
      * @return array{
@@ -630,11 +676,15 @@ class WeightedDatabaseManager extends DatabaseManager
      * case where the status table cannot be asked. A second spelling of "which replica" would be
      * a second thing to keep in step with the health record.
      *
+     * The spelling itself is `ReplicaMetadata::key()` — the same one the resolver builds its pool
+     * keys with, and the one the boot audit names a refused replica by before this manager is
+     * ever resolved.
+     *
      * @param array<string, mixed> $replica
      */
     public function replicaKey(array $replica): string
     {
-        return $this->replicaHost($replica).':'.$this->replicaPort($replica);
+        return ReplicaMetadata::key($replica);
     }
 
     /**
