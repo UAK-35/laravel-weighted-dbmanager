@@ -144,7 +144,7 @@ the change.
 
 | rule | test |
 |---|---|
-| every line names the level it was written at | `assertSeverityStamped()` in `BootAuditTest`, asserted over the finding, collision and lost-update lines |
+| every line names the level it was written at | `assertSeverityStamped()` in `BootAuditTest`, asserted over the finding, collision and resolution lines, and over the two about the record's own write |
 | a refused value is selectable by `severity`, and its clearing is not | `test_a_refused_value_is_selectable_from_the_log_by_its_severity` |
 | a finding's context cannot overwrite the line's level | `test_the_line_names_the_level_it_was_written_at_even_when_a_finding_context_carries_the_key` |
 | the real refusal path carries it, standing and clearing | `test_flat_string_reader_windows_are_refused_at_error_level`, `test_a_pgcat_switch_written_as_something_that_is_not_a_switch_is_refused_at_error_level` |
@@ -164,11 +164,14 @@ Two mutations confirm the assertions have teeth: dropping `severity` from `logCo
 2. **The resolution line does not say which level cleared** (candidate C, rejected). A reader
    that never saw the finding standing cannot learn from the clearing alone that it was a
    refusal — it can only learn that the key stopped standing.
-3. **`severity: "error"` covers more than refused values.** The collision line and the
-   lost-update line are written at `error` too, deliberately: both are defects in the package,
-   both are worth waking somebody for, and neither is about a setting an operator repairs. A
-   rule that pages on `severity == "error"` may therefore surface a package defect — which is
-   the intended reading, not a false positive.
+3. **`severity: "error"` covers more than refused values.** Three other kinds of line are
+   written at `error` too, deliberately: the collision line, which is a defect in the package;
+   the kept line, which says two boots in flight disagreed about a key; and the unlock line,
+   which says the write could not take the record's lock and merged unserialised. All three are
+   worth waking somebody for, none is about a setting an operator repairs, and a rule that
+   pages on `severity == "error"` may therefore surface one of them — which is the intended
+   reading, not a false positive. Each names what it is about in its own context, and the
+   README's triage table says which key tells them apart.
 4. **The values are the package's, not the application's.** `severity` is `error` or
    `warning`, never `ERROR`/`WARNING`/`CRITICAL`; a monitor that filters on its own level
    vocabulary needs one mapping, which is the point.
@@ -182,7 +185,7 @@ the endpoint and the CLI report are unaffected.
 
 ## Files
 
-- `src/Support/BootAudit.php` — `logContext()`, the four call sites, and the `SEVERITY_*`
+- `src/Support/BootAudit.php` — `logContext()`, the five call sites, and the `SEVERITY_*`
   docblock naming it.
 - `tests/Unit/Support/BootAuditTest.php` — the stamped-severity helper and two tests.
 - `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` — the real refusal paths.

@@ -85,10 +85,16 @@ const STRUCTURE_WRITE_BACKS = [
         flip lock, which is the only writer of this file. This write used to be a plain
         file_put_contents of four keys, which is how converged_at came to be erased and the boot window
         moved with it.',
-    'src/Support/BootAudit.php::persist writes $this->file' => 'the audit record, and this write is deliberately not a merge. The record is one file shared by every
-        boot of an installation, so the read is taken again as the file is about to be replaced and a
-        record another boot left in between is *reported* — with the keys this write drops — rather than
-        merged, because a merge would take the race the report exists to name and make it quiet.',
+    'src/Support/BootAudit.php::write writes $this->file' => 'the audit record. The record is one file shared by every boot of an installation, so the read this
+        write is safe against is taken in its caller rather than in its payload: persist() reads the file,
+        merges the copy this boot started with into what is on disk, and hands the result here, with the
+        whole read-merge-write under an exclusive flock on a companion file. A key another boot recorded
+        therefore cannot arrive between that read and this write, which is what makes this a
+        read-modify-write that cannot lose one rather than the bug — and the lock is an open descriptor,
+        so a worker killed mid-write leaves nothing behind that stops the next boot, which is why it is a
+        lock and not the sentinel the store-probe decision refused. The write itself rather than persist()
+        is the site because this is where the file is replaced; a rename of a temp over the record is what
+        that looks like, and it is the reason the lock lives on a companion file beside it.',
 ];
 
 /**
@@ -1013,7 +1019,7 @@ function structureWriteBackFixtures(): array
             PHP,
             [],
         ],
-        'a temp file a rename completes, read two calls away' => [
+        'a temp file a rename completes, read in a helper the write site calls' => [
             <<<'PHP'
             <?php
             class Audit
@@ -1025,14 +1031,14 @@ function structureWriteBackFixtures(): array
                     return (array) json_decode((string) @file_get_contents($this->file), true);
                 }
 
-                private function reportLostUpdate(): void
+                private function keepEntries(): void
                 {
                     $onDisk = $this->read();
                 }
 
                 public function persist(array $updated): void
                 {
-                    $this->reportLostUpdate();
+                    $this->keepEntries();
                     $temporary = $this->file.'.tmp.'.getmypid();
                     file_put_contents($temporary, json_encode($updated));
                     rename($temporary, $this->file);
@@ -1261,7 +1267,7 @@ function structureWriteBacksIn(string $source): array
  *
  * The class is the unit rather than the method, and that is the decision this check is built on:
  * the read and the write are rarely in one method. `writeState()` replaces the file `readState()`
- * reads, `persist()` replaces the one `read()` reads and says so through `reportLostUpdate()` —
+ * reads, `persist()` merges the file `read()` reads and hands the result to `write()`, which is the method that replaces it —
  * and the bug this check exists for lived exactly at a method that replaced a file the class read
  * somewhere else. A write in a class that reads the path is a read-modify-write of it, whichever
  * method each half is in; what is reported is the write site, because that is where the file is

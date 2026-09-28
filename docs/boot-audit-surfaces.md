@@ -376,7 +376,7 @@ restarts anything.
 | nothing standing is `none`, which is a value in the summary's vocabulary only | `test_a_summary_of_nothing_standing_is_none` | audit |
 | a level outside the two the audit logs at counts as the quieter one | `test_a_level_outside_the_vocabulary_is_counted_as_the_quieter_one` | audit |
 | the payload tells a refused value apart from a setting that cannot act, and still says `status: ok` | `test_the_health_endpoint_tells_a_setting_that_cannot_act_apart_from_a_refused_value` | provider |
-| the same choice is in the log: every line names the level it was written at | `assertSeverityStamped()` (over the finding, collision and lost-update lines), in `test_a_refused_value_is_selectable_from_the_log_by_its_severity` | audit |
+| the same choice is in the log: every line names the level it was written at | `assertSeverityStamped()` (over the finding, collision and resolution lines, and the two the record's write can add), in `test_a_refused_value_is_selectable_from_the_log_by_its_severity` | audit |
 | a finding's context cannot overwrite the line's level | `test_the_line_names_the_level_it_was_written_at_even_when_a_finding_context_carries_the_key` | audit |
 | with no record to read, the block makes no claim and `error` names the reason | `test_the_audit_block_makes_no_claim_when_there_is_no_record_to_read` | provider |
 | an unreadable record is not rounded to "nothing standing" — `available: false`, `error` set, and `severity: none` because nothing is *known* to stand | `test_a_record_that_cannot_be_read_is_not_rounded_to_nothing_standing` | audit |

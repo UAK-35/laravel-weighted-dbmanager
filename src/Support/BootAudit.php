@@ -46,6 +46,15 @@ use Illuminate\Support\Facades\Log;
  * entirely because the feature is no longer wanted. A sentence that assumes the
  * repair — "pgcat flipping is active" — would be a lie for the other two.
  *
+ * One installation has many boots, so the record has more than one writer. The write
+ * re-reads the file as it is about to be replaced and merges rather than replacing, and
+ * the read-merge-write is taken under an exclusive advisory lock on a companion file —
+ * one the kernel releases when a process ends however it ends, so a worker killed
+ * mid-write leaves nothing behind that stops the next boot. `persist()` states the rule
+ * key by key and why the mechanism is this lock rather than a sentinel, and a record that
+ * cannot be written at all is not read again, merged or locked: an unwritable directory
+ * costs a stat rather than a wait.
+ *
  * THE STORE PROBE, UNDER PHP-FPM
  * ------------------------------
  * Store reachability is the one finding that needs the network, and under FPM the
@@ -98,13 +107,53 @@ final class BootAudit
     public const SEVERITY_NONE = 'none';
 
     /**
+     * How many times a write asks for the record's lock, and how long it waits between two
+     * attempts. A boot cannot block on a diagnostic: the holder is another boot whose
+     * merge-and-write takes microseconds, so short attempts are generous, and a holder that
+     * is wedged — a filesystem that stopped answering — must not become an application that
+     * never boots. Exhausting them is not a refusal: the write goes ahead and says so.
+     */
+    private const LOCK_ATTEMPTS = 8;
+
+    private const LOCK_RETRY_MICROSECONDS = 15_000;
+
+    /** @var \Closure(string): array{0: bool, 1: resource|null} */
+    private \Closure $lockAcquirer;
+
+    /** @var \Closure(mixed): void */
+    private \Closure $lockReleaser;
+
+    /**
      * @param string $file where findings that still stand are remembered
      * @param int $storeProbeSeconds seconds between store probes; 0 never probes
+     * @param \Closure(string): array{0: bool, 1: resource|null}|null $lockAcquirer how one
+     *        attempt at the record's lock is made — injected so a test can hold it, refuse it,
+     *        or watch it being released without a second process
+     * @param \Closure(mixed): void|null $lockReleaser what lets the lock go again, called with
+     *        whatever the acquirer returned
      */
     public function __construct(
         private readonly string $file,
         private readonly int $storeProbeSeconds = 60,
+        ?\Closure $lockAcquirer = null,
+        ?\Closure $lockReleaser = null,
     ) {
+        $this->lockAcquirer = $lockAcquirer ?? static function (string $file): array {
+            $handle = @fopen($file, 'c');
+
+            if ($handle === false) {
+                return [false, null];
+            }
+
+            return [@flock($handle, LOCK_EX | LOCK_NB), $handle];
+        };
+
+        $this->lockReleaser = $lockReleaser ?? static function (mixed $handle): void {
+            if (is_resource($handle)) {
+                @flock($handle, LOCK_UN);
+                @fclose($handle);
+            }
+        };
     }
 
     /**
@@ -449,6 +498,11 @@ final class BootAudit
      * the record holds one entry per key, and a fold that ran before the log would drop the
      * replaced sentence before anyone read it. `fold()` is where that is enforced.
      *
+     * `$record` is what this boot read when it started, and the write merges into the file as
+     * it is now rather than replacing it with the result of that read — so the keys this boot
+     * did not evaluate, and the ones another boot recorded while this one was running, are
+     * taken from disk. See `persist()`, which is also where the lock is taken.
+     *
      * @param Record $record what a previous boot reported
      * @param list<BootAuditFinding> $findings the settings that cannot act now
      * @param list<string> $checked the finding keys this boot actually evaluated —
@@ -468,6 +522,9 @@ final class BootAudit
         $standing = [];
         $next = [];
 
+        /** @var array<string, Finding> $resolutions */
+        $resolutions = [];
+
         foreach ($record['findings'] as $key => $reported) {
             if (isset($current[$key])) {
                 continue;   // still failing: its warning was just logged again
@@ -479,11 +536,13 @@ final class BootAudit
                 continue;
             }
 
-            Log::warning('[WeightedDB] '.$reported['resolution'], self::logContext(self::SEVERITY_WARNING, [
-                'finding' => $key,
-                'first_reported_at' => $reported['first_reported_at'],
-                'resolved' => true,
-            ] + $reported['context']));
+            // Collected rather than logged here, because whether this key has actually
+            // stopped standing is decided by the write: an entry another boot substantiated
+            // is kept, and a line saying the finding cleared would then be false about the
+            // record — a monitor closing its page on `resolved: true` would be closing one
+            // that still stands. The resolutions are logged below, without the keys the
+            // merge kept.
+            $resolutions[$key] = $reported;
         }
 
         foreach ($current as $key => $finding) {
@@ -507,7 +566,26 @@ final class BootAudit
             'store_probed_at' => $probedAt ?? $record['store_probed_at'],
         ];
 
-        $this->persist($record, $updated);
+        // The keys this boot produced, as opposed to the ones it carried over: the merge
+        // needs the difference, because a carried-over entry is not this boot's news about a
+        // setting and is not this boot's to write.
+        $kept = $this->persist($record, $updated, array_keys($current));
+
+        if ($resolutions === []) {
+            return;
+        }
+
+        foreach ($resolutions as $key => $reported) {
+            if (in_array($key, $kept, true)) {
+                continue;   // kept: the record still holds it, so it has not cleared
+            }
+
+            Log::warning('[WeightedDB] '.$reported['resolution'], self::logContext(self::SEVERITY_WARNING, [
+                'finding' => $key,
+                'first_reported_at' => $reported['first_reported_at'],
+                'resolved' => true,
+            ] + $reported['context']));
+        }
     }
 
     /**
@@ -630,41 +708,188 @@ final class BootAudit
     }
 
     /**
-     * Replace the record when it changed, and remove it when there is nothing left
-     * to remember. Written beside the target and renamed over it, so a concurrent
-     * reader never sees half a record.
+     * Merge what this boot produced into the record, and write the result.
      *
-     * A concurrent *writer* is the other half of that, and the record is one file shared by
-     * every boot of an installation — per installation, not per worker, which is what makes
-     * the probe cheap and this write contended. This boot decided what to remember from the
-     * copy it read, so if another boot has written the file since, replacing it now discards
-     * entries no reader has taken out of it yet. The file is therefore read once more as it
-     * is about to be replaced, and a record that is no longer the one this boot was decided
-     * from is reported with the keys this write drops.
+     * WHY THIS IS A MERGE, AND WHY IT TAKES A LOCK
+     * --------------------------------------------
+     *   The record is one file shared by every boot of an installation — per installation,
+     *   not per worker, which is what makes the probe cheap and this write contended. This
+     *   boot decided what to remember from the copy it read near its start, and the store
+     *   probe between the two is a network call, so the window can be a connect timeout wide.
+     *   Replacing the file with that copy discards whatever another boot recorded in the
+     *   meantime: an entry no reader has taken out of the record yet, and with it the age the
+     *   next boot would have dated it from.
      *
-     * Reported, not refused, and not locked. Refusing would leave the settings this boot
-     * checked unrecorded over a race, and a lock is the mechanism the store-probe decision
-     * already rejected for this file: one left behind by a killed worker would stop the
-     * record from ever being written again. A dropped entry, named, is louder than either.
+     *   Two mechanisms close that, and both are needed. The write re-reads the file as it is
+     *   about to be replaced and merges, so a copy that has gone stale is not what lands. And
+     *   the read-merge-write is taken under an exclusive advisory lock, so two boots cannot
+     *   merge from the same copy and write over each other — the merge narrows the window, the
+     *   lock closes it.
+     *
+     *   The lock is `flock(LOCK_EX)` on a companion file, and *which* lock matters as much as
+     *   the mutual exclusion: it lives on an open descriptor, so the kernel releases it when
+     *   the process ends however it ends. A worker killed mid-write leaves nothing behind that
+     *   stops the next boot from writing — the file it locked may remain, but an empty file is
+     *   not a lock — where the sentinel the store-probe decision refused (a lock whose
+     *   *existence* is the lock, or one holding a pid) would wait for somebody to find it. A
+     *   boot does not wait for this one indefinitely either: `LOCK_ATTEMPTS` short attempts,
+     *   then the merge goes ahead from the freshest read it can take — recording the settings
+     *   this boot checked matters more than recording them alone — and says it could not
+     *   serialise.
+     *
+     * WHAT THE MERGE DECIDES, KEY BY KEY
+     * ----------------------------------
+     *   A key takes this boot's verdict only where this boot looked at the file as it now is.
+     *   The keys this boot produced are written over whatever is there. An entry this boot
+     *   evaluated and found clean is removed — and only while it is still the entry this boot
+     *   read: one that *changed* under this boot while it was about to clear that key is
+     *   another boot's report, and it is kept, because a boot that just logged a setting
+     *   failing is not contradicted by a copy read earlier that was about to close it out.
+     *   Every other key is taken as it is on disk at the write, which is what "not looked at
+     *   this boot" has always meant — the difference being that it is now read here rather
+     *   than from the copy this boot started with.
+     *
+     *   Nothing is refused and nothing is silent: a write that keeps an entry this boot was
+     *   about to clear says so, with the keys, and so does a write that could not take the
+     *   lock. The safe path is the quiet one.
+     *
+     * WHERE THE RECORD CANNOT BE WRITTEN, NONE OF THIS RUNS
+     * ----------------------------------------------------
+     *   A directory that accepts no file is the same state the store probe is gated on, and it
+     *   is answered the same way: the merge is not attempted, because its result has nowhere to
+     *   go. The rule is not only about the work — eight attempts at a lock the filesystem will
+     *   not let this process open is a fifth of a second added to every boot under FPM, and the
+     *   boot already says what it found. It is also about the line above: a write that cannot
+     *   land has not "merged without serialising", and there is nothing to serialise it
+     *   against, so reporting one would be a claim about a write that never happened.
+     *
+     * @param Record $previous the record this boot read when it started
+     * @param Record $updated  what this boot would write on its own
+     * @param list<string> $produced the keys `$updated` holds because *this* boot produced
+     *        them, rather than carrying them over from `$previous`
+     * @return list<string> the keys kept against this boot's clean verdict, so the caller can
+     *         keep quiet about a finding the record still holds
+     */
+    private function persist(array $previous, array $updated, array $produced): array
+    {
+        if (self::canonical($previous) === self::canonical($updated)) {
+            return [];
+        }
+
+        // Nothing can be written where the record's directory takes no file, so none of the
+        // read-merge-write is attempted — see the docblock. A resolution is still logged by the
+        // caller, which is the honest reading: this boot did evaluate the key and find it clean,
+        // and it is the record's repair that has nowhere to go rather than the finding's state.
+        if (!$this->recordIsWritable()) {
+            return [];
+        }
+
+        [$held, $handle, $attempts, $waited] = $this->acquireLock();
+
+        try {
+            $onDisk = $this->read();
+
+            [$record, $kept] = $this->merge($previous, $updated, $produced, $onDisk);
+
+            if ($kept !== []) {
+                $this->reportKept($kept, $onDisk, $previous, $updated);
+            }
+
+            if (!$held) {
+                $this->reportUnlocked($attempts, $waited);
+            }
+
+            $this->write($record);
+        } finally {
+            ($this->lockReleaser)($handle);
+        }
+
+        return $kept;
+    }
+
+    /**
+     * The record as it should be written: this boot's findings, this boot's clean verdicts
+     * where they still apply, and every other key as the file holds it now.
      *
      * @param Record $previous
      * @param Record $updated
+     * @param list<string> $produced
+     * @param Record $onDisk
+     * @return array{0: Record, 1: list<string>} the record, and the keys kept against this
+     *         boot's clean verdict because another boot substantiated them
      */
-    private function persist(array $previous, array $updated): void
+    private function merge(array $previous, array $updated, array $produced, array $onDisk): array
     {
-        if (self::canonical($previous) === self::canonical($updated)) {
-            return;
+        $clearing = array_diff(array_keys($previous['findings']), array_keys($updated['findings']));
+
+        $findings = [];
+        $kept = [];
+
+        foreach ($onDisk['findings'] as $key => $entry) {
+            $read = $previous['findings'][$key] ?? null;
+
+            if ($read !== null && in_array($key, $clearing, true)) {
+                if (self::canonical($read) === self::canonical($entry)) {
+                    continue;   // this boot evaluated it and found it clean: the news is this boot's
+                }
+
+                // Another boot substantiated it after this boot read the file, so the entry it
+                // wrote stands and a clean verdict from an older copy does not clear it.
+                $kept[] = $key;
+            }
+
+            $findings[$key] = $entry;
         }
 
-        $this->reportLostUpdate($previous, $updated);
+        foreach ($updated['findings'] as $key => $entry) {
+            if (!in_array($key, $produced, true)) {
+                continue;   // carried over, not asserted: the file — just read — is its record
+            }
 
-        if ($updated['findings'] === [] && $updated['store_probed_at'] === null) {
+            $findings[$key] = $entry;
+        }
+
+        return [[
+            'findings' => $findings,
+            'store_probed_at' => self::latestProbe($onDisk['store_probed_at'], $updated['store_probed_at']),
+        ], $kept];
+    }
+
+    /**
+     * The later of two probe stamps — a probe another boot recorded is not forgotten by this
+     * one, which is the difference between merging the record and writing a copy of it: the
+     * cost of forgetting is a probe nobody needed.
+     */
+    private static function latestProbe(?int $left, ?int $right): ?int
+    {
+        if ($left === null) {
+            return $right;
+        }
+
+        if ($right === null) {
+            return $left;
+        }
+
+        return max($left, $right);
+    }
+
+    /**
+     * The record to disk, atomically: written beside its target and renamed over it, so a
+     * concurrent reader never sees half a record. Removed instead when there is nothing left
+     * to remember — the merged record, not this boot's copy of it, because a boot whose own
+     * findings all cleared has no business deleting an entry another boot just recorded.
+     *
+     * @param Record $record
+     */
+    private function write(array $record): void
+    {
+        if ($record['findings'] === [] && $record['store_probed_at'] === null) {
             @unlink($this->file);
 
             return;
         }
 
-        $encoded = json_encode($updated, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        $encoded = json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
         if ($encoded === false) {
             return;
@@ -686,49 +911,103 @@ final class BootAudit
     }
 
     /**
-     * Say so when the record about to be replaced is no longer the one this boot read.
+     * The record's lock, asked for a bounded number of times.
      *
-     * The keys the other boot added — and that this write does not carry — are named,
-     * because those are the entries that go nowhere: recorded by a boot that has since
-     * exited, never taken out of the file by anything, and now held by a copy that is being
-     * overwritten. Every other difference is this boot's own work: the keys it resolved are
-     * meant to leave, and the ones it is writing are meant to arrive.
-     *
-     * The sentences themselves are not lost — the boot that produced them logged them, which
-     * is where a finding is written — so the loss is the record: the next boot cannot resolve
-     * a key it never saw, and cannot date a finding from when it was first reported.
-     *
-     * @param Record $previous what this boot was decided from
-     * @param Record $updated  what is about to be written
+     * @return array{0: bool, 1: resource|null, 2: int, 3: int} held, the descriptor it is held
+     *         on, how many attempts were made, and how long they took in milliseconds
      */
-    private function reportLostUpdate(array $previous, array $updated): void
+    private function acquireLock(): array
     {
-        $onDisk = $this->read();
+        $started = microtime(true);
 
-        if (self::canonical($onDisk) === self::canonical($previous)) {
-            return;
+        for ($attempt = 1; $attempt <= self::LOCK_ATTEMPTS; $attempt++) {
+            [$held, $handle] = ($this->lockAcquirer)($this->lockPath());
+
+            if ($held) {
+                return [true, $handle, $attempt, self::millisecondsSince($started)];
+            }
+
+            if ($attempt < self::LOCK_ATTEMPTS) {
+                usleep(self::LOCK_RETRY_MICROSECONDS);
+            }
         }
 
-        $appeared = array_diff_key($onDisk['findings'], $previous['findings']);
-        $discarded = array_keys(array_diff_key($appeared, $updated['findings']));
+        return [false, null, self::LOCK_ATTEMPTS, self::millisecondsSince($started)];
+    }
 
-        Log::error(
-            $discarded === []
-                ? '[WeightedDB] The audit record changed while this boot was running, so this write replaces the copy another process left. That copy holds no entry this write does not, so nothing goes unread.'
-                : sprintf(
-                    '[WeightedDB] The audit record changed while this boot was running, so this write replaces the copy another process left, discarding %d entr%s another boot recorded and nothing has read: %s. The sentences survive in the log that boot wrote them to — what is lost is the record, and with it the age the next boot would have dated them from.',
-                    count($discarded),
-                    count($discarded) === 1 ? 'y' : 'ies',
-                    implode(', ', $discarded),
-                ),
-            self::logContext(self::SEVERITY_ERROR, [
-                'record' => $this->file,
-                'discarded' => $discarded,
-                'keys_on_disk' => array_keys($onDisk['findings']),
-                'keys_this_boot_read' => array_keys($previous['findings']),
-                'keys_this_boot_writes' => array_keys($updated['findings']),
-            ]),
-        );
+    private static function millisecondsSince(float $started): int
+    {
+        return (int) round((microtime(true) - $started) * 1000);
+    }
+
+    /**
+     * The file the record's lock is taken on: beside the record rather than on it. The write
+     * replaces the record by renaming a temp over it, so a descriptor opened on the record
+     * would be holding a file nothing else will ever open again — and two boots that opened it
+     * either side of a rename would each hold "the record" and neither exclude the other.
+     *
+     * The file may outlive the lock, and that is the point: an empty file beside the record is
+     * not a lock, says nothing, and stops nothing.
+     */
+    private function lockPath(): string
+    {
+        return $this->file.'.lock';
+    }
+
+    /**
+     * Say so when an entry another boot substantiated is kept against this boot's clean verdict
+     * on that key.
+     *
+     * The line is about a disagreement rather than a loss: with the merge, the entry survives
+     * this write, and the sentence names the keys that were kept. What it cannot settle is
+     * which of the two boots is right — configuration is read once per process, so two boots in
+     * flight can genuinely be running different configurations — and the record keeps the
+     * finding until a boot evaluates the key cleanly with nothing re-reporting it in between.
+     *
+     * @param list<string> $kept
+     * @param Record $onDisk
+     * @param Record $previous
+     * @param Record $updated
+     */
+    private function reportKept(array $kept, array $onDisk, array $previous, array $updated): void
+    {
+        Log::error(sprintf(
+            '[WeightedDB] The audit record changed while this boot was running: this write keeps %d entr%s another boot recorded after this boot read the file, and does not clear %s — a setting another boot has just reported failing is not cleared by a copy read before that. It stands until a boot evaluates the key cleanly with nothing re-reporting it.',
+            count($kept),
+            count($kept) === 1 ? 'y' : 'ies',
+            count($kept) === 1 ? 'it' : 'them',
+        ), self::logContext(self::SEVERITY_ERROR, [
+            'record' => $this->file,
+            'kept' => $kept,
+            'keys_on_disk' => array_keys($onDisk['findings']),
+            'keys_this_boot_read' => array_keys($previous['findings']),
+            'keys_this_boot_writes' => array_keys($updated['findings']),
+        ]));
+    }
+
+    /**
+     * Say so when the record's lock could not be taken: the merge still ran, but nothing
+     * serialised it against another boot, so an entry added between its read and its write can
+     * be lost — the one write this class still makes that another boot's work can disappear
+     * under, and the reason the line is here rather than a refusal.
+     *
+     * A refusal would leave the settings this boot checked unrecorded, over a lock the operator
+     * may not be able to fix from where the line is read; the directory the lock lives in is
+     * named, because that is the likeliest cause and the fix is a permission.
+     */
+    private function reportUnlocked(int $attempts, int $waited): void
+    {
+        Log::error(sprintf(
+            '[WeightedDB] The audit record lock could not be taken in %d attempt(s) over %dms, so this write merged without serialising against another boot — an entry added between its read and its write can be lost. The lock is %s, and a directory that does not accept a file there is the likeliest cause.',
+            $attempts,
+            $waited,
+            $this->lockPath(),
+        ), self::logContext(self::SEVERITY_ERROR, [
+            'record' => $this->file,
+            'lock' => $this->lockPath(),
+            'attempts' => $attempts,
+            'waited_ms' => $waited,
+        ]));
     }
 
     /**

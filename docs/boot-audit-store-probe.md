@@ -312,11 +312,16 @@ what "the store" is.
 
 1. **The interval is check-then-stamp, not a lock.** Several workers booting in the same
    instant after the interval expires can each find the timestamp stale and each probe — up
-   to N probes per interval instead of one. Left as is deliberately: the cost is a bounded
-   extra timeout, while a lock adds a failure mode of its own, where a lock left behind by a
-   killed worker would stop the probe from ever running again. Not probing is worse than
-   probing twice, so the cheaper mechanism wins. If this is ever tightened, stamp the
-   timestamp *before* probing rather than taking a lock.
+   to N probes per interval instead of one. Left as is deliberately, and the stamp is now the
+   one part of the record that is written without one: `BootAudit::persist()` does take a
+   lock, but on a *companion* file and on an open descriptor, so the kernel releases it when a
+   process ends however it ends and a worker killed mid-write leaves nothing behind — the
+   sentinel this decision refused is not the mechanism that is there. What keeps the probe out
+   of that lock is the cost of holding it: the lock would have to be held across the connect
+   timeout, which is the slow case the interval exists to bound, where a duplicate probe is
+   one bounded extra wait. Not probing is worse than probing twice, so the cheaper mechanism
+   wins. If this is ever tightened, stamp the timestamp *before* probing rather than taking a
+   lock.
 2. **An unwritable record means no coverage — now visible rather than silent.** Accepted
    above as the trade (losing coverage beats a timeout per request), and reported by the
    `store probe` row of `db:doctor`, which fails on an unwritable record and warns when
@@ -346,7 +351,10 @@ what "the store" is.
   deployment-scoped lifecycle. The interval is a stand-in for that lifecycle, arrived at
   because Laravel's boot is not a per-deploy event under FPM.
 - **A shared lock with a TTL** (rather than an interval) would bound concurrent probes
-  harder, if the stampede case ever measured as a problem.
+  harder, if the stampede case ever measured as a problem. A lock is no longer hypothetical
+  in this package — the record's own write takes one that a killed worker cannot leave behind
+  — so what rules it out here is only where it would have to be held: across the connect
+  timeout this interval exists to avoid.
 
 ---
 
@@ -354,7 +362,7 @@ what "the store" is.
 
 | file | role |
 |---|---|
-| `src/Support/BootAudit.php` | the record: read, `storeProbeDue()`, report/resolve, atomic write |
+| `src/Support/BootAudit.php` | the record: read, `storeProbeDue()`, report/resolve, the merge and the locked atomic write |
 | `src/Providers/WeightedDatabaseServiceProvider.php` | gates the probe, produces the findings, decides what counts as checked |
 | `src/Support/RedisAccess.php` | the facade-free path to Redis, and the reasons it can fail |
 | `src/Database/Weighted/RedisAtomicStateStore.php` | `isHealthy()` — evidence, not proof |

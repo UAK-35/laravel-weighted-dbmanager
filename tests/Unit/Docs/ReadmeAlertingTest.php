@@ -29,9 +29,9 @@ use Uak35\WeightedDbManager\Tests\TestCase;
  * stopped answering the question fails here instead of in production.
  *
  * What is not covered: `jq` has to be on the machine (the test skips without it, as
- * PushingDocTest skips a missing shell), and the log-side keys — `levels`, `discarded`,
- * `keys_on_disk` — are log context rather than payload fields, so they are asserted where they
- * are written, by `BootAuditTest`, and not by walking this payload.
+ * PushingDocTest skips a missing shell), and the log-side keys — `levels`, `kept`, `lock` —
+ * are log context rather than payload fields, so they are asserted where they are written, by
+ * `BootAuditTest`, and not by walking this payload.
  */
 class ReadmeAlertingTest extends TestCase
 {

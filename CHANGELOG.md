@@ -4,12 +4,75 @@
 
 ### Fixed
 
+- **The boot audit's record is now safe under genuinely concurrent boots rather than merely loud
+  about them.** The record is one file shared by every boot of an installation, and a boot writes it
+  from the copy it read near its start — with the store probe in between, which is a network call, so
+  the window can be a connect timeout wide. Two boots in flight therefore both wrote from the same
+  starting point, and the later one **discarded** whatever the earlier recorded: an entry nothing had
+  taken out of the record yet, dropped by a write that never knew it was there. The rename that made
+  the write atomic protected the *reader*; the writer was the same hazard one level up, and it was
+  reported — a line naming the entries about to go — rather than prevented. It is prevented now, by
+  two mechanisms that are both needed. The write re-reads the record as it is about to be replaced
+  and **merges**: the keys this boot produced are written over what is there; a key this boot
+  evaluated and found clean is cleared only while the entry is still the one this boot read, and one
+  another boot substantiated in the meantime is kept and named, because a boot that has just logged a
+  setting failing is not contradicted by a copy read before that; every other key is taken as the
+  file holds it; and the probe stamp keeps the later of the two, so a merge cannot cost the
+  installation a probe it did not need. And the read-merge-write is taken under an exclusive
+  `flock(LOCK_EX)` on a **companion** file beside the record — a companion because the write replaces
+  the record by renaming a temp over it, so a descriptor opened on the record would be holding a file
+  nothing will ever open again, and two boots either side of a rename would each hold "the record"
+  while excluding nothing. Which lock it is matters as much as the exclusion: `flock` lives on an open
+  descriptor, so the kernel releases it when a process ends however it ends, and a worker killed
+  mid-write leaves an empty file beside the record — which is not a lock, says nothing and stops
+  nothing — where the sentinel the store-probe decision refused would have waited for somebody to
+  find and delete it. A boot does not wait for the lock indefinitely either: eight attempts, 15 ms
+  apart, and then the merge goes ahead from the freshest read it can take and says it could not
+  serialise, because recording the settings this boot checked matters more than recording them alone.
+  Where the record cannot be written at all, none of the write is attempted — no re-read, no merge and
+  no eight futile attempts at a lock a read-only directory would refuse, since the merge's result has
+  nowhere to go and a write that never happened has not "merged without serialising": the boot pays a
+  stat for the check, and the finding it logged is what an operator gets. The change is pinned by
+  seven new tests in `BootAuditTest` — the merge, the kept verdict, the lock taken and left free for
+  the next boot, a lock file a killed worker left behind, a lock this boot cannot take, the re-read
+  taken inside the lock, and the probe stamp — and mutation-checked against its own failures: writing
+  this boot's own copy instead of the merged one fails four of them, reading the file before taking
+  the lock fails one, taking the stamp from this boot's copy fails one, and giving up on the write
+  when the lock cannot be taken fails one.
+
+  The mechanism is measured rather than argued, too. `BootAuditConcurrencyTest` runs four real boots
+  of one record — as **processes**, because a lock is only worth measuring between processes: two
+  descriptors the same process opened collide whether or not the writers share a path, so a
+  same-process test passes against a design that excludes nothing. Every boot is released at the
+  same wall-clock instant and times two windows around the shipped lock closures: the read of the
+  record to the rename that replaced it, and the part of that the lock is held for. What it asserts
+  is the relationship and never a number — the hold stays far below the boot stage it sits between,
+  so a lock taken at boot rather than at the write fails the run — in two regimes that fail for
+  different reasons: a boot stage between the read and the write is what a stale copy would be
+  written back over, which is the merge's half, and with no stage at all every boot is inside its
+  critical section at the same instant, so the reads all happen before any of the writes and the run
+  is the lock's. Run against that harness, the two mutations that separate the mechanisms each fail
+  their half: writing this boot's own copy instead of the merged one loses three of the four keys
+  *in silence*, in both regimes, and giving each boot a lock path of its own fails both runs on the
+  boot that wrote its key and could not find it.
+
 - **`PUSHING.md`'s credential section is two paragraphs again.** The sentence that closes the
   `glab` half of it — `the token does not.` — had run into the sentence after it, so the advice
   about a personal access token read as its continuation. Nothing was reworded, and the shape is
   worth naming because nothing here reads sentence shape: the guards over these records read
   claims — a cited test name, a count, a fenced block — so a fused pair of sentences is exactly
   what the suite cannot see.
+
+### Changed
+
+- **Two of the boot audit's log lines are about the record's write instead of about a lost entry,
+  and an alert rule written against the old one needs updating.** "The audit record changed while
+  this boot was running …" no longer says `discarding N entries` — the entry is not discarded any
+  more, the write keeps it — and the context keys it is triaged by are `kept` and
+  `keys_this_boot_read` rather than `discarded` and `keys_on_disk`. A lock the write could not take
+  is the second line, and its context carries `lock`, `attempts` and `waited_ms`. Both are logged at
+  `error`, both name their subject in the context, and the README's triage table says which key tells
+  which kind of page apart.
 
 ## 0.2.0-alpha1 - 2026-09-28
 

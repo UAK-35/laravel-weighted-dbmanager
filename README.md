@@ -964,13 +964,14 @@ gate that exits non-zero on any row that warns or fails.
 A refused value and a defect in the package both arrive at `severity: "error"` — deliberately,
 because a defect nobody reports is worse than a page somebody triages. Triage is mechanical,
 and it is three fields: a `finding` key names an owner, and the payload either carries a
-setting's own evidence or the two keys that mean something else happened.
+setting's own evidence or the keys that mean something else happened.
 
 | what arrives | how you know | whose it is |
 |---|---|---|
-| a `swrr.*` setting was refused | the message quotes the value, and the context carries neither `levels` nor `discarded` | the installation's: the fix is `config/db-manager.php` |
+| a `swrr.*` setting was refused | the message quotes the value, and the context carries none of `levels`, `kept` or `lock` | the installation's: the fix is `config/db-manager.php` |
 | "Two findings this boot share the key …" | the context carries `levels` — two branches of the package produced one key | the package's: no configuration can repair it, and the record keeps the louder of the two |
-| "The audit record changed while this boot was running …" | the context carries `discarded` and `keys_on_disk` | the file's: two boots wrote one `swrr.audit.file`, so the entry is lost rather than wrong |
+| "The audit record changed while this boot was running …" | the context carries `kept` and `keys_this_boot_read` | the installation's: two boots in flight were running different configurations, so the entry is kept rather than wrong — it stands until a boot evaluates the key cleanly with nothing re-reporting it |
+| "The audit record lock could not be taken …" | the context carries `lock` and `attempts` | the host's: the record's directory would not accept the lock file, or another boot held the lock longer than this one waits — the merge ran unserialised, which is the one write left that can lose an entry |
 | `audit.available: false` with `error` set | the message names the file and what is wrong with it (`… is not JSON (Syntax error)`, `… is empty`, `… does not hold a map of findings`) | the installation's: a path, a permission, or half a write |
 | `audit.available: false` with `error: null` | there is no record and no reason — nothing was read because nothing is registered | the installation's: the package's provider is not registered |
 | a line with **no** `finding` key | `[WeightedDB] Degraded to the in-process SWRR store.` and its siblings, which carry `connection`, `store` and a `reason`/`error` instead | the store's: no boot audit is involved, and this is the degradation described above |

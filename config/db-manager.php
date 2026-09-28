@@ -141,6 +141,16 @@ return [
         // package does not have. Each warning is closed out by the boot that sees the
         // finding gone, and what still stands is remembered in `file`.
         //
+        // `file` is one record per installation, written by every boot of it, so the
+        // read-merge-write is taken under an advisory lock on `file`.lock — a companion
+        // empty file the kernel releases when the process ends however it ends, left in
+        // place on purpose. It is not a sentinel and is not meant to be deleted by hand:
+        // nothing holds it but an open descriptor, so a worker killed mid-write leaves it
+        // behind and the next boot simply takes it. The directory `file` names therefore
+        // has to accept a file, or the audit's findings are logged and never remembered;
+        // `db:doctor` fails on that, and the record itself is never locked — the write
+        // replaces it by renaming a temp over it.
+        //
         // `store_probe_seconds` is the only entry that costs anything: it is how often
         // the primary store may be PINGed, which is what keeps the probe off the
         // request path under PHP-FPM (0 never probes).

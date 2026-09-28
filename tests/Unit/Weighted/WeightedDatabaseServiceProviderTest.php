@@ -975,6 +975,10 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     {
         // A read-only deploy: the finding is still logged, but its resolution can never
         // be written down. Losing a pair of log lines must not cost the boot.
+        //
+        // Where nothing can be written, none of the write is attempted — not the re-read, not
+        // the merge, and not the lock, which this filesystem would refuse eight times over. The
+        // finding is the whole of what an operator gets, and the boot pays a stat for it.
         $blocked = $this->blockedDirectoryPath();
 
         $this->useAudit($blocked . '/audit.json');
@@ -985,7 +989,7 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->collectLogs($records);
         $this->reportBootAudit();
 
-        $this->assertCount(1, $records);
+        $this->assertCount(1, $records, 'the finding, and not a word about a write that has nowhere to go');
         $this->assertStringContainsString('pgcat will never act', $records[0]['message']);
         $this->assertSame([], $this->recordedKeys(), 'nothing could be written, and nothing was claimed');
     }

@@ -114,7 +114,7 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the findings in the richest boot, as boot-audit-finding-keys.md counts them | "**eight** findings, **eight** keys, the exact set" | `WeightedDatabaseServiceProviderTest::RICHEST_BOOT_KEYS` |
 | the keys in the richest boot, as boot-audit-finding-keys.md counts them | "**eight** findings, **eight** keys, the exact set" | `WeightedDatabaseServiceProviderTest::RICHEST_BOOT_KEYS` |
 | the replica settings the audit refuses, as boot-audit-finding-keys.md counts them | "all **three** replica settings unreadable" | the provider's `REPLICA_METADATA` table |
-| the boot lines that carry a severity, as boot-audit-log-severity.md counts them | "`logContext()`, the **four** call sites" | the `self::logContext(` calls in `BootAudit.php` |
+| the boot lines that carry a severity, as boot-audit-log-severity.md counts them | "`logContext()`, the **five** call sites" | the `self::logContext(` calls in `BootAudit.php` |
 | the commands whose exit code this record is about, as it counts them | "**Three** commands in this package are scheduled", "All **three** are checked by mutation rather than by argument", "the **three** tables, and the sentences naming the test that reads each one" | the matrices `DocumentedExitCounts` names — which commands have one is a decision, and the record counts the list |
 | the doctor's exit matrix, as documented-exit-codes.md counts its cells | "a **fourteen**-cell matrix" | `DbDoctorTest::exitCodeProvider()` |
 | the probe's exit matrix, as documented-exit-codes.md counts its cells | "a **nine**-cell matrix" | `DbProbeReplicasCommandTest::exitCodeProvider()` |

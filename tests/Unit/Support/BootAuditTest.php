@@ -9,6 +9,7 @@ use DateTimeZone;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionClass;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\BootAuditFinding;
 use Uak35\WeightedDbManager\Support\UnreadableRecord;
@@ -135,22 +136,22 @@ class BootAuditTest extends TestCase
     }
 
     /**
-     * The other half of the same hazard, one level up: the record is one file, and the
-     * boots that write it are several processes.
+     * The other half of the same hazard, one level up: the record is one file, and the boots
+     * that write it are several processes.
      *
-     * A boot decides what to remember from the copy it read and then replaces the whole
-     * file. Two boots in flight together therefore both write from the same starting point,
-     * and the later one discards whatever the earlier recorded — an entry nothing has taken
-     * out of the record, dropped by a write that never knew it was there. The atomic rename
-     * covers the reader; this is the writer.
+     * A boot decides what to remember from the copy it read and then replaces the whole file.
+     * Two boots in flight together both write from the same starting point, so the later one
+     * used to discard whatever the earlier recorded — an entry nothing had taken out of the
+     * record, dropped by a write that never knew it was there. The atomic rename covers the
+     * reader; the writer was the same hazard one level up.
      *
-     * So the file is read once more as it is about to be replaced, and the entries this
-     * write would drop are named. It is reported and not refused — the newest settings are
-     * still the ones worth recording, and a diagnostic does not stop a boot — and not locked,
-     * for the reason the store probe decision already gave: a lock left behind by a killed
-     * worker would stop the record being written at all.
+     * So the file is read again as it is about to be replaced and the two copies are merged: an
+     * entry the writing boot never saw is on disk, so it is in the record the write leaves
+     * behind. That is the whole repair, and it is why nothing is logged here — a write that kept
+     * an entry has not lost it, and an installation that named a race on every boot would be
+     * crying wolf about its own writes.
      */
-    public function test_an_entry_another_boot_recorded_mid_boot_is_named_rather_than_replaced_in_silence(): void
+    public function test_an_entry_another_boot_recorded_mid_boot_survives_this_boots_write(): void
     {
         $audit = $this->audit();
 
@@ -158,10 +159,7 @@ class BootAuditTest extends TestCase
         $stale = $audit->read();
 
         // Another boot records a finding while this one is still running.
-        file_put_contents($this->auditFile, (string) json_encode([
-            'findings' => ['swrr.reader_days.refused' => $this->finding('2026-09-20T08:15:00+00:00', 'error')],
-            'store_probed_at' => null,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $this->putRecord(['swrr.reader_days.refused' => $this->finding('2026-09-20T08:15:00+00:00', 'error')]);
 
         $records = [];
         $this->collectLogs($records);
@@ -172,32 +170,260 @@ class BootAuditTest extends TestCase
             resolution: 'The pgcat mismatch no longer applies.',
         )], checked: ['swrr.pgcat.gate']);
 
-        $this->assertCount(2, $records, 'the finding this boot logged, and the entry this write drops');
+        $this->assertCount(1, $records, 'the finding this boot logged, and nothing else: the entry below is not lost');
         $this->assertStringContainsString('pgcat will never act.', $records[0]['message']);
 
-        // The dropped entry is named — not the ones this boot is deliberately writing or
-        // resolving, which are its own work rather than somebody else's loss.
-        $this->assertSame('error', $records[1]['level']);
-        $this->assertStringContainsString('changed while this boot was running', $records[1]['message']);
-        $this->assertStringContainsString('discarding 1 entry', $records[1]['message']);
-        $this->assertStringContainsString('swrr.reader_days.refused', $records[1]['message']);
-        $this->assertSame(['swrr.reader_days.refused'], $records[1]['context']['discarded']);
-        $this->assertSame($this->auditFile, $records[1]['context']['record']);
-        $this->assertSame(['swrr.reader_days.refused'], $records[1]['context']['keys_on_disk']);
-        $this->assertSame(['swrr.pgcat.gate'], $records[1]['context']['keys_this_boot_writes']);
+        // Both settings are remembered, and the entry this boot never saw keeps the age the next
+        // boot dates it from — a merged write is not a rewrite of somebody else's news.
+        $findings = $audit->read()['findings'];
+        $keys = array_keys($findings);
+        sort($keys);
 
-        $this->assertSeverityStamped($records);
-
-        // Reported is not repaired: the write still went ahead, because a race must not
-        // leave the settings this boot checked unrecorded.
-        $this->assertSame(['swrr.pgcat.gate'], array_keys($audit->read()['findings']));
+        $this->assertSame(['swrr.pgcat.gate', 'swrr.reader_days.refused'], $keys);
+        $this->assertSame('2026-09-20T08:15:00+00:00', $findings['swrr.reader_days.refused']['first_reported_at']);
+        $this->assertSame('warning', $findings['swrr.pgcat.gate']['level']);
     }
 
     /**
-     * A record nobody else touched writes in silence, which is the ordinary case and has
-     * to stay quiet: an installation that logged a lost update on every boot would be
-     * crying wolf about its own writes.
+     * The other side of the merge, and the one place the write still has something to say: an
+     * entry this boot evaluated and found clean is not cleared while another boot has just
+     * substantiated it.
+     *
+     * A boot's clean verdict is about the copy it read, and configuration is read once per
+     * process — so two boots in flight can genuinely be running different configurations, and one
+     * of them finding a key fine is not evidence about the other. The entry stands, and the write
+     * says so, because the resolution line it would otherwise log is a claim this record
+     * contradicts: a monitor closing its page on `resolved: true` would be closing one for a
+     * finding that is still standing.
      */
+    public function test_an_entry_another_boot_substantiated_is_kept_against_this_boots_clean_verdict(): void
+    {
+        $audit = $this->audit();
+
+        // A first boot records the finding; this boot reads that record, and then evaluates the
+        // key clean, which is what a repaired configuration looks like from here.
+        $audit->report($this->emptyRecord(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $readByThisBoot = $audit->read();
+
+        // Another boot, still running the configuration that fails, records it again.
+        $this->putRecord(['swrr.pgcat.gate' => $this->finding($this->ago('-1 minute'), 'error')]);
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($readByThisBoot, [], checked: ['swrr.pgcat.gate']);
+
+        // One line: the kept entry is named, and no resolution is logged for a key the record
+        // still holds.
+        $this->assertCount(1, $records, 'the kept entry, and no `resolved` line the record contradicts');
+        $this->assertSame('error', $records[0]['level']);
+        $this->assertStringContainsString('changed while this boot was running', $records[0]['message']);
+        $this->assertStringContainsString('keeps 1 entry', $records[0]['message']);
+        $this->assertSame(['swrr.pgcat.gate'], $records[0]['context']['kept']);
+        $this->assertSame($this->auditFile, $records[0]['context']['record']);
+        $this->assertSame(['swrr.pgcat.gate'], $records[0]['context']['keys_on_disk']);
+        $this->assertSame(['swrr.pgcat.gate'], $records[0]['context']['keys_this_boot_read']);
+        $this->assertSame([], $records[0]['context']['keys_this_boot_writes']);
+
+        $this->assertSeverityStamped($records);
+
+        // The other boot's sentence and the age it is dated from are what the record keeps, not
+        // this boot's clean verdict.
+        $kept = $audit->read()['findings']['swrr.pgcat.gate'];
+
+        $this->assertSame('error', $kept['level']);
+        $this->assertSame($this->ago('-1 minute'), $kept['first_reported_at']);
+    }
+
+    /**
+     * The lock is what makes the re-read a merge: it has to happen *after* this boot has the
+     * record to itself, or two boots that each re-read and then each write simply overwrite one
+     * another a moment later.
+     *
+     * The acquirer here is the other boot — it finishes its write and only then hands the lock
+     * over, which is the order those two happen in. An implementation that read the file before
+     * taking the lock reads the copy from before that write, and loses exactly the entry this
+     * looks for.
+     */
+    public function test_the_record_is_re_read_after_the_lock_is_taken_rather_than_before(): void
+    {
+        $file = $this->tempDir() . '/audit.json';
+        $this->auditFile = $file;
+
+        $audit = new BootAudit($file, 0, lockAcquirer: function (string $path) use ($file): array {
+            // The other boot's write, which happened just before it let the lock go.
+            file_put_contents($file, (string) json_encode([
+                'findings' => ['swrr.reader_days.refused' => $this->finding('2026-09-20T08:15:00+00:00', 'error')],
+                'store_probed_at' => null,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+            return [true, fopen($path, 'c')];
+        });
+
+        $records = [];
+        $this->collectLogs($records);
+
+        // Read first: what this boot was decided from is the file as it was before the write above.
+        $audit->report($audit->read(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $keys = array_keys($audit->read()['findings']);
+        sort($keys);
+
+        $this->assertSame(
+            ['swrr.pgcat.gate', 'swrr.reader_days.refused'],
+            $keys,
+            'the entry the other boot wrote before releasing the lock is in the record this boot leaves',
+        );
+
+        $this->assertCount(1, $records);
+    }
+
+    /**
+     * The mechanism cannot be left behind, and that is the property being chosen here rather than
+     * the mutual exclusion on its own: `flock` lives on an open descriptor, so the kernel drops it
+     * when the process ends however it ends, while a lock whose *existence* is the lock waits for
+     * somebody to come and delete it.
+     *
+     * What a worker killed mid-write leaves on disk is an empty file beside the record. It is not
+     * a lock, and this is the test that says so: the file is there and the write proceeds without
+     * a word, where a sentinel would have to log that it could not serialise.
+     */
+    public function test_a_lock_file_left_behind_by_a_killed_worker_stops_nothing(): void
+    {
+        $audit = $this->audit();
+
+        // All a killed worker leaves: the file it locked, with nothing holding it any more.
+        file_put_contents($this->auditFile . '.lock', '');
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($this->emptyRecord(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(1, $records, 'the finding, and no line about a lock the write could not take');
+        $this->assertArrayHasKey('swrr.pgcat.gate', $audit->read()['findings']);
+    }
+
+    /**
+     * Two things the defaults have to get right, and both are load-bearing.
+     *
+     * The lock is not taken on the record itself: the write renames a temp over the record, so a
+     * descriptor on it would be holding the file nothing will ever open again, and two boots
+     * either side of a rename would each hold "the record" while excluding nothing. And the lock
+     * is free again afterwards, which is what lets the next boot write at all — an advisory lock
+     * released only when its descriptor is closed is one a long-lived worker would hold for ever.
+     */
+    public function test_the_record_is_written_under_a_real_lock_and_left_free_for_the_next_boot(): void
+    {
+        $audit = $this->audit();
+
+        $audit->report($this->emptyRecord(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $this->assertFileExists($this->auditFile . '.lock', 'the lock is a companion file, because the record is replaced by a rename');
+        $this->assertSame(['swrr.pgcat.gate'], array_keys($audit->read()['findings']));
+
+        $handle = fopen($this->auditFile . '.lock', 'c');
+        $this->assertIsResource($handle);
+        $this->assertTrue(flock($handle, LOCK_EX | LOCK_NB), 'the write let the record go, so the next boot can take it');
+
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+
+    /**
+     * A lock another boot holds for longer than this one is willing to wait is the one write left
+     * that can still lose an entry, so it is named rather than hidden — and it is named *while*
+     * the write goes ahead, because the settings this boot checked are still worth recording and a
+     * diagnostic does not stop a boot.
+     */
+    public function test_a_lock_this_boot_cannot_take_is_reported_and_the_write_still_lands(): void
+    {
+        $audit = $this->audit();
+
+        // Another boot, holding the record's lock while this one tries.
+        $holder = fopen($this->auditFile . '.lock', 'c');
+        $this->assertIsResource($holder);
+        $this->assertTrue(flock($holder, LOCK_EX | LOCK_NB));
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($this->emptyRecord(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(2, $records, 'the finding, and the line that says the write could not serialise');
+        $this->assertSame('error', $records[1]['level']);
+        $this->assertStringContainsString('lock could not be taken', $records[1]['message']);
+        $this->assertSame($this->auditFile . '.lock', $records[1]['context']['lock']);
+
+        // Derived rather than restated: the number of attempts and the time they took are the
+        // class's own constants, and a loop that gave up after one attempt would pass a bare
+        // "at least once".
+        $attempts = (new ReflectionClass(BootAudit::class))->getConstant('LOCK_ATTEMPTS');
+        $retry = (new ReflectionClass(BootAudit::class))->getConstant('LOCK_RETRY_MICROSECONDS');
+
+        $this->assertSame($attempts, $records[1]['context']['attempts']);
+        $this->assertGreaterThanOrEqual(
+            intdiv(($attempts - 1) * $retry, 1000),
+            $records[1]['context']['waited_ms'],
+            'the attempts were waited out rather than fired off',
+        );
+
+        $this->assertSeverityStamped($records);
+
+        // Merged without serialising is not refused: a race does not cost the boot the settings it
+        // checked.
+        $this->assertArrayHasKey('swrr.pgcat.gate', $audit->read()['findings']);
+
+        flock($holder, LOCK_UN);
+        fclose($holder);
+    }
+
+    /**
+     * The other field the record holds is merged too, and for the same reason: a probe another
+     * boot recorded while this one was running is a probe nobody needs to repeat, so writing the
+     * whole record from this boot's own copy would buy the installation one extra connect timeout
+     * — the cost the interval exists to bound.
+     */
+    public function test_a_probe_another_boot_recorded_is_not_forgotten_by_this_boots_write(): void
+    {
+        $audit = $this->audit();
+
+        $this->putRecord([], 1_000);
+        $stale = $audit->read();
+
+        // Another boot probes and records the stamp while this one is still running.
+        $this->putRecord([], 2_000);
+
+        $audit->report($stale, [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        $this->assertSame(2_000, $audit->read()['store_probed_at'], 'the later stamp is the one the record keeps');
+    }
+
     /**
      * A log-based monitor pages on `severity`, which is the whole point of the levels: a
      * refused value is input the installation is running without, worth waking somebody for,
@@ -271,7 +497,12 @@ class BootAuditTest extends TestCase
         $this->assertSame('mysql_app', $records[0]['context']['connection'], 'the rest of the context is the finding\'s and is logged untouched');
     }
 
-    public function test_a_record_nobody_else_wrote_writes_without_a_lost_update_line(): void
+    /**
+     * A record nobody else touched writes in silence, which is the ordinary case and has to stay
+     * quiet: an installation that logged a race on every boot would be crying wolf about its own
+     * writes, and a monitor that paged on it would have a rule that fires on steady state.
+     */
+    public function test_a_record_nobody_else_wrote_writes_without_a_line_about_the_race(): void
     {
         $audit = $this->audit();
 
@@ -284,9 +515,9 @@ class BootAuditTest extends TestCase
             resolution: 'The pgcat mismatch no longer applies.',
         )], checked: ['swrr.pgcat.gate']);
 
-        foreach ($records as $record) {
-            $this->assertStringNotContainsString('changed while this boot was running', $record['message']);
-        }
+        $this->assertCount(1, $records, 'the finding, and nothing about the write itself');
+        $this->assertStringContainsString('pgcat will never act.', $records[0]['message']);
+        $this->assertArrayNotHasKey('kept', $records[0]['context']);
     }
 
     /**
@@ -765,6 +996,21 @@ class BootAuditTest extends TestCase
         $this->auditFile = $this->tempDir() . '/audit.json';
 
         return new BootAudit($this->auditFile, 0);
+    }
+
+    /**
+     * The record written to *this* test's audit file, which is what a test that injects the
+     * lock's closures needs: `record()` writes to a directory of its own and `audit()` builds
+     * the audit this file belongs to.
+     *
+     * @param array<string, mixed> $findings
+     */
+    private function putRecord(array $findings, ?int $probedAt = null): void
+    {
+        file_put_contents((string) $this->auditFile, (string) json_encode([
+            'findings' => $findings,
+            'store_probed_at' => $probedAt,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 
     /**
