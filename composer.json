@@ -37,6 +37,7 @@
         "symfony/process": "^7.2"
     },
     "require-dev": {
+        "brianium/paratest": "7.*",
         "laravel/pint": "^1.25",
         "orchestra/testbench": "^10.0",
         "phpstan/phpstan": "^2.0",

@@ -109,6 +109,15 @@ abstract class TestCase extends Orchestra
             'state_file' => self::stateDir() . '/pgcat-flip-state-' . $boot . '.json',
             'lock_file' => self::stateDir() . '/pgcat-flip.lock',
         ]);
+
+        // The one real query /health/db runs on the connection the package follows is switched
+        // off for this fixture, because the fixture's connections declare replicas that do not
+        // exist (10.1.0.1, 10.1.0.9): a test must not open a socket to ask one of them. It is a
+        // documented switch rather than a fixture-only default so the endpoint's shipped default
+        // stays the one the sample config prints — on — and the tests that are *about* the query
+        // turn it back on and point the connection at SQLite, which answers without a server.
+        // See tests/Unit/Http/DatabaseHealthControllerTest.php.
+        $app['config']->set('db-manager.swrr.health', ['pinned_query' => false]);
     }
 
     /**
