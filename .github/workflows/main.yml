@@ -75,11 +75,12 @@ jobs:
       run: composer install --prefer-dist --no-progress
 
     - name: Run the check suite
-      # The same eight checks a release is gated behind locally — PHP syntax, an
-      # AST parse of the same files, `composer validate --strict`, platform
-      # requirements, the workflow YAML, PHPStan, Pint and PHPUnit — rather than
-      # the three `composer test` covers. CI must not be weaker than the gate a
-      # tag is cut behind, and the YAML check is the one that reads this file.
+      # The same nine checks a release is gated behind locally — PHP syntax, an
+      # AST parse of the same files, the write-back scan of `src/` and `config/`,
+      # `composer validate --strict`, platform requirements, the workflow YAML,
+      # PHPStan, Pint and PHPUnit — rather than the three `composer test` covers.
+      # CI must not be weaker than the gate a tag is cut behind, and the YAML
+      # check is the one that reads this file.
       # A tool the runner is missing drops to a skip; `--require-all` is what
       # would make that a failure instead.
       run: composer checks

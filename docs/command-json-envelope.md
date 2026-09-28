@@ -11,8 +11,10 @@ considered, and why they were not taken.
 
 Everything below is implemented in `Console\JsonEnvelope` — the key set, the per-key defaults, the
 raw write and the two reports it refuses — over the commands' own `--json` routes; each command's
-`kind` vocabulary and evidence keys are its own, declared as a class constant beside it. The rules
-are pinned by the tests named at the end.
+evidence keys are its own, declared as a class constant beside it, and the register described below
+is where every command that writes a report, the key its verdict is read by, the table its words are
+documented in and the words two of them may share are declared. The rules are pinned by the tests
+named at the end.
 
 ---
 
@@ -22,6 +24,14 @@ are pinned by the tests named at the end.
 `kind`, `exit_code`, `reason`, `error` — **and each command declares its own evidence after them,
 so `db:pgcat-flip`, `db:probe-replicas` and `db:replica-status` are read by one rule: the five, then
 whatever that command's evidence table says is in the object.**
+
+**The vocabulary is one declaration too.** `JsonEnvelope::REPORTS` names every command in this
+package that writes a report, the key its run verdict is read by and the README table that documents
+its closed vocabulary, and `JsonEnvelope::SHARED_KINDS` names the words two of them may share. So
+what a consumer needs from a report is defined in a class rather than spread over the documents that
+describe it: the key set and its order, the vocabulary and the spelling each command reads it by,
+the word two reports share on purpose, and the rule that the exit code travels inside the object
+rather than in a `$?` from somewhere else.
 
 ## Why this needed deciding at all
 
@@ -151,6 +161,14 @@ or, in the flip's case, the flipper, and both commands answer `unbound` with the
 else is shared by decree — `no_read_list` and `no_replicas` are different sentences about different
 subjects, and naming them one word would be the kind of tidiness a job pays for.
 
+Where each of those tables is, and which key it is read by, is `JsonEnvelope::REPORTS` — so the
+question this record used to leave to a reader, whether any word appears on two reports and whether
+it is the same word for the same thing, is answered in one place, and `JsonEnvelope::SHARED_KINDS`
+is the part of the answer that says `unbound` is deliberate. `JsonEnvelopeTest` reads the register in
+both directions: every command whose own source writes a report must appear in it, so a further
+report command cannot be written unwatched, and every word two registered vocabularies share must be
+declared as shared, so the rule is compared rather than remembered.
+
 ### What the flag does not change
 
 Nothing about the run. Each command's matrix runs twice — once for the rendered report and once for
@@ -165,6 +183,8 @@ because neither has a flag it could contradict: each has the connection argument
 |---|---|
 | the five keys, their order, and the defaults a command declares | `JsonEnvelopeTest::test_every_report_leads_with_the_same_five_keys`, `test_an_absent_key_takes_the_default_the_command_declared` |
 | a report cannot publish a key its command did not declare | `JsonEnvelopeTest::test_a_report_naming_an_undeclared_key_is_refused` |
+| every command that writes a report is registered, with the table its verdict is read by | `JsonEnvelopeTest::test_the_register_names_every_command_that_writes_a_report` |
+| a word two reports share is one the register declares as shared | `JsonEnvelopeTest::test_a_word_two_reports_share_is_one_the_register_declares` |
 | a command cannot take one of the envelope's own keys | `JsonEnvelopeTest::test_a_command_cannot_take_one_of_the_envelopes_own_keys` |
 | a value survives a decorated output | `JsonEnvelopeTest::test_a_value_is_written_through_a_decorated_output_unchanged` |
 | every route of the sweep is the same run as one object, `-v` included | `DbProbeReplicasCommandTest::test_the_json_report_is_the_same_run_as_one_object` |
@@ -182,7 +202,10 @@ shared shape while its own test stays green.
 ## Known limitations
 
 - **`db:doctor --json` still names its run's verdict `verdict`.** That is a decision with its own
-  record, not an oversight: see candidate F above.
+  record, not an oversight: see candidate F above. What the register changes about it is that the
+  spelling is declared rather than assumed — `JsonEnvelope::REPORTS` carries `verdict` for that
+  command — so a reader of the one place learns the whole contract, including the one report this
+  class does not write.
 - **`status` means two things across surfaces.** In a command's report it is the *subject's own
   array* — the flipper's snapshot, the manager's summary — and in `/health/db` it is the verdict
   string. They are different readers, and the collision is written down here rather than fixed by
@@ -193,9 +216,13 @@ shared shape while its own test stays green.
   kinds, the codes and the counts; the strings are for a person.
 - **The envelope is not versioned.** Keys are added deliberately and each command's test states the
   list, but a consumer that rejects unknown keys would break on an addition rather than ignore it.
-- **A kind table is bound per command.** Adding a kind to the sweep's vocabulary is caught by the
-  sweep's test; nothing checks that the *set* of words across the three commands stays coherent,
-  because there is no artefact that holds it. `unbound` is shared by convention, written down here.
+- **A kind table is bound per command, and the set of words is now held in one place.** Adding a
+  kind to the sweep's vocabulary is still a change to the sweep's own table and its own test, which
+  is what a per-command vocabulary is for; what is no longer true is that nothing looks at the set.
+  `JsonEnvelope::REPORTS` holds the reports, `JsonEnvelope::SHARED_KINDS` holds the words two of them
+  may share, and `JsonEnvelopeTest` reads every registered table to prove the second: a word two
+  reports share that is not declared there fails, and so does a declared shared word that no two
+  reports really share. This bullet used to be the finding — "there is no artefact that holds it".
 
 ## What would change this decision
 
@@ -216,11 +243,11 @@ shared shape while its own test stays green.
 
 | File | Role |
 |---|---|
-| `src/Console/JsonEnvelope.php` | the envelope: `CORE`, the raw write, the defaults, and the two refusals |
+| `src/Console/JsonEnvelope.php` | the envelope: `CORE`, the register of the commands that write a report and the words two of them may share, the raw write, the defaults, and the two refusals |
 | `src/Console/Commands/DbFlipPgcatCommand.php` | the flip's evidence, its kinds, and a JSON branch in every route |
 | `src/Console/Commands/DbProbeReplicas.php` | `--json`, five kinds, and the per-replica rows as `replicas` |
 | `src/Console/Commands/DbReplicaStatus.php` | `--json`, three kinds, and the status/pgcat/audit evidence |
-| `tests/Unit/Console/JsonEnvelopeTest.php` | the shared half: keys, order, defaults, the refusals, the raw write |
+| `tests/Unit/Console/JsonEnvelopeTest.php` | the shared half: keys, order, defaults, the refusals, the raw write, the register both ways, and the words two reports may share |
 | `tests/Unit/Console/DbProbeReplicasCommandTest.php` | the JSON half of the sweep's matrix and the kind-table binding |
 | `tests/Unit/Console/DbReplicaStatusTest.php` | the routes of the distribution, the audit block, and the kind-table binding |
 | `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the flip's JSON matrix, which stays the reference for the shape |

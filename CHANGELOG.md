@@ -4,6 +4,84 @@
 
 ### Added
 
+- **A write-back scan is now one of the checks, so a keyed structure read from disk and written back
+  whole fails the gate instead of a reader noticing.** The shape is the quiet one: a file is read as a
+  record or a state file, a key or two are set on the copy in memory, and the whole structure goes
+  back — every key the reader did not know about is gone, the diff shows the key that was added, and
+  nothing shows the keys that went. Both places in this package where it has mattered were found by
+  someone reading the code rather than by a run failing: the flip's state file was once replaced by
+  whichever four keys the flip happened to carry, which erased `converged_at` and moved the boot
+  window with it, and the boot audit's record is one file shared by every boot of an installation.
+  `bin/checks.php` now scans `src/` and `config/` for the shape in the AST rather than as text: a
+  write is `file_put_contents()` or the `fwrite()` of a handle opened in the same method, its target
+  is what a `rename()` in the same method finishes on rather than the temp it names, the path has to
+  be one the class reads, and the payload has to be a whole value — an encoded structure, or a
+  variable, element or array holding one — so a log line written into a file that is also read is not
+  a finding. One form needs no explanation, and it is the one the flip already uses:
+  `file_put_contents($this->stateFile, json_encode([...$this->readState(), 'last_mode' => $mode]))`
+  survives a key that arrived between the read and the write, so a merge with a read taken at the
+  write site is exempt. Every other write-back is named in the `STRUCTURE_WRITE_BACKS` register at the
+  top of the check, with the reason the copy being replaced is still the truth — the flip's config
+  rollback, its state file through `writeState()`, and the audit record, which re-reads and *reports*
+  a record another boot left rather than merging it. A register entry the code has left behind fails
+  the check too, because a declaration that outlives the code it described would excuse the next write
+  at that spot. And because a detector that has stopped seeing the shape reports an empty result, it
+  is run against fixtures of its own — the two ways this package has lost a key, the merges that are
+  the safe form of both, including one whose read is two calls deep, the atomic temp-then-rename
+  write, a handle opened and written with, a config file rebuilt around an encoded structure, a copy
+  to another file, a scratch file nobody reads, a line of prose, and a helper that writes what its
+  caller read — before it is pointed at the tree, so it fails by name rather than passing everything.
+  The scan has been mutation-checked against its own failures: a dropped register entry fails naming
+  every site it should have covered, an entry the code no longer has fails naming it, a dropped work
+  in the detector — the merge exemption, the temp resolution, the handle resolution, the encoder that
+  makes a rebuilt config recognisable, reading a path out of a `require` — fails the fixture that pins
+  it, and a file with the bug shape dropped into the scanned tree fails by file, line and payload.
+
+- **A deploy gate for `db:doctor --json` now ships in the README, and the guard that keeps it honest is
+  a test.** The preflight's object was documented with `jq` one-liners for a person at a prompt, and
+  what a pipeline needs is the other thing: one script to paste that names the rows its deploy blocks
+  on and refuses to ship when one of those rows is not `PASS` — a `WARN` on a row you named is a row
+  you said must pass — or when some row `FAIL`ed, which the run's own `verdict` folds, because the row
+  list is not a fixed length and a pipeline cannot name a row it has never seen. It decides on the
+  object and not the exit code: the command's status is discarded on purpose, so a preflight that never
+  got written is an empty file, and `jq` refuses that as loudly as a failing row does. A gate written
+  in `jq` is a promise about field names, and one failure would otherwise never be seen: `select` over
+  a row name no row carries matches nothing, so a row renamed in the doctor leaves the gate passing
+  every preflight, the broken one included. So `tests/Unit/Docs/DoctorGateTest.php` treats the block as
+  code — the fenced block is read out of the README, its `jq` program is extracted and **run** against
+  a report this command really produced: one it must ship, one whose named row is `WARN` and one whose
+  unnamed row `FAIL`ed, each refusal asserted to name the row it refused on — and every row the gate
+  names is asserted to be a row a real report carries. The gate has been mutation-checked against its
+  own failures: a row name no run carries fails the row check, a dropped `select` fails the named-row
+  refusal, an unread run `verdict` fails the unnamed-row refusal, and a gate that refuses everything
+  fails the clean case.
+
+- **The vocabulary every report is written in is now declared in one place, which is the half of the
+  report contract this package's own records had been leaving open.** `docs/db-doctor-json.md` and
+  `docs/pgcat-flip-json.md` each ended by naming a package-wide envelope as the thing that would
+  change their decision, and the doctor's record said what it would want from one: a single place
+  that defines the vocabulary. `Console\JsonEnvelope` already held the other two halves — the five
+  keys every report leads with, and the rule that the exit code travels inside the object rather
+  than in a `$?` beside it — and now holds the third. `JsonEnvelope::REPORTS` names every command in
+  the package that writes a report, the key its run verdict is read by, and the README table its
+  closed vocabulary is documented in; `JsonEnvelope::SHARED_KINDS` declares the words two of those
+  vocabularies may legitimately share, which is how `unbound` stops being a convention and becomes
+  the declared case. `db:doctor` is in that register rather than beside it: its object is still
+  written by hand and still names the run's verdict `verdict` — candidate F of
+  `docs/command-json-envelope.md` is why, and a rename is still the one-line answer for a gate that
+  wants one name — but the spelling is now declared in the same place as the other reports', so
+  learning what each of them calls its verdict is reading one document rather than three records and
+  an exception. The register is read back out of the package rather than restated: the tests parse
+  the table each entry names with the column each entry names, and find the commands that write a
+  report by reading `src/Console/Commands/` for the two ways one is written — through the envelope,
+  or by hand in the single case that is. A further report command therefore cannot be written
+  without an entry, an entry cannot name a command that writes no report or a table that is not
+  there, and a word two reports happen to share has to be declared as shared — which turns the
+  limitation the envelope's own record carried (nothing compared the vocabularies, because no
+  artefact held the set of words) into a comparison instead of a note. Nothing about a run changes:
+  the keys, the codes, the kinds and their tables are exactly what they were, and the register is a
+  declaration of them.
+
 - **`db:probe-replicas` and `db:replica-status` report as data, in the envelope `db:pgcat-flip`
   defined — extracted into one class so the three commands a pipeline branches on are read by one
   rule.** Both earlier JSON records ended by naming this as the thing that would change their

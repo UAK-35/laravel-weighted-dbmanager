@@ -65,6 +65,64 @@ final class JsonEnvelope
     ];
 
     /**
+     * Every command in this package that writes a report: the key its run verdict is written in,
+     * and the README table its closed vocabulary is documented in.
+     *
+     * WHY THE VOCABULARY NEEDS ONE PLACE AS WELL
+     * ------------------------------------------
+     *   The five keys above are one half of this package's report contract; the other half is the
+     *   verdict that fills one of them — a word from a vocabulary the command closes, so that a
+     *   scheduler can branch on it. Each command documented its own words and each command's test
+     *   read its own table back, which binds a table to a command and leaves the question the
+     *   doctor's record named unanswered: does any word appear on two reports, and is it the same
+     *   word for the same thing? Answering that meant holding four documents in your head at once.
+     *   This is the one place that answers it, and it is the place a command writes its report
+     *   through, so the answer is declared rather than derived from the tables it names.
+     *
+     *   The key is per report, and this is the whole of it: the flip, the sweep and the
+     *   distribution name the run's verdict `kind`, and `db:doctor` names it `verdict` — the decision
+     *   [command-json-envelope.md](../../docs/command-json-envelope.md) records as candidate F,
+     *   whose reason is that one word at two scopes on the doctor's page is the thing a rename would
+     *   put two names on. Declaring it here rather than leaving it as an exception is what makes
+     *   this register complete: a consumer reads one document to learn what each of the package's
+     *   reports calls its verdict.
+     *
+     *   Where the exit code lives is the one thing the package's reports do not differ on, and it is
+     *   `write()` below: every report carries the code the process exits with inside the object, so a
+     *   saved report answers what happened and what to branch on without a second artefact.
+     */
+    public const REPORTS = [
+        'db:pgcat-flip' => ['key' => 'kind', 'table' => '### The JSON report: one object for a pipeline'],
+        'db:probe-replicas' => ['key' => 'kind', 'table' => '### Probing: `db:probe-replicas`'],
+        'db:replica-status' => ['key' => 'kind', 'table' => '### Reading the distribution: `db:replica-status`'],
+        'db:doctor' => ['key' => 'verdict', 'table' => '### The preflight as data: db:doctor --json'],
+    ];
+
+    /**
+     * The verdict words two reports may legitimately share; every other word a registered table
+     * documents belongs to one command alone.
+     *
+     * WHY A WORD MAY BE SHARED AT ALL
+     * -------------------------------
+     *   A word that means one thing on two reports is not a collision, it is the same repair — and a
+     *   consumer that already handles it should not have to learn a second spelling for it.
+     *   `unbound` is that word: the container has no weighted manager, which is one fact about one
+     *   installation whether a sweep or a flip is the thing that went looking for it. The flip
+     *   reaches it through its own vocabulary, so the dependency it names can be the flipper rather
+     *   than the manager, and both are the same row of the same preflight.
+     *
+     *   Nothing else is shared, and that is kept apart on purpose: `no_read_list` and `no_replicas`
+     *   are different sentences about different subjects, and naming them one word would be a
+     *   consumer's problem rather than a tidiness. This constant is what keeps the rule checkable
+     *   rather than remembered — `JsonEnvelopeTest` reads every registered table and refuses a word
+     *   two of them share unless it is declared here, so a second shared spelling arrives as a
+     *   decision instead of as a coincidence a reader notices later.
+     */
+    public const SHARED_KINDS = [
+        'unbound' => 'the container has no weighted manager, or — for the flip — no flipper',
+    ];
+
+    /**
      * Write one report — this command's envelope, then its evidence — and answer the exit code.
      *
      * The write is raw: a machine-readable channel must not have an angle bracket in a path or a

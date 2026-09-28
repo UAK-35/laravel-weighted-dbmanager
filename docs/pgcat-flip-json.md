@@ -262,8 +262,11 @@ kind table documenting `failed` as exiting `0` (the binding test fails).
   with `verdict`, `connection` and `counts` instead. That is a decision with [its own
   record](db-doctor-json.md): what a gate asserts of a preflight is *rows*, and its run verdict is
   one word at two scopes, so renaming it `kind` would put two names for one word on one page. A job
-  that reads all four still has one thing to remember, and it is the same thing here: `command`,
-  `exit_code`, and a key set that is documented and bound.
+  that reads all four still has one thing to remember, and it is now written in one place rather than
+  in this bullet: `JsonEnvelope::REPORTS` names every command in the package that writes a report,
+  and the key its run verdict is read by — `kind` for the three command reports, `verdict` for the
+  doctor — so what a consumer remembers is a register, and the `command`, `exit_code` and bound key
+  set this bullet used to state are read out of it.
 
 ## What would change this decision
 

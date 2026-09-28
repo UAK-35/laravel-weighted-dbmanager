@@ -7,18 +7,20 @@ declare(strict_types=1);
  * bin/checks.php
  *
  * One entry point for every check this package can run: PHP syntax, an
- * independent AST parse of the same files, the composer.json schema, the
- * platform requirements, the workflow YAML, the counts the records render from
- * their derivations, PHPStan, Pint and PHPUnit.
+ * independent AST parse of the same files, a scan for files read and written
+ * back whole, the composer.json schema, the platform requirements, the workflow
+ * YAML, the counts the records render from their derivations, PHPStan, Pint and
+ * PHPUnit.
  *
  * WHY THIS EXISTS IN ADDITION TO `composer test`
  * ----------------------------------------------
  * `composer test` covers the three gates CI enforces — style, types, tests.
  * The rest of what is checked here (a per-file `php -l` pass, a parse of every
- * file by nikic/php-parser, `composer validate --strict`,
- * `composer check-platform-reqs`, the workflow YAML) is otherwise only looked
- * at by hand after something breaks. Running them together gives one command,
- * one summary and one exit code to trust.
+ * file by nikic/php-parser, the write-back scan, `composer validate --strict`,
+ * `composer check-platform-reqs`, the workflow YAML) is otherwise only looked at
+ * by hand after something breaks.
+ * Running them together gives one command, one summary and one exit code to
+ * trust.
  *
  * USAGE
  * -----
@@ -42,9 +44,59 @@ declare(strict_types=1);
  * tool as a skip rather than crashing on it.
  */
 
+use PhpParser\Node;
+use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
 
 $root = str_replace('\\', '/', dirname(__DIR__));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The write-back register
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every place this package reads a file and writes it back whole, and why it is not the
+ * silent overwrite `checkStructureWriteBacks()` exists to catch.
+ *
+ * The shape the check looks for is the one a reader cannot see: a file is read as a keyed
+ * structure — a record, a state file, a config — a key or two are set on the copy in memory,
+ * and the whole structure is written back. Every key the reader did not know about is then
+ * gone, with nothing in the diff to say so, because the write looks like an ordinary one. It
+ * has happened here twice: the flip's state file was replaced by whichever four keys the flip
+ * happened to carry (erasing `converged_at` and moving the boot window with it), and the boot
+ * audit's record is one file shared by every boot of an installation.
+ *
+ * So each of them is a decision now, written down rather than assumed. The key is what a
+ * failing run prints — `<file>::<method> writes <path>` — so an author who adds the next one
+ * pastes the key the check just named and says why the read is still the truth when the write
+ * lands. A merge with a read taken at the write site is the one form that needs no entry: a
+ * key that appeared between the read and the write survives it, which is what makes the
+ * difference between the bug and a read-modify-write that is aware of it.
+ */
+const STRUCTURE_WRITE_BACKS = [
+    'src/Pgcat/PgcatConfigFlipper.php::rollBack writes $target' => 'the bytes read from the target before the copy, put back when the swap has already happened. A
+        rollback is the one write that must not merge: the copy being restored is older than the file on
+        disk on purpose, which is what putting it back means, and both hold one mode for one mode. It is
+        one flip wide, under the flip lock, and what it prevents — pgcat running one mode from memory
+        while the disk holds the other — is the reason it exists.',
+    'src/Pgcat/PgcatConfigFlipper.php::writeState writes $this->stateFile' => 'the state file, through the one method every flip writes it by. The state is read and the file is
+        not: writeLastMode() merges a read taken at the write site, so a key the file gained between two
+        flips survives that write, and recordRun() replaces the record with the copy it read under the
+        flip lock, which is the only writer of this file. This write used to be a plain
+        file_put_contents of four keys, which is how converged_at came to be erased and the boot window
+        moved with it.',
+    'src/Support/BootAudit.php::persist writes $this->file' => 'the audit record, and this write is deliberately not a merge. The record is one file shared by every
+        boot of an installation, so the read is taken again as the file is about to be replaced and a
+        record another boot left in between is *reported* — with the keys this write drops — rather than
+        merged, because a merge would take the race the report exists to name and make it quiet.',
+];
+
+/**
+ * The calls that turn a value into the text a file holds. A keyed structure on its way to disk is one
+ * of these, whichever function built the string around it — which is what makes a payload recognisable
+ * as a structure written back rather than as a sentence this run composed.
+ */
+const VALUE_ENCODERS = ['json_encode', 'var_export', 'serialize', 'yaml_emit'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI
@@ -109,6 +161,12 @@ if (is_file($root . '/vendor/autoload.php')) {
 // often than they are read, and a syntax error in one of them is otherwise only
 // found by running it.
 $phpFiles = phpFiles([$root . '/src', $root . '/tests', $root . '/config', $root . '/bin']);
+
+// What a consumer installs, which is the half of the tree a write-back can lose data in. The
+// dev scripts under bin/ rewrite documents a person then reads, and the one that rewrites a
+// record (bin/counts.php) refuses unless every claim it is about to render resolved, so they
+// are outside this check on purpose rather than by omission.
+$shippedFiles = phpFiles([$root . '/src', $root . '/config']);
 $composer = composerCommand($root);
 $yamlFiles = yamlFiles($root);
 
@@ -147,6 +205,11 @@ $checks = [
         'title' => 'AST parse (nikic/php-parser)',
         'skip' => !class_exists(ParserFactory::class) ? 'nikic/php-parser is not installed' : null,
         'run' => static fn (): array => checkAst($root, $phpFiles),
+    ],
+    'writeback' => [
+        'title' => 'Structure write-back (a file read from disk, written back whole)',
+        'skip' => !class_exists(ParserFactory::class) ? 'nikic/php-parser is not installed' : null,
+        'run' => static fn (): array => checkStructureWriteBacks($root, $shippedFiles),
     ],
     'schema' => [
         'title' => 'composer.json schema (validate --strict)',
@@ -689,6 +752,853 @@ function checkAst(string $root, array $files): array
     return $failures === []
         ? ['exit' => 0, 'output' => count($files) . ' files parsed']
         : ['exit' => 1, 'output' => implode(PHP_EOL, $failures)];
+}
+
+/**
+ * The whole-file write-back check: a file read from disk, written back as one piece.
+ *
+ * WHY A STATIC CHECK, AND WHY THIS ONE
+ * ------------------------------------
+ *   A keyed structure read from disk, changed in memory and written back whole loses every key
+ *   the reader did not know about, and it loses them *quietly*: the write is an ordinary write,
+ *   the diff shows the key that was added, and nothing shows the keys that went. Both places in
+ *   this package where it has mattered were found by a reader noticing, not by a run failing —
+ *   the flip's state file, replaced by whichever four keys the flip carried at the time, and the
+ *   boot audit's record, which is one file shared by every boot of an installation.
+ *
+ *   So the shape is looked for in the source instead of in a running installation. A class that
+ *   reads a path (as a keyed structure, or as the whole file's bytes) and writes that same path
+ *   back is a read-modify-write of a file, and every one of them is either safe for a reason only
+ *   its author knows or is the bug. One of them is a form that needs no reason:
+ *
+ *     file_put_contents($this->stateFile, json_encode([...$this->readState(), 'last_mode' => $mode]));
+ *
+ *   A key that appeared between the read and the write survives that, because the read is taken at
+ *   the write. Every other form — a structure read earlier and written back, bytes read before a
+ *   swap and restored after it — is reported, and the register at the top of this file is where
+ *   its author says why the copy being replaced is still the truth.
+ *
+ * WHAT IS SCANNED
+ * ---------------
+ *   `src/` and `config/`, the two directories a consumer installs, in the AST rather than as text.
+ *   A write is `file_put_contents()`, or the `fwrite()` of a handle opened in the same method, and
+ *   its target is the path it names — or, when the write lands in a temp that a `rename()` in the
+ *   same method completes, the path that rename names, which is the atomic write every writer here
+ *   uses and so the one whose target a text search would miss.
+ *
+ * WHAT IT CANNOT SEE
+ * ------------------
+ *   It is deliberately shallow, so the ways past it are worth naming rather than discovering: a
+ *   read that goes through a handle opened elsewhere (`fread`), a write assembled by a helper
+ *   (`file_put_contents($path, $this->encode($state))` — the payload is a call this check does not
+ *   unwrap), a path written in one class and read in another, a path built by string functions the
+ *   check does not follow, and a read-modify-write that happens across two processes rather than in
+ *   one method. Each is a real way to lose a key; none is a way this package does it today. The
+ *   check is a guard against the shape coming back, not a proof that it is absent.
+ *
+ * THE FRESH-READ EXEMPTION IS NOT TRUST
+ * -------------------------------------
+ *   A merge with a read of the same path taken at the write site is the form the flip's
+ *   `writeLastMode()` uses, and it is exempt because the exemption is *checked*: the payload has to
+ *   be an array, an `array_merge()` or a `+`, and the read has to be of the path being written,
+ *   found by walking the payload. A payload that merely looks like a merge is not one.
+ *
+ * @param list<string> $files
+ * @return array{exit: int, output: string}
+ */
+function checkStructureWriteBacks(string $root, array $files): array
+{
+    $fixtures = structureWriteBackFixtures();
+    $disagreements = [];
+
+    foreach ($fixtures as $name => [$source, $expected]) {
+        $reported = structureWriteBackMethods($source);
+        $wanted = $expected;
+        sort($reported);
+        sort($wanted);
+
+        if ($reported !== $wanted) {
+            $disagreements[] = sprintf(
+                '  %-54s expected %s, reported %s',
+                $name,
+                $wanted === [] ? 'nothing' : implode(', ', $wanted),
+                $reported === [] ? 'nothing' : implode(', ', $reported),
+            );
+        }
+    }
+
+    // The fixtures are run against the same detector the shipped tree is, and before it, because a
+    // detector that has stopped seeing the shape reports an empty result: without this, the check
+    // that is meant to catch a silent overwrite would fail silently itself.
+    if ($disagreements !== []) {
+        return [
+            'exit' => 1,
+            'output' => implode(PHP_EOL, [
+                'The detector no longer agrees with its own fixtures, so what it says about the shipped',
+                'tree is not worth having — a shape it has stopped recognising is a finding it reports',
+                'as an empty result:',
+                '',
+                ...$disagreements,
+            ]),
+        ];
+    }
+
+    $findings = [];
+
+    foreach ($files as $file) {
+        $source = @file_get_contents($file);
+
+        if ($source === false) {
+            continue;
+        }
+
+        foreach (structureWriteBacksIn($source) as $finding) {
+            $findings[] = [...$finding, 'file' => relative($root, $file), 'key' => sprintf(
+                '%s::%s writes %s',
+                relative($root, $file),
+                $finding['method'],
+                $finding['path'],
+            )];
+        }
+    }
+
+    $declared = array_keys(STRUCTURE_WRITE_BACKS);
+    $seen = array_column($findings, 'key');
+    $undeclared = [];
+
+    foreach ($findings as $finding) {
+        if (!in_array($finding['key'], $declared, true)) {
+            $undeclared[] = sprintf(
+                '  %s:%d  %s  (%s)',
+                $finding['file'],
+                $finding['line'],
+                $finding['key'],
+                $finding['payload'],
+            );
+        }
+    }
+
+    $stale = array_values(array_diff($declared, $seen));
+
+    if ($undeclared !== [] || $stale !== []) {
+        $output = [];
+
+        if ($undeclared !== []) {
+            $output = [
+                'A file this class reads is written back whole, which is how a key nobody knew about',
+                'disappears without a diff saying so:',
+                '',
+                ...$undeclared,
+                '',
+                'Either merge the read into the write (a fresh read of the same path taken at the write',
+                'site survives a key that arrived in between), or add the key above to',
+                'STRUCTURE_WRITE_BACKS in this file with the reason the copy being replaced is still',
+                'the truth.',
+            ];
+        }
+
+        if ($stale !== []) {
+            if ($output !== []) {
+                $output[] = '';
+            }
+
+            $output = [...$output, 'STRUCTURE_WRITE_BACKS declares write-back(s) that are not there any more, so a', 'declaration outlives the code it described and would excuse the next write at that spot:', ''];
+
+            foreach ($stale as $key) {
+                $output[] = '  ' . $key;
+            }
+
+            $output[] = '';
+            $output[] = 'Remove the entry, or restore the write — a register that is empty of meaning is';
+            $output[] = 'how a check stops being one.';
+        }
+
+        return ['exit' => 1, 'output' => implode(PHP_EOL, $output)];
+    }
+
+    return [
+        'exit' => 0,
+        'output' => sprintf(
+            '%d write-back(s) in the shipped tree, every one declared; the detector agreed with all %d fixtures',
+            count($findings),
+            count($fixtures),
+        ),
+    ];
+}
+
+/**
+ * The shapes the detector is proven against before it is trusted with the shipped tree.
+ *
+ * Each fixture is a source string and the methods that must be reported in it, so the check runs
+ * the same code over a shape it must find and shapes it must leave alone: the two ways this package
+ * has lost a key, the merges that are the safe form of both — one direct, one whose read is two
+ * calls deep — the atomic temp-then-rename write, a handle opened and written with, a config file
+ * rebuilt around an encoded structure, a copy to a different file, a scratch file nobody reads, a
+ * line of prose written into a file that is also read, and the case where the write site is one
+ * method and the read is in its caller's. A detector that stops seeing one of these fails the check
+ * by name rather than passing everything.
+ *
+ * @return array<string, array{0: string, 1: list<string>}>
+ */
+function structureWriteBackFixtures(): array
+{
+    return [
+        'a structure read earlier, written back whole' => [
+            <<<'PHP'
+            <?php
+            class State
+            {
+                public function __construct(private string $file) {}
+
+                private function read(): array
+                {
+                    $raw = @file_get_contents($this->file);
+                    return is_string($raw) ? (array) json_decode($raw, true) : [];
+                }
+
+                public function persist(string $mode): void
+                {
+                    $state = $this->read();
+                    $state['mode'] = $mode;
+                    file_put_contents($this->file, json_encode($state));
+                }
+            }
+            PHP,
+            ['persist'],
+        ],
+        'the file replaced by the keys this run happens to carry' => [
+            <<<'PHP'
+            <?php
+            class Flip
+            {
+                private string $stateFile = '/tmp/state.json';
+
+                private function readState(): array
+                {
+                    return (array) json_decode((string) @file_get_contents($this->stateFile), true);
+                }
+
+                public function record(string $mode): void
+                {
+                    $state = $this->readState();
+                    file_put_contents($this->stateFile, json_encode([
+                        'last_mode' => $mode,
+                        'flipped_by' => 'flipper',
+                    ]));
+                }
+            }
+            PHP,
+            ['record'],
+        ],
+        'a merge with a read taken at the write site' => [
+            <<<'PHP'
+            <?php
+            class Merge
+            {
+                private string $stateFile = '/tmp/state.json';
+
+                private function readState(): array
+                {
+                    return (array) json_decode((string) @file_get_contents($this->stateFile), true);
+                }
+
+                public function record(string $mode): void
+                {
+                    file_put_contents($this->stateFile, json_encode([
+                        ...$this->readState(),
+                        'last_mode' => $mode,
+                    ]));
+                }
+            }
+            PHP,
+            [],
+        ],
+        'a temp file a rename completes, read two calls away' => [
+            <<<'PHP'
+            <?php
+            class Audit
+            {
+                private string $file = '/tmp/audit.json';
+
+                private function read(): array
+                {
+                    return (array) json_decode((string) @file_get_contents($this->file), true);
+                }
+
+                private function reportLostUpdate(): void
+                {
+                    $onDisk = $this->read();
+                }
+
+                public function persist(array $updated): void
+                {
+                    $this->reportLostUpdate();
+                    $temporary = $this->file.'.tmp.'.getmypid();
+                    file_put_contents($temporary, json_encode($updated));
+                    rename($temporary, $this->file);
+                }
+            }
+            PHP,
+            ['persist'],
+        ],
+        'a copy to another file' => [
+            <<<'PHP'
+            <?php
+            class Copier
+            {
+                public function swap(string $from, string $to): void
+                {
+                    $temporary = $to.'.tmp.'.getmypid();
+                    file_put_contents($temporary, file_get_contents($from));
+                    rename($temporary, $to);
+                }
+            }
+            PHP,
+            [],
+        ],
+        'a scratch file nothing reads' => [
+            <<<'PHP'
+            <?php
+            class Locks
+            {
+                private string $lockFile = '/tmp/flip.lock';
+
+                public function touch(): void
+                {
+                    file_put_contents($this->lockFile, '');
+                }
+            }
+            PHP,
+            [],
+        ],
+        'a line of prose written into a file that is read' => [
+            <<<'PHP'
+            <?php
+            class Log
+            {
+                private string $file = '/tmp/log.txt';
+
+                public function tail(): string
+                {
+                    return (string) @file_get_contents($this->file);
+                }
+
+                public function write(string $line): void
+                {
+                    file_put_contents($this->file, sprintf("%s\n", $line));
+                }
+            }
+            PHP,
+            [],
+        ],
+        'a merge whose read is two calls deep' => [
+            <<<'PHP'
+            <?php
+            class DeepMerge
+            {
+                private string $stateFile = '/tmp/state.json';
+
+                private function state(): array
+                {
+                    return (array) json_decode((string) @file_get_contents($this->stateFile), true);
+                }
+
+                private function readState(): array
+                {
+                    return $this->state();
+                }
+
+                public function record(string $mode): void
+                {
+                    file_put_contents($this->stateFile, json_encode([
+                        ...$this->readState(),
+                        'mode' => $mode,
+                    ]));
+                }
+            }
+            PHP,
+            [],
+        ],
+        'a handle opened and written with' => [
+            <<<'PHP'
+            <?php
+            class Handle
+            {
+                private string $file = '/tmp/handle.json';
+
+                public function read(): array
+                {
+                    return (array) json_decode((string) @file_get_contents($this->file), true);
+                }
+
+                public function persist(array $state): void
+                {
+                    $handle = fopen($this->file, 'w');
+                    fwrite($handle, json_encode($state));
+                    fclose($handle);
+                }
+            }
+            PHP,
+            ['persist'],
+        ],
+        'a config file rebuilt around an encoded structure' => [
+            <<<'PHP'
+            <?php
+            class ConfigFile
+            {
+                public function __construct(private string $path) {}
+
+                private function load(): array
+                {
+                    return (array) (require $this->path);
+                }
+
+                public function save(array $values): void
+                {
+                    file_put_contents($this->path, '<?php return '.var_export($values, true).';');
+                }
+            }
+            PHP,
+            ['save'],
+        ],
+        'the write site that replaces what the class reads elsewhere' => [
+            <<<'PHP'
+            <?php
+            class Helpers
+            {
+                private string $stateFile = '/tmp/state.json';
+
+                private function readState(): array
+                {
+                    return (array) json_decode((string) @file_get_contents($this->stateFile), true);
+                }
+
+                private function writeState(array $state): void
+                {
+                    @file_put_contents($this->stateFile, json_encode($state, JSON_PRETTY_PRINT));
+                }
+
+                public function record(string $mode): void
+                {
+                    $state = $this->readState();
+                    $state['last_mode'] = $mode;
+                    $this->writeState($state);
+                }
+            }
+            PHP,
+            ['writeState'],
+        ],
+    ];
+}
+
+/**
+ * The methods a source string writes a whole value back into a path its own class reads.
+ *
+ * The fixture half of the check, which asserts on names; `structureWriteBacksIn()` is the same
+ * scan with the file, line and payload a report needs.
+ *
+ * @return list<string>
+ */
+function structureWriteBackMethods(string $source): array
+{
+    $methods = array_column(structureWriteBacksIn($source), 'method');
+
+    return array_values(array_unique($methods));
+}
+
+/**
+ * Every write in one source string that puts a whole value back into a path the same class reads.
+ *
+ * @return list<array{method: string, line: int, path: string, payload: string}>
+ */
+function structureWriteBacksIn(string $source): array
+{
+    $factory = new ParserFactory();
+
+    $parser = method_exists($factory, 'createForNewestSupportedVersion')
+        ? $factory->createForNewestSupportedVersion()
+        : $factory->create();
+
+    try {
+        $ast = $parser->parse($source);
+    } catch (\PhpParser\Error) {
+        // A file that does not parse is the syntax and AST checks' to report; saying it again here
+        // would turn one problem into three failures with the same cause.
+        return [];
+    }
+
+    if ($ast === null) {
+        return [];
+    }
+
+    $finder = new NodeFinder();
+    $findings = [];
+
+    foreach ($finder->findInstanceOf($ast, Node\Stmt\ClassLike::class) as $class) {
+        $methods = [];
+
+        foreach ($class->getMethods() as $method) {
+            $methods[$method->name->toString()] = $method;
+        }
+
+        $findings = [...$findings, ...scopeWriteBacks($methods, $source, $finder)];
+    }
+
+    $functions = [];
+
+    foreach ($ast as $statement) {
+        if ($statement instanceof Node\Stmt\Function_) {
+            $functions[$statement->name->toString()] = $statement;
+        }
+    }
+
+    return [...$findings, ...scopeWriteBacks($functions, $source, $finder)];
+}
+
+/**
+ * The write-backs in one set of methods that share a class: a write of a whole value to a path
+ * that the class reads.
+ *
+ * The class is the unit rather than the method, and that is the decision this check is built on:
+ * the read and the write are rarely in one method. `writeState()` replaces the file `readState()`
+ * reads, `persist()` replaces the one `read()` reads and says so through `reportLostUpdate()` —
+ * and the bug this check exists for lived exactly at a method that replaced a file the class read
+ * somewhere else. A write in a class that reads the path is a read-modify-write of it, whichever
+ * method each half is in; what is reported is the write site, because that is where the file is
+ * replaced.
+ *
+ * Each method's own reads are still closed over the calls between them first, because the
+ * fresh-read exemption has to see a read taken at the write site through a helper — `[...$this->readState(), …]`
+ * is a merge however many calls deep the read itself is.
+ *
+ * @param array<string, Node> $methods
+ * @return list<array{method: string, line: int, path: string, payload: string}>
+ */
+function scopeWriteBacks(array $methods, string $source, NodeFinder $finder): array
+{
+    $reads = [];
+
+    foreach ($methods as $name => $method) {
+        $reads[$name] = readPaths($method, $source, $finder);
+    }
+
+    do {
+        $changed = false;
+
+        foreach ($methods as $name => $method) {
+            foreach (selfCalls($method, $finder) as $called) {
+                if (!isset($reads[$called]) || $reads[$called] === []) {
+                    continue;
+                }
+
+                $merged = array_values(array_unique([...$reads[$name], ...$reads[$called]]));
+
+                if ($merged !== $reads[$name]) {
+                    $reads[$name] = $merged;
+                    $changed = true;
+                }
+            }
+        }
+    } while ($changed);
+
+    $class = array_values(array_unique(array_merge(...array_values($reads))));
+
+    if ($class === []) {
+        return [];
+    }
+
+    $findings = [];
+
+    foreach ($methods as $name => $method) {
+        foreach (writeSites($method, $source, $finder) as $site) {
+            if (!in_array($site['path'], $class, true)) {
+                continue;
+            }
+
+            if (!wholeValue($site['payload'], $source, $finder)) {
+                continue;
+            }
+
+            if (mergesFreshRead($site['payload'], $site['path'], $reads, $source, $finder)) {
+                continue;
+            }
+
+            $findings[] = [
+                'method' => $name,
+                'line' => $site['line'],
+                'path' => $site['path'],
+                'payload' => nodeText($site['payload'], $source),
+            ];
+        }
+    }
+
+    return $findings;
+}
+
+/**
+ * The paths one method reads whole: a file read as bytes, a file included as a PHP structure, or
+ * a file parsed as one.
+ *
+ * A handle is not a read here: `fopen()` for a lock is not a whole file, and the paths this
+ * package opens that way are never written back through `file_put_contents()`.
+ *
+ * @return list<string>
+ */
+function readPaths(Node $method, string $source, NodeFinder $finder): array
+{
+    $sinks = ['file_get_contents', 'file', 'readfile', 'parse_ini_file', 'yaml_parse_file', 'yaml_parse_url'];
+    $paths = [];
+
+    foreach ($finder->findInstanceOf($method, Node\Expr\FuncCall::class) as $call) {
+        $name = functionName($call);
+        $argument = $call->getArgs()[0] ?? null;
+
+        if ($name === null || $argument === null || !in_array($name, $sinks, true)) {
+            continue;
+        }
+
+        $paths[] = nodeText($argument->value, $source);
+    }
+
+    foreach ($finder->findInstanceOf($method, Node\Expr\Include_::class) as $include) {
+        $paths[] = nodeText($include->expr, $source);
+    }
+
+    return array_values(array_unique($paths));
+}
+
+/**
+ * The writes a method performs, with the path each one really lands on.
+ *
+ * Two resolutions, and both are the way this package writes a file: a `fwrite()` names a handle,
+ * so the path is the `fopen()` that opened it; a write into a temp names the temp, so the path is
+ * what a `rename()` of that temp finishes on. A write that is neither is the path it names.
+ *
+ * @return list<array{path: string, payload: Node\Expr, line: int}>
+ */
+function writeSites(Node $method, string $source, NodeFinder $finder): array
+{
+    $handles = [];
+    $renames = [];
+
+    foreach ($finder->findInstanceOf($method, Node\Expr\Assign::class) as $assign) {
+        $expr = $assign->expr;
+
+        if (!$expr instanceof Node\Expr\FuncCall || functionName($expr) !== 'fopen') {
+            continue;
+        }
+
+        $opened = $expr->getArgs()[0] ?? null;
+
+        if ($opened !== null) {
+            $handles[nodeText($assign->var, $source)] = nodeText($opened->value, $source);
+        }
+    }
+
+    foreach ($finder->findInstanceOf($method, Node\Expr\FuncCall::class) as $call) {
+        if (functionName($call) !== 'rename') {
+            continue;
+        }
+
+        $arguments = $call->getArgs();
+        $from = $arguments[0] ?? null;
+        $to = $arguments[1] ?? null;
+
+        if ($from !== null && $to !== null && str_starts_with(nodeText($from->value, $source), '$')) {
+            $renames[nodeText($from->value, $source)] = nodeText($to->value, $source);
+        }
+    }
+
+    $sites = [];
+
+    foreach ($finder->findInstanceOf($method, Node\Expr\FuncCall::class) as $call) {
+        if (!in_array(functionName($call), ['file_put_contents', 'fwrite'], true)) {
+            continue;
+        }
+
+        $arguments = $call->getArgs();
+        $target = $arguments[0] ?? null;
+        $payload = $arguments[1] ?? null;
+
+        if ($target === null || $payload === null) {
+            continue;
+        }
+
+        $named = nodeText($target->value, $source);
+
+        $sites[] = [
+            'path' => $renames[$named] ?? $handles[$named] ?? $named,
+            'payload' => $payload->value,
+            'line' => $call->getStartLine(),
+        ];
+    }
+
+    return $sites;
+}
+
+/**
+ * Whether a payload is a whole value rather than prose this run composed: an encoded structure, a
+ * variable, property, element or array holding one, or a string built around an encode — which is
+ * what a config file rebuilt from the array it was read as looks like.
+ *
+ * A literal is not one, and neither is a `sprintf()`: a file this class reads and a line written
+ * into it is a log, not a keyed structure going back to disk, and reporting it would be noise that
+ * teaches a reader to declare things. An encoder is the signal that a structure is on its way to
+ * disk, so it counts wherever it appears in the payload.
+ */
+function wholeValue(Node $payload, string $source, NodeFinder $finder): bool
+{
+    if (containsEncoder($payload, $finder)) {
+        return true;
+    }
+
+    $value = unwrapValue($payload);
+
+    return $value instanceof Node\Expr\Variable
+        || $value instanceof Node\Expr\PropertyFetch
+        || $value instanceof Node\Expr\StaticPropertyFetch
+        || $value instanceof Node\Expr\ArrayDimFetch
+        || $value instanceof Node\Expr\Array_;
+}
+
+/**
+ * Whether a payload encodes a structure anywhere in it, so `'<?php return '.var_export($config, true).';'`
+ * is a structure written back rather than a sentence composed.
+ */
+function containsEncoder(Node $payload, NodeFinder $finder): bool
+{
+    return $finder->find($payload, static fn (Node $node): bool => $node instanceof Node\Expr\FuncCall
+        && in_array(functionName($node), VALUE_ENCODERS, true)) !== [];
+}
+
+
+/**
+ * A payload with its encoders and casts removed: the value that is actually being written, so a
+ * `json_encode([...$state])` is read as the array it is.
+ */
+function unwrapValue(Node $node): Node
+{
+    $encoders = VALUE_ENCODERS;
+
+    while (true) {
+        if ($node instanceof Node\Expr\Cast) {
+            $node = $node->expr;
+            continue;
+        }
+
+        $argument = $node instanceof Node\Expr\FuncCall && in_array(functionName($node), $encoders, true)
+            ? ($node->getArgs()[0] ?? null)
+            : null;
+
+        if ($argument === null) {
+            return $node;
+        }
+
+        $node = $argument->value;
+    }
+}
+
+/**
+ * Whether a payload merges a read of the path it is writing, taken at the write site — the one form
+ * that needs no declaration, because a key that arrived between the two is not lost by it.
+ *
+ * Only a container that can merge qualifies: an array, an `array_merge()`, a `+`. A payload that is
+ * merely *built from* a read — `json_encode(['last_mode' => $mode])` — is not a merge however much
+ * of its content came from one.
+ *
+ * @param array<string, list<string>> $reads
+ */
+function mergesFreshRead(Node $payload, string $path, array $reads, string $source, NodeFinder $finder): bool
+{
+    $value = unwrapValue($payload);
+
+    $merges = $value instanceof Node\Expr\Array_
+        || $value instanceof Node\Expr\BinaryOp\Plus
+        || ($value instanceof Node\Expr\FuncCall && functionName($value) === 'array_merge');
+
+    if (!$merges) {
+        return false;
+    }
+
+    foreach ($finder->findInstanceOf($value, Node\Expr\FuncCall::class) as $call) {
+        $argument = $call->getArgs()[0] ?? null;
+
+        if (functionName($call) === 'file_get_contents' && $argument !== null && nodeText($argument->value, $source) === $path) {
+            return true;
+        }
+    }
+
+    foreach ($finder->findInstanceOf($value, Node\Expr\MethodCall::class) as $call) {
+        $called = selfCalledName($call);
+
+        if ($called !== null && in_array($path, $reads[$called] ?? [], true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * The methods of its own class a method calls, by name.
+ *
+ * @return list<string>
+ */
+function selfCalls(Node $method, NodeFinder $finder): array
+{
+    $names = [];
+
+    foreach ($finder->findInstanceOf($method, Node\Expr\MethodCall::class) as $call) {
+        $called = selfCalledName($call);
+
+        if ($called !== null) {
+            $names[] = $called;
+        }
+    }
+
+    return array_values(array_unique($names));
+}
+
+/**
+ * The method name of a `$this->x()` / `self::x()` / `static::x()` call, or null when the call is on
+ * something else — another object's method is not this class's read.
+ */
+function selfCalledName(Node\Expr\MethodCall $call): ?string
+{
+    $variable = $call->var;
+
+    $isSelf = $variable instanceof Node\Expr\Variable && $variable->name === 'this';
+    $isStatic = $variable instanceof Node\Name
+        && in_array(strtolower($variable->toString()), ['self', 'static'], true);
+
+    return ($isSelf || $isStatic) && $call->name instanceof Node\Identifier
+        ? $call->name->toString()
+        : null;
+}
+
+/**
+ * The name of a called function, when it is a plain function name: `file_get_contents('x')` has
+ * one, `$fn('x')` and `$this->m()` do not.
+ */
+function functionName(Node\Expr\FuncCall $call): ?string
+{
+    return $call->name instanceof Node\Name ? strtolower($call->name->toString()) : null;
+}
+
+/**
+ * The source text of a node, so a path is compared as it is written rather than as a resolved
+ * value nothing here can know.
+ */
+function nodeText(Node $node, string $source): string
+{
+    $start = $node->getStartFilePos();
+    $end = $node->getEndFilePos();
+
+    if ($start < 0 || $end < $start) {
+        return '(unknown)';
+    }
+
+    return (string) preg_replace('/\s+/', ' ', substr($source, $start, $end - $start + 1));
 }
 
 /**

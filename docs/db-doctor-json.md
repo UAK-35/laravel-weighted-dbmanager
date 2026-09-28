@@ -224,6 +224,10 @@ the two tables look alike would be a table the matrix could not check.
 | a pgcat repair travels as data too: the line the table prints is the string the object carries, and a row that can name none carries `[]` rather than omitting the key | `DbDoctorTest::test_the_json_report_carries_the_pgcat_repair_line_the_table_prints` |
 | a verdict the report can carry is documented, and vice versa | `DbDoctorTest::test_every_json_verdict_is_documented` |
 | a vet run keeps the envelope and swaps the subject key for `config_file`, so one gate reads both modes | `DbDoctorTest::test_the_config_file_flag_reports_through_the_json_envelope` |
+| the deploy gate the README pastes ships a preflight whose named rows pass | `DoctorGateTest::test_the_gate_the_readme_pastes_ships_a_preflight_whose_named_rows_pass` |
+| ...and refuses a named row that is not `PASS`, naming it | `DoctorGateTest::test_the_gate_refuses_a_named_row_that_is_not_pass` |
+| ...and refuses a run whose unnamed row failed, naming the rows | `DoctorGateTest::test_the_gate_refuses_a_run_whose_unnamed_row_failed` |
+| every row the gate blocks on is a row a real report carries | `DoctorGateTest::test_every_row_the_gate_names_is_a_row_a_run_produces` |
 
 Mutations this decision has been checked against, run against the matrix test unless noted: the
 envelope's `checks` renamed to `rows` (14 of 14 cells fail on the key list), the row's `verdict`
@@ -236,8 +240,12 @@ and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails namin
 ## Known limitations
 
 - **The row set is not a fixed length.** Six rows when `db` does not resolve, eleven otherwise. A gate
-  must select by `name`; nothing in the object states how many rows there "should" be, so a gate that
-  expects a particular row to exist has to decide what its absence means on its own.
+  must select by `name` — the row's identity, and the same string the table prints — and nothing in the
+  object states how many rows there "should" be, so a gate that expects a particular row to exist has
+  to decide what its absence means on its own. The README's deploy gate is the worked example of that
+  decision, and `DoctorGateTest` is where it is enforced: it asserts that every row the gate blocks on
+  is a row a real report carries, because a row renamed in the doctor would leave the gate matching
+  nothing and passing every preflight.
 - **`detail` is prose, and platform-shaped.** It carries real paths, real commands and supervisor's
   own output, with the separators of the platform that ran it. Assert on `name`, `verdict` and
   `exit_code`, which are the contract; `suggestions` is the one string-shaped value meant to be acted
@@ -251,14 +259,19 @@ and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails namin
   consumer that rejects unknown keys would break on an addition rather than ignore it.
 - **`verdict` is upper case and the health payload's `status` is not.** The doctor's three strings are
   the table's own, and the health endpoint's `ok`/`degraded`/`misconfigured` are a different
-  vocabulary for a different question asked of a different reader. A package-wide envelope would
-  settle it; there is not one (see below).
+  vocabulary for a different question asked of a different reader. A package-wide envelope settles the
+  *report* half of that question and deliberately not this half: `JsonEnvelope::REPORTS` names the
+  commands that write a report, and `/health/db` is not one of them — the line
+  [command-json-envelope.md](command-json-envelope.md) draws between an endpoint a poller reads and a
+  report a gate branches on.
 - **The gap this record opened with is closed, and one difference is left on purpose.** When it was
   written, `db:probe-replicas` and `db:replica-status` had no machine-readable form at all; both now
   write the five keys `db:pgcat-flip` defines, from one class
   ([command-json-envelope.md](command-json-envelope.md)). What remains is the name of the run's
-  verdict: `verdict` here, `kind` in the three command reports. See candidate F, and the bullet
-  below about adopting the shared envelope.
+  verdict: `verdict` here, `kind` in the three command reports — and it is declared rather than
+  merely noted, which is the one place this record asked for: `JsonEnvelope::REPORTS` carries
+  `verdict` for this command, so what a preflight calls its run verdict is read from the register
+  itself. See candidate F, and the bullet below about adopting the shared envelope.
 
 ## What would change this decision
 
@@ -291,7 +304,8 @@ and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails namin
 | `src/Console/Commands/DbDoctor.php` | `--json`, `report()` (the envelope and the raw write), `counts()`, `runVerdict()`, `loudest()` — the fold `verdict()` and `runVerdict()` share |
 | `tests/Unit/Console/DbDoctorTest.php` | the JSON half of the exit matrix, the table-versus-object comparison, the suggestions, and the verdict-vocabulary binding |
 | `tests/Support/Readme.php` | the verdict table read out of the README as data |
-| `README.md` | the envelope, the sample object, the `jq` examples, and the verdict table |
+| `README.md` | the envelope, the sample object, the `jq` examples, the deploy gate a pipeline pastes, and the verdict table |
+| `tests/Unit/Docs/DoctorGateTest.php` | the gate run rather than read: a real report it must ship, two it must refuse, and the rows it names checked against the ones a run produces |
 | `docs/documented-exit-codes.md` | the same idea one level up: documenting a code and enforcing it |
 | `docs/pgcat-flip-json.md` | the flip's object, whose flag, key-set rule and "the code travels inside it" this follows |
 | `docs/command-json-envelope.md` | the five keys as one class, shared with `db:probe-replicas` and `db:replica-status`, and why this object does not take them |

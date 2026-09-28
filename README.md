@@ -1611,6 +1611,42 @@ weighted manager leaves the six configuration rows and no replica rows at all, s
 platform that ran it; assert on `name`, `verdict` and `exit_code`, which are the contract, and treat
 `suggestions` as the repairs a row offers rather than as a substitute for reading the row.
 
+The one-liners above are what a person types at a prompt. What a deploy pastes is the gate below:
+**the rows this pipeline treats as blocking are named in it**, editing that list is the whole of
+configuring it, and it refuses the deploy — printing the rows — when one of those rows is not `PASS`
+(a `WARN` on a row you named is a row you said must pass) or when some row `FAIL`ed, which the run's
+own `verdict` folds. The object decides and not the exit code: the command's status is discarded on
+purpose, so a preflight that never got written is an empty file, and `jq` refuses that as loudly as a
+failing row does.
+
+```bash
+# The deploy gate: name the rows your pipeline treats as blocking, and this refuses the deploy —
+# printing them — when one is not PASS, or when any row failed.
+php artisan db:doctor --strict --json > preflight.json || true
+
+jq -e '
+  ["provider swap", "weighted factory", "store reachability"] as $blocking
+  | . as $preflight
+  | [$preflight.checks[]
+     | select(.name as $row | $blocking | index($row))
+     | select(.verdict != "PASS")]
+  | if length > 0
+    then error("refusing to deploy: " + (map("\(.verdict)  \(.name)") | join("; ")))
+    elif $preflight.verdict == "FAIL"
+    then error("refusing to deploy: the preflight failed — "
+               + ([$preflight.checks[] | select(.verdict == "FAIL") | .name] | join(", ")))
+    else true
+    end
+' preflight.json
+```
+
+A gate is a promise about field names, and field names are what a later commit changes. So this block
+is read back by `tests/Unit/Docs/DoctorGateTest.php`, which runs *this* program through `jq` against a
+report a real `db:doctor --json` run produced: a clean preflight it must ship, and two it must refuse
+— a named row that warned, and a run whose unnamed row failed — each while naming the row it refused
+on. Every row the gate names must also be a row a run really produces, because a renamed row is the
+one failure the gate cannot report: it would simply match nothing, and pass.
+
 `--json` changes the report and nothing else: the same checks run, the code is the one `gateFailed()`
 computed, and nothing is written either way. It composes with `--strict`, which is how a pipeline will
 pass it, and there is no combination to refuse — a doctor is not a daemon, so a report cannot be
@@ -1896,8 +1932,9 @@ Windows-only `ext-*` platform requirements to `install` / `update` / `require` /
 
 `composer checks` (`bin/checks.php`) runs every applicable check and prints one
 summary with one exit code: `php -l` over every file (including `bin/`), an
-independent AST parse of the same files, `composer validate --strict`,
-`check-platform-reqs`, the workflow YAML, PHPStan, Pint and PHPUnit. The schema
+independent AST parse of the same files, a write-back scan of `src/` and `config/`,
+`composer validate --strict`, `check-platform-reqs`, the workflow YAML, PHPStan,
+Pint and PHPUnit. The schema
 check asks about `composer.lock` only when the repository contains one — it is
 gitignored here, so a lock a local `composer.json` edit has made stale cannot turn
 the gate red over a file no clone has, which is the same question CI answers after
@@ -1905,6 +1942,19 @@ writing its own. It prints only failures by default (`--verbose` streams everyth
 `--only=syntax,tests` to narrow, reports
 a missing tool as a skip rather than crashing on it (`--require-all` turns that
 into a failure), and can add `composer audit` with `--audit`.
+
+The write-back scan is the one check whose subject is the shape of the code rather
+than the code itself: a class that reads a file and writes that same file back is a
+read-modify-write of it, which is how a key nobody knew about disappears without a
+diff saying so — a write of a temp file that a `rename()` completes is followed to
+the path it really replaces, and a write that merges a read taken at the write site
+is the one form that needs no explanation. Every other one is named in the
+`STRUCTURE_WRITE_BACKS` register at the top of `bin/checks.php`, with the reason the
+copy being replaced is still the truth; a write-back that is not in the register
+fails the check, and a register entry the code has left behind fails it too. The
+detector is run against fixtures of its own first, so a shape it has stopped
+recognising fails the check rather than reporting an empty result — the limitation
+of a static scan is written up beside the register.
 
 `phpstan.neon.dist` runs at **level `max`** over `src` with **no ignore entries
 and no baseline file** — every finding is fixed, not silenced.
