@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha1 - 2026-09-28
+
 ### Added
 
 - **A write-back scan is now one of the checks, so a keyed structure read from disk and written back

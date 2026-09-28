@@ -71,8 +71,8 @@
             "providers": []
         },
         "branch-alias": {
-            "dev-dev": "0.1.x-dev",
-            "dev-main": "0.1.x-dev"
+            "dev-dev": "0.2.x-dev",
+            "dev-main": "0.2.x-dev"
         }
     },
     "scripts": {
