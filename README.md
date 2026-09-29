@@ -1762,7 +1762,11 @@ beside it, the file it did or did not touch, and whether the run recorded a mode
 then read back out of the README by
 `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table`, the same guard the
 sweep and the preflight have — so a case cannot be documented without a cell behind it, and a
-cell cannot be added without documenting it.
+cell cannot be added without documenting it. The three other places this README says what the
+flip exits — the rehearsal recipe, the boot-window bullet, and the disarmed-flipper row under
+[Pgcat](#pgcat) — are compared with the row each one restates by
+`DbFlipPgcatCommandTest::test_the_prose_that_restates_the_table_states_the_same_codes`, because a
+second statement of a code is a second thing to keep in step.
 
 One state the table names is not a row of that matrix and has a test of its own: `--status`
 wins when a rehearsal is asked for in the same run, because its only evidence is the line the

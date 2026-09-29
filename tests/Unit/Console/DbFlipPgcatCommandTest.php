@@ -574,6 +574,128 @@ final class DbFlipPgcatCommandTest extends TestCase
     }
 
     /**
+     * The sentences elsewhere in the README that restate the table, and the row each one is a
+     * paraphrase of.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     *   The table under [Flipping] is the contract, and the guard above binds it to the matrix — but
+     *   it is not the only place the README says what the flip exits. Three other sections say it in
+     *   their own words, for the reader who is *in* that section: the rehearsal recipe (`--dry-run`
+     *   is a deploy gate, so its reader is writing a pipeline), the boot-window bullet, and the
+     *   pgcat snapshot's table, whose row for a disabled flipper says it exits `0` without entering
+     *   the watch loop. A paraphrase that drifts is a wrong code in a place nothing was reading, and
+     *   it drifts *quietly*: the sentence still reads as an argument about what a scheduler should
+     *   do, and the table it restates is still right.
+     *
+     *   So every one of them is declared here with the row it restates, and the test below compares
+     *   the code the sentence writes with the code the row documents. {code} is the number the
+     *   sentence writes in backticks (the placeholder stands for the number *and* the backticks
+     *   around it) — the only thing compared — and the rest of the phrase is
+     *   literal, because the sentence *is* the claim: a reworded or reflowed one fails here rather
+     *   than quietly leaving the claim unchecked, which is the failure mode `ProseNumbersTest`
+     *   exists for one record over.
+     *
+     *   The comparison is against the **table**, not against the matrix: the table is the statement
+     *   an operator reads and it is already bound to the cells, so the chain reads sentence → table →
+     *   matrix, and each link fails on its own terms.
+     *
+     * @return array<string, array{heading: string, phrase: string, row: string}>
+     */
+    private static function paraphrases(): array
+    {
+        return [
+            'the rehearsal recipe: the code for a flip that would happen' => [
+                'heading' => '### Rehearsing a flip: `--dry-run`',
+                'phrase' => 'Exit codes are the question, not the outcome: {code} when a flip would happen',
+                'row' => 'a rehearsal, whether it would flip, would not, or was forced',
+            ],
+            'the rehearsal recipe: the code for a step that did not work' => [
+                'heading' => '### Rehearsing a flip: `--dry-run`',
+                'phrase' => 'and {code} only when a step a flip needs did not work',
+                'row' => 'a step a flip needs did not work, or a rehearsal of one',
+            ],
+            'the rehearsal recipe: the three ways a flip does its job' => [
+                'heading' => '### Rehearsing a flip: `--dry-run`',
+                'phrase' => 'applied, nothing to do and skipped all exit {code}',
+                'row' => 'a flip applied, nothing to do, or skipped by another instance',
+            ],
+            'the rehearsal recipe: the code for a step that did not work, or a source that is not there' => [
+                'heading' => '### Rehearsing a flip: `--dry-run`',
+                'phrase' => 'only a step that did not work — or a source config that is not there — exits {code}',
+                'row' => 'a step a flip needs did not work, or a rehearsal of one',
+            ],
+            'the rehearsal recipe: the code for a refused combination' => [
+                'heading' => '### Rehearsing a flip: `--dry-run`',
+                'phrase' => 'A refused flag combination exits {code} without reaching the flipper at all',
+                'row' => 'a flag combination that is refused',
+            ],
+            'the boot window: the code for a window that closed' => [
+                'heading' => '### How long the flip keeps trying: the boot window',
+                'phrase' => 'At the deadline `db:pgcat-flip` returns `window_closed` and exits {code}',
+                'row' => "the container's boot window had closed",
+            ],
+            'the pgcat snapshot: the code for a flipper that is not armed' => [
+                'heading' => '### It only ever acts on a PostgreSQL connection',
+                'phrase' => 'prints that reason and exits {code} at once; it never enters the watch loop',
+                'row' => 'the flipper is not armed for this connection',
+            ],
+        ];
+    }
+
+    /**
+     * A sentence that restates the table is the same claim as the table, and it is compared here
+     * rather than trusted: every code the three other sections write is the code the row it
+     * paraphrases documents.
+     *
+     * The section is read whole and matched against the phrase with its whitespace collapsed, so a
+     * reflowed paragraph is a reflow — where a reworded sentence is a failure, because the sentence
+     * is what a reader is told and this test has to be revisited when it changes. Both halves fail
+     * by name: a phrase that is no longer there says so and prints the phrase, and a code that moved
+     * names the sentence, the row it restates, and both numbers.
+     */
+    public function test_the_prose_that_restates_the_table_states_the_same_codes(): void
+    {
+        $rows = Readme::table('### Flipping: `db:pgcat-flip`', 'exit');
+        $declared = self::paraphrases();
+
+        $this->assertNotSame([], $declared, 'a guard pinned to sentences needs sentences to read');
+
+        foreach ($declared as $where => $claim) {
+            $section = (string) preg_replace('/\s+/', ' ', Readme::section($claim['heading']));
+
+            // The placeholder is the one thing not literal: everything else is quoted as written,
+            // so the pattern can only match the sentence this guard was pinned to.
+            $parts = array_map(
+                static fn (string $part): string => preg_quote($part, '/'),
+                explode('{code}', $claim['phrase']),
+            );
+
+            $matches = [];
+
+            $this->assertSame(
+                1,
+                preg_match('/'.implode('`(\d+)`', $parts).'/', $section, $matches),
+                sprintf("README.md no longer states [%s] the way this guard reads it, so nothing is being checked there. It is written as: %s", $where, $claim['phrase']),
+            );
+
+            $documented = Readme::row($rows, 'what the run found', $claim['row']);
+
+            $this->assertSame(
+                Readme::code($documented['exit']),
+                (int) $matches[1],
+                sprintf(
+                    'README.md states [%s] as exiting %s, while the row it paraphrases — "%s" — documents %s.',
+                    $where,
+                    $matches[1],
+                    $claim['row'],
+                    $documented['exit'],
+                ),
+            );
+        }
+    }
+
+    /**
      * The boot window as the `--status` table prints it — the facts an operator reads when a
      * container is about to be declared failed, from the same block `/health/db` publishes so the
      * two cannot say different things.

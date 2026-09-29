@@ -27,6 +27,30 @@
   `### Deprecated` a patch, `### Security` a minor, the `BREAKING` marker read as a heading rather
   than as a claim, an unknown heading read as empty, and the config half's severity read as a patch —
   and each fails its own case.
+- **A sentence elsewhere in the README that restates `db:pgcat-flip`'s exit table is now compared
+  with the row it paraphrases, so a paraphrase cannot drift from the contract it restates.** The
+  table under [Flipping](README.md#flipping-dbpgcat-flip) is the contract and it is bound to the
+  matrix — but it is not the only place the README states a code: the rehearsal recipe says a
+  `--dry-run` gate exits `0` when a flip would happen and `1` when a step a flip needs did not work,
+  the boot-window bullet says a closed window exits `0`, and the pgcat snapshot's row for a disarmed
+  flipper says it exits `0` without entering the watch loop. Each is written for the reader who is
+  *in* that section — `--dry-run` is a deploy gate, so its reader is writing a pipeline — and each
+  is a restatement, which means a number that changed in the table could stay wrong in three places
+  nothing was reading. The failure is quiet from both ends: the sentence still reads as an argument
+  about what a scheduler should do, and the table it forwards to is still right.
+
+  `DbFlipPgcatCommandTest::paraphrases()` declares each sentence with the row it restates, and
+  `test_the_prose_that_restates_the_table_states_the_same_codes` reads the section it lives in,
+  matches the sentence with its whitespace collapsed, and compares the code it writes with the code
+  the row documents. The number is the only part of a phrase not written literally, so a reworded
+  sentence fails here rather than leaving the claim unchecked — the failure mode `ProseNumbersTest`
+  exists for one record over — while a reflowed one is a reflow. The comparison is against the table
+  rather than the matrix, because the table is what an operator reads and it is already bound to the
+  cells: the chain reads sentence → table → matrix, and each link was measured. A wrong code in the
+  table fails both guards by name (two failures); a wrong code in a sentence fails this one alone;
+  and rewording a sentence fails it with the phrase printed, so a sentence that has moved is a
+  change to the test as well as to the README.
+
 - **The surface says when one name is declared by more than one file, which is the one change it
   cannot see.** The surface is keyed by name, so two files declaring one config key is a single entry
   in it, from the first of them read, and the second file's declaration is in neither map — so a change

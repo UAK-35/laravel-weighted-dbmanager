@@ -102,6 +102,19 @@ for in the same run has a test of its own, because its only evidence is a line t
 branch did not print — while every other assertion a row can make, that nothing was touched and
 nothing was recorded, is true of a rehearsal as well.
 
+**A sentence that restates a row is compared with that row.** The flip's table is not the only
+place the README states one of this command's codes. Three other sections say it in their own
+words, for the reader who is *in* that section: the rehearsal recipe — `--dry-run` is a deploy
+gate, so its reader is writing a pipeline — the boot-window bullet, and the row of the pgcat
+snapshot's table that covers a disarmed flipper. Each is a restatement, and a restatement is not a
+guard: a code that changed in the table could stay wrong in three places nothing was reading, and
+it is quiet from both ends, because the sentence still reads as an argument about what a scheduler
+should do and the table it forwards to is still right. So each sentence is declared with the row it
+paraphrases, and the code it writes is compared with the code that row documents. The comparison is
+against the **table** rather than the matrix — the table is the statement an operator reads and it
+is already bound to the cells — so the chain reads sentence → table → matrix, and each link fails on
+its own terms.
+
 **The four failure modes.** Reverting a documented number; adding a documented case with no
 cell behind it; rewording a documented case so it is no longer the one the matrix names; and
 dropping a cell's assignment to a documented case. Each is a failing assertion with the case
@@ -154,6 +167,7 @@ the drift rather than the repair.
 | `DbProbeReplicasCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the sweep's five documented cases, their numbers, and that every one of its nine cells is an instance of one |
 | `DbDoctorTest::test_the_matrix_agrees_with_the_readme_exit_table` | the doctor's three documented cases, both `--strict` columns, and that the two sets of cases are the same |
 | `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's nine documented cases, their numbers, and that every one of its seventeen cells is an instance of one |
+| `DbFlipPgcatCommandTest::test_the_prose_that_restates_the_table_states_the_same_codes` | the sentences in three other sections that restate one of the flip's rows, the code each one writes, and the row it is a paraphrase of |
 | `DbFlipPgcatCommandTest::test_status_wins_when_a_rehearsal_is_asked_for_at_the_same_time` | the one rule the flip's table names that a row cannot hold |
 
 All three are checked by mutation rather than by argument: reverting `every replica failed` to
@@ -188,7 +202,10 @@ and deleting one cell's assignment each produce exactly one failure naming the c
   tables (what each check judges, what a rehearsal does not do) carry no exit code and are not
   read here; the check table is bound by its row *names* elsewhere — `DbDoctorTest` compares it
   with the rows the command builds and `ProseNumbersTest` binds the counts the records state
-  about it.
+  about it. A *sentence* that restates a code is the other shape, and one command binds those now:
+  `db:pgcat-flip`'s paraphrases are compared with the row each one restates. The other three
+  commands' prose restatements are not bound — how far a paraphrase may drift before it stops
+  being one is a judgement, and it has been made for the command that has three of them.
 - **The parser is a parser.** It reads the first table under a heading with a named column, so
   restructuring the README so that a different table has that column first would bind the
   wrong one — which fails loudly (the labels would not match) rather than silently.
@@ -217,7 +234,7 @@ and deleting one cell's assignment each produce exactly one failure naming the c
 
 | File | Role |
 |---|---|
-| `tests/Support/Readme.php` | the tables read as data: `table()`, `row()`, `code()`, `plain()` |
+| `tests/Support/Readme.php` | the README read as data: `table()`, `row()`, `code()`, `plain()`, and `section()` for the sentences that restate a table |
 | `tests/Unit/Console/DbProbeReplicasCommandTest.php` | the sweep's matrix, its provider, and the map from each cell to its documented case |
 | `tests/Unit/Console/DbDoctorTest.php` | the doctor's matrix, its provider, and the case each cell's counts belong to |
 | `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the flip's matrix, its provider, and the map from each cell to its documented case |
