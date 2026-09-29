@@ -415,9 +415,10 @@ final class ReleaseRepo
         }
 
         // The real scripts, copied rather than reimplemented: surface.php holds the
-        // symbol reader and the inventory format, inventory.php is what a hand
-        // regeneration runs, and release.php is the thing under test.
-        foreach (['release.php', 'surface.php', 'inventory.php'] as $script) {
+        // symbol reader and the inventory format, weighing.php the four signals and the
+        // weighing both commands share, inventory.php is what a hand regeneration runs,
+        // blame.php answers about one symbol, and release.php is the thing under test.
+        foreach (['release.php', 'surface.php', 'weighing.php', 'inventory.php', 'blame.php'] as $script) {
             if (!copy($package . '/bin/' . $script, $root . '/bin/' . $script)) {
                 throw new RuntimeException("Could not copy bin/{$script}");
             }
@@ -630,15 +631,27 @@ final class ReleaseRepo
         JSON . "\n";
     }
 
-    private static function thing(): string
+    /**
+     * The one class the fixture ships, and the one config file.
+     *
+     * It carries a constant and a public property on purpose: they are the rows the
+     * inventory witnesses with no tag to diff against, so a fixture without them could
+     * not test the signal that exists for that case. Neither is a method, so the counts
+     * the tests assert (two files, two public methods) do not move with them.
+     */
+    private static function thing(string $class = 'Thing', bool $withVersion = true): string
     {
-        return <<<'PHP'
+        $constant = $withVersion ? "    public const VERSION = '1';\n\n" : '';
+
+        return <<<PHP
         <?php
 
         namespace Fixture;
 
-        class Thing
+        class {$class}
         {
+        {$constant}    public string \$label = 'thing';
+
             public function label(): string
             {
                 return 'thing';
@@ -652,6 +665,7 @@ final class ReleaseRepo
         PHP . "\n";
     }
 
+    /** The config file's keys, which the surface rows cover beside the class members. */
     /**
      * @param list<string> $paths
      */

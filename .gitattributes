@@ -27,7 +27,9 @@
 /bin/checks.php       export-ignore
 /bin/release.php      export-ignore
 /bin/surface.php      export-ignore
+/bin/weighing.php     export-ignore
 /bin/inventory.php    export-ignore
+/bin/blame.php        export-ignore
 /bin/composer-link.cmd export-ignore
 /files.tsv            export-ignore
 /methods.tsv          export-ignore

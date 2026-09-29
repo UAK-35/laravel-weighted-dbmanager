@@ -1173,12 +1173,12 @@ the application still boots and answers requests, and each one is a row:
 | `weighted factory`   | `db.factory` is not `WeightedConnectionFactory` — the replica is chosen there, so weighting is not running either                                  |
 | `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value) |
 | `pgcat gate`         | `swrr.pgcat.enabled` is on where pgcat cannot act, or armed while a path a flip needs is unset. Reads the boot record as well as this boot's verdict, so it also fails with the age of a mismatch an earlier boot recorded, and warns when one is on record for a connection this run does not inspect. Prints `swrr.pgcat.enabled = false` as a `suggestion` for the switch armed where pgcat cannot act, and nothing for the other two failures: the paths it names are this installation's to choose |
-| `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. The only row that never prints a `suggestion`: every problem here is a path or a permission, and the right value is whatever this installation's pgcat and supervisor actually use |
+| `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. Names **every** problem it finds, one sentence each and each dated from its own finding, and prints a `suggestion` per problem where the package can state the repair exactly: `chmod +r` for a source it cannot read, `chmod +w` for a file it cannot write and `chmod +wx` for a directory (a rename has to traverse it), and — for an *empty* `config_path`/`state_file`/`lock_file` — the setting line with the value the published config ships. A path that is not there, and an empty `readers_path`/`no_readers_path`, get no line: those values are this installation's to choose, and a plausible-looking path pasted into configuration replaces the operator's intent with this tool's |
 | `pgcat supervisor`   | the flipper is armed and the command it runs *after* the swap cannot work: its executable does not resolve for this user (not an absolute path, not on `PATH`), the program name is an unquoted glob the shell may rewrite, supervisorctl cannot answer, or supervisor does not know the program. Read-only: the flip's own command with `status` in the verb position, plus — only when supervisor does not know the program, the one fault whose repair is a name — the bare `supervisorctl status` that lists what supervisord is running, whose nearest names the row then reports. Prints the setting line to paste as a `suggestion` for the two faults that reduce to a command — an unquoted program name, and a command left empty — and nothing for the rest, which are repaired in a `PATH`, a running supervisord or a `[program:]` section; an unknown program is named in the row's sentence rather than printed as a line, because a near miss is a ranked answer and a `suggestion` is a value a gate may apply without reading it |
 | `replica metadata`   | *fails* when a replica's `weight`/`cpu_cores`/`ram_gb` is a value the resolver does not read as written — not a number, or a number under the floor that key is read at — naming the replica and what the resolver reads instead. A weight it cannot read is read as `0`, and `0` is how a replica is disabled, so that replica leaves the pool: without this the row reports the smaller pool as the installation. Also names a replica disabled with `weight: 0`, which is a choice and does not fail. The pool's own arithmetic comes from the resolver rather than from this row: `replicaStatus()` is the pool, `poolExclusions()` is what it does not hold and why, and the two partition the read list. *Warns* when the replicas carry no metadata at all, so the resolver picks at random while the table still looks weighted |
 | `switch values`      | **Fails** when `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` or `swrr.allow_local_fallback` is written as something that is not on or off — `'false'`, `'off'` and `'no'` are how off is written, and a cast reads every one of them as *on*, which on the pgcat switch arms the file swap. The row quotes the value, quotes the accepted spellings, and names the value the setting falls back to. Names **every** switch it refuses rather than the first, and dates each from its own finding in the boot record. Nothing is suggested: re-spelling `'flase'` would be guessing at what was meant |
 | `reader windows`     | `swrr.reader_windows` holds an entry that is not a window — the flat `'10:00-14:20'` is the one everyone writes first — or is not a list of windows at all, or `swrr.reader_days` is not a list of day numbers — `'1,2,3'` written as one string is the same mistake one key over. **Fails** on both, naming the entry and quoting the shape the setting reads: reading a typo as "nothing" is what inverts the setting, so the package refuses it instead. *Warns* on the three ways a well-formed setting still cannot act — an empty day list (permissive), days outside 1…7 (the pool is never used), and windows whose start is not before their end (never entered). When the refused value names its own replacement — the flat string, `'1,2,3'` — the row also prints the setting line to paste as a `suggestion` under it. Names **every** problem it finds rather than the first, and dates each from its own finding in the boot record |
-| `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them |
+| `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — except the unwritable record, which is the one state whose own record cannot hold the date it would print |
 | `store reachability` | the primary store cannot serve a read: no usable `redis` binding, or a connection that refuses — workers then fall back to an in-process rotation that is not shared between them |
 
 Read-only, so it is safe in a deploy pipeline: nothing is written, no replica is
@@ -1285,6 +1285,15 @@ reachability row's `PASS` in that state means "this boot did not check", which i
 this one sits directly above it. Disabling the probe is a choice, so that is a
 warning; an unwritable record is not, because nothing then performs the check.
 
+Both states are boot findings as well, under a key each —
+`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable` — so the row dates each
+from its own and a preflight can say how long the installation has been unable to check its
+store rather than only that it is. The second is the one finding whose own record can never hold
+its date: the file a date would be written to is the file that cannot be written, so an operator
+gets the log line, and the row is the surface that remembers nothing about it. A probe that is
+switched on with an in-process store is named by the row and is not a finding, because there is
+nothing it could have been checking.
+
 `pgcat gate` is the row that is not only this process's opinion. The boot audit
 records a mismatch while it stands and clears it on the boot that finds the gate
 open, so the row reports both halves: the verdict it computes now, and
@@ -1383,6 +1392,17 @@ value (`swrr.reader_days is "1,2,3", not a list of days`), quotes the shape the 
 reads, and says what is left: a list whose remaining entries are days keeps them, and the
 row says how many.
 
+One row can be about more than one of these at once, so it names **every** problem it finds
+and not the first. The two settings are refused independently, and an operator who fixes the
+windows and redeploys should not hear about the days on the next preflight — a second deploy
+for a sentence that would have fitted on this row — while the boot audit had been reporting
+both from the beginning. The verdict is the loudest problem in the list, so a refusal beside
+a warning is still a `FAIL`, and each problem is dated from *its own* finding: the record
+holds one entry per finding key, and quoting the first key on file would put a date on a
+problem the row is not reporting. Two refused settings therefore print two `suggestion`
+lines, one repair each — and the same shape is what `pgcat files` prints its file problems
+in, one line per problem where the package can name the repair.
+
 Both failures end with a line that is not a check. A refused value that names its own
 replacement is printed in the shape the setting reads, so the repair is a paste rather
 than a translation — `swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]`
@@ -1396,6 +1416,22 @@ midnight, `'10:00 to 14:20'` is not a range, and `'mon'` is not a day. The packa
 the shape and stops, because a guess printed as a fix is worse than the sentence it
 replaces. `ReaderWindows::suggestion()` and `ReaderDays::suggestion()` hold that rule;
 `docs/reader-windows-refusal.md` lists which values get a line and why the rest do not.
+
+The pgcat rows follow the same rule, and they are where it is easiest to see why it is a rule
+rather than a nicety. `pgcat gate` prints `swrr.pgcat.enabled = false` when the switch is armed
+where pgcat cannot act: the repair its own sentence already names, in the shape a report can be
+acted on without being read as English — and, in `--json`, a string a gate can select on rather
+than a clause buried in a `detail`. `pgcat supervisor` prints the setting line for the two faults
+that reduce to a command, an unquoted program name and a command left empty. `pgcat files` prints
+one per problem it can repair, and the two kinds are the two the package knows rather than guesses:
+a **mode** for a path this installation has chosen and cannot use, and a **setting line** for an
+empty key whose value the published config ships. A line's shape says where it goes — `chmod …` is
+run, `swrr.pgcat.… = …` is pasted — which is what a gate binding to `suggestions` needs to know. A
+path that is not there, and an empty `readers_path`/`no_readers_path`, still get none: the file has
+to be put there by whatever installs pgcat, and the package will not name a value it would have to
+guess at. `PgcatConfigFlipper` holds all of it — `suggestionForGate()`, `suggestionForSupervisor()`
+and `fileProblems()` — so every line comes from the class that knows which setting a flip reads and
+which file it touches — and a `FAIL` stays a `FAIL` whether a line is printed under it or not.
 
 A `FAIL` on `pgcat files` is the one that would otherwise wait for the window to
 open: the application boots, `pgcat gate` passes, and the flip throws at the moment

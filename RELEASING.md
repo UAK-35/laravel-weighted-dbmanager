@@ -329,6 +329,48 @@ you disagree with: an entry that is really a fix belongs under `### Fixed`, and
 a change nobody meant to make public belongs behind a `private` modifier. Moving
 the entry is the fix; there is no flag that lowers the policy.
 
+### Which signal caught it
+
+The plan says what the bump is. `php bin/blame.php` says where it came from: it takes
+one name and reports which of the four signals names it and whether that signal is the
+one the bump came from.
+
+```bash
+php bin/blame.php Uak35\WeightedDbManager\WeightedServiceProvider
+php bin/blame.php WeightedServiceProvider::boot
+php bin/blame.php configuration
+```
+
+The weighing it reads is the plan's own — the same call, from the same tree — so the two
+cannot disagree about the bump. Each signal is reported as `caught` or `quiet` with the
+severity it weighed, and the two surface halves are asked twice: once about the lines
+they changed, and once about whether they hold the name at all. A symbol that is at the
+last tag and unchanged since it is in neither, and that is the answer too — the bump moved
+for another reason, which the report names.
+
+Named and responsible are not the same thing, and the report keeps them apart: a `docs:`
+commit that mentions the symbol is `caught` at a patch while the `### Added` heading above
+it weighs the minor, so the contribution paragraph says the bump came from elsewhere and
+lists what did carry it. The notes are searched as entries rather than as headings — a
+heading is what weighs and the entry is what names — and an entry is quoted with the
+heading it sits under, because that is the part that carried a weight.
+
+The match is a plain `contains`, not a pattern. Quoting, a leading `\` and a trailing `()`
+are stripped, and nothing else is: `weight` finds `weighed`, `weighting` and `weigh()` at
+once, which is what somebody holding half a name wants. Nothing resembling the name is an
+answer rather than an error — and it is the exit code too, so a script can branch on it:
+
+| Exit | Means |
+|---|---|
+| `0` | a signal, or one of the two surfaces, names it |
+| `1` | nothing does |
+| `2` | usage error |
+
+Unlike `bin/release.php` it has no preconditions: it does not read the branch, refuse a
+dirty tree or ask CI, because a question about one symbol is asked mid-edit. It writes
+nothing, and it works with no tag at all — with none the commits and public-API signals
+have no base, which the report says rather than diffing against nothing.
+
 ### Declaring the bump instead
 
 `--minor`, `--major` and `--version=X.Y.Z` name the bump yourself. They are held

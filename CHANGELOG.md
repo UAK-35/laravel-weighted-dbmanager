@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Added
+
+- **`php bin/blame.php SYMBOL` reports which of the four signals names a class, a method, a constant
+  or a config key, and what that signal contributed to the bump.** The plan answers "what version is
+  next"; this answers the question a contributor has afterwards — a `feat:` commit with no changelog
+  entry, a changelog entry with no surface change, a public method that vanished — and the two cannot
+  disagree about the bump, because the command calls the same `weigh()` the plan does, from the same
+  tree. Each signal is reported as `caught` or `quiet` with the severity it weighed, and each half of
+  the surface is asked twice: once about the lines it changed, and once about whether it holds the
+  name at all. That second question is the one that stops a symbol being *unchanged since the last
+  tag* from looking like a symbol nothing could find — the two are the same silence otherwise.
+
+  Named and responsible are kept apart, which is the distinction the report is built on: a `docs:`
+  commit that mentions the symbol is `caught` at a patch while the `### Added` heading above it
+  weighs the minor, so the contribution paragraph says the bump came from elsewhere and lists what did
+  carry it. The notes are searched as entries rather than as headings — a heading is what weighs and
+  the entry is what names — and a wrapped entry is joined into one before it is matched, so a mention
+  on its third line is not reported as a fragment that starts mid-word. The match is a plain
+  `contains`, not a pattern: quoting, a leading `\` and a trailing `()` are stripped and nothing else
+  is, so `weight` finds `weighed`, `weighting` and `weigh()` at once. There are no preconditions — no
+  branch, no dirty-tree rail, no CI, because a question about one symbol is asked mid-edit — and the
+  exit code is the scripted form of the answer: `0` something names it, `1` nothing does, `2` a usage
+  error.
+
+  What a weighing *is* now lives in a file of its own. `bin/weighing.php` holds `parseVersion()`,
+  `bumpFor()`, `weigh()`, the four readers, and the changelog section helpers, moved out of
+  `bin/release.php` byte for byte with no function name declared in both. That is what makes the two
+  commands one policy rather than two copies of one: a change to how the surface is diffed or the
+  notes are weighed cannot reach one and miss the other. `bin/release.php` keeps the command — the
+  arguments, the preconditions, the plan and the tag — and its own behaviour is unchanged. Pinned by
+  sixteen cases in `BlameTest`, from a symbol two signals name at the top severity to the four ways
+  the name can be typed and the three exit codes, and each rule is measured against its own
+  regression: reading any naming as responsibility fails one test, searching the notes as headings
+  only fails one, deriving the diagnosis from the evidence rather than from the two surface maps
+  fails two, dropping the two surfaces from the exit code fails four, taking the name exactly as
+  typed fails one, and ignoring an unknown option fails one.
+
 ### Fixed
 
 - **`bin/inventory.php`'s rewrite warned about discarding a record it had never read.** The warning
