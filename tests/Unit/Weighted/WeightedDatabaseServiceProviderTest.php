@@ -72,6 +72,12 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     /** @var list<string> */
     private array $tempDirs = [];
 
+    /**
+     * How far back a test's record is stamped when it asks for a probe: a day, which is older than
+     * every interval these tests set and is what makes "the interval has elapsed" unambiguous.
+     */
+    private const STORE_PROBE_REWOUND = 86400;
+
     protected function tearDown(): void
     {
         foreach ($this->tempDirs as $dir) {
@@ -981,7 +987,7 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         // finding is the whole of what an operator gets, and the boot pays a stat for it.
         $blocked = $this->blockedDirectoryPath();
 
-        $this->useAudit($blocked . '/audit.json');
+        $this->useAudit($blocked . '/audit.json', storeProbeSeconds: 60);
         $this->pgcatSwitchedOnForAMysqlConnection();
         self::resetBootAuditGuard();
 
@@ -989,8 +995,13 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->collectLogs($records);
         $this->reportBootAudit();
 
-        $this->assertCount(1, $records, 'the finding, and not a word about a write that has nowhere to go');
+        $this->assertCount(2, $records, 'the gate finding, and the record\'s own — and not a word about a write that has nowhere to go');
         $this->assertStringContainsString('pgcat will never act', $records[0]['message']);
+        $this->assertSame(
+            'swrr.audit.file.unwritable',
+            $records[1]['context']['finding'],
+            'the record that cannot be written is a finding of its own, and the log line is all an operator gets',
+        );
         $this->assertSame([], $this->recordedKeys(), 'nothing could be written, and nothing was claimed');
     }
 
@@ -1064,6 +1075,117 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->assertStringContainsString('swrr.reader_days is set, but none of its entries is a usable day', $records[0]['message']);
         $this->assertSame('swrr.reader_fallback.always_readers', $records[0]['context']['finding']);
         $this->assertSame(['swrr.reader_fallback.always_readers'], $this->recordedKeys());
+    }
+
+    /**
+     * A file a flip needs that this installation cannot use: recorded at boot, under the key of the
+     * setting it is about, with the sentence `db:doctor`'s `pgcat files` row prints.
+     *
+     * This is the class of fault the audit's charter would otherwise exclude — a flip throws on it —
+     * and the reason it is here anyway: the throw happens whenever traffic is next due to switch,
+     * while the fault is a fact about the installation from the boot that sees it. The state and
+     * lock directories are the sharpest case of it, because their writes are silenced: a flip
+     * reports success and re-applies on every poll, and the mismatch record stays empty.
+     */
+    public function test_a_file_a_flip_needs_that_cannot_be_used_is_recorded_under_its_settings_key(): void
+    {
+        $paths = $this->armTheFlip();
+
+        // A path occupied by a regular file can never be the directory beside it, so the state
+        // file's directory is unwritable on every platform without touching a mode bit.
+        $blocked = $paths['state_file'].'.blocked';
+        file_put_contents($blocked, '');
+        $this->usePgcat(['state_file' => $blocked.'/pgcat-flip-state.json']);
+
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records, 'one problem, one line');
+        $this->assertSame('warning', $records[0]['level'], 'a file that cannot be used is not a value the package refuses');
+        $this->assertStringContainsString('flip state directory ['.$blocked.'] is not writable', $records[0]['message']);
+        $this->assertStringContainsString(
+            'reports success while recording nothing',
+            $records[0]['message'],
+            'the sentence says what it costs, because this is the failure nothing else logs',
+        );
+        $this->assertSame('swrr.pgcat.state_file.unusable', $records[0]['context']['finding']);
+        $this->assertSame('swrr.pgcat.state_file', $records[0]['context']['setting']);
+        $this->assertSame('directory_unwritable', $records[0]['context']['state']);
+        $this->assertSame($blocked, $records[0]['context']['path']);
+        $this->assertSame(['swrr.pgcat.state_file.unusable'], $this->recordedKeys());
+
+        // Putting the directory back closes it out: the file is usable again, which is the same
+        // news as flipping being switched off.
+        $this->usePgcat(['state_file' => $paths['state_file']]);
+        self::resetBootAuditGuard();
+
+        $this->reportBootAudit();
+
+        $this->assertCount(2, $records);
+        $this->assertSame('warning', $records[1]['context']['severity']);
+        $this->assertStringContainsString('is writable again, or pgcat flipping is off', $records[1]['message']);
+        $this->assertSame('swrr.pgcat.state_file.unusable', $records[1]['context']['finding']);
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    /**
+     * An empty path is the rows' problem and not a file finding: there is no file to judge, and what
+     * the installation has is an arming without the values it needs rather than a file it cannot
+     * use.
+     *
+     * The file keys are for a path this installation has *chosen* and cannot use. The other state
+     * has two surfaces already — `db:doctor`'s gate row names the key to fill in, and its files row
+     * prints the published value as the repair where the config ships one — and a boot would only be
+     * logging a line about a path it has nothing to say about, on every boot, for an installation
+     * that is armed but not yet pointed at its files.
+     */
+    public function test_an_empty_pgcat_path_is_the_rows_problem_and_not_a_file_finding(): void
+    {
+        $this->armTheFlip();
+        $this->usePgcat(['config_path' => '', 'readers_path' => '', 'no_readers_path' => '']);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertSame([], $records, 'nothing is logged: the arming is not a file this boot can judge');
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    /**
+     * Switching pgcat off closes a file finding out, which is the other half of every resolution
+     * sentence here: with flipping off, nothing reads the file, so there is nothing left to repair.
+     *
+     * The file keys are in the checked set whether or not the flipper is armed for exactly this
+     * reason — `fileProblems()` is empty for an inert flipper, and a boot that never armed it would
+     * otherwise leave a finding standing forever.
+     */
+    public function test_switching_pgcat_off_closes_a_file_finding_out(): void
+    {
+        $paths = $this->armTheFlip();
+        $this->usePgcat(['readers_path' => $paths['readers_path'].'.gone']);
+        self::resetBootAuditGuard();
+        $this->reportBootAudit();
+
+        $this->assertSame(['swrr.pgcat.readers_path.unusable'], $this->recordedKeys());
+
+        $this->usePgcat(['enabled' => false]);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertSame([], $this->recordedKeys());
+        $this->assertCount(1, $records);
+        $this->assertStringContainsString(
+            'The reader variant a flip swaps in is readable again, or pgcat flipping is off',
+            $records[0]['message'],
+        );
     }
 
     /**
@@ -1883,7 +2005,96 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->reportBootAudit();
 
         $this->assertSame([], $unrecordable->asked, 'no probe without somewhere to record it');
+        $this->assertCount(1, $records, 'the record\'s own finding, which is the whole of what an unwritable record produces');
+        $this->assertSame('swrr.audit.file.unwritable', $records[0]['context']['finding']);
+    }
+
+    /**
+     * The probe switched off is a finding of its own, and it is the one the record can date.
+     *
+     * The row says this boot cannot check the store; a record is what says how long that has been
+     * true, which is the question a preflight cannot answer from a row. It is a warning rather than
+     * an error because the README calls switching it off a choice — the `--strict` half of the gate
+     * is what refuses it — and the boot that switches it on again closes the entry out.
+     */
+    public function test_a_switched_off_store_probe_is_recorded_under_its_own_key(): void
+    {
+        $this->useAudit(storeProbeSeconds: 0);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records);
+        $this->assertSame('warning', $records[0]['level']);
+        $this->assertStringContainsString('switched off (swrr.audit.store_probe_seconds = 0)', $records[0]['message']);
+        $this->assertStringContainsString('an unreachable store is reported by nothing at boot', $records[0]['message']);
+        $this->assertSame('swrr.audit.store_probe_seconds.off', $records[0]['context']['finding']);
+        $this->assertSame(0, $records[0]['context']['seconds']);
+        $this->assertSame([WeightedDatabaseServiceProvider::KEY_STORE_PROBE_OFF], $this->recordedKeys());
+
+        // The probe switched on again, on a store that answers: nothing to report, so the entry is
+        // closed out by the boot that finds the state gone.
+        $this->bindRedis(reachable: true);
+        $this->useAudit(storeProbeSeconds: 60);
+        self::resetBootAuditGuard();
+
+        $this->reportBootAudit();
+
+        $this->assertCount(2, $records);
+        $this->assertStringContainsString('The store probe runs again', $records[1]['message']);
+        $this->assertSame('swrr.audit.store_probe_seconds.off', $records[1]['context']['finding']);
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    /**
+     * The record that cannot be written is a finding, and it is the one finding its own record can
+     * never hold: the file a date would be written to is the file that cannot be written.
+     *
+     * Keyed anyway — a log line with a key is one an alert rule and a grep can select on — and this
+     * is the state the README sets against the choice of switching the probe off. Nothing is claimed
+     * on record, because nothing could be written: the floor is a line an operator reads.
+     */
+    public function test_a_record_that_cannot_be_written_is_logged_and_never_remembered(): void
+    {
+        $blocked = $this->blockedDirectoryPath();
+
+        $this->useAudit($blocked . '/audit.json', storeProbeSeconds: 60);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records);
+        $this->assertSame('warning', $records[0]['level']);
+        $this->assertStringContainsString('cannot be written, and it is what throttles the probe', $records[0]['message']);
+        $this->assertStringContainsString('nothing will report an unreachable store', $records[0]['message']);
+        $this->assertSame('swrr.audit.file.unwritable', $records[0]['context']['finding']);
+        $this->assertSame($blocked . '/audit.json', $records[0]['context']['file']);
+        $this->assertSame([], $this->recordedKeys(), 'the record that would remember it is the record that cannot be written');
+    }
+
+    /**
+     * A probe that is switched on with an in-process store is not a finding.
+     *
+     * Nothing is stopped that could have run: there is no store to reach, and the reachability row
+     * warns about the store that makes it so. The row names it; the audit stays silent, because a
+     * state nothing can change is not one an operator is asked to repair.
+     */
+    public function test_a_probe_with_nothing_to_reach_is_not_a_finding(): void
+    {
+        config()->set('db-manager.swrr.primary_store', 'local');
+        $this->useAudit(storeProbeSeconds: 60);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
         $this->assertSame([], $records);
+        $this->assertSame([], $this->recordedKeys());
     }
 
     /**
@@ -1963,6 +2174,24 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         ]);
 
         $this->app->forgetInstance(BootAudit::class);
+
+        // A probe that is switched on is a probe the test expects to happen: the record is stamped
+        // far enough back that the interval just named has elapsed. The suite's own record
+        // (`TestCase`) is stamped now, so a boot probes when a test asked for one and not otherwise.
+        // A path that cannot be written — a blocked one — stays unwritable, which is what the two
+        // tests about that state are reading.
+        if ($storeProbeSeconds > 0) {
+            $record = is_file($this->auditFile())
+                ? (json_decode((string) file_get_contents($this->auditFile()), true) ?: [])
+                : [];
+
+            // Whatever is on record stays on record: a test that leaves a finding for the boot it is
+            // about to run is a test that expects it there, and only the stamp is the suite's to set.
+            $record['findings'] ??= [];
+            $record['store_probed_at'] = time() - self::STORE_PROBE_REWOUND;
+
+            @file_put_contents($this->auditFile(), (string) json_encode($record));
+        }
     }
 
     /**
@@ -2080,7 +2309,7 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     private function rewindStoreProbe(): void
     {
         $record = json_decode((string) file_get_contents($this->auditFile()), true);
-        $record['store_probed_at'] = time() - 3600;
+        $record['store_probed_at'] = time() - self::STORE_PROBE_REWOUND;
 
         file_put_contents($this->auditFile(), (string) json_encode($record));
     }

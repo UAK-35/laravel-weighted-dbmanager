@@ -4,6 +4,115 @@
 
 ### Fixed
 
+- **`db:doctor`'s `store probe` row dates each of its two states from its own boot finding, so a
+  preflight can say how long the installation has been unable to check its store rather than only
+  that it is.** Both faults the row reports are the same kind of thing and it is the kind a row
+  cannot express: a probe switched off (`swrr.audit.store_probe_seconds = 0`, the documented way to
+  keep the audit to configuration checks) and a record the probe cannot be remembered in. Neither is
+  a malformed value — the package reads both settings perfectly and the installation cannot carry one
+  of them out — and both *stand*: a row describes this boot, the record describes every boot since,
+  and "since when" is the whole question about a state that has been true for weeks. Each is a
+  finding of its own now — `swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable` — so
+  the row dates each from its own entry, the way every refused reader setting already does, and the
+  register of rows that can name several problems covers it: `store probe` was the one case in that
+  register that survived the "first problem only" mutation, because the row built its two sentences
+  itself instead of asking the shared row builder for them, and once the states are findings it builds
+  them the way every other row does and the mutation reaches it. Both are `warning` level: the first
+  because switching the probe off is the choice the README names and `--strict` is the surface that
+  refuses it, the second because it is the fault the README sets against that choice and nothing about
+  it is malformed either.
+
+  The second key is the one finding in this package whose own record can never hold its date: the file
+  a date would be written to is the file that cannot be written, so `persist()` skips the write and the
+  operator gets the log line. It is keyed anyway — a line with a key is one an alert rule and a grep
+  can select on, and the row is where the state is described — and the asymmetry is written down at
+  the constant rather than left to be discovered, because the alternative was a standing state
+  reported by no key at all in exactly the case where the record is guaranteed to be silent. The
+  third state the row names — a probe that is switched on with an in-process `swrr.primary_store` —
+  deliberately keeps **no** key: there is nothing it could have been checking, and the reachability
+  row already warns about the store that makes it so.
+
+  The sentences are written once, in the class that owns the probe and writes them into the log
+  (`BootAudit::probeOffSentence()` and `probeUnwritableSentence()`), so the row cannot describe a state
+  differently from the line beside it — the same reason `ReplicaMetadata` was extracted; and
+  `datedRow()` now finishes a sentence by trimming whatever full stops it carries and writing one back,
+  because the store probe's two end where the row appends its own `--strict` aside or names the file.
+  Pinned by three cases in `WeightedDatabaseServiceProviderTest`
+  (`test_a_switched_off_store_probe_is_recorded_under_its_own_key`,
+  `test_a_record_that_cannot_be_written_is_logged_and_never_remembered`,
+  `test_a_probe_with_nothing_to_reach_is_not_a_finding`) and by
+  `DbDoctorTest::test_the_store_probe_row_dates_each_state_from_its_own_finding`, and
+  mutation-checked: `datedRow()` printing only the first problem now fails 19 tests rather than the
+  15 it did before this change, the store probe's own three row tests among them. The suite's default
+  boot stopped being an opted-out installation with it — `store_probe_seconds` was `0` in
+  `TestCase`, which is a standing finding of its own now, so the fixture's boot is a probe that is on
+  and has already run, and the tests that are about the probe set the interval and backdate the stamp
+  themselves.
+
+- **`db:doctor`'s `pgcat files` row prints the repair for every problem it reports, rather than
+  naming three unusable files in sentences and leaving the `suggestion` column empty.** The row is
+  the only one that can carry several problems at once, and it was the one that never printed a
+  line: every fault it reported was a path or a permission, which is exactly what the reader-window
+  rule excludes — the package would have to guess at a value only the installation knows. That
+  stopped being true of every problem at once. A permission is a **mode** on a path this
+  installation has already chosen, and an empty `config_path`/`state_file`/`lock_file` is a value
+  the published config ships, so each problem is now dated from its own finding and repaired
+  individually: `chmod +r` for a source the row cannot read, `chmod +w` for a file it cannot write,
+  and `chmod +wx` for a directory, because the atomic swap writes `{target}.tmp.{pid}` into it *and*
+  renames the result over the target, so write without traverse still fails. The mode is a symbolic
+  *add* on the path the check was run against rather than a whole mode, so nothing the operator set
+  is rewritten, and it is deliberately unscoped — the row proves that *this* user can use the file,
+  so a line naming a narrower class could print a repair that does not clear the check it was
+  printed for. An empty key prints the setting line with the value the published config ships, which
+  is the half of candidate C of `docs/pgcat-suggestion-lines.md` that survived review: a value the
+  package itself publishes is its own to repair, so `swrr.pgcat.config_path = '/etc/pgcat/pgcat.toml'`
+  and the two state paths as the sample's `sys_get_temp_dir()` spells them on this host are printed,
+  while `readers_path` and `no_readers_path` — documented as `—` — still get none. A file that is not
+  there gets none either, because that file has to be put there by whatever installs pgcat, and
+  nothing about which states are *problems* changed: the sentences, their order and the list they
+  come from are the same, and the sentence still accompanies the line because the flip's refusal,
+  `--dry-run` and `/health/db`'s `warning` read the sentence and have no suggestion column.
+
+  The row and the record read one list. `PgcatConfigFlipper::fileProblems()` is where the
+  preconditions are computed — the flipper already owned the keys, the documented commands and the
+  paths a flip touches, so it owns these too — and `db:doctor` renders each problem into the row
+  while the boot audit records the same problems as findings, one key per setting:
+  `swrr.pgcat.config_path.unusable`, `swrr.pgcat.readers_path.unusable`,
+  `swrr.pgcat.no_readers_path.unusable`, `swrr.pgcat.state_file.unusable` and
+  `swrr.pgcat.lock_file.unusable`. They are `warning` level rather than `error`, because an unusable
+  path is a flip that will throw when the window next opens rather than an installation serving
+  reads the wrong way; each carries the setting, the path and the state it was found in, and each
+  has a resolution sentence for the boot that finds the file usable again and for the boot that
+  finds pgcat off, so a record closes out on the repair rather than waiting to be deleted. An
+  *empty* key is the one state the record leaves to the row, and deliberately: the provider defaults
+  `state_file` and `lock_file`, so emptiness has to be written on purpose, and a boot that logged
+  each unset path would write three lines per boot about a state the two `pgcat` rows already report
+  and the flip's first use already throws on. The audit reports files, `db:doctor` reports armings.
+
+  Pinned by seven cases in `PgcatConfigFlipperTest` —
+  `test_the_documented_paths_are_the_ones_the_published_config_ships`, which reads the values out of
+  the published config rather than copying them beside it,
+  `test_an_empty_key_carries_the_published_value_only_where_the_config_ships_one`,
+  `test_a_directory_that_will_not_take_a_write_carries_the_mode_that_would`,
+  `test_a_file_that_is_not_there_gets_no_line`,
+  `test_a_file_that_cannot_be_read_carries_the_mode_that_would`,
+  `test_each_file_mode_problem_carries_the_bit_that_failed` and
+  `test_an_inert_flipper_has_no_file_preconditions_at_all` — by three in `DbDoctorTest`
+  (`test_the_files_row_prints_one_repair_line_per_problem`,
+  `test_the_files_row_repairs_an_empty_key_only_where_the_published_config_ships_a_value`,
+  `test_each_file_problem_is_dated_from_its_own_finding`) and by three in
+  `WeightedDatabaseServiceProviderTest`
+  (`test_a_file_a_flip_needs_that_cannot_be_used_is_recorded_under_its_settings_key`,
+  `test_an_empty_pgcat_path_is_the_rows_problem_and_not_a_file_finding`,
+  `test_switching_pgcat_off_closes_a_file_finding_out`), and mutation-checked against its own
+  failures: returning no line for an unreadable source fails one test — which of them depends on
+  the platform, the filesystem case where mode bits are honoured and the mode table where they are
+  not — and that table exists because the first run of this mutation on this laptop measured
+  **zero** failures, with `+r` covered only by a case that has to skip there; declaring the state
+  path instead of reading it from the sample fails two, the drift guard and the empty-key line;
+  recording an empty key as a file finding fails 34; and a row that printed only the first problem's
+  repair fails three.
+
 - **`db:doctor`'s `replica metadata` row names a drained replica in every branch now, rather than
   only in the one that passes.** The row reports two kinds of thing and they are not the same kind: a
   *value* the resolver cannot read, which is what fails a deploy, and a *replica* the pool does not

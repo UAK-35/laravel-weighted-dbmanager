@@ -178,17 +178,38 @@ is the row's identity and the thing to select on; the order and the count are th
 documented as such.
 
 `name` is the same string the table prints, so the report an operator read and the object a job parses
-name the same row the same way. `suggestions` is the repairs the row offers — the setting line to
-paste, drawn from the same source the renderer's `suggestion` column is — and an empty list where a row
+name the same row the same way. `suggestions` is the repairs the row offers — the value or the mode to
+apply, drawn from the same source the renderer's `suggestion` column is — and an empty list where a row
 has none.
 
-Three rows can offer one, and each takes it from the class that owns the value rather than from a rule
+Four rows can offer one, and each takes it from the class that owns the value rather than from a rule
 written out a second time here: `ReaderWindows` and `ReaderDays` for the reader settings, and
-`PgcatConfigFlipper::suggestionForGate()`/`suggestionForSupervisor()` for the pgcat ones — the switch
-armed where pgcat cannot act, an unquoted program name, a command left empty. A row offers a line only
-when the fault reduces to one exactly; `pgcat files` never does, because every problem it reports is a
-path or a permission and the package will not name a value it would have to guess at. The line is not
-a verdict: the `FAIL` stands, and is counted, whether or not one is printed under it.
+`PgcatConfigFlipper` for the pgcat ones — the switch armed where pgcat cannot act, an unquoted program
+name, a command left empty, and, per problem, the file preconditions `fileProblems()` reports. A row
+offers a line only where the fault reduces to something exact, which for a file problem means a mode
+the check found missing (`chmod +r` on a source that cannot be read, `chmod +w`/`+wx` on a path a flip
+must write) or the value the published config ships for a key that is empty. A path that is simply not
+there, and an empty `readers_path`/`no_readers_path`, still get no line: those values are the
+installation's, and the package will not name one it would have to guess at. A line is not a verdict:
+the `FAIL` stands, and is counted, whether or not one is printed under it.
+
+### A row that has several problems names every one of them
+
+`detail` is the row's own account of what it found, and several rows can find more than one thing:
+`reader windows` reports each refused reader setting, `switch values` each switch that is not a switch,
+`pgcat files` each file a flip needs and cannot use, and `store probe` a probe that is switched off
+beside a record that cannot be written. Each problem keeps its own sentence, and each is dated from
+its own finding, so a row that named whichever problem it noticed first would still read as a
+complete answer — which is why the row set is declared in `DbDoctorTest::rowsNamingSeveralProblems()`
+and every entry in it is given two problems and asked for both. The register is the test: a row that
+can report several problems and is not in it fails the set test, which measures the answer out of the
+run — the record dates each problem from its own finding, so the rows carrying more than one date are
+the rows naming several problems. Every row in the register is datable, and the store probe is the
+one that had to be made so: its two states were a sentence and nothing else, and a row that reports
+a state standing for weeks is a row an operator asks "since when" about. They are findings now —
+`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`, both warnings, the first
+because switching the probe off is a documented choice and the second because it is the fault the
+README sets against that choice — so the register's measure sees all four rows rather than three.
 
 ### What the flag does not change
 
@@ -222,6 +243,8 @@ the two tables look alike would be a table the matrix could not check.
 | the object is the table as data: one installation, both reports, the row names and verdicts compared to each other | `DbDoctorTest::test_the_json_report_is_the_table_as_data` |
 | the repairs are on the row that carries them, and an empty list where there are none | `DbDoctorTest::test_the_json_report_carries_the_suggestions_the_table_prints` |
 | a pgcat repair travels as data too: the line the table prints is the string the object carries, and a row that can name none carries `[]` rather than omitting the key | `DbDoctorTest::test_the_json_report_carries_the_pgcat_repair_line_the_table_prints` |
+| a row that can name several problems names every one of them — and one that stops at the first fails, which no other test in the file would see | `DbDoctorTest::test_a_row_that_can_name_several_problems_names_every_one_of_them` (four data sets) |
+| which rows those are is measured out of the run rather than restated: the rows carrying a date per problem are the ones the register declares | `DbDoctorTest::test_the_rows_naming_several_dated_problems_are_the_ones_the_register_declares` |
 | a verdict the report can carry is documented, and vice versa | `DbDoctorTest::test_every_json_verdict_is_documented` |
 | a vet run keeps the envelope and swaps the subject key for `config_file`, so one gate reads both modes | `DbDoctorTest::test_the_config_file_flag_reports_through_the_json_envelope` |
 | the deploy gate the README pastes ships a preflight whose named rows pass | `DoctorGateTest::test_the_gate_the_readme_pastes_ships_a_preflight_whose_named_rows_pass` |
@@ -235,7 +258,15 @@ renamed to `status` (14 of 14 fail on the row shape), `exit_code` pinned to `0` 
 exits correctly (10 cells fail on the field), `strict` pinned to `false` (7 cells fail), the run's
 `verdict` pinned to `PASS` (12 cells fail), `suggestions` emptied (the matrix is silent — no cell's
 profile carries a repair — and the dedicated suggestions test fails, which is why that test exists),
-and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails naming both sets).
+and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails naming both sets). The rule
+about a row with several problems has its own: `datedRow()` printing only the first problem's
+sentence fails **19** tests, and the register's four cases and its set test are five of them — the
+other fourteen are the rows' own tests, including the three `store probe` row tests. The store probe
+used to be the case that survived this mutation, because the row built its two sentences itself
+instead of asking `datedRow()` for them; once its two states were findings it built them the same way
+every other row does, so the mutation reaches it and the register's case is no longer the only thing
+that would notice. That is the whole reason the row's states became findings: a row that dates what
+it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 

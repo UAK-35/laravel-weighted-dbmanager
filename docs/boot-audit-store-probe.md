@@ -291,6 +291,69 @@ what "the store" is.
 
 ---
 
+## The third decision: the two states are findings, so the row can date them
+
+Gates 2 and 3 above leave two states in which the check never runs, and for a long time both
+were reported by one surface only — `db:doctor`'s `store probe` row. That was enough to *find*
+them and not enough to date them. The row describes the boot that ran it; what an operator asks
+about a state that has stood for a fortnight is how long it has stood, and the only thing that
+can answer is the record, which remembers by finding **key**. So each state is a finding:
+
+| state | key | level | the choice, or the fault |
+|---|---|---|---|
+| `swrr.audit.store_probe_seconds` is `0`, so nothing probes | `swrr.audit.store_probe_seconds.off` | `warning` | the **choice** — the documented way to keep the audit to configuration checks, and what `--strict` refuses |
+| the audit record cannot be written, so the throttle is missing | `swrr.audit.file.unwritable` | `warning` | the **fault** the README sets against that choice — nothing is malformed, and nothing is checking the store either |
+
+Both levels are the default, and the reason is the same for both: neither is a value the package
+refuses to read. A refused value is a setting that cannot mean what it says (`switch values`), and
+what these two describe is a setting that means exactly what it says on an installation that cannot
+carry it out. That is also why the second one is a `warning` although the *row* fails on it: the row
+is a preflight and a failed preflight is the point of it, while a `warning` in the audit is a state to
+put in front of somebody rather than a deploy to stop.
+
+The moot state is deliberately not keyed. A configured interval with an in-process
+`swrr.primary_store` leaves the probe nothing to reach, and the reachability row already warns about
+the store that makes it so — a finding would be a second line about one setting, and there is no
+state for a record to remember, because nothing about the configuration changed. The row keeps
+naming it (see the doctor's row for the third state) and the audit stays silent.
+
+### The one key whose date is never written
+
+`swrr.audit.file.unwritable` is the only finding in this package whose own record can never hold its
+date: the file a date would be written to *is* the file that cannot be written, so `persist()` skips
+the write and the finding is logged without being remembered. There is therefore no
+`recorded unresolved since` clause the row can append to it — the row prints the sentence the log
+carries and nothing more — and the key exists for the two things it can still do: a log line an alert
+rule and a grep can select on, and a name for the state in the surface that describes it.
+
+The asymmetry is the reason the key was not simply left out. A standing state with no key at all
+would be the one thing this audit does not do — report a configuration the package understood
+perfectly and the installation could not act on — and it would be uncountable exactly in the case
+where the record is guaranteed to be silent. Its resolution sentence ("the audit record is writable
+again, so the probe it throttles runs on its interval again") is written for the same reason every
+other one is: it is what a boot that finds the file usable again would log, if there were anything to
+resolve.
+
+### The sentences are the audit's, and the shared row learns to finish one
+
+`BootAudit::probeOffSentence()` and `probeUnwritableSentence()` are the single source of both texts,
+because two surfaces print them — the log line and the row — and a row that words a state differently
+from the line beside it is the failure the replica metadata was extracted for. They end without a
+full stop on purpose: the row appends the condition that it is a warning and not a failure ("…, and
+`--strict` would fail this warning") or names the file it cannot write, so a sentence ended here
+would have to be reprinted rather than extended. `datedRow()` therefore finishes a sentence by
+trimming whatever full stops it carries and writing one back, which is byte-for-byte the same string
+for every sentence that already ended properly.
+
+The register of rows that can name several problems is where the change is measured rather than
+asserted: `store probe` used to be the one entry in it that survived the "`datedRow()` names only the
+first problem" mutation, because the row assembled its own sentences instead of going through the
+shared builder. Once the two states are findings it goes through the builder like every other row, so
+the mutation reaches it — 19 tests fail against it now rather than 15 — and the register's `store
+probe` case is no longer the only test that would notice a row regressing to its first problem.
+
+---
+
 ## Tests that pin the rules
 
 | rule | test | in |
@@ -298,6 +361,10 @@ what "the store" is.
 | an unreachable store is probed, reported, and later resolved | `test_an_unreachable_primary_store_is_probed_reported_and_resolved` | provider |
 | an unwritable record, and probing switched off, are reported rather than silent | `test_the_store_probe_row_fails_when_its_record_cannot_be_written`, `test_the_store_probe_row_warns_when_probing_is_switched_off` | doctor |
 | both of them at once are named together, with the loudest as the verdict | `test_the_store_probe_row_names_a_switched_off_probe_and_an_unwritable_record`, `test_the_store_probe_row_names_the_moot_store_beside_an_unwritable_record` | doctor |
+| each of the two states is dated from its own finding entry rather than the first key on file | `test_the_store_probe_row_dates_each_state_from_its_own_finding` | doctor |
+| the switched-off probe is recorded under a key of its own | `test_a_switched_off_store_probe_is_recorded_under_its_own_key` | provider |
+| an unwritable record is logged with its key and never remembered, because the file the date would go in is the file that cannot be written | `test_a_record_that_cannot_be_written_is_logged_and_never_remembered` | provider |
+| a probe with nothing to reach is named by the row and is not a finding | `test_a_probe_with_nothing_to_reach_is_not_a_finding` | provider |
 | the interval bounds the probe; without a writable record there is no probe at all | `test_the_store_probe_respects_its_interval_and_is_not_attempted_unrecorded` | provider |
 | an unbound `redis` is reported without resolving it, then resolved once bound | `test_a_store_with_no_binding_at_all_is_reported_without_resolving_it` | provider |
 | a deliberate in-process store is never probed, and still closes a recorded finding | `test_a_deliberate_in_process_store_is_not_probed_and_closes_the_finding` | provider |
@@ -329,7 +396,10 @@ what "the store" is.
    and the row names every state it finds rather than the first: switching the probe on to
    clear the warning reports an unwritable record on the same run instead of the next
    preflight. `db:doctor`'s own probe is never throttled, so it remains the answer for an
-   installation whose throttle is broken.
+   installation whose throttle is broken. Both states carry a finding key, so the run that
+   finds them is also the run that can date them — with the one exception the key documents:
+   the unwritable record's own date has nowhere to be written, so its key is there for the log
+   and the alert rule and its row prints no age.
 3. **The resolution sentence covers two different endings.** Switching
    `swrr.primary_store` to `local` closes a recorded reachability finding with "not
    unreachable any more", which is true of the finding but not of the store. Distinguishing
@@ -362,7 +432,7 @@ what "the store" is.
 
 | file | role |
 |---|---|
-| `src/Support/BootAudit.php` | the record: read, `storeProbeDue()`, report/resolve, the merge and the locked atomic write |
+| `src/Support/BootAudit.php` | the record: read, `storeProbeDue()`, report/resolve, the merge and the locked atomic write, and the one wording of the two states (`probeOffSentence()`, `probeUnwritableSentence()`) that the log and the row both print |
 | `src/Providers/WeightedDatabaseServiceProvider.php` | gates the probe, produces the findings, decides what counts as checked |
 | `src/Support/RedisAccess.php` | the facade-free path to Redis, and the reasons it can fail |
 | `src/Database/Weighted/RedisAtomicStateStore.php` | `isHealthy()` — evidence, not proof |

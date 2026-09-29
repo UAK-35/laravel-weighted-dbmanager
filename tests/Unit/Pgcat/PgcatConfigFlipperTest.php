@@ -169,6 +169,8 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $connectionName = null,
         ?\Closure $runner = null,
         ?string $connectionSource = null,
+        ?string $stateFile = null,
+        ?string $lockFile = null,
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -193,8 +195,8 @@ class PgcatConfigFlipperTest extends TestCase
         $flipper = new PgcatConfigFlipper(
             resolver: $resolver,
             config: $config,
-            stateFile: $this->stateFile,
-            lockFile: $this->lockFile,
+            stateFile: $stateFile ?? $this->stateFile,
+            lockFile: $lockFile ?? $this->lockFile,
             fileCopier: function (string $from, string $to): bool {
                 $this->copyLog[] = [$from, $to];
                 return @copy($from, $to);
@@ -960,6 +962,191 @@ class PgcatConfigFlipperTest extends TestCase
         foreach ($verdicts as $fault => $verdict) {
             $this->assertNull($flipper->suggestionForSupervisor($verdict), $fault);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The files a flip needs: the state each one is in, and the repair it reduces to
+    //
+    // `db:doctor`'s `pgcat files` row prints this list and the boot audit records a finding
+    // from it, so both halves are pinned here — which state each unusable file is in, and the
+    // line the package can state for it: a mode for a permission, the value the published
+    // config ships for a key that is empty, and nothing at all where the value is this
+    // installation's to choose.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The repair for an empty key is a second copy of a default unless it is read from the file
+     * that ships the default, so the published config is parsed here and compared with it. An
+     * operator pastes the line this test checks, which is why both halves failing together is the
+     * point rather than an inconvenience.
+     */
+    public function test_the_documented_paths_are_the_ones_the_published_config_ships(): void
+    {
+        $sample = (string) file_get_contents(dirname(__DIR__, 3).'/config/db-manager.php');
+
+        preg_match("/'config_path'\\s*=>\\s*env\\(\\s*'SWRR_PGCAT_CONFIG'\\s*,\\s*'([^']+)'/", $sample, $config);
+        preg_match("/'state_file'\\s*=>\\s*sys_get_temp_dir\\(\\)\\s*\\.\\s*'([^']+)'/", $sample, $state);
+        preg_match("/'lock_file'\\s*=>\\s*sys_get_temp_dir\\(\\)\\s*\\.\\s*'([^']+)'/", $sample, $lock);
+
+        $this->assertNotSame('', $config[1] ?? '', 'the sample no longer declares config_path in the shape this reads');
+        $this->assertNotSame('', $state[1] ?? '', 'the sample no longer declares state_file in the shape this reads');
+        $this->assertNotSame('', $lock[1] ?? '', 'the sample no longer declares lock_file in the shape this reads');
+
+        $documented = PgcatConfigFlipper::documentedPaths();
+
+        $this->assertSame($config[1], $documented['config_path']);
+        $this->assertSame(sys_get_temp_dir().$state[1], $documented['state_file']);
+        $this->assertSame(sys_get_temp_dir().$lock[1], $documented['lock_file']);
+    }
+
+    public function test_an_empty_key_carries_the_published_value_only_where_the_config_ships_one(): void
+    {
+        // `readers_path` and `no_readers_path` are the two the README documents as `—`: the
+        // published config shows an example of the *shape*, and a flip pointed at a file that is
+        // not there is worse off than one with an empty column, because it looks like an answer.
+        $flipper = $this->build(
+            'readers',
+            ['config_path' => '', 'readers_path' => '', 'no_readers_path' => ''],
+            stateFile: '',
+            lockFile: '',
+        );
+
+        $lines = [];
+
+        foreach ($flipper->fileProblems() as $problem) {
+            $lines[$problem['setting']] = $problem['suggestion'];
+        }
+
+        $this->assertSame(
+            [
+                'readers_path' => null,
+                'no_readers_path' => null,
+                'config_path' => 'swrr.pgcat.config_path = '.var_export('/etc/pgcat/pgcat.toml', true),
+                'state_file' => 'swrr.pgcat.state_file = '.var_export(sys_get_temp_dir().'/pgcat-flip-state.json', true),
+                'lock_file' => 'swrr.pgcat.lock_file = '.var_export(sys_get_temp_dir().'/pgcat-flip.lock', true),
+            ],
+            $lines,
+            'every empty key is a problem, and only the three with a published value are repairable',
+        );
+    }
+
+    public function test_a_directory_that_will_not_take_a_write_carries_the_mode_that_would(): void
+    {
+        // A path already occupied by a regular file can never be the directory beside it, so this
+        // holds on every filesystem — no mode bits involved. The line adds write *and* traverse:
+        // the temp file goes into the directory and the rename that finishes the swap acts on it.
+        $dir = $this->tmp.'/blocked';
+        file_put_contents($dir, '');
+
+        $flipper = $this->build(
+            'readers',
+            ['config_path' => $dir.'/pgcat.toml'],
+            stateFile: $dir.'/state.json',
+            lockFile: $dir.'/flip.lock',
+        );
+
+        $problems = [];
+
+        foreach ($flipper->fileProblems() as $problem) {
+            $problems[$problem['setting']] = [$problem['kind'], $problem['suggestion']];
+        }
+
+        $line = 'chmod +wx '.escapeshellarg($dir);
+
+        $this->assertSame([PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $line], $problems['config_path']);
+        $this->assertSame([PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $line], $problems['state_file']);
+        $this->assertSame([PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $line], $problems['lock_file']);
+    }
+
+    /**
+     * A file that is not there gets no line at all, and this half is asserted on every
+     * filesystem — no mode bits are involved, so nothing about the environment can skip it.
+     */
+    public function test_a_file_that_is_not_there_gets_no_line(): void
+    {
+        $gone = $this->build('readers', ['readers_path' => $this->tmp.'/gone.toml']);
+
+        $problems = [];
+
+        foreach ($gone->fileProblems() as $problem) {
+            $problems[$problem['setting']] = $problem;
+        }
+
+        $this->assertSame(PgcatConfigFlipper::FILE_MISSING, $problems['readers_path']['kind']);
+        $this->assertNull(
+            $problems['readers_path']['suggestion'],
+            'the file has to be put there by whatever installs pgcat, and the package does not know where it went',
+        );
+    }
+
+    public function test_a_file_that_cannot_be_read_carries_the_mode_that_would(): void
+    {
+        // The other half: the path is known and the bit that failed is known, so the repair is a
+        // mode. Skipped where the environment ignores mode bits — the check itself has to fail
+        // before the line it prints can be asked about — which is why this case is its own test
+        // rather than the tail of the deterministic one above.
+        @chmod($this->tmp.'/pgcat-readers.toml', 0o000);
+
+        if (is_readable($this->tmp.'/pgcat-readers.toml')) {
+            $this->markTestSkipped('This environment cannot make a file unreadable.');
+        }
+
+        $unreadable = $this->build('readers');
+
+        foreach ($unreadable->fileProblems() as $problem) {
+            if ($problem['setting'] === 'readers_path') {
+                $this->assertSame(PgcatConfigFlipper::FILE_UNREADABLE, $problem['kind']);
+                $this->assertSame('chmod +r '.escapeshellarg($this->tmp.'/pgcat-readers.toml'), $problem['suggestion']);
+
+                return;
+            }
+        }
+
+        $this->fail('a source that cannot be read was not reported at all');
+    }
+
+    /**
+     * The three modes the row can print, asked of the rule rather than of a filesystem.
+     *
+     * The unreadable case above has to skip where the environment ignores mode bits — the check has
+     * to fail before the line it prints can be asked about — so on such a platform a `+r` line that
+     * was never printed would go unnoticed. This asks `suggestionForFileProblem()` for the line of a
+     * *kind* and a *path*, which involves no file at all, so every mode is covered everywhere.
+     *
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function fileModeProblems(): array
+    {
+        return [
+            'a source that cannot be read' => ['readers_path', PgcatConfigFlipper::FILE_UNREADABLE, '+r'],
+            'a file that cannot be written' => ['config_path', PgcatConfigFlipper::FILE_UNWRITABLE, '+w'],
+            'a directory a flip writes into' => ['state_file', PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, '+wx'],
+        ];
+    }
+
+    #[DataProvider('fileModeProblems')]
+    public function test_each_file_mode_problem_carries_the_bit_that_failed(
+        string $setting,
+        string $kind,
+        string $mode,
+    ): void {
+        $path = $this->tmp.'/pgcat-readers.toml';
+        $suggest = new \ReflectionMethod(PgcatConfigFlipper::class, 'suggestionForFileProblem');
+
+        $this->assertSame(
+            'chmod '.$mode.' '.escapeshellarg($path),
+            $suggest->invoke($this->build('readers'), $setting, $kind, $path),
+        );
+    }
+
+    public function test_an_inert_flipper_has_no_file_preconditions_at_all(): void
+    {
+        // Nothing reads or writes a pgcat file while the flipper is inert, so there is no
+        // precondition to judge and no reason to require a path to exist — the same reason the row
+        // passes and the same reason the boot audit resolves a finding it recorded while armed.
+        $flipper = $this->build('readers', ['enabled' => false, 'config_path' => '', 'readers_path' => '']);
+
+        $this->assertSame([], $flipper->fileProblems());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -122,6 +122,8 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         self::KEY_REPLICA_WEIGHT_REFUSED,
         self::KEY_REPLICA_CORES_REFUSED,
         self::KEY_REPLICA_RAM_REFUSED,
+        self::KEY_STORE_PROBE_OFF,
+        self::KEY_STORE_PROBE_FILE_UNWRITABLE,
     ];
 
     /**
@@ -187,6 +189,88 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
 
     /** `swrr.pgcat.use_reload` written as something that is not on or off. */
     public const KEY_PGCAT_RELOAD_REFUSED = 'swrr.pgcat.use_reload.refused';
+
+    /**
+     * A file a flip needs, set and unusable: a source it cannot read, the target it replaces, or a
+     * directory one of them has to accept a write in.
+     *
+     * One key per setting rather than one for the family, because a record remembers a finding by
+     * its key: a reader source that cannot be read and a flip target that is not writable are two
+     * mistakes with two repairs, and one key would have them resolve — and be dated — together.
+     * The *state* is in the sentence rather than in the key, so a file that goes from not there to
+     * not readable is the same finding with a new message, not a resolution and a fresh date.
+     *
+     * These are audited at boot although a flip throws on them, which is the one class of fault
+     * that rule excludes (see reportBootAudit()): the fault is a fact about this installation from
+     * the moment the file goes, whether or not a flip is ever attempted, and the throw it
+     * eventually produces arrives whenever traffic is next due to switch — at the moment the
+     * window opens, which is the worst moment to learn it. `db:doctor`'s `pgcat files` row prints
+     * the same problems, in the same sentences and the same order, from the same list:
+     * `PgcatConfigFlipper::fileProblems()`.
+     */
+    public const KEY_PGCAT_CONFIG_PATH_UNUSABLE = 'swrr.pgcat.config_path.unusable';
+
+    /** The reader variant a flip swaps in is not there, or cannot be read. */
+    public const KEY_PGCAT_READERS_PATH_UNUSABLE = 'swrr.pgcat.readers_path.unusable';
+
+    /** The writer-only variant a flip swaps in is not there, or cannot be read. */
+    public const KEY_PGCAT_NO_READERS_PATH_UNUSABLE = 'swrr.pgcat.no_readers_path.unusable';
+
+    /**
+     * The file a flip remembers its last mode in. Both writes to it are silenced, so a directory
+     * that will not take it leaves a flip reporting success, re-applying on every poll, and the
+     * unresolved-mismatch record with nothing in it — which is the failure nothing else logs, and
+     * the reason the file preconditions are audited at all.
+     */
+    public const KEY_PGCAT_STATE_FILE_UNUSABLE = 'swrr.pgcat.state_file.unusable';
+
+    /** The mutex a concurrent flipper stands down on, silenced in the same way and for the same reason. */
+    public const KEY_PGCAT_LOCK_FILE_UNUSABLE = 'swrr.pgcat.lock_file.unusable';
+
+    /**
+     * The finding each file problem is recorded under, by the setting it is about.
+     *
+     * Declared once because three places need it and none of them may guess: the boot audit
+     * records each problem under its setting's key (`pgcatFileFindings()`), it spreads the same
+     * list into the keys it evaluates, and `db:doctor` dates each problem from the finding it
+     * names — so a mapping written twice could date one problem two ways, or leave a key no boot
+     * ever evaluates standing forever.
+     *
+     * @var array<string, string>
+     */
+    public const PGCAT_FILE_KEYS = [
+        'config_path' => self::KEY_PGCAT_CONFIG_PATH_UNUSABLE,
+        'readers_path' => self::KEY_PGCAT_READERS_PATH_UNUSABLE,
+        'no_readers_path' => self::KEY_PGCAT_NO_READERS_PATH_UNUSABLE,
+        'state_file' => self::KEY_PGCAT_STATE_FILE_UNUSABLE,
+        'lock_file' => self::KEY_PGCAT_LOCK_FILE_UNUSABLE,
+    ];
+
+    /**
+     * The store probe switched off: `swrr.audit.store_probe_seconds` is `0`, so the one check that
+     * costs anything never runs and an unreachable store is reported by nothing at boot.
+     *
+     * Audited although the README calls switching it off a choice, and for the reason the choice is
+     * the finding: it is a standing state on an installation that still runs a store that can go
+     * unreachable, and how long it has stood is exactly what a preflight cannot tell from the row —
+     * a row describes this boot, a record describes every boot since. It is a warning rather than an
+     * error for the same reason the row's verdict is `WARN`: nothing is malformed, and the
+     * `--strict` half of the gate is the surface that refuses it.
+     */
+    public const KEY_STORE_PROBE_OFF = 'swrr.audit.store_probe_seconds.off';
+
+    /**
+     * The record the probe is throttled by cannot be written, so the PING is skipped on every boot
+     * whatever the interval says.
+     *
+     * This is the fault the README sets against the choice above ("an unwritable record is not"),
+     * and it is the one finding in the package whose own record can never hold its date: the file a
+     * date would be written to is the file that cannot be written, so `persist()` skips the write
+     * and an operator gets the log line. It is keyed anyway — a line with a key is one an alert rule
+     * and a grep can select on — and `db:doctor`'s row reports the same sentence, dated like every
+     * other problem it names.
+     */
+    public const KEY_STORE_PROBE_FILE_UNWRITABLE = 'swrr.audit.file.unwritable';
 
     /**
      * `swrr.allow_local_fallback` written as something that is not on or off. This switch is
@@ -538,6 +622,14 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * A misconfiguration that throws on first use is deliberately not audited here:
      * the runtime logs it, `db:doctor` reports it, and a flip reports it as a failure.
      *
+     * The pgcat file preconditions are the exception, and the distinction is when the fault
+     * becomes visible rather than whether it throws: a path a flip needs that is missing,
+     * unreadable or unwritable is a fact about this installation from the boot that finds it,
+     * while the throw it eventually produces happens whenever traffic is next due to switch —
+     * hours later, at the moment the window opens. Nothing else checks those paths between
+     * flips, and two of them (the state and lock directories) fail *silently* when a flip does
+     * run, which is this audit's whole subject.
+     *
      * The resolution half has to survive a restart — correcting any of these means
      * editing configuration, which is read once per process — so the findings that
      * still stand are written to `swrr.audit.file` and the boot that finds one gone
@@ -577,7 +669,9 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         // actually serving reads.
         $probeStore = $store['effective'] === 'redis' && $audit->storeProbeDue($record);
 
-        $checkeds = self::AUDITED_KEYS;
+        // The file preconditions are spread in from the map that names them, so a key added there is
+        // evaluated by the next boot rather than waiting for a second edit here.
+        $checkeds = [...self::AUDITED_KEYS, ...array_values(self::PGCAT_FILE_KEYS)];
 
         if ($store['effective'] === 'local' || $probeStore) {
             // Either nothing can be unreachable (the in-process store is local by
@@ -589,10 +683,12 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         $findings = [
             ...$this->switchFindings($swrr, $flipper),
             ...$this->pgcatFindings($flipper),
+            ...$this->pgcatFileFindings($flipper),
             ...$this->readerFallbackFindings($swrr),
             ...$this->replicaMetadataFindings($this->app->make(Repository::class)),
             ...$this->primaryStoreFindings($store, $swrr, $probeStore),
             ...$this->weightFormulaFindings($swrr),
+            ...$this->storeProbeFindings($audit),
         ];
 
         $audit->report(
@@ -630,6 +726,106 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             resolution: 'The pgcat mismatch no longer applies: swrr.pgcat.enabled and the connection\'s driver no longer disagree.',
             context: self::currentConnection($this->app->make(Repository::class)),
         )];
+    }
+
+    /**
+     * A file a flip needs that this installation cannot use, one finding per setting.
+     *
+     * The same list `db:doctor`'s `pgcat files` row prints — same sentences, same order, both read
+     * from `PgcatConfigFlipper::fileProblems()` — and the half that remembers them, so a preflight
+     * and a log reader can say how long the file has been unusable rather than only that it is.
+     *
+     * A setting that is *empty* is not a file fault and is not reported here: there is no file to
+     * judge, and what the operator has is an arming without the values it needs rather than a file
+     * it cannot use. `db:doctor` reports that state in its own two rows — the gate names the key to
+     * fill in, and the files row prints the published value as the repair where the config ships
+     * one — so the record is not the only surface, and a boot that audits an empty key would be
+     * logging a line about a path it has nothing to say about.
+     *
+     * The level is the default one. This is not a value the package refuses to read — it is a
+     * configuration the package reads perfectly and an installation that cannot carry it out — and
+     * the sentence says which of the two it is.
+     *
+     * @return list<BootAuditFinding>
+     */
+    private function pgcatFileFindings(PgcatConfigFlipper $flipper): array
+    {
+        $findings = [];
+
+        foreach ($flipper->fileProblems() as $problem) {
+            if ($problem['path'] === '') {
+                continue;   // an empty key is the arming's problem, not a file's
+            }
+
+            $findings[] = new BootAuditFinding(
+                key: self::PGCAT_FILE_KEYS[$problem['setting']],
+                warning: $problem['sentence'],
+                resolution: self::fileResolution($problem['setting']),
+                context: [
+                    'setting' => 'swrr.pgcat.'.$problem['setting'],
+                    'path' => $problem['path'],
+                    'state' => $problem['kind'],
+                ],
+            );
+        }
+
+        return $findings;
+    }
+
+    /**
+     * What closes a file finding out: the file is usable again, or flipping is off, in which case
+     * no flip reads it. Both are true statements about the same record, and the boot that sees
+     * either logs this instead of the warning.
+     */
+    private static function fileResolution(string $setting): string
+    {
+        return match ($setting) {
+            'config_path' => 'The pgcat flip target is usable again — it is there, and the directory it sits in accepts the copy a flip writes beside it — or pgcat flipping is off.',
+            'readers_path' => 'The reader variant a flip swaps in is readable again, or pgcat flipping is off.',
+            'no_readers_path' => 'The writer-only variant a flip swaps in is readable again, or pgcat flipping is off.',
+            default => 'The directory a flip records its state and stands down in is writable again, or pgcat flipping is off.',
+        };
+    }
+
+    /**
+     * The two states in which the store check never runs, one finding each.
+     *
+     * `BootAudit::storeProbeStatus()` is the source of both, and it is the same source
+     * `storeProbeDue()` reads, so the runtime, `/health/db` and `db:doctor`'s row cannot disagree
+     * about whether a probe happens. Only the states that stop the probe are reported: a probe that
+     * is switched on with an in-process store has nothing to reach, and the reachability row already
+     * warns about the store that makes it so.
+     *
+     * The sentences are the audit's rather than this class's, because `db:doctor` prints them too and
+     * a row and a log line that describe one setting two ways is the failure `ReplicaMetadata` was
+     * extracted for. The unwritable one is logged but can never be remembered — see the key.
+     *
+     * @return list<BootAuditFinding>
+     */
+    private function storeProbeFindings(BootAudit $audit): array
+    {
+        $status = $audit->storeProbeStatus();
+        $findings = [];
+
+        if (!$status['enabled']) {
+            $findings[] = new BootAuditFinding(
+                key: self::KEY_STORE_PROBE_OFF,
+                warning: BootAudit::probeOffSentence($status['seconds']),
+                resolution: 'The store probe runs again — swrr.audit.store_probe_seconds is above 0 — so an unreachable store is reported at boot again.',
+                context: ['setting' => 'swrr.audit.store_probe_seconds', 'seconds' => $status['seconds'], 'file' => $status['file']],
+            );
+        }
+
+        if (!$status['writable']) {
+            $findings[] = new BootAuditFinding(
+                key: self::KEY_STORE_PROBE_FILE_UNWRITABLE,
+                warning: BootAudit::probeUnwritableSentence($status['file']),
+                resolution: 'The audit record is writable again, so the probe it throttles runs on its interval again.',
+                context: ['setting' => 'swrr.audit.file', 'file' => $status['file']],
+            );
+        }
+
+        return $findings;
     }
 
     /**

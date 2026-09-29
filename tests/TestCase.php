@@ -90,14 +90,28 @@ abstract class TestCase extends Orchestra
         // The audit record is unique per boot. A record left behind by one test method
         // would otherwise be resolved — and the resolution logged — by the next one,
         // which is the cross-process behaviour the tests assert deliberately rather
-        // than by accident. The store probe is off by default so no test reaches for
-        // Redis by accident; the tests that cover it switch it on.
+        // than by accident.
+        //
+        // The boot this fixture describes is an installation whose probe is on and has
+        // already run: the interval is the shipped default, and the record carries a stamp
+        // from a moment ago, so no boot in this suite issues a PING and none has anything
+        // to say about the store. A probe that is switched off is a standing finding of its
+        // own now (`swrr.audit.store_probe_seconds.off`, switched off with
+        // `store_probe_seconds = 0`), and a suite that left it off would have that finding
+        // in every boot it asserts about; the provider tests that *are* about the probe set
+        // the interval themselves and backdate the stamp with their `rewindStoreProbe()`.
         $boot = self::nextBoot();
+        $record = self::stateDir() . '/audit-' . $boot . '.json';
 
         $app['config']->set('db-manager.swrr.audit', [
-            'file' => self::stateDir() . '/audit-' . $boot . '.json',
-            'store_probe_seconds' => 0,
+            'file' => $record,
+            'store_probe_seconds' => 60,
         ]);
+
+        file_put_contents($record, (string) json_encode([
+            'findings' => [],
+            'store_probed_at' => time(),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         // Both switches are declared on purpose. Their documented defaults are the ones the
         // shipped config prints — `enabled` off, `use_reload` on — and a suite that left them

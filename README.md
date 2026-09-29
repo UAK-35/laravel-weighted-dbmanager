@@ -1383,16 +1383,6 @@ value (`swrr.reader_days is "1,2,3", not a list of days`), quotes the shape the 
 reads, and says what is left: a list whose remaining entries are days keeps them, and the
 row says how many.
 
-One row can be about more than one of these at once, so it names **every** problem it finds
-and not the first. The two settings are refused independently, and an operator who fixes the
-windows and redeploys should not hear about the days on the next preflight — a second deploy
-for a sentence that would have fitted on this row — while the boot audit had been reporting
-both from the beginning. The verdict is the loudest problem in the list, so a refusal beside
-a warning is still a `FAIL`, and each problem is dated from *its own* finding: the record
-holds one entry per finding key, and quoting the first key on file would put a date on a
-problem the row is not reporting. Two refused settings therefore print two `suggestion`
-lines, one repair each.
-
 Both failures end with a line that is not a check. A refused value that names its own
 replacement is printed in the shape the setting reads, so the repair is a paste rather
 than a translation — `swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]`
@@ -1406,19 +1396,6 @@ midnight, `'10:00 to 14:20'` is not a range, and `'mon'` is not a day. The packa
 the shape and stops, because a guess printed as a fix is worse than the sentence it
 replaces. `ReaderWindows::suggestion()` and `ReaderDays::suggestion()` hold that rule;
 `docs/reader-windows-refusal.md` lists which values get a line and why the rest do not.
-
-The pgcat rows follow the same rule, and they are where it is easiest to see why it is a rule
-rather than a nicety. `pgcat gate` prints `swrr.pgcat.enabled = false` when the switch is armed
-where pgcat cannot act: the repair its own sentence already names, in the shape a report can be
-acted on without being read as English — and, in `--json`, a string a gate can select on rather
-than a clause buried in a `detail`. `pgcat supervisor` prints the setting line for the two faults
-that reduce to a command, an unquoted program name and a command left empty. `pgcat files` prints
-no line at all: every problem it reports is a path or a permission, the right value is whatever
-this installation's pgcat and supervisor actually use, and a plausible-looking path pasted into
-configuration replaces the operator's intent with this tool's. `PgcatConfigFlipper::suggestionForGate()`
-and `suggestionForSupervisor()` hold that half of the rule, so the line comes from the class that
-knows which setting the flip reads — and a `FAIL` stays a `FAIL` whether a line is printed under
-it or not.
 
 A `FAIL` on `pgcat files` is the one that would otherwise wait for the window to
 open: the application boots, `pgcat gate` passes, and the flip throws at the moment

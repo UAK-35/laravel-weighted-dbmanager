@@ -108,6 +108,22 @@ final class PgcatConfigFlipper
     private const USE_RELOAD_DEFAULT = true;
 
     /**
+     * The states a file a flip needs can be in. Named rather than left to the sentence, because
+     * the repair line is keyed on them: a path that is not there is the installation's to point
+     * somewhere else, one that cannot be read is a mode, and a test that pinned this by matching
+     * prose would be pinning the prose.
+     */
+    public const FILE_UNSET = 'unset';
+
+    public const FILE_MISSING = 'missing';
+
+    public const FILE_UNREADABLE = 'unreadable';
+
+    public const FILE_UNWRITABLE = 'unwritable';
+
+    public const FILE_DIRECTORY_UNWRITABLE = 'directory_unwritable';
+
+    /**
      * The command a flip runs when the pgcat block does not say otherwise — the one the
      * published `config/db-manager.php` prints beside `restart_command` and `reload_command`,
      * and the one `status()` reports for a key that is not written.
@@ -753,6 +769,241 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * The values the published `config/db-manager.php` ships for the path settings that have one
+     * there, resolved for this host. Named for the same reason the documented commands above are:
+     * the value is needed as a *repair* as well as a default, and a repair that was a second copy
+     * of the default could drift from the default it is telling an operator to write.
+     *
+     * `readers_path` and `no_readers_path` are deliberately absent. The published config carries
+     * example values for them, but those are an example of the *shape* — the README's table
+     * documents both as `—`, because there is no default to document — and a flip pointed at a
+     * file that does not exist on this host is worse off than one with an empty column: it looks
+     * like an answer.
+     *
+     * @return array{config_path: string, state_file: string, lock_file: string}
+     */
+    public static function documentedPaths(): array
+    {
+        return [
+            'config_path' => '/etc/pgcat/pgcat.toml',
+            'state_file' => sys_get_temp_dir().'/pgcat-flip-state.json',
+            'lock_file' => sys_get_temp_dir().'/pgcat-flip.lock',
+        ];
+    }
+
+    /**
+     * Every way a file a flip needs can be unusable, one problem each.
+     *
+     * `db:doctor`'s `pgcat files` row prints this list and the boot audit records a finding from
+     * it, so the two cannot disagree about which file this installation is missing — and the
+     * finding's key, its sentence and the state it names all come from here rather than from the
+     * row that happens to be rendering it.
+     *
+     * Each problem carries the repair line the package can state *exactly*, which is a smaller
+     * set than the problems: a path that does not exist is this installation's to point somewhere
+     * else, while a mode and a key with a published value are two things the package knows. The
+     * rule is `ReaderWindows::suggestion()`'s, one row over — a line rather than a plausible-
+     * looking guess, both halves pinned by tests rather than by taste.
+     *
+     * Empty while the flipper is inert, because nothing reads or writes a pgcat file then: there
+     * is no precondition to judge, and no reason to require a path to exist.
+     *
+     * @return list<array{setting: string, kind: string, path: string, sentence: string, suggestion: string|null}>
+     */
+    public function fileProblems(): array
+    {
+        if (!$this->isEnabled()) {
+            return [];
+        }
+
+        $problems = [];
+
+        // swap() reads the source matching the mode it is entering, so both sources have to be
+        // readable or one of the two directions cannot run. The sentence says where a flip stops
+        // rather than only what is wrong, because the same text is the boot finding's warning.
+        foreach (['readers_path' => 'reader source', 'no_readers_path' => 'writer source'] as $setting => $label) {
+            $path = ConfigValue::string($this->config[$setting] ?? null);
+
+            if ($path === '') {
+                $problems[] = $this->fileProblem(
+                    $setting,
+                    self::FILE_UNSET,
+                    '',
+                    "swrr.pgcat.{$setting} is not set ({$label}), so one direction of a flip has no path to read.",
+                );
+
+                continue;
+            }
+
+            if (!is_file($path)) {
+                $problems[] = $this->fileProblem(
+                    $setting,
+                    self::FILE_MISSING,
+                    $path,
+                    "{$label} [{$path}] does not exist, so a flip stops there with nothing replaced.",
+                );
+            } elseif (!is_readable($path)) {
+                $problems[] = $this->fileProblem(
+                    $setting,
+                    self::FILE_UNREADABLE,
+                    $path,
+                    "{$label} [{$path}] is not readable, so a flip stops there with nothing replaced.",
+                );
+            }
+        }
+
+        $target = ConfigValue::string($this->config['config_path'] ?? null);
+
+        if ($target === '') {
+            $problems[] = $this->fileProblem(
+                'config_path',
+                self::FILE_UNSET,
+                '',
+                'swrr.pgcat.config_path is not set (flip target), so there is no path to swap a variant into.',
+            );
+        } else {
+            if (!is_file($target)) {
+                $problems[] = $this->fileProblem(
+                    'config_path',
+                    self::FILE_MISSING,
+                    $target,
+                    "flip target [{$target}] does not exist, so pgcat is running on whatever is at another path.",
+                );
+            } elseif (!is_writable($target)) {
+                $problems[] = $this->fileProblem(
+                    'config_path',
+                    self::FILE_UNWRITABLE,
+                    $target,
+                    "flip target [{$target}] is not writable, so a flip may not get its copy into place.",
+                );
+            }
+
+            // The copy is written beside the target as {target}.tmp.{pid} and then renamed over
+            // it, so the directory needs write permission even when the file itself has it — and
+            // a rename needs to traverse it, which is why the repair names both bits.
+            $directory = dirname($target);
+
+            if (!self::directoryWritable($directory)) {
+                $problems[] = $this->fileProblem(
+                    'config_path',
+                    self::FILE_DIRECTORY_UNWRITABLE,
+                    $directory,
+                    "directory [{$directory}] is not writable, so the atomic swap cannot write its temp file.",
+                );
+            }
+        }
+
+        // The state and lock files are how a flip remembers that it happened and how a concurrent
+        // flipper stands down, and the state directory is also where the boot check records an
+        // unresolved pgcat mismatch so a later boot can log its resolution. Every one of those
+        // writes is silenced with @, so when their directory is not writable a flip still reports
+        // success — and then restarts pgcat again on the next poll, forever, and the mismatch
+        // warning is logged with nothing on record to close it out.
+        foreach (['state_file' => 'flip state', 'lock_file' => 'flip lock'] as $setting => $label) {
+            $path = $setting === 'state_file' ? $this->stateFile : $this->lockFile;
+
+            if ($path === '') {
+                $problems[] = $this->fileProblem(
+                    $setting,
+                    self::FILE_UNSET,
+                    '',
+                    $setting === 'state_file'
+                        ? "swrr.pgcat.{$setting} is not set ({$label}), so a flip cannot remember that it happened and re-applies on every poll."
+                        : "swrr.pgcat.{$setting} is not set ({$label}), so the mutex a concurrent flipper stands down on cannot be taken.",
+                );
+
+                continue;
+            }
+
+            $directory = dirname($path);
+
+            if (!self::directoryWritable($directory)) {
+                $problems[] = $this->fileProblem(
+                    $setting,
+                    self::FILE_DIRECTORY_UNWRITABLE,
+                    $directory,
+                    $setting === 'state_file'
+                        ? "{$label} directory [{$directory}] is not writable, so a flip reports success while recording nothing and restarts pgcat again on the next poll."
+                        : "{$label} directory [{$directory}] is not writable, so the mutex a concurrent flipper stands down on cannot be taken.",
+                );
+            }
+        }
+
+        return $problems;
+    }
+
+    /**
+     * One file problem, with the repair line this package can state for it — or none, where the
+     * repair is a path or an owner only the installation knows.
+     *
+     * `path` is the path the problem is about, which is the directory itself for the two
+     * directory problems: that is what a mode is changed on, so it is what the line names.
+     *
+     * @return array{setting: string, kind: string, path: string, sentence: string, suggestion: string|null}
+     */
+    private function fileProblem(string $setting, string $kind, string $path, string $sentence): array
+    {
+        return [
+            'setting' => $setting,
+            'kind' => $kind,
+            'path' => $path,
+            'sentence' => $sentence,
+            'suggestion' => $this->suggestionForFileProblem($setting, $kind, $path),
+        ];
+    }
+
+    /**
+     * The line that clears a file problem, or null when the package cannot name one.
+     *
+     * Two kinds of repair qualify, and they are the two the package knows rather than guesses:
+     *
+     *   - **a mode**, for a path this installation has chosen and cannot use. The line adds the
+     *     bit the check found missing (`chmod +r` for a source that cannot be read, `chmod +w` for
+     *     a file or a directory a flip must write, and both bits for a directory, which a rename
+     *     also has to traverse). It is deliberately a symbolic add rather than a mode: it changes
+     *     nothing the operator set beyond the bit that failed. It is also deliberately unscoped —
+     *     the check was run as whoever ran the command, so the line has to clear it for that user
+     *     rather than for a class this class cannot know. An installation whose pgcat config
+     *     carries credentials should scope it to the user pgcat runs as; the row says which path
+     *     and which bit, which is what a narrower repair needs.
+     *   - **the key a flip reads**, for a path setting that is empty and whose value the published
+     *     `config/db-manager.php` ships — see documentedPaths(). A key with no published value
+     *     (`readers_path`, `no_readers_path`) gets no line: the value is this installation's to
+     *     choose, and a path this package invented would replace the operator's intent rather
+     *     than carry it out.
+     *
+     * A path that simply is not there gets no line either, and that is the same rule: the file has
+     * to be put in place by whatever installs pgcat, and the package does not know where it went.
+     */
+    private function suggestionForFileProblem(string $setting, string $kind, string $path): ?string
+    {
+        $mode = match ($kind) {
+            self::FILE_UNREADABLE => '+r',
+            self::FILE_UNWRITABLE => '+w',
+            self::FILE_DIRECTORY_UNWRITABLE => '+wx',
+            default => null,
+        };
+
+        if ($mode !== null) {
+            return sprintf('chmod %s %s', $mode, escapeshellarg($path));
+        }
+
+        $published = self::documentedPaths()[$setting] ?? null;
+
+        return $kind === self::FILE_UNSET && $published !== null
+            ? sprintf('swrr.pgcat.%s = %s', $setting, var_export($published, true))
+            : null;
+    }
+
+    /**
+     * A directory that exists and will accept the temp file a flip writes into it.
+     */
+    private static function directoryWritable(string $directory): bool
+    {
+        return is_dir($directory) && is_writable($directory);
+    }
+
+    /**
      * The pgcat setting line that clears the gate problem a row is reporting, or null when the
      * problem is not repaired by a value this package can name.
      *
@@ -765,10 +1016,11 @@ final class PgcatConfigFlipper
      *
      * Null for the gate row's other failure — armed with a path a flip needs unset, which the row
      * names as a key (`swrr.pgcat.no_readers_path`) whose value is this installation's to choose,
-     * so a path guessed here would replace the operator's intent rather than carry it out. Also
-     * null when the row passed this boot and is only carrying a mismatch still on record: the
-     * configuration has nothing to change, because a boot that sees the gate open closes the
-     * record out.
+     * so a path guessed here would replace the operator's intent rather than carry it out. That
+     * row's sibling prints a line for the same state *where the published config ships a value* —
+     * see `fileProblems()`. Also null when the row passed this boot and is only carrying a
+     * mismatch still on record: the configuration has nothing to change, because a boot that sees
+     * the gate open closes the record out.
      */
     public function suggestionForGate(): ?string
     {

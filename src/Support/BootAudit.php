@@ -466,6 +466,37 @@ final class BootAudit
     }
 
     /**
+     * The sentence for a probe that is switched off, written once for the two surfaces that report
+     * it: the boot finding and `db:doctor`'s row. It is the row's sentence because the row is where
+     * an operator reads it, and the finding because a standing state is what a record remembers —
+     * one setting, one sentence, two readers.
+     *
+     * It ends without a period on purpose (`README`'s "Disabling the probe is a choice"): the row
+     * appends a condition of its own to it, and a row that owns half a sentence cannot have it ended
+     * for it here.
+     */
+    public static function probeOffSentence(int $seconds): string
+    {
+        return sprintf(
+            'switched off (swrr.audit.store_probe_seconds = %d) — an unreachable store is reported by nothing at boot; db:doctor still probes on demand',
+            $seconds,
+        );
+    }
+
+    /**
+     * The sentence for a record the probe cannot be remembered in, shared with the row for the same
+     * reason. This one is not a choice: the record is the throttle, so nothing runs the PING and
+     * nothing reports an unreachable store, on every boot, from the boot that finds the file.
+     */
+    public static function probeUnwritableSentence(string $file): string
+    {
+        return sprintf(
+            'the record at %s cannot be written, and it is what throttles the probe, so the PING is skipped on every boot — nothing will report an unreachable store',
+            $file,
+        );
+    }
+
+    /**
      * True when a store probe is due. False when probing is switched off, and false
      * — rather than "every time" — when the record cannot be written, because the
      * throttle lives in that file: without it a dead store would cost its connect

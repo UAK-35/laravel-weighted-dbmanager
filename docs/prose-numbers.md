@@ -108,9 +108,9 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 |---|---|---|
 | the commands the provider registers, as README.md counts them | "All **four** are registered by the provider" | the command classes in `src/Console/Commands/` |
 | the shapes the log-severity decision was weighed against, as README.md counts them | "the **seven** shapes it was weighed against" | the candidate headings of `boot-audit-log-severity.md`, less the chosen one |
-| the audit's finding keys, as boot-audit-surfaces.md counts them | "pgcat is one of **fifteen** keys", "would put **fifteen** keys' worth …" | the provider's `KEY_*` constants |
-| the finding lists one boot spreads, as boot-audit-finding-keys.md counts them | "the **six** methods whose lists are spread into one boot's findings" | the `...$this->` spreads in `reportBootAudit()` |
-| the assembly methods the provider spreads today, as boot-audit-finding-keys.md counts them | "it spreads **six** today" | the `...$this->` spreads in `reportBootAudit()` |
+| the audit's finding keys, as boot-audit-surfaces.md counts them | "pgcat is one of **twenty-two** keys", "would put **twenty-two** keys' worth …" | the provider's `KEY_*` constants |
+| the finding lists one boot spreads, as boot-audit-finding-keys.md counts them | "the **eight** methods whose lists are spread into one boot's findings" | the `...$this->` spreads in `reportBootAudit()` |
+| the assembly methods the provider spreads today, as boot-audit-finding-keys.md counts them | "it spreads **eight** today" | the `...$this->` spreads in `reportBootAudit()` |
 | the findings in the richest boot, as boot-audit-finding-keys.md counts them | "**eight** findings, **eight** keys, the exact set" | `WeightedDatabaseServiceProviderTest::RICHEST_BOOT_KEYS` |
 | the keys in the richest boot, as boot-audit-finding-keys.md counts them | "**eight** findings, **eight** keys, the exact set" | `WeightedDatabaseServiceProviderTest::RICHEST_BOOT_KEYS` |
 | the replica settings the audit refuses, as boot-audit-finding-keys.md counts them | "all **three** replica settings unreadable" | the provider's `REPLICA_METADATA` table |

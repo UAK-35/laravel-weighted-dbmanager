@@ -850,8 +850,22 @@ class DbDoctor extends Command
      * at the moment traffic is supposed to switch: swap() throws then, and the window
      * it was meant to open never opens.
      *
-     * Paths come from the flipper's own status(), so the doctor checks exactly what a
-     * flip would touch rather than parsing the same config a second time.
+     * The problems come from `PgcatConfigFlipper::fileProblems()` — the class that owns the paths
+     * — and the boot audit records the same list (for a path that is set; an empty key is this
+     * row's alone), so the row and the record cannot disagree about which file this installation
+     * is missing. Each problem is its own sentence, its own finding
+     * key and its own repair line where the package can state one exactly, assembled by the same
+     * machinery the reader rows use: a permission is a mode to paste (`chmod +r` on a source that
+     * cannot be read, `chmod +w` on a file or directory a flip has to write, `+wx` on a directory a
+     * rename also has to traverse) and an *empty* key whose value the published config ships is
+     * that setting line, drawn from `PgcatConfigFlipper::documentedPaths()` so a repair cannot
+     * drift from the default it is telling the operator to write. A path that is simply not there,
+     * and an empty `readers_path`/`no_readers_path`, get no line: those values belong to the
+     * installation, and a plausible-looking path pasted into configuration replaces the operator's
+     * intent with this tool's guess.
+     *
+     * Paths come from the flipper rather than being parsed a second time here, so the doctor
+     * judges exactly what a flip would touch.
      *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
@@ -873,26 +887,30 @@ class DbDoctor extends Command
             return $this->row('pgcat files', self::PASS, 'flipper is not armed — no pgcat file is read or written');
         }
 
-        $status = $flipper->status();
-        $problems = $this->pgcatFileProblems($status);
+        $problems = [];
+
+        foreach ($flipper->fileProblems() as $problem) {
+            $problems[] = [
+                'status' => self::FAIL,
+                // The finding this problem is remembered by, so each one is dated from its own
+                // entry rather than from the first key the record happens to hold — and a problem
+                // the boot record has nothing about (an empty key, which the audit leaves to this
+                // row) prints no date at all rather than one belonging to another setting.
+                'key' => WeightedDatabaseServiceProvider::PGCAT_FILE_KEYS[$problem['setting']],
+                'sentence' => $problem['sentence'],
+                'suggestion' => $problem['suggestion'],
+            ];
+        }
 
         if ($problems !== []) {
-            // Deliberately no suggestion, and this is the only row that never carries one.
-            // Every problem here is a path or a permission: a file that is not there, a
-            // directory that will not take the temp file, a state file whose directory is
-            // read-only. The package can name none of them — the right value is whatever this
-            // installation's pgcat and supervisor are actually configured to use — and a
-            // plausible-looking path pasted into configuration is worse than a blank column,
-            // because it replaces the operator's intent with this tool's guess. So the row
-            // names each unusable file and stops.
-            return $this->row('pgcat files', self::FAIL, implode('; ', $problems));
+            return $this->datedRow('pgcat files', $problems, $this->recordedFindings());
         }
 
         return $this->row(
             'pgcat files',
             self::PASS,
             'a flip could run: both sources are readable and '
-            . ConfigValue::string($status['config_path'])
+            . ConfigValue::string($flipper->status()['config_path'])
             . ' is writable',
         );
     }
@@ -985,85 +1003,6 @@ class DbDoctor extends Command
                 $verdict['flip_command'],
             ),
         );
-    }
-
-    /**
-     * Every way a file a flip uses can be unusable, named individually so an operator
-     * sees which one to fix rather than only that a flip would fail.
-     *
-     * @param array<string, mixed> $status
-     * @return list<string>
-     */
-    private function pgcatFileProblems(array $status): array
-    {
-        $problems = [];
-
-        // swap() reads the source matching the mode it is entering, so both sources
-        // have to be readable or one of the two directions cannot run.
-        foreach (['readers_path' => 'reader source', 'no_readers_path' => 'writer source'] as $key => $label) {
-            $path = ConfigValue::string($status[$key] ?? null);
-
-            if ($path === '') {
-                $problems[] = "swrr.pgcat.{$key} is not set ({$label})";
-            } elseif (!is_file($path)) {
-                $problems[] = "{$label} [{$path}] does not exist";
-            } elseif (!is_readable($path)) {
-                $problems[] = "{$label} [{$path}] is not readable";
-            }
-        }
-
-        $target = ConfigValue::string($status['config_path'] ?? null);
-
-        if ($target === '') {
-            $problems[] = 'swrr.pgcat.config_path is not set (flip target)';
-        } else {
-            if (!is_file($target)) {
-                $problems[] = "flip target [{$target}] does not exist";
-            } elseif (!is_writable($target)) {
-                $problems[] = "flip target [{$target}] is not writable";
-            }
-
-            // The copy is written beside the target as {target}.tmp.{pid} and then
-            // renamed over it, so the directory needs write permission even when the
-            // file itself has it.
-            $directory = dirname($target);
-
-            if (!$this->directoryWritable($directory)) {
-                $problems[] = "directory [{$directory}] is not writable, so the atomic swap cannot write its temp file";
-            }
-        }
-
-        // The state and lock files are how a flip remembers that it happened and how a
-        // concurrent flipper stands down, and this directory is also where the boot
-        // check records an unresolved pgcat mismatch so a later boot can log its
-        // resolution. Every one of those writes is silenced with @, so when their
-        // directory is not writable a flip still reports success — and then
-        // restarts pgcat again on the next poll, forever, and the mismatch warning is
-        // logged with nothing on record to close it out.
-        foreach (['state_file' => 'flip state', 'lock_file' => 'flip lock'] as $key => $label) {
-            $path = ConfigValue::string($status[$key] ?? null);
-
-            if ($path === '') {
-                $problems[] = "swrr.pgcat.{$key} is not set ({$label})";
-                continue;
-            }
-
-            $directory = dirname($path);
-
-            if (!$this->directoryWritable($directory)) {
-                $problems[] = "{$label} directory [{$directory}] is not writable";
-            }
-        }
-
-        return $problems;
-    }
-
-    /**
-     * A directory that exists and will accept the temp file a flip writes into it.
-     */
-    private function directoryWritable(string $directory): bool
-    {
-        return is_dir($directory) && is_writable($directory);
     }
 
     /**
@@ -1694,9 +1633,14 @@ class DbDoctor extends Command
         foreach ($problems as $problem) {
             $finding = $problem['key'] === null ? null : ($recorded[$problem['key']] ?? null);
 
+            // A sentence is finished here rather than at its own full stop: the row's sentences
+            // mostly end with one, and the store probe's two never have (they end where the row
+            // appends its own `--strict` aside, or with the file a record cannot be written to).
+            // Trimming whatever full stops are there and writing one back is the same string for
+            // every sentence that already ended properly.
             $sentences[] = $finding === null
                 ? $problem['sentence']
-                : substr($problem['sentence'], 0, -1).$this->recordSuffix($finding).'.';
+                : rtrim($problem['sentence'], '.').$this->recordSuffix($finding).'.';
 
             if ($problem['suggestion'] !== null) {
                 $suggestions[] = $problem['suggestion'];
@@ -1717,6 +1661,13 @@ class DbDoctor extends Command
      * request. Either way an unreachable store is reported by nothing, on every boot,
      * forever, and the reachability row's PASS means "this boot did not probe" rather
      * than "the store answered". This row is where that distinction is visible.
+     *
+     * Each of the two is a boot finding as well, so the row dates each from its own — and the
+     * sentences come from `BootAudit`, which owns the probe and writes the same text into the log,
+     * rather than being written a second time here. The third state is this row's own: a probe that
+     * is on with an in-process store has nothing to reach, which is not a state the audit can
+     * report, because the setting that makes it so is the store selection and the reachability row
+     * already warns about it.
      *
      * The two are independent, so an installation can be in both at once, and the row names
      * every one of them rather than the first it reaches: an operator who switches the probe
@@ -1747,26 +1698,27 @@ class DbDoctor extends Command
 
         $interval = $status['seconds'] === 1 ? '1 second' : $status['seconds'] . ' seconds';
 
-        /** @var list<array{status: string, sentence: string}> $problems */
+        /** @var list<array{status: string, key: string|null, sentence: string, suggestion: string|null}> $problems */
         $problems = [];
 
         if (!$status['enabled']) {
             $problems[] = [
                 'status' => self::WARN,
-                'sentence' => sprintf(
-                    'switched off (swrr.audit.store_probe_seconds = %d) — an unreachable store is reported by nothing at boot; db:doctor still probes on demand%s',
-                    $status['seconds'],
+                'key' => WeightedDatabaseServiceProvider::KEY_STORE_PROBE_OFF,
+                'sentence' => BootAudit::probeOffSentence($status['seconds'])
                     // Only a warning while the record can be written: beside an unwritable
                     // record the row is a failure anyway, and --strict has nothing left to add.
-                    $status['writable'] ? ', and --strict would fail this warning' : '',
-                ),
+                    .($status['writable'] ? ', and --strict would fail this warning' : ''),
+                'suggestion' => null,
             ];
         }
 
         if (!$status['writable']) {
             $problems[] = [
                 'status' => self::FAIL,
-                'sentence' => "the record at {$status['file']} cannot be written, and it is what throttles the probe, so the PING is skipped on every boot — nothing will report an unreachable store",
+                'key' => WeightedDatabaseServiceProvider::KEY_STORE_PROBE_FILE_UNWRITABLE,
+                'sentence' => BootAudit::probeUnwritableSentence($status['file']),
+                'suggestion' => null,
             ];
         }
 
@@ -1781,11 +1733,15 @@ class DbDoctor extends Command
         if ($status['enabled'] && $store['effective'] !== 'redis') {
             $problems[] = [
                 'status' => self::WARN,
+                // No key: nothing about this state is remembered, because nothing about it is a
+                // finding. The row names it and the reachability row warns about the store.
+                'key' => null,
                 'sentence' => sprintf(
                     'switched on every %s but nothing is probed: swrr.primary_store is %s, so reads are served in-process and the check has nothing to reach',
                     $interval,
                     $store['configured'] === '' ? 'the in-process store' : "\"{$store['configured']}\"",
                 ),
+                'suggestion' => null,
             ];
         }
 
@@ -1797,13 +1753,7 @@ class DbDoctor extends Command
             );
         }
 
-        $sentences = [];
-
-        foreach ($problems as $problem) {
-            $sentences[] = $problem['sentence'];
-        }
-
-        return $this->row('store probe', $this->verdict($problems), implode('; ', $sentences));
+        return $this->datedRow('store probe', $problems, $this->recordedFindings());
     }
 
     /**

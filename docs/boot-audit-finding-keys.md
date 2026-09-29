@@ -55,7 +55,7 @@ comments and documentation: `readerFallbackFindings()` folds its two causes into
 sentence rather than emit a second finding that "would overwrite this one", and the reader
 audit's changelog entry called a finding key "unique by construction". That was a claim about
 the *provider* — the four assembly methods it had then happened not to produce the same key
-twice, and it spreads six today — turned into a guarantee the repository did not hold. The
+twice, and it spreads eight today — turned into a guarantee the repository did not hold. The
 provider is the thing that can change; the audit is the thing that has to survive the change.
 
 So the decision has two halves, and they are not the same half:
@@ -415,7 +415,7 @@ the reads all land before the writes whatever the stage is.
 - **If a third level were added.** Then "keep the louder" needs an order and the line needs to
   name the ranks it compared rather than "the louder of the two".
 - **If host applications assembled findings.** Today only the provider builds the list, inside
-  one file with six methods. A public extension point would need the same uniqueness stated
+  one file with eight methods. A public extension point would need the same uniqueness stated
   as part of its contract, because a host that emitted a key twice would be relying on this
   line to notice.
 
@@ -425,7 +425,7 @@ the reads all land before the writes whatever the stage is.
 |---|---|
 | `src/Support/BootAudit.php` | `report()` calls `fold()`, which logs every finding and names a shared key; `persist()` merges the record and takes the lock |
 | `src/Support/BootAuditFinding.php` | the value being folded: key, warning, resolution, context, level |
-| `src/Providers/WeightedDatabaseServiceProvider.php` | the six methods whose lists are spread into one boot's findings |
+| `src/Providers/WeightedDatabaseServiceProvider.php` | the eight methods whose lists are spread into one boot's findings |
 | `tests/Unit/Support/BootAuditTest.php` | the guard: both sentences logged, the collision named, which sentence the record keeps, and the merge and the lock in one process |
 | `tests/Unit/Support/BootAuditConcurrencyTest.php` | the guard across processes: real boots on one record, every key surviving, and the two windows measured |
 | `tests/Support/boot-audit-child.php` | one boot as a child process — the merge and the lock with nothing shared but the filesystem |

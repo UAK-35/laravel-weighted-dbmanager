@@ -116,7 +116,7 @@ final class ProseNumbersTest extends TestCase
         return [
             'the audit\'s finding keys, as boot-audit-surfaces.md counts them' => [
                 'record' => 'docs/boot-audit-surfaces.md',
-                'pinned' => '/(?:pgcat is one of|would put) (\w+) keys/',
+                'pinned' => '/(?:pgcat is one of|would put) ([\w-]+) keys/',
                 'counts' => 'the provider\'s `KEY_*` constants',
                 'expected' => count(self::constantsOn(WeightedDatabaseServiceProvider::class, 'KEY_')),
             ],
@@ -529,7 +529,9 @@ final class ProseNumbersTest extends TestCase
                 );
             }
 
-            preg_match_all('/\*\*(\w+)\*\*/', $cells[1], $matches);
+            // The hyphen is part of the word here: a record that counts past twenty spells it
+            // `twenty-two`, and a capture of `\w+` would read that as `twenty`.
+            preg_match_all('/\*\*([\w-]+)\*\*/', $cells[1], $matches);
 
             foreach ($matches[1] as $word) {
                 NumberWords::toInt($word);

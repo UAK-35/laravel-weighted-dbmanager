@@ -416,6 +416,45 @@ class DbDoctorTest extends TestCase
         $this->assertSame(1, $exit);
     }
 
+    /**
+     * Each state of the probe is dated from its own finding, so the row answers "since when".
+     *
+     * The two states come and go independently — a probe can be switched off for weeks and the
+     * record become unwritable this morning — so one date on both would claim the installation
+     * started being unable to check its store at one moment, which is a claim about the wrong state.
+     *
+     * The record is written and *then* made read-only, because that is the only way an installation
+     * can be in the second state and still have a record to read: the file that holds the date is the
+     * file the state is about, and an installation with nowhere to write it has no record at all.
+     */
+    public function test_the_store_probe_row_dates_each_state_from_its_own_finding(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcat();
+
+        $record = $this->tempDir() . '/audit.json';
+
+        $this->useAudit(storeProbeSeconds: 0, file: $record);
+        $this->recordFindings([
+            WeightedDatabaseServiceProvider::KEY_STORE_PROBE_OFF => '2026-09-20T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_STORE_PROBE_FILE_UNWRITABLE => '2026-09-24T08:15:00+00:00',
+        ]);
+        chmod($record, 0o444);
+
+        if (is_writable($record)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'store probe');
+
+        $this->assertStringStartsWith('FAIL  store probe', $row);
+        $this->assertStringContainsString('recorded unresolved since 2026-09-20T08:15:00+00:00', $row);
+        $this->assertStringContainsString('recorded unresolved since 2026-09-24T08:15:00+00:00', $row);
+        $this->assertSame(2, substr_count($row, 'recorded unresolved since'), 'one date per state, from its own key');
+        $this->assertSame(1, $exit);
+    }
+
     public function test_an_armed_flipper_with_every_pgcat_file_in_place_passes(): void
     {
         $this->bindRedis(reachable: true);
@@ -516,6 +555,111 @@ class DbDoctorTest extends TestCase
         $this->assertStringStartsWith('FAIL  pgcat files', $row);
         $this->assertStringContainsString('flip state directory', $row);
         $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The repairs the row can state, one per problem — and the row prints them as a list rather
+     * than one line for whichever problem it noticed first, which is the shape the reader rows
+     * have had since the first refused window.
+     *
+     * A path already occupied by a regular file can never be the directory beside it, so this
+     * asserts on a directory problem without depending on mode bits: the line names the directory
+     * and adds both the write bit the check found missing and the traverse bit the rename after it
+     * needs. The two paths share a directory, so the same line appears twice — once per problem,
+     * which is the claim.
+     */
+    public function test_the_files_row_prints_one_repair_line_per_problem(): void
+    {
+        $dir = $this->tempDir();
+        file_put_contents($dir . '/blocked', '');
+
+        $this->armPgcat([
+            'state_file' => $dir . '/blocked/state.json',
+            'lock_file' => $dir . '/blocked/flip.lock',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat files');
+
+        $this->assertStringStartsWith('FAIL  pgcat files', $row);
+        $this->assertStringContainsString('flip state directory', $row);
+        $this->assertStringContainsString('flip lock directory', $row);
+        $this->assertSame(
+            [
+                'chmod +wx ' . escapeshellarg($dir . '/blocked'),
+                'chmod +wx ' . escapeshellarg($dir . '/blocked'),
+            ],
+            $this->repairs($output),
+            'one line per problem, each naming the path the check failed on',
+        );
+        $this->assertSame(1, $exit, 'a repair is not a verdict: the row still fails');
+    }
+
+    /**
+     * An empty key is a problem, and only the keys the published config ships a value for are
+     * repairable from here.
+     *
+     * `config_path` has a documented value — the file the sample config points at — so the repair
+     * is that setting line, drawn from the flipper so it cannot drift from the default it tells the
+     * operator to write. `readers_path` and `no_readers_path` are documented as `—`, and the row
+     * names them without inventing a path: a wrong guess pasted into configuration points a flip at
+     * a file that does not exist, which is worse than an empty column.
+     */
+    public function test_the_files_row_repairs_an_empty_key_only_where_the_published_config_ships_a_value(): void
+    {
+        $this->armPgcat([
+            'config_path' => '',
+            'readers_path' => '',
+            'no_readers_path' => '',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat files');
+
+        $this->assertStringStartsWith('FAIL  pgcat files', $row);
+        $this->assertStringContainsString('swrr.pgcat.config_path is not set', $row);
+        $this->assertStringContainsString('swrr.pgcat.readers_path is not set', $row);
+        $this->assertStringContainsString('swrr.pgcat.no_readers_path is not set', $row);
+        $this->assertSame(
+            ["swrr.pgcat.config_path = '/etc/pgcat/pgcat.toml'"],
+            $this->repairs($output),
+            'the key with a published value is repairable; the two the README documents as `—` are not',
+        );
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * Each problem is dated from *its own* finding, which is what one key per setting buys: a record
+     * holding two file findings dates two problems, and a problem the record has nothing about — a
+     * key this installation never set, which the audit leaves to this row — prints no date rather
+     * than one belonging to another setting.
+     */
+    public function test_each_file_problem_is_dated_from_its_own_finding(): void
+    {
+        $dir = $this->tempDir();
+        file_put_contents($dir . '/blocked', '');
+
+        $this->armPgcat([
+            'state_file' => $dir . '/blocked/state.json',
+            'config_path' => $dir . '/gone.toml',
+        ]);
+
+        $this->recordFindings([
+            WeightedDatabaseServiceProvider::KEY_PGCAT_STATE_FILE_UNUSABLE => '2026-09-20T08:00:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_PGCAT_CONFIG_PATH_UNUSABLE => '2026-09-24T21:05:00+00:00',
+        ]);
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat files');
+
+        $this->assertStringContainsString('flip state directory', $row);
+        $this->assertStringContainsString('flip target', $row);
+        $this->assertStringContainsString('recorded unresolved since 2026-09-20T08:00:00+00:00', $row);
+        $this->assertStringContainsString(
+            'recorded unresolved since 2026-09-24T21:05:00+00:00',
+            $row,
+            'two problems, two findings, two dates: quoting the first key on file would date the wrong one',
+        );
     }
 
     public function test_an_armed_flipper_with_unset_paths_is_reported_as_incomplete(): void
@@ -1411,6 +1555,7 @@ class DbDoctorTest extends TestCase
      */
     public function test_the_reader_windows_row_prints_the_repair_for_a_flat_string(): void
     {
+        $this->armPgcat();
         $this->useReaderFallback(['10:00-14:20'], [1, 2, 3, 4, 5]);
 
         [$output, $exit] = $this->doctor();
@@ -1430,6 +1575,7 @@ class DbDoctorTest extends TestCase
      */
     public function test_the_reader_windows_row_prints_the_repair_for_a_day_list_written_as_one_string(): void
     {
+        $this->armPgcat();
         $this->useReaderFallback([['start' => '10:00:00', 'end' => '14:20:00']], '1,2,3');
 
         [$output, $exit] = $this->doctor();
@@ -1446,6 +1592,7 @@ class DbDoctorTest extends TestCase
      */
     public function test_the_reader_windows_row_prints_the_repair_for_a_window_written_without_its_list(): void
     {
+        $this->armPgcat();
         $this->useReaderFallback(['start' => '10:00:00', 'end' => '14:20:00'], [1, 2, 3, 4, 5]);
 
         [$output, $exit] = $this->doctor();
@@ -1473,6 +1620,7 @@ class DbDoctorTest extends TestCase
      */
     public function test_the_reader_windows_row_prints_no_repair_it_would_have_to_guess_at(): void
     {
+        $this->armPgcat();
         $this->useReaderFallback(['22:00-06:00'], [1, 2, 3, 4, 5]);
 
         [$output, $exit] = $this->doctor();
@@ -2123,7 +2271,7 @@ class DbDoctorTest extends TestCase
         sort($rows);
 
         $this->assertSame(
-            ['pgcat gate', 'pgcat supervisor', 'reader windows'],
+            ['pgcat files', 'pgcat gate', 'pgcat supervisor', 'reader windows'],
             $rows,
             'the rows that carry a repair are the ones the record says can, and no others: ' . implode(', ', $rows),
         );
@@ -2132,6 +2280,140 @@ class DbDoctorTest extends TestCase
             count($carrying),
             $this->numberClaim('docs/db-doctor-json.md', '/(\w+) rows can offer one/'),
             'the record counts the rows that can carry a suggestion line',
+        );
+    }
+
+    /**
+     * The rows that can name several problems, and one problem from each half they have in the run
+     * `everyRowWithSeveralProblems()` builds.
+     *
+     * This table is the register: a row that can report more than one problem has an entry here, and
+     * its entry gives it two of them, so a row that regressed to naming whichever problem it noticed
+     * first fails its own case — and, for the rows the record dates, the set test below as well. A
+     * fragment is how a case names its problem: each one is distinctive to a single problem, so
+     * finding both of them in *one* `detail` is the row naming both, whatever the sentences around
+     * them say.
+     *
+     * The repairs are counted apart from the problems deliberately. `switch values` and `store probe`
+     * name several problems and offer no repair at all — re-spelling a value that is not a switch
+     * would be guessing at what was meant — so the two halves of a row are not the same number and
+     * are not wired to each other here.
+     *
+     * @return array<string, array{0: string, 1: list<string>, 2: int}>
+     */
+    public static function rowsNamingSeveralProblems(): array
+    {
+        return [
+            // A window written without its list, and a day list written as the `.env` string: two
+            // refused settings, each re-spelled by the rule that refused it, so two repairs.
+            'reader windows — both reader settings refused' => [
+                'reader windows',
+                ['reader_windows[0] is "10:00-14:20"', 'swrr.reader_days is "1,2,3"'],
+                2,
+            ],
+            // Two switches that are not switches, and the one row that shows the halves apart.
+            'switch values — two switches that are not switches' => [
+                'switch values',
+                ['swrr.pgcat.use_reload is "maybe"', 'swrr.allow_local_fallback is "nope"'],
+                0,
+            ],
+            // The flip's own state and lock resolve into a directory a regular file already
+            // occupies, so neither can be written: two problems, one mode line each.
+            'pgcat files — two paths the flip cannot write' => [
+                'pgcat files',
+                ['flip state directory', 'flip lock directory'],
+                2,
+            ],
+            // The probe switched off, beside the record that throttles it unable to be written: the
+            // second is only a problem because the first is a choice, and the row names both.
+            'store probe — off, and a record that cannot be written' => [
+                'store probe',
+                ['switched off (swrr.audit.store_probe_seconds = 0', 'cannot be written, and it is what throttles the probe'],
+                0,
+            ],
+        ];
+    }
+
+    /**
+     * A row that can name several problems names every one of them.
+     *
+     * The shape is `datedRow()`'s: one sentence per problem, separated so an operator can tell
+     * where one ends and the next begins, and one `suggestion` per problem that has a repair. A row
+     * that stopped at the first problem would pass every other test in this file — the first
+     * problem is named, dated and repaired exactly as it was — which is what makes this a rule of
+     * its own rather than a detail of the tests above.
+     *
+     * @param list<string> $fragments
+     */
+    #[DataProvider('rowsNamingSeveralProblems')]
+    public function test_a_row_that_can_name_several_problems_names_every_one_of_them(
+        string $row,
+        array $fragments,
+        int $repairs,
+    ): void {
+        $record = $this->everyRowWithSeveralProblems();
+
+        if ($row === 'store probe' && is_writable($record)) {
+            // Running as root, or on a filesystem that ignores the read-only bit: the row's second
+            // problem cannot exist here, and the half that can is asserted by the run itself.
+            $this->markTestSkipped('This environment cannot make the record read-only.');
+        }
+
+        $check = $this->checkNamed($this->report($this->doctorJson()[0]), $row);
+
+        foreach ($fragments as $fragment) {
+            $this->assertStringContainsString(
+                $fragment,
+                $check['detail'],
+                "{$row} stopped naming a problem it has ({$fragment}): {$check['detail']}",
+            );
+        }
+
+        $this->assertSame(
+            'FAIL',
+            $check['verdict'],
+            "{$row} is reporting problems, so it is not passing: {$check['detail']}",
+        );
+
+        $this->assertCount(
+            $repairs,
+            $check['suggestions'],
+            "{$row} carries one repair per problem that has one, and no more: " . implode(' | ', $check['suggestions']),
+        );
+    }
+
+    /**
+     * The rows that name several problems are the ones the register declares, read out of the run.
+     *
+     * The record dates each problem from its own finding — one key per setting is what makes that
+     * possible — so a row with two problems carries two dates and a row with one carries one. That
+     * makes the count of dates the run's own answer to which rows name several problems, measured
+     * rather than restated: a row that regressed to its first problem drops out of the set, and a row
+     * that grew a second finding appears in it without being declared.
+     *
+     * Every row in the register is dated in this fixture, including `store probe` — whose two states
+     * became findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`)
+     * for exactly this reason: a row that reports a state standing for weeks is a row an operator asks
+     * "since when" about.
+     */
+    public function test_the_rows_naming_several_dated_problems_are_the_ones_the_register_declares(): void
+    {
+        $this->everyRowWithSeveralProblems();
+
+        $several = [];
+
+        foreach ($this->report($this->doctorJson()[0])['checks'] as $check) {
+            if (substr_count($check['detail'], 'recorded unresolved since') > 1) {
+                $several[] = $check['name'];
+            }
+        }
+
+        sort($several);
+
+        $this->assertSame(
+            ['pgcat files', 'reader windows', 'store probe', 'switch values'],
+            $several,
+            'the rows that name several dated problems are the ones the register declares: ' . implode(', ', $several),
         );
     }
 
@@ -2147,6 +2429,7 @@ class DbDoctorTest extends TestCase
     {
         // The flat string is the refused window everyone writes first, and the one spelling the
         // package can repair without guessing at what was meant.
+        $this->armPgcat();
         $this->useReaderFallback(['10:00-14:20'], [1, 2, 3, 4, 5]);
         $this->usePublishedConfig();
         $this->bindRedis(reachable: true);
@@ -2935,6 +3218,35 @@ class DbDoctorTest extends TestCase
      * Leave the record a previous boot would have written: an unresolved pgcat
      * mismatch, in the shape the audit reads back.
      */
+    /**
+     * A boot record holding the findings a test wants a row to be dated from.
+     *
+     * Written the way the audit writes it, because the reader is strict about the shape: a test
+     * that invented a thinner one would be asserting against a record the package would treat as
+     * unreadable rather than as nothing standing.
+     *
+     * @param array<string, string> $keys finding key => when it was first reported
+     */
+    private function recordFindings(array $keys): void
+    {
+        $findings = [];
+
+        foreach ($keys as $key => $since) {
+            $findings[$key] = [
+                'resolution' => 'This is what closes it out.',
+                'warning' => 'This is what it says while it stands.',
+                'level' => 'warning',
+                'context' => [],
+                'first_reported_at' => $since,
+            ];
+        }
+
+        file_put_contents((string) config('db-manager.swrr.audit.file'), (string) json_encode([
+            'findings' => $findings,
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
     private function recordGateMismatch(string $connection, string $driver, string $since): void
     {
         file_put_contents((string) config('db-manager.swrr.audit.file'), (string) json_encode([
@@ -3050,6 +3362,60 @@ class DbDoctorTest extends TestCase
         }
 
         return $carrying;
+    }
+
+    /**
+     * One run in which every row that can name several problems has more than one: both reader
+     * settings refused, two switches that are not switches, two paths the flip cannot write, and —
+     * because the record is made read-only after it is written — a store probe that is off beside a
+     * record that cannot be written.
+     *
+     * One run rather than a fixture per row, because the register is about the row *set*: a fixture
+     * built for a single row leaves the others at whatever the default slice happens to be, and the
+     * set test would then be reading the slice rather than the claim.
+     *
+     * The record is written *and then* made read-only, in that order, because the dated rows need
+     * the entries and the store probe needs the record unwritable — one file both ways, which is
+     * what makes a single run enough for every case. The store probe's two states are findings of
+     * their own now, so its problems are dated from this same record like the others'.
+     *
+     * @return string the record's path, so a case can skip where the platform ignores the bit
+     */
+    private function everyRowWithSeveralProblems(): string
+    {
+        $dir = $this->tempDir();
+
+        // A path already occupied by a regular file can never be the directory beside it, so the
+        // two state paths fail without depending on mode bits.
+        file_put_contents($dir . '/blocked', '');
+
+        $this->armPgcat([
+            'use_reload' => 'maybe',
+            'state_file' => $dir . '/blocked/state.json',
+            'lock_file' => $dir . '/blocked/flip.lock',
+        ]);
+
+        config()->set('db-manager.swrr.allow_local_fallback', 'nope');
+        $this->useReaderFallback(['10:00-14:20'], '1,2,3');
+
+        $record = $this->tempDir() . '/audit.json';
+
+        // One entry per problem the dated rows have, so each row has as many dates as problems and
+        // the dates are the run's own count of them.
+        $this->useAudit(0, $record);
+        $this->recordFindings([
+            WeightedDatabaseServiceProvider::KEY_READER_WINDOWS_REFUSED => '2026-09-20T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_READER_DAYS_REFUSED => '2026-09-21T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_PGCAT_RELOAD_REFUSED => '2026-09-22T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_FALLBACK_REFUSED => '2026-09-23T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::PGCAT_FILE_KEYS['state_file'] => '2026-09-24T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::PGCAT_FILE_KEYS['lock_file'] => '2026-09-25T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_STORE_PROBE_OFF => '2026-09-26T08:15:00+00:00',
+            WeightedDatabaseServiceProvider::KEY_STORE_PROBE_FILE_UNWRITABLE => '2026-09-27T08:15:00+00:00',
+        ]);
+        chmod($record, 0o444);
+
+        return $record;
     }
 
     /**

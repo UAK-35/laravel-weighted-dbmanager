@@ -29,10 +29,14 @@ final class NumberWords
     /**
      * The word for each number the records may state.
      *
-     * The list stops at twenty on purpose. A count past it is not a sentence this package writes
-     * — a table with twenty-one rows is a generated document, not a paragraph — and the failure
-     * ("the record states a number this vocabulary does not have") is a better outcome than
-     * silently writing digits into prose that spells its numbers out.
+     * The list stops at thirty on purpose, and it used to stop at twenty. The ceiling is a
+     * judgement about when a count stops being a sentence, and the audit's own key table is what
+     * moved it: `boot-audit-surfaces.md` states how many finding keys the provider declares, and
+     * that count passed twenty while the sentence stating it stayed a sentence — one key out of the
+     * set, which is what the sentence is about. Past thirty the failure ("the record states a number
+     * this vocabulary does not have") still stands, because a count that size is a generated document
+     * rather than a paragraph, and a failure is a better outcome than silently writing digits into
+     * prose that spells its numbers out.
      *
      * @var array<int, string>
      */
@@ -57,6 +61,16 @@ final class NumberWords
         18 => 'eighteen',
         19 => 'nineteen',
         20 => 'twenty',
+        21 => 'twenty-one',
+        22 => 'twenty-two',
+        23 => 'twenty-three',
+        24 => 'twenty-four',
+        25 => 'twenty-five',
+        26 => 'twenty-six',
+        27 => 'twenty-seven',
+        28 => 'twenty-eight',
+        29 => 'twenty-nine',
+        30 => 'thirty',
     ];
 
     /**

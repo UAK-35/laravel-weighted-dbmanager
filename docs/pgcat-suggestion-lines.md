@@ -1,7 +1,8 @@
 # Which pgcat rows should print the config line to paste?
 
-A design record for the `suggestion` lines the `pgcat gate` and `pgcat supervisor` rows print,
-and for the one pgcat row that prints none.
+A design record for the `suggestion` lines the `pgcat gate`, `pgcat supervisor` and `pgcat files`
+rows print — the last one per problem, and only where the repair is something the package can state
+exactly — and for the problems that get no line at all.
 
 `db:doctor` has printed a `suggestion` line under a row since the reader-window refusal: a
 refused value that names its own replacement is printed in the shape the setting reads, so the
@@ -23,19 +24,22 @@ FAIL  pgcat supervisor the configured supervisor command is empty, … — write
 `detail`, and a terminal cannot paste one. This document records what the package prints
 instead, which alternatives were considered, and why they were not taken.
 
-Everything below is implemented in `Pgcat\PgcatConfigFlipper::suggestionForGate()` and
-`::suggestionForSupervisor()`, and in `DbDoctor::pgcatGate()` / `::pgcatSupervisor()`. The
-rules are pinned by the tests named at the end.
+Everything below is implemented in `Pgcat\PgcatConfigFlipper::suggestionForGate()`,
+`::suggestionForSupervisor()` and `::fileProblems()`, and in `DbDoctor::pgcatGate()` /
+`::pgcatSupervisor()` / `::pgcatFiles()`. The rules are pinned by the tests named at the end.
 
 ---
 
 ## The answer in one line
 
-**A pgcat row prints a `suggestion` line only when the fault reduces to an exact config value,
-and the flipper — which owns the keys and the documented commands — names it.** `pgcat gate`
-prints `swrr.pgcat.enabled = false` for the switch armed where pgcat cannot act. `pgcat
-supervisor` prints the setting line for the two faults that reduce to a command: a program name
-that needs quoting, and a command left empty. `pgcat files` prints no line at all.
+**A pgcat row prints a `suggestion` line only when the fault reduces to something the package can
+state exactly, and the flipper — which owns the keys, the documented commands and the file
+preconditions — names it.** `pgcat gate` prints `swrr.pgcat.enabled = false` for the switch armed
+where pgcat cannot act. `pgcat supervisor` prints the setting line for the two faults that reduce to
+a command: a program name that needs quoting, and a command left empty. `pgcat files` prints one line
+per problem it can repair, and those are two kinds: a **mode**, for a path this installation has
+chosen and cannot use, and a **setting line**, for an empty key whose value the published config
+ships. A path that is not there, and an empty `readers_path`/`no_readers_path`, still get none.
 
 ---
 
@@ -99,6 +103,14 @@ deliberately leaves `readers_path` and `no_readers_path` documented as `—` bec
 value to document — a hypothetical container path, or a distro's. Pointing a flip at a file
 that does not exist on this host is worse than an empty column, because it looks like an answer.
 
+**Half of C was adopted later, for the three keys that are not hypothetical.** The published config
+ships `config_path`, `state_file` and `lock_file` — the README's table documents a default for each
+of them — so a line naming that value is the package's own rather than a path it invented, and the
+objection that mattered against C (a value that could drift from the default it names) is answered
+by reading the sample out of the repository in a test. `readers_path` and `no_readers_path` are the
+two where the sample only ever shows an example of the *shape*, the README documents them as `—`, and
+they still get no line. See "The files row, later" below.
+
 ### D — ask supervisor what it *does* know, and name the program from the answer
 
 `supervisorctl status` with no program lists every program supervisord runs, and the
@@ -158,7 +170,12 @@ tests rather than by taste.
 | `pgcat gate` | the switch on where pgcat cannot act | `swrr.pgcat.enabled = false` |
 | `pgcat gate` | armed without a path a flip needs | none — the paths are the installation's to choose |
 | `pgcat gate` | this boot is fine, a mismatch is still on record | none — the configuration has nothing to change; a boot closes the record out |
-| `pgcat files` | a missing, unreadable or unwritable file, or a directory that will not take the temp file | none |
+| `pgcat files` | a source file that is not readable | `chmod +r <the path>` |
+| `pgcat files` | the target file that is not writable | `chmod +w <the path>` |
+| `pgcat files` | a directory a flip writes into (the target's, the state file's, the lock's) | `chmod +wx <the directory>` |
+| `pgcat files` | `config_path`, `state_file` or `lock_file` is empty | `swrr.pgcat.<key> = <the value the published config ships>` |
+| `pgcat files` | a source or the target that is not there | none — the file has to be put there by whatever installs pgcat |
+| `pgcat files` | `readers_path` or `no_readers_path` is empty | none — the README documents those two as `—` |
 | `pgcat supervisor` | `unquoted` | `swrr.pgcat.<key> = '<the command, program name quoted>'` |
 | `pgcat supervisor` | `empty` | `swrr.pgcat.<key> = '<the command that key documents>'` |
 | `pgcat supervisor` | `unknown_program` | none — the sentence names the running programs nearest the configured name; a ranked near miss is not a value to apply |
@@ -209,6 +226,55 @@ repair. So the row prints both: the sentence for reading, the line for acting, a
 
 ---
 
+### The files row, later: a mode, and a published value
+
+`pgcat files` was the row that printed nothing, and the reason was that every problem it reported was
+a path or a permission. That stopped being true of every problem at once — a permission is a mode on a
+known path, and an empty key is a value the published config documents — so the row was re-decided
+rather than left as the exception this document was written around. Which states get a line:
+
+| State | Line |
+|---|---|
+| a source file that is not readable | `chmod +r <the path>` |
+| the target file that is not writable | `chmod +w <the path>` |
+| a directory a flip writes into (the target's, the state file's, the lock's) | `chmod +wx <the directory>` |
+| `config_path`, `state_file`, `lock_file` is empty | `swrr.pgcat.<key> = <the value the published config ships>` |
+| a source or the target that is not there | none |
+| `readers_path` / `no_readers_path` is empty | none |
+
+**The mode is the bit the check found missing**, on the path the check was run against — which is why
+a directory gets two of them: the temp file is written into the directory and the rename that finishes
+the swap acts on it, so write without traverse still fails. It is a symbolic *add* rather than a mode,
+so nothing the operator set is rewritten, and it is deliberately unscoped: `db:doctor` proves that
+*this* user can read and write those paths — `pgcat-flip-dry-run.md` records that limitation for the
+rehearsal, and it is the same one here — so a line naming a narrower class could print a repair that
+does not clear the check it was printed for. An installation whose pgcat config carries credentials
+should scope it; the row names the path and the bit, which is what a narrower repair needs.
+
+**The setting line is the published value, resolved on this host.** `config_path` is
+`/etc/pgcat/pgcat.toml` as the sample spells it, and the two state paths are the sample's
+`sys_get_temp_dir() . '/pgcat-flip-…'`, evaluated. `PgcatConfigFlipper::documentedPaths()` is where they
+live, for the same reason the documented commands live in constants — the repair and the default cannot
+drift apart — and a test reads the published config out of the repository and compares the two.
+
+**A line's shape says where it goes.** `chmod …` is a command; `swrr.pgcat.… = …` is a setting. A gate
+that applies `suggestions` without reading them therefore has one rule to write, which is what
+candidate F was rejected for and what this is not: the two kinds are distinguishable from the first
+word, and both are pinned by tests rather than by taste.
+
+**Which states are *problems* did not change.** The row reports exactly what it reported before, in
+the same sentences and the same order, read from `PgcatConfigFlipper::fileProblems()` rather than from
+a detector of the doctor's own — and the boot audit records the same list as findings, under one key
+per setting, so a preflight can say how long a file has been unusable instead of only that it is. An
+empty key is the one state the record does not carry: there is no file to judge, the package's audit
+reports files rather than armings, and `db:doctor`'s two rows are where an arming without its paths is
+reported — the gate names the key to fill in, and this row prints the published value as the repair
+where the config ships one. Each problem is dated from its own finding, so a row with two of them
+prints two dates and a problem with no entry prints none.
+
+Checked by mutation: returning no line for `FILE_UNREADABLE`, borrowing the doctor's own path for the
+published value, and auditing an empty key each fail the test named for them below.
+
 ## Tests that pin the rules
 
 | Test | Rule |
@@ -220,7 +286,20 @@ repair. So the row prints both: the sentence for reading, the line for acting, a
 | `PgcatConfigFlipperTest::test_the_supervisor_suggestion_for_an_empty_command_is_the_command_it_documents` | the `empty` line, both keys |
 | `PgcatConfigFlipperTest::test_no_suggestion_is_named_for_a_fault_a_pgcat_value_cannot_repair` | the other six faults and the two non-faults, each against a real verdict |
 | `DbDoctorTest::test_the_gate_row_prints_the_switch_as_the_line_to_paste` | the row prints it, and still fails |
-| `DbDoctorTest::test_the_gate_and_files_rows_print_no_line_for_a_path_only_the_installation_knows` | the two rows with nothing to name |
+| `DbDoctorTest::test_the_gate_and_files_rows_print_no_line_for_a_path_only_the_installation_knows` | the gate row, and the one files problem whose value only the installation knows |
+| `PgcatConfigFlipperTest::test_the_documented_paths_are_the_ones_the_published_config_ships` | the published values are read out of the sample rather than copied beside it |
+| `PgcatConfigFlipperTest::test_an_empty_key_carries_the_published_value_only_where_the_config_ships_one` | which empty keys get a line, and which two do not |
+| `PgcatConfigFlipperTest::test_a_directory_that_will_not_take_a_write_carries_the_mode_that_would` | the directory line, and the same line for the two settings that share a directory |
+| `PgcatConfigFlipperTest::test_a_file_that_is_not_there_gets_no_line` | a missing file gets none, on every filesystem: nothing about the environment can skip it |
+| `PgcatConfigFlipperTest::test_a_file_that_cannot_be_read_carries_the_mode_that_would` | an unreadable one gets `+r` (skipped where the platform ignores mode bits) |
+| `PgcatConfigFlipperTest::test_each_file_mode_problem_carries_the_bit_that_failed` | all three modes, asked of the rule rather than of a file, so they hold where mode bits are ignored |
+| `PgcatConfigFlipperTest::test_an_inert_flipper_has_no_file_preconditions_at_all` | nothing to judge while the flipper is not armed |
+| `DbDoctorTest::test_the_files_row_prints_one_repair_line_per_problem` | the row prints the list rather than the first problem's repair |
+| `DbDoctorTest::test_the_files_row_repairs_an_empty_key_only_where_the_published_config_ships_a_value` | the same rule through the row, with three empty keys and one line |
+| `DbDoctorTest::test_each_file_problem_is_dated_from_its_own_finding` | one key per setting: two problems, two dates |
+| `WeightedDatabaseServiceProviderTest::test_a_file_a_flip_needs_that_cannot_be_used_is_recorded_under_its_settings_key` | the record, its context, and the resolution that closes it |
+| `WeightedDatabaseServiceProviderTest::test_an_empty_pgcat_path_is_the_rows_problem_and_not_a_file_finding` | the one state the record leaves to the row |
+| `WeightedDatabaseServiceProviderTest::test_switching_pgcat_off_closes_a_file_finding_out` | the other half of every resolution sentence |
 | `DbDoctorTest::test_the_supervisor_row_prints_the_quoted_command_to_write` | the row's half of the `unquoted` repair |
 | `DbDoctorTest::test_the_supervisor_row_fails_when_the_command_is_empty` | the row's half of the `empty` repair, in the documented shape |
 | `DbDoctorTest::test_the_supervisor_row_prints_no_line_for_a_fault_a_config_line_cannot_reach` | a fault repaired in a PATH, end to end |
@@ -239,6 +318,29 @@ Mutations this decision has been checked against, run against the two test class
   test and the files-row test, the object-versus-table test, and the four reader-window repair
   tests, whose rows would each pick up a line the installation does not have. A stray suggestion
   is loud, which is what this column being exact buys.
+- **the `FILE_UNREADABLE` arm returning no line** — 1 failure, and *which* test it is depends on
+  the platform: on a box that honours mode bits it is the unreadable-file case, and on a box that
+  ignores them — this laptop — it is
+  `PgcatConfigFlipperTest::test_each_file_mode_problem_carries_the_bit_that_failed`, whose
+  `a source that cannot be read` row asks the rule for the line of a *kind* and a *path* and touches
+  no file at all. That row exists because the filesystem case has to skip where the environment
+  cannot make a file unreadable; without it the mutation measured **0** failures here, which is how
+  the gap was found rather than argued about. The `+w` and `+wx` arms are pinned the same way now,
+  deterministically, and the missing-file half stays a case of its own because nothing about the
+  environment can skip it.
+- **the published state path spelled out instead of read from the sample** — 2 failures: the drift
+  guard that compares `documentedPaths()` with the published config, and the empty-key test that
+  prints the line. A repair that has drifted from the default it names fails on the guard rather
+  than in front of an operator.
+- **the audit recording an empty key as a file finding** — 34 failures, across the provider and
+  doctor suites. That is the count that decided this rule: an installation that is armed but not yet
+  pointed at its files is the *default fixture* of these tests, and a boot that logged a line for
+  each unset path would log three of them per boot, forever, about a state the two rows already
+  report and the flip's first use already throws on.
+- **the row printing one repair for the first problem rather than one per problem** — 3 failures:
+  the per-problem test, the empty-key test (whose line is not the first problem's) and the
+  date-per-problem test. The order the problems arrive in is the flipper's, so a row that printed
+  only the first would send an operator to one of the three files it is complaining about.
 
 ---
 
@@ -253,9 +355,18 @@ Mutations this decision has been checked against, run against the two test class
   name supervisor knows is now discovered (half of candidate D) and the row names the closest
   ones in its sentence, but "closest" is not "meant": the line is the value a gate applies
   without reading, so the ranking stays where a human reads it.
-- **`pgcat files` is the only row in the whole command that never prints a line.** That is a
-  property of the faults, not of the row, and it would change the moment a fault there reduced to
-  a value — see below.
+- **`pgcat files` can print the same line twice.** The row is the only one that reports several
+  problems about one path — the state file and the lock in one unwritable directory print one
+  `chmod +wx` each — and it keeps them separate rather than folding them, because they are two
+  settings with two repairs. An operator reads that once and changes one mode.
+- **A mode line names the bit, not the user.** `+r` and `+w` grant the bit to every class, which is
+  what makes the line clear the check it was printed for whoever runs the flip — and also a change
+  to a file that may hold credentials. Scoping it is the operator's call, and the row gives them
+  what a narrower repair needs: the path and the bit.
+- **An empty `state_file` or `lock_file` is the row's and not the record's.** The provider defaults
+  both when they are absent, so the empty case needs the key to be set to an empty string on
+  purpose — and a boot that audited it would be the only surface reporting it, which is the rule
+  this record draws the other way: the audit reports files, `db:doctor` reports armings.
 - **The line is offered for the fault as written, not for the installation's intent.** A gate
   that applies `suggestions` blindly will turn `swrr.pgcat.enabled` off where the operator meant
   to point `database.default` at a PostgreSQL connection instead (candidate E). The line says
@@ -284,6 +395,14 @@ Mutations this decision has been checked against, run against the two test class
 - **If a pgcat fault were added whose remedy is a *different* pgcat key** — a path, or a
   connection mapping — the line would no longer be the fault's own setting, and `suggestionForGate()`
   would need to return a key rather than a fixed one.
+- **If a gate came to *apply* repairs rather than offer them.** The two kinds of line are told apart
+  by their first word today, which is enough to read and not enough to act on safely; an applying
+  gate would need the destination named — a field beside the line, or a key its shape is derived
+  from — and the mode lines would need the user question settled rather than left to the operator.
+- **If the boot audit came to report the arming itself** — an armed flipper missing the paths a flip
+  needs — then the empty-key problems in `pgcat files` would have a finding to be dated from, and the
+  rule that the record reports files rather than armings would be the thing to revisit. The count is
+  in the mutations above: 34 tests pin the current silence.
 
 ## Files
 
@@ -291,8 +410,10 @@ Mutations this decision has been checked against, run against the two test class
 |---|---|
 | `src/Pgcat/PgcatConfigFlipper.php` | `suggestionForGate()`, `suggestionForSupervisor()`, `commandKey()`, `documentedCommand()`, and the documented commands as constants |
 | `src/Pgcat/SupervisorStep.php` | the faults, the verbatim sentences, and the quoted command a repair prints |
-| `src/Console/Commands/DbDoctor.php` | `pgcatGate()` and `pgcatSupervisor()` print the line; `pgcatFiles()` deliberately does not; `suggestionLines()` |
-| `tests/Unit/Pgcat/PgcatConfigFlipperTest.php` | the fault-to-line mapping |
+| `src/Console/Commands/DbDoctor.php` | `pgcatGate()`, `pgcatSupervisor()` and `pgcatFiles()` print the lines; `datedRow()` turns each problem into a sentence, a key and a repair; `suggestionLines()` |
+| `src/Providers/WeightedDatabaseServiceProvider.php` | `PGCAT_FILE_KEYS`, the map from setting to finding key, and `pgcatFileFindings()` |
+| `tests/Unit/Pgcat/PgcatConfigFlipperTest.php` | the fault-to-line mapping, both for the command faults and for the file preconditions |
 | `tests/Unit/Console/DbDoctorTest.php` | the rows, and the object's half |
+| `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | the file findings the boot records, and the resolution that closes them |
 | `docs/reader-windows-refusal.md` | the rule this one follows, and where it was decided |
 | `docs/pgcat-supervisor-preflight.md` | the supervisor faults the two lines are drawn from |
