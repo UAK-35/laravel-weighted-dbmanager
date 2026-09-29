@@ -86,11 +86,11 @@ $paths = inventoryPaths($root);
 // that discards a change the last release recorded is worth saying out loud: the
 // inventory is only evidence while it still describes an older tree.
 //
-// Both of them, or neither: a rewrite can only lose a record it read, and a pair
-// that is half there — the state an interrupted release leaves, since the files are
-// written by one call and any but the first can fail — has no record on one side.
-// Diffing against a side that was never read reports every row of the other side as
-// a change this run is discarding, which names a change nothing ever recorded.
+// All three, or none: a rewrite can only lose a record it read, and one file that was
+// never read — the state an interrupted release leaves, since the files are written by
+// one call and any but the first can fail — is enough for the whole comparison to be
+// skipped. Diffing against a side that was never read reports every row of the other
+// two as a change this run is discarding, which names a change nothing ever recorded.
 $stored = [
     'files' => readInventory($paths['files']),
     'methods' => readInventory($paths['methods']),
