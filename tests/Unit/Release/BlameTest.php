@@ -205,6 +205,43 @@ final class BlameTest extends TestCase
     }
 
     /**
+     * A removed public constant: the surface signal names it, the severity is breaking,
+     * and the bump is nevertheless a minor because the package is pre-1.0. Both halves of
+     * that sentence have to appear — a report that said only "breaking" would send a
+     * reader looking for a major that this policy does not produce.
+     */
+    public function test_a_removal_is_named_and_contributed_with_the_0x_caveat(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->dropClassConstant();
+        $repo->commit('chore: drop the version constant');
+
+        $run = $repo->scriptRun('blame.php', 'Fixture\\Thing::VERSION');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertStringContainsString(
+            '  caught  breaking  public API  names it in 1 line(s)' . PHP_EOL,
+            $run->output,
+            $run->describe(),
+        );
+        $this->assertStringContainsString(
+            '            • removed public constant Fixture\Thing::VERSION' . PHP_EOL,
+            $run->output,
+            $run->describe(),
+        );
+        $this->assertStringContainsString(
+            'It contributed: the weighing came out at breaking, and it is named in what carried that'
+            . ' — public API. The bump is a minor, because 0.x takes a breaking change as a minor'
+            . ' until there is a 1.0 line to break.',
+            $run->output,
+            $run->describe(),
+        );
+        $this->assertStringContainsString('In the surface now: nothing' . PHP_EOL, $run->output, $run->describe());
+        $this->assertStringContainsString('In the surface at v0.1.0: 1 symbol(s)' . PHP_EOL, $run->output, $run->describe());
+    }
+
+    /**
      * The inventory as the only witness — a stored row the tree does not back. The symbol
      * is in neither surface, because it is not in the tree at all, so this is also the case
      * where a line of evidence names something the surface reader cannot see: a real answer,
@@ -292,6 +329,31 @@ final class BlameTest extends TestCase
             $bare->output,
             $bare->describe(),
         );
+    }
+
+    /**
+     * A fragment, not a pattern: the match is a plain `contains`, so half a remembered
+     * name finds the members that hold it. That is on purpose — the command is asked when
+     * somebody is unsure of the spelling — and it means one symbol can answer with several.
+     */
+    public function test_a_fragment_finds_every_symbol_that_holds_it(): void
+    {
+        $repo = ReleaseRepo::make();
+
+        $run = $repo->scriptRun('blame.php', 'label');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertStringContainsString(
+            '    • public method Fixture\Thing::label()' . PHP_EOL,
+            $run->output,
+            $run->describe(),
+        );
+        $this->assertStringContainsString(
+            '    • public property Fixture\Thing::$label' . PHP_EOL,
+            $run->output,
+            $run->describe(),
+        );
+        $this->assertStringContainsString('In the surface now: 2 symbol(s)' . PHP_EOL, $run->output, $run->describe());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

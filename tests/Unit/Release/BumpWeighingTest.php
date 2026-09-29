@@ -259,6 +259,78 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
+     * The case the third inventory file was added for: a tree with no tag at all. The
+     * public-API signal diffs the tree against the last tag, so with no tag there is no
+     * "before" for it to see a removal in, and the weighing says so — the notes are what
+     * decide a first release. A written-down inventory is the one thing that can still
+     * witness the removal, and a config key or a constant is what it has to have written
+     * down to do it, since a method is the only kind of row the other signal would have
+     * caught anyway.
+     *
+     * The tag diff is not merely silent here; it has nothing to diff. So the removal comes
+     * from the inventory and nowhere else, which is what makes this a test of the rows
+     * rather than of the signal that was already there.
+     */
+    public function test_a_constant_removed_with_no_tag_at_all_is_witnessed_by_the_inventory_alone(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+
+        // Stamped `(no tag)`, which is the stamp a tree with no releases writes — so the
+        // inventory is fresh rather than stale, and is weighed without a tag to check it
+        // against.
+        $repo->refreshInventory();
+        $repo->dropClassConstant();
+        $repo->commit('chore: keep an inventory');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue($run->said('no release tag yet'), $run->describe());
+        $this->assertTrue($run->said('fresh, weighed against (no tag)'), $run->describe());
+        $this->assertTrue(
+            $run->said('removed public constant Fixture\\Thing::VERSION'),
+            $run->describe(),
+        );
+        $this->assertSame(
+            'minor  (weighed: a breaking change, which is a minor while the package is pre-1.0)',
+            $run->plan('bump'),
+            $run->describe(),
+        );
+
+        // And nothing about the tree's files or methods moved with it: the constant is a row
+        // only the third file holds.
+        $this->assertFalse($run->said('removed public method'), $run->describe());
+    }
+
+    /**
+     * An inventory with two of its three files: the rule that makes a third file safe to add
+     * at all, and the state every tree is in the first time it is weighed after one exists.
+     *
+     * A file that is not there cannot say whether the rows it should hold were never written
+     * or were just removed, so it is reported as incomplete rather than read as an empty file —
+     * which would count every config key and constant in the tree as added since the last
+     * release, and raise a bump nothing changed asked for.
+     */
+    public function test_an_inventory_missing_one_of_its_files_is_incomplete_and_never_moves_the_bump(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+
+        $repo->refreshInventory();
+        $repo->commit('chore: keep an inventory');
+        $repo->drop('surface.tsv');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('no complete inventory to weigh against — surface.tsv missing'),
+            $run->describe(),
+        );
+        $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
+    }
+
+    /**
      * Nothing a signal may do: an inventory that is merely missing is not a reason to
      * change the version, and a release should not be blocked by a file that is
      * neither the version nor the tree.
@@ -307,12 +379,12 @@ final class BumpWeighingTest extends TestCase
         $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
         $this->assertSame('0.1.1  (tag v0.1.1)', $run->plan('next version'), $run->describe());
         $this->assertTrue(
-            $run->said('inventory refreshed — 2 file(s), 2 method(s), described as v0.1.1'),
+            $run->said('inventory refreshed — 2 file(s), 2 method(s), 3 key(s)/member(s), described as v0.1.1'),
             $run->describe(),
         );
 
         // Rewritten, not appended to: the stamp describes the tag that was just cut.
-        foreach (['files.tsv', 'methods.tsv'] as $inventory) {
+        foreach (['files.tsv', 'methods.tsv', 'surface.tsv'] as $inventory) {
             $this->assertStringContainsString(
                 'describes the tree at v0.1.1',
                 $repo->read($inventory),

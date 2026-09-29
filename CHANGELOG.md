@@ -4,6 +4,42 @@
 
 ### Added
 
+- **The inventory records what a consumer can name besides the files and the methods — config keys,
+  env vars, public constants, enum cases and public properties — in a third file, `surface.tsv`.**
+  The inventory is the one versioning signal that does not need a tag: `bin/release.php` diffs the
+  public surface of `src/` and `config/` against the last tag, so a tree with no tag at all has
+  nothing for that signal to see a removal in, and the weighing says so ("the notes decide"). What
+  it could not see even with a tag is the *moment*: a config key removed in an unreleased commit and
+  a key removed before the tag are one diff to it. A stored row is its own "before", which is why
+  these are written down at all — an installation that sets `swrr.…` learns a key is gone when the
+  key stops being read, and there was nothing in the package that could tell it sooner. The rows are
+  `kind`, `symbol`, `file`, one per line like the other two files, and the kind is the word the
+  report uses, so a removal reads as `removed public constant Fixture\Thing::VERSION`.
+
+  A third file changes what a missing one means, so the inventory is now weighed **as a whole or not
+  at all**: a file that is not there cannot say whether the rows it should hold were never written or
+  were just removed, and reading it as an empty one would report every config key and constant in the
+  tree as added since the last release — a minor nobody asked for. A tree whose inventory predates
+  this file is told its inventory is *incomplete* and the notes and the tag diff carry the weighing,
+  which is the state this repository is in until the next release writes all three.  `bin/release.php`
+  writes and commits them together, stamped with the tag it creates, and `bin/inventory.php --check`
+  compares and reports all three.
+
+  Writing the rows exposed a fault in the symbol reader they go through: a declared type stands
+  between the visibility and the variable it modifies (`public string $label`), and the reader walked
+  back from the variable and stopped at the type name — so every **typed** property was invisible, to
+  this file *and* to the public-API signal that shares the reader. Fourteen are visible in this
+  package now, and a typed property in a consumer's class is caught as a removal where it used to be
+  invisible to both. Pinned by three cases in `InventoryTest`
+  (`test_the_surface_rows_record_the_keys_and_members_a_tag_diff_cannot`,
+  `test_check_reports_a_constant_the_tree_no_longer_declares`,
+  `test_check_reports_a_config_key_the_file_no_longer_returns`) and two in `BumpWeighingTest`
+  (`test_a_constant_removed_with_no_tag_at_all_is_witnessed_by_the_inventory_alone`,
+  `test_an_inventory_missing_one_of_its_files_is_incomplete_and_never_moves_the_bump`), and each rule
+  is measured against its own regression: not reporting a removed row fails one test, reading an
+  incomplete inventory as an empty one fails one, and restoring the typed-property behaviour fails
+  two.
+
 - **`php bin/blame.php SYMBOL` reports which of the four signals names a class, a method, a constant
   or a config key, and what that signal contributed to the bump.** The plan answers "what version is
   next"; this answers the question a contributor has afterwards — a `feat:` commit with no changelog

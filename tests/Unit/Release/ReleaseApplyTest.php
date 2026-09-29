@@ -32,7 +32,7 @@ final class ReleaseApplyTest extends TestCase
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue($run->said('committed and tagged v1.1.0'), $run->describe());
-        $this->assertTrue($run->said('inventory refreshed — 2 file(s), 2 method(s), described as v1.1.0'), $run->describe());
+        $this->assertTrue($run->said('inventory refreshed — 2 file(s), 2 method(s), 3 key(s)/member(s), described as v1.1.0'), $run->describe());
 
         // The tag exists, and the commit under it is the release's own.
         $this->assertStringContainsString('v1.1.0', $repo->tags());
@@ -53,7 +53,7 @@ final class ReleaseApplyTest extends TestCase
         // that stamp is the entire contract with the next release.
         $this->assertStringContainsString('describes the tree at v1.1.0', $repo->read('files.tsv'));
         $this->assertStringContainsString('describes the tree at v1.1.0', $repo->read('methods.tsv'));
-        $this->assertStringContainsString('files.tsv', $repo->git('ls-files', 'files.tsv', 'methods.tsv'));
+        $this->assertStringContainsString('files.tsv', $repo->git('ls-files', 'files.tsv', 'methods.tsv', 'surface.tsv'));
 
         // Everything the release wrote was committed, so the tag points at the tree.
         $this->assertSame('', trim($repo->git('status', '--porcelain', '--untracked-files=no', '--', '.')));
@@ -357,6 +357,12 @@ final class ReleaseApplyTest extends TestCase
         self::assertSame($expected, substr_count($haystack, $needle), $haystack);
     }
 
+    /**
+     * The fixture's class with its `weight()` gone and everything else it declares still
+     * there, so the change this round trip weighs is one row rather than the four a whole
+     * class replaced would be — the constant and the property are rows of the inventory now,
+     * and dropping them would put two more changes into the same verdict.
+     */
     private static function thingWithoutWeight(): string
     {
         return <<<'PHP'
@@ -366,6 +372,10 @@ final class ReleaseApplyTest extends TestCase
 
         class Thing
         {
+            public const VERSION = '1';
+
+            public string $label = 'thing';
+
             public function label(): string
             {
                 return 'thing';

@@ -46,7 +46,7 @@ report the next version, it decides it.
 | Branch alias | Both dev-lane aliases (`dev-main`, `dev-dev`) are kept on the line being developed (see below) |
 | Commit | `Release vX.Y.Z`, touching only `CHANGELOG.md` and, when it moves, `composer.json` |
 | Tag | Annotated: `git tag -a vX.Y.Z -m vX.Y.Z` |
-| Inventory | `files.tsv` and `methods.tsv` are rewritten in the same commit, stamped with the tag being created (see [the inventory](#the-inventory)) |
+| Inventory | `files.tsv`, `methods.tsv` and `surface.tsv` are rewritten in the same commit, stamped with the tag being created (see [the inventory](#the-inventory)) |
 
 `--dry-run` prints all of the above, the CHANGELOG head after promotion, and the
 exact git commands it would run — without writing, committing or tagging
@@ -80,23 +80,30 @@ no bump flag can talk the script out of it.
 
 ## The inventory
 
-`files.tsv` and `methods.tsv` sit at the package root. `bin/release.php` writes
-them in the release commit, next to the CHANGELOG, and the next release reads them
-as its fourth signal. They are what a tag is not always able to be: a written-down
-list of what was shipped, so a renamed file or a method that changed shape can be
-seen rather than remembered — including where the history gives no useful tag to
-diff against.
+`files.tsv`, `methods.tsv` and `surface.tsv` sit at the package root. `bin/release.php`
+writes them in the release commit, next to the CHANGELOG, and the next release reads
+them as its fourth signal. They are what a tag is not always able to be: a
+written-down list of what was shipped, so a renamed file, a method that changed shape
+or a config key that was dropped can be seen rather than remembered — including where
+the history gives no useful tag to diff against.
 
 | File | One row per | Columns |
 |---|---|---|
 | `files.tsv` | file under `src/` or `config/` | `name`, `path`, `symbol` — the class the file declares, or `(none)` for a config file |
 | `methods.tsv` | public method | `method`, `file`, `class`, `signature` — the signature being required/total argument counts and the shape of each parameter |
+| `surface.tsv` | config key, env var, public constant, enum case or public property | `kind`, `symbol`, `file` — the kind being the word the report uses, so a removal reads as `removed public constant Acme\Thing::VERSION` |
+
+The third file is the one that does not need a tag. The public-API signal diffs the
+tree against the last tag, so a tree with one — or with none — has nothing for it to
+see a removal in, and the rows a consumer sets rather than imports are exactly the ones
+nobody notices went: an installation that sets `swrr.…` finds out when the key stops
+being read. A stored row is its own "before", which is why these are written down.
 
 TSV rather than JSON, and not for speed: a row is `explode("\t", $line)`, there is
 no quoting rule to get wrong, and one symbol per line means `git diff` shows a
 rename as two lines a person can read.
 
-Both files open with two `#` lines — what the file is, and which tag it
+All three files open with two `#` lines — what the file is, and which tag it
 *describes*. The stamp is the whole safety property:
 
 - it names the tag being released from → the rows are evidence, and the tree is
@@ -109,11 +116,11 @@ That is the one direction a versioning signal must never be wrong in: believing 
 lazily refreshed inventory would ship a breaking change as a patch. Losing one
 costs a second opinion and nothing else, because no signal ever lowers the bump.
 
-Regenerating by hand is for looking — `php bin/inventory.php` rewrites both files
-with the latest tag and prints the evidence that rewrite discarded:
+Regenerating by hand is for looking — `php bin/inventory.php` rewrites all three
+files with the latest tag and prints the evidence that rewrite discarded:
 
 ```bash
-php bin/inventory.php            # write both files, stamp them with the latest tag
+php bin/inventory.php            # write all three files, stamp them with the latest tag
 php bin/inventory.php --check    # compare, write nothing, exit 1 when out of step
 ```
 
@@ -142,6 +149,15 @@ and the rows of the other one are written without being described as discarded. 
 is the state an interrupted release leaves — the two files are written by one call and
 only the second can fail — so the next run of either writer finishes the pair rather
 than reporting a loss nobody suffered.
+
+The rules about the third file are pinned by name:
+`InventoryTest::test_the_surface_rows_record_the_keys_and_members_a_tag_diff_cannot`
+holds the rows — and that a *typed* public property is one of them, which is what a
+reader that stopped at the type name could not see —
+`BumpWeighingTest::test_a_constant_removed_with_no_tag_at_all_is_witnessed_by_the_inventory_alone`
+holds the weighing it exists for, and
+`BumpWeighingTest::test_an_inventory_missing_one_of_its_files_is_incomplete_and_never_moves_the_bump`
+holds the whole-or-nothing rule.
 
 Do **not** wire `--check` into CI. An inventory kept in step with every commit can
 never witness a change, and witnessing one is the only thing it is for.
@@ -262,7 +278,7 @@ cannot be read off anything else. Passing it now exits `2` rather than being
 ignored, because a flag that silently does nothing is worse than one that is
 refused.
 
-An out-of-date `files.tsv` or `methods.tsv` is not a rail either. It is reported
+An out-of-date `files.tsv`, `methods.tsv` or `surface.tsv` is not a rail either. It is reported
 in the plan and then ignored: a release should not be blocked by a file that is
 neither the version nor the tree. Ignored is not forgotten, though — a release that
 proceeds **replaces** the file with the stamp of the tag it just cut, so "stale" is a
@@ -309,7 +325,7 @@ with the evidence behind them:
 | CHANGELOG | The `###` headings of `## Unreleased`. `### Removed` is breaking; `### Added`, `### Changed` and `### Deprecated` are a minor; `### Fixed` and `### Security` are a patch. A `### Breaking changes` heading, or the uppercase `BREAKING` marker, is breaking |
 | commits | The subjects and footers of the commits since the last tag, read as Conventional Commits: `feat` is a minor, `fix`, `docs`, `test`, `chore`, `refactor`, `perf`, `style`, `build`, `ci` and `revert` are a patch, and a `!` or a `BREAKING CHANGE:` footer is breaking. Release commits and merges are skipped |
 | public API | `src/` and `config/` at HEAD against the last tag: a class, public method, constant, enum case, public property, config key or env var that disappeared is breaking; one that appeared is a minor; a method that gained a required argument is breaking |
-| inventory | `files.tsv` and `methods.tsv` as the last release wrote them, against the tree now — read only when their stamp names the tag being released from, and reported as *stale* and skipped when it does not (see [the inventory](#the-inventory)) |
+| inventory | `files.tsv`, `methods.tsv` and `surface.tsv` as the last release wrote them, against the tree now — read only when their stamp names the tag being released from, and reported as *stale* and skipped when it does not (see [the inventory](#the-inventory)) |
 
 A commit with no `type:` prefix reads as a patch. It cannot raise the bump by
 accident, and it cannot lower one either — the notes and the surface still say
@@ -317,8 +333,17 @@ what they say.
 
 The inventory is the one signal that does not need a tag, and the one that is
 ever skipped: it is skipped when its stamp does not name the tag being released
-from. No signal may lower the bump — each is read on its own and the loudest wins
-— so a skipped or absent inventory costs a second opinion and nothing else.
+from, and it is skipped whole when one of its files is not there at all. No signal
+may lower the bump — each is read on its own and the loudest wins — so a skipped or
+absent inventory costs a second opinion and nothing else.
+
+The whole-or-nothing rule is what makes a file that was added later safe to weigh. A
+file that is not there cannot say whether the rows it should hold were never written
+or were just removed, and reading it as an empty one would report every config key and
+constant in the tree as added since the last release — a minor the change did not ask
+for. So a tree whose inventory predates `surface.tsv` is told its inventory is
+incomplete, and the tag diff and the notes carry the weighing until the next release
+writes all three.
 
 With no tag yet there is nothing to diff against, so only the notes are read —
 which is why the first release is `0.1.0` when its notes have anything under
@@ -450,9 +475,9 @@ From the second release on there is a real base to compare against and the bump
 is weighed like any other, with `--ignore-policy` back to being the escape hatch
 for a weighing that misread the tree.
 
-The first release is also the first time the inventory is written: `files.tsv`
-and `methods.tsv` land in the same commit, stamped `v0.0.1`, and from the second
-release on they are a signal like any other.
+The first release is also the first time the inventory is written: `files.tsv`,
+`methods.tsv` and `surface.tsv` land in the same commit, stamped `v0.0.1`, and from
+the second release on they are a signal like any other.
 
 Dev tags ahead of it are cut from `dev` rather than `main`, and are named with
 `--version=0.0.1-alphaN` — see [prerelease tags](#prerelease-dev-tags). They change

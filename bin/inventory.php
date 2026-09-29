@@ -4,18 +4,26 @@
 declare(strict_types=1);
 
 /**
- * bin/inventory.php — write files.tsv and methods.tsv from the working tree.
+ * bin/inventory.php — write the inventory — files.tsv, methods.tsv, surface.tsv —
+ * from the working tree.
  *
- * WHAT THE TWO FILES ARE FOR
- * --------------------------
+ * WHAT THE THREE FILES ARE FOR
+ * ----------------------------
  *   `composer release -- --weigh` decides the bump from four signals, and the
- *   inventory is one of them: the files this package ships and the public methods
- *   they declare, written down, so a file that was renamed or a method that
- *   changed shape can be seen rather than remembered.
+ *   inventory is one of them: the files this package ships, the public methods they
+ *   declare, and the keys and members a consumer can name besides them — config
+ *   keys, env vars, public constants, enum cases and public properties — written
+ *   down, so a file that was renamed, a method that changed shape or a constant or
+ *   a config key that was dropped can be seen rather than remembered.
+ *
+ *   The third file is the one that does not need a tag. The public-API signal diffs
+ *   the tree against the last tag, so a tree with no tag has nothing for it to see a
+ *   removal in; a stored row is its own "before", which is why the constants and the
+ *   config keys are written down at all.
  *
  * IT IS NOT A SECOND TREE TO KEEP IN STEP BY HAND
  * ----------------------------------------------
- *   `bin/release.php` writes both files itself, in the same commit as the
+ *   `bin/release.php` writes all three files itself, in the same commit as the
  *   CHANGELOG promotion, stamped with the tag it is creating. The stamp is the
  *   whole safety property: a file that describes the release being cut is
  *   evidence, and a file regenerated at some other moment is not — so the release
@@ -25,7 +33,7 @@ declare(strict_types=1);
  *
  * USAGE
  * -----
- *   php bin/inventory.php                 write both files, stamped with the latest tag
+ *   php bin/inventory.php                 write all three files, stamped with the latest tag
  *   php bin/inventory.php --check         compare, write nothing, exit 1 when out of step
  *   php bin/inventory.php --root=PATH     run against another checkout
  *   php bin/inventory.php --help
@@ -77,9 +85,16 @@ $paths = inventoryPaths($root);
 // What the files on disk say, read before anything can overwrite them. A rewrite
 // that discards a change the last release recorded is worth saying out loud: the
 // inventory is only evidence while it still describes an older tree.
+//
+// Both of them, or neither: a rewrite can only lose a record it read, and a pair
+// that is half there — the state an interrupted release leaves, since the files are
+// written by one call and any but the first can fail — has no record on one side.
+// Diffing against a side that was never read reports every row of the other side as
+// a change this run is discarding, which names a change nothing ever recorded.
 $stored = [
     'files' => readInventory($paths['files']),
     'methods' => readInventory($paths['methods']),
+    'surface' => readInventory($paths['surface']),
 ];
 
 $result = syncInventory($root, $tag, !$check);
@@ -87,9 +102,10 @@ $result = syncInventory($root, $tag, !$check);
 if ($check) {
     if ($result['current']) {
         note(sprintf(
-            'inventory is current — %d files, %d public methods, described as %s',
+            'inventory is current — %d files, %d public methods, %d key(s)/member(s), described as %s',
             $result['count']['files'],
             $result['count']['methods'],
+            $result['count']['surface'],
             $tag,
         ));
 
@@ -100,7 +116,7 @@ if ($check) {
 
     fwrite(STDERR, PHP_EOL . '✗ The inventory is out of step with the tree:' . PHP_EOL . PHP_EOL);
 
-    foreach (['files', 'methods'] as $file) {
+    foreach (['files', 'methods', 'surface'] as $file) {
         $name = basename($paths[$file]);
         $onDisk = @file_get_contents($paths[$file]);
 
@@ -129,23 +145,21 @@ if ($check) {
 }
 
 if (!$result['written']) {
-    fwrite(STDERR, '✗ Could not write ' . basename($paths['files']) . ' / ' . basename($paths['methods']) . '.' . PHP_EOL);
+    fwrite(STDERR, '✗ Could not write ' . basename($paths['files']) . ' / ' . basename($paths['methods'])
+        . ' / ' . basename($paths['surface']) . '.' . PHP_EOL);
 
     exit(1);
 }
 
-// Both of them, or neither: a rewrite can only lose a record it read, and a pair
-// that is half there — the state an interrupted release leaves, since the files are
-// written by one call and any but the first can fail — has no record on one side.
-// Diffing against a side that was never read reports every row of the other side as
-// a change this run is discarding, which names a change nothing ever recorded.
-$evidence = ($stored['files'] === null || $stored['methods'] === null)
+$evidence = ($stored['files'] === null || $stored['methods'] === null || $stored['surface'] === null)
     ? []
     : diffInventory($stored, inventoryRecords($root))['evidence'];
 
 note(sprintf('%s — %d files, described as %s', basename($paths['files']), $result['count']['files'], $tag));
 note(sprintf('%s — %d public methods', basename($paths['methods']), $result['count']['methods']));
-note('stage them with: git add -- ' . basename($paths['files']) . ' ' . basename($paths['methods']));
+note(sprintf('%s — %d key(s) and member(s)', basename($paths['surface']), $result['count']['surface']));
+note('stage them with: git add -- ' . basename($paths['files']) . ' ' . basename($paths['methods'])
+    . ' ' . basename($paths['surface']));
 
 if ($evidence !== []) {
     note(sprintf('this rewrite discarded the record of %d change(s):', count($evidence)));
@@ -158,7 +172,7 @@ if ($evidence !== []) {
         echo '      … and ' . (count($evidence) - 3) . ' more' . PHP_EOL;
     }
 
-    note('the release script is the intended writer: it refreshes both files in the release commit, where they still describe the last release');
+    note('the release script is the intended writer: it refreshes all three files in the release commit, where they still describe the last release');
 }
 
 exit(0);
@@ -211,7 +225,7 @@ function note(string $message): void
 function usage(): void
 {
     echo <<<'TXT'
-    bin/inventory.php — write files.tsv and methods.tsv from the working tree.
+    bin/inventory.php — write files.tsv, methods.tsv and surface.tsv from the working tree.
 
     Usage:
       php bin/inventory.php [options]
@@ -221,7 +235,7 @@ function usage(): void
           --root=PATH      Package root to inventory (default: the parent of bin/).
       -h, --help           Show this help.
 
-    The release script refreshes both files in the release commit, so running this
+    The release script refreshes all three files in the release commit, so running this
     by hand is for seeing what changed — not for keeping them current.
 
     TXT;

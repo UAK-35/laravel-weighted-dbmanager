@@ -1904,12 +1904,16 @@ docs/                    design records for decisions that are not obvious from 
 bin/checks.php           every local check, summed up in one summary
 bin/counts.php           writes the counts a record states from the code that owns them
 bin/release.php          tag-driven releases (see RELEASING.md)
-bin/surface.php          the symbol reader and differ both release commands share
-bin/inventory.php        writes files.tsv and methods.tsv from the working tree
+bin/surface.php          the symbol reader, the surface differ and the inventory format
+                         the release commands share
+bin/weighing.php         the four signals and the weighing release.php and blame.php share
+bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv from the working tree
+bin/blame.php            which signal names one symbol, and what it contributed to the bump
 bin/publish-config.php   publishes the sample config into an application
-files.tsv, methods.tsv   what the last release shipped — its files and their public
-                         methods, stamped with the tag they describe, refreshed by
-                         bin/release.php and read back by the next release
+files.tsv, methods.tsv,  what the last release shipped — its files, their public methods,
+surface.tsv              and the config keys, env vars, constants and properties a
+                         consumer can name, stamped with the tag they describe,
+                         refreshed by bin/release.php and read back by the next release
 ```
 
 ## Testing
@@ -1995,13 +1999,13 @@ composer release -- --weigh --push       # ...and push branch + tag (or push you
 `0.0.0` when there are none) and the bump out of the changes themselves:
 `--weigh` reads four signals — the Unreleased notes, the commits since the last
 tag, the public surface of `src/` and `config/`, and the inventory (`files.tsv`,
-`methods.tsv`) the previous release wrote — and applies the policy in
+`methods.tsv`, `surface.tsv`) the previous release wrote — and applies the policy in
 [RELEASING.md](RELEASING.md) — a fix is a patch, a new command or config key is a
 minor, a removed or renamed public symbol is a minor while 0.x and a major after
 1.0.0. Declaring a smaller bump instead (`--minor`, `--major`,
 `--version=X.Y.Z`) stops the release with exit code 1 and names the change that
 forbids it, so a breaking change cannot be shipped as a patch. It then promotes
-`## Unreleased` to the released heading with a compare link, refreshes both
+`## Unreleased` to the released heading with a compare link, refreshes the three
 inventory files in the same commit, keeps both dev-lane branch aliases
 (`dev-main`, `dev-dev`) on the line being developed, and refuses to continue on a
 dirty tree, the wrong branch, an existing tag, an empty release section, or a

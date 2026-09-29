@@ -33,13 +33,16 @@ declare(strict_types=1);
  *                 Conventional Commits (feat, fix, docs, `!`, BREAKING CHANGE)
  *     public API  the classes, public methods, constants, cases, properties and
  *                 config keys of src/ and config/ at HEAD versus the last tag
- *     inventory   files.tsv and methods.tsv as the last release wrote them,
+ *     inventory   files.tsv, methods.tsv and surface.tsv as the last release wrote
  *                 them, against the tree now — read only when their stamp names the
  *                 tag being released from, so a stale one is reported, not trusted
  *
- *   The inventory is the one signal that does not need a tag: this script writes
- *   both files into the release commit itself, stamped with the tag it is creating,
- *   so the next release has a written-down copy of the last one to weigh against.
+ *   The inventory is the one signal that does not need a tag: this script writes all
+ *   three files into the release commit itself, stamped with the tag it is creating,
+ *   so the next release has a written-down copy of the last one to weigh against —
+ *   and `surface.tsv` carries the config keys, env vars, constants, cases and
+ *   properties, which are the rows that witness a removal on a tree with no tag at
+ *   all, since the public-API signal above diffs two tags.
  *
  *   The name is the verb on purpose: it does not only work the bump out, it
  *   takes it, which is why it is not called --detect.
@@ -533,9 +536,10 @@ $inventoryLine = $weighing['inventory']['stamp'] === '(missing)'
 
 printf("  release notes %d bullet(s) in the promoted section%s", $promoted['entries'], PHP_EOL);
 printf(
-    "  inventory     %d file(s), %d method(s)  (%s)%s",
+    "  inventory     %d file(s), %d method(s), %d key(s)/member(s)  (%s)%s",
     $weighing['inventory']['counts']['files'],
     $weighing['inventory']['counts']['methods'],
+    $weighing['inventory']['counts']['surface'],
     $inventoryLine,
     PHP_EOL,
 );
@@ -618,16 +622,18 @@ $inventory = syncInventory($root, $tag, true);
 
 if (!$inventory['written']) {
     fail(sprintf(
-        'Could not write %s / %s.',
+        'Could not write %s / %s / %s.',
         relativeTo($root, $inventoryFiles['files']),
         relativeTo($root, $inventoryFiles['methods']),
+        relativeTo($root, $inventoryFiles['surface']),
     ));
 }
 
 note(sprintf(
-    'inventory refreshed — %d file(s), %d method(s), described as %s',
+    'inventory refreshed — %d file(s), %d method(s), %d key(s)/member(s), described as %s',
     $inventory['count']['files'],
     $inventory['count']['methods'],
+    $inventory['count']['surface'],
     $tag,
 ));
 

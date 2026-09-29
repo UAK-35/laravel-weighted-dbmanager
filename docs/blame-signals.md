@@ -135,9 +135,11 @@ Three smaller decisions came out of building it:
 | `BlameTest::test_a_signal_that_names_it_below_the_top_did_not_contribute` | named and responsible kept apart: the commits signal is `caught` at a patch, the bump came from the notes, and the report says so and lists what carried it |
 | `BlameTest::test_a_name_no_signal_and_no_surface_holds_exits_one` | the exit-1 answer, and the paragraph for a name that is not a public symbol |
 | `BlameTest::test_a_symbol_that_did_not_change_is_held_but_names_no_signal` | a symbol present at both ends that nothing moved is held by both maps and exits `0` — the answer that is not a miss |
+| `BlameTest::test_a_removal_is_named_and_contributed_with_the_0x_caveat` | a removed constant reads as breaking, contributes, and the bump is the minor the 0.x policy asks for |
 | `BlameTest::test_the_inventory_can_be_the_only_signal_that_names_it` | a stored row the tree does not back: the inventory alone names it, and the surface holds it at neither end |
 | `BlameTest::test_a_changelog_with_no_unreleased_heading_is_reported_rather_than_read_as_quiet` | the third meaning of a quiet signal — nothing to read rather than nothing found |
 | `BlameTest::test_quotes_a_leading_slash_and_a_trailing_pair_are_all_the_same_query` | the three spellings of one name reduce to one query, byte for byte |
+| `BlameTest::test_a_fragment_finds_every_symbol_that_holds_it` | the match is a `contains`: half a name finds a method and a property together |
 | `BlameTest::test_naming_nothing_is_a_usage_error_and_exits_two` | no argument is a usage error, not an empty report |
 | `BlameTest::test_an_unknown_option_is_a_usage_error_and_exits_two` | an argument the command does not take is refused rather than ignored — `--weigh` especially, since it looks like it should change the answer |
 | `BlameTest::test_two_names_is_a_usage_error_and_exits_two` | one symbol per run |

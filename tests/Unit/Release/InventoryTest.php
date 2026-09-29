@@ -45,7 +45,7 @@ final class InventoryTest extends TestCase
 
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertTrue(
-            $run->said('inventory is current — 2 files, 2 public methods, described as (no tag)'),
+            $run->said('inventory is current — 2 files, 2 public methods, 3 key(s)/member(s), described as (no tag)'),
             $run->describe(),
         );
 
@@ -228,6 +228,76 @@ final class InventoryTest extends TestCase
     // surface.tsv: the rows that do not need a tag
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * The third file, and the rows it is for: everything a consumer can name that is not
+     * a file and not a method — a config key, a public constant, a public property. They
+     * are the half of the inventory that witnesses a removal on a tree with no tag at all,
+     * because the public-API signal diffs two tags and a tree with one has nothing for it
+     * to see a removal in.
+     *
+     * The property in the fixture is typed, which is worth stating: a type name sits between
+     * the visibility and the variable, and the reader used to stop walking at it, so every
+     * property that declared one was invisible — to this file and to the tag diff both.
+     */
+    public function test_the_surface_rows_record_the_keys_and_members_a_tag_diff_cannot(): void
+    {
+        $repo = self::inventoried();
+        $surface = $repo->read('surface.tsv');
+
+        $this->assertStringContainsString('describes the tree at (no tag)', $surface);
+        $this->assertStringContainsString("config\tenabled\tconfig/sample.php", $surface);
+        $this->assertStringContainsString("const\tFixture\\Thing::VERSION\tsrc/Thing.php", $surface);
+        $this->assertStringContainsString("property\tFixture\\Thing::\$label\tsrc/Thing.php", $surface);
+
+        // One row per line, in the columns the header names, like the other two files.
+        $this->assertStringContainsString("# kind\tsymbol\tfile", $surface);
+        $this->assertCount(3, array_slice(explode("\n", trim($surface)), 2));
+    }
+
+    /**
+     * The drift the file exists to catch: a constant the tree no longer declares. The rows
+     * are named the way the reader spells them, so the report reads as the removal rather
+     * than as a line that moved.
+     */
+    public function test_check_reports_a_constant_the_tree_no_longer_declares(): void
+    {
+        $repo = self::inventoried();
+        $repo->dropClassConstant();
+
+        $run = $repo->scriptRun('inventory.php', '--check');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue($run->refused('surface.tsv: 1 line(s) stale: 1 gone, 0 new'), $run->describe());
+        $this->assertTrue(
+            $run->refused('gone: const | Fixture\Thing::VERSION | src/Thing.php'),
+            $run->describe(),
+        );
+
+        // The other two files are untouched by it: a constant is nothing to files.tsv or
+        // methods.tsv, which is why the file it lives in has to be noticed separately.
+        $this->assertFalse($run->refused('files.tsv'), $run->describe());
+        $this->assertFalse($run->refused('methods.tsv'), $run->describe());
+    }
+
+    /**
+     * The same drift one key over: a config key is what an installation sets, so a removed
+     * one breaks every installation that sets it, and it is the row a consumer is most
+     * likely to notice only after upgrading.
+     */
+    public function test_check_reports_a_config_key_the_file_no_longer_returns(): void
+    {
+        $repo = self::inventoried();
+        $repo->dropConfigKey('enabled');
+
+        $run = $repo->scriptRun('inventory.php', '--check');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->refused('gone: config | enabled | config/sample.php'),
+            $run->describe(),
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // The root it is pointed at
     // ─────────────────────────────────────────────────────────────────────────
@@ -371,7 +441,7 @@ final class InventoryTest extends TestCase
         $this->assertTrue($run->said('this rewrite discarded the record of 1 change(s):'), $run->describe());
         $this->assertTrue($run->said('      • removed public method Fixture\Thing::weight()'), $run->describe());
         $this->assertTrue(
-            $run->said('the release script is the intended writer: it refreshes both files in the release commit'),
+            $run->said('the release script is the intended writer: it refreshes all three files in the release commit'),
             $run->describe(),
         );
 
@@ -481,11 +551,9 @@ final class InventoryTest extends TestCase
         $run = $repo->scriptRun('inventory.php');
 
         $this->assertSame(1, $run->exitCode, $run->describe());
-        $this->assertTrue($run->refused('✗ Could not write files.tsv / methods.tsv.'), $run->describe());
+        $this->assertTrue($run->refused('✗ Could not write files.tsv / methods.tsv / surface.tsv.'), $run->describe());
 
-        // Nothing half-written: the failure is reported before either file is promised,
-        // and the pair is written by the same call.
-        // Neither file is left half-written: the pair is promised together, so the
+        // Neither file is left half-written: the set is promised together, so the
         // second is not attempted once the first has failed.
         $this->assertFalse($repo->exists('methods.tsv'), 'the second file is not written when the first cannot be');
     }
@@ -508,11 +576,16 @@ final class InventoryTest extends TestCase
         $run = $repo->scriptRun('inventory.php');
 
         $this->assertSame(1, $run->exitCode, $run->describe());
-        $this->assertTrue($run->refused('✗ Could not write files.tsv / methods.tsv.'), $run->describe());
+        $this->assertTrue($run->refused('✗ Could not write files.tsv / methods.tsv / surface.tsv.'), $run->describe());
         $this->assertTrue($repo->exists('files.tsv'), $run->describe(), 'the first write is not undone by the second failing');
         $this->assertTrue(is_dir($repo->path('methods.tsv')), $run->describe());
     }
 
+    /**
+     * The fixture's class with one method gone — and everything else it declares left in
+     * place, so the change these tests are about is one row rather than the three a whole
+     * class replaced would be.
+     */
     private static function thingWithoutWeight(): string
     {
         return <<<'PHP'
@@ -522,6 +595,10 @@ final class InventoryTest extends TestCase
 
         class Thing
         {
+            public const VERSION = '1';
+
+            public string $label = 'thing';
+
             public function label(): string
             {
                 return 'thing';

@@ -3,15 +3,16 @@
 declare(strict_types=1);
 
 /**
- * bin/surface.php — the shared half of bin/release.php and bin/inventory.php.
+ * bin/surface.php — the shared half of every bin/ command that reads this package.
  *
  * WHAT A SURFACE IS
  * -----------------
  *   A surface is what a consumer of this package can name: the classes,
  *   interfaces, traits and enums a file declares, and of each one the public
  *   methods, constants, enum cases and properties — plus, for a config file, the
- *   keys it returns and the env vars it reads. Both commands need it: the release
- *   script weighs it against the last tag, and the inventory writes it down.
+ *   keys it returns and the env vars it reads. Every command needs it: the release
+ *   script weighs it against the last tag, bin/blame.php asks whether it holds one
+ *   name, and the inventory writes it down.
  *
  *   The reading is deliberately syntactic, from tokens rather than a semantic
  *   model. A changed parent class is not reported, and a member marked `@internal`
@@ -24,7 +25,8 @@ declare(strict_types=1);
  *     levels      the order patch < minor < breaking that everything compares on
  *     reading     a surface out of the working tree, or out of a tag, via git
  *     diffing     two surfaces compared, and a symbol key turned into a sentence
- *     inventory   files.tsv and methods.tsv: their format, their reader, their writer
+ *     inventory   files.tsv, methods.tsv and surface.tsv: their format, their reader,
+ *                 their writer
  *
  * NO SHEBANG, ON PURPOSE
  * ----------------------
@@ -467,12 +469,34 @@ function visibilityBefore(array $tokens, int $index, bool $explicitOnly = false)
                     $readonly = true;
 
                     continue 2;
+                case T_STRING:
+                case T_ARRAY:
+                case T_CALLABLE:
+                case T_NAME_QUALIFIED:
+                case T_NAME_FULLY_QUALIFIED:
+                case T_NAME_RELATIVE:
+                    // A declared type sits between the visibility and the variable it
+                    // modifies — `public string $label`, `private Foo $dep` — both in a class
+                    // body and in a property promoted through a constructor's parameter list.
+                    // Walking past it is what makes a *typed* property a member of the
+                    // surface: the walk used to stop at the type name, so every property that
+                    // declared one was invisible, to the tag diff as well as to the
+                    // inventory. Nothing else can stand between a visibility and a variable,
+                    // so this cannot walk past the member it started in.
+                    continue 2;
                 default:
                     return $readonly ? 'public' : null;
             }
         }
 
         if (trim($token) === '') {
+            continue;
+        }
+
+        // The punctuation of a nullable, union or intersection type: `public ?string $label`,
+        // `public int|string $x`. Reachable from a variable for the same reason a type name
+        // is — there is nothing else it can be.
+        if ($token === '?' || $token === '|' || $token === '&') {
             continue;
         }
 
@@ -963,7 +987,7 @@ function classKind(string $description): string
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Two files at the package root, both TSV, both with the same shape: a comment
+ * Three files at the package root, all TSV, all with the same shape: a comment
  * saying what it is and which tag it describes, a comment naming the columns, then
  * one record per line.
  *
@@ -977,13 +1001,14 @@ function classKind(string $description): string
  * than believed — an inventory in step with the tree cannot witness a change, and
  * that is the only thing it is for.
  *
- * @return array{files: string, methods: string}
+ * @return array{files: string, methods: string, surface: string}
  */
 function inventoryPaths(string $root): array
 {
     return [
         'files' => $root . '/files.tsv',
         'methods' => $root . '/methods.tsv',
+        'surface' => $root . '/surface.tsv',
     ];
 }
 
@@ -1013,19 +1038,27 @@ function inventoryCovers(string $root): array
 }
 
 /**
- * The rows the two files hold, read off the working tree: the files the package
- * ships and the public methods they declare.
+ * The rows the inventory holds, read off the working tree: the files the package
+ * ships, the public methods they declare, and everything else a consumer can name
+ * — config keys, env vars, public constants, enum cases and public properties.
  *
  * The `symbol` column is what stops a file rename from being mistaken for a move:
  * under PSR-4 the path and the class name are one fact, so a path that changed
  * while its symbol did not is the only kind of move that costs a consumer nothing.
  *
- * @return array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>}
+ * The third list is the one that exists for a tree with no tag to diff against. A
+ * tag diff needs two tags and a method's removal is visible to it; a config key or a
+ * constant removed since the inventory was written is visible to nothing but this,
+ * because the public-API signal compares the tree to a tag and has no "before" of its
+ * own when there is none.
+ *
+ * @return array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}
  */
 function inventoryRecords(string $root): array
 {
     $files = [];
     $methods = [];
+    $named = [];
 
     foreach (inventoryCovers($root) as $path) {
         $source = @file_get_contents($root . '/' . $path);
@@ -1061,13 +1094,35 @@ function inventoryRecords(string $root): array
                 'signature' => $description,
             ];
         }
+
+        // The rest of the surface: constants, enum cases and public properties, and —
+        // for a config file — the keys it returns and the env vars it reads. The
+        // parser already spells each one as `kind:name`, which is why a row is stored
+        // as its two halves rather than as the key.
+        $namedWith = $surface;
+
+        if (str_starts_with($path, 'config/')) {
+            $namedWith += configSurface($source);
+        }
+
+        foreach (array_keys($namedWith) as $key) {
+            [$kind, $name] = array_pad(explode(':', $key, 2), 2, $key);
+
+            if (in_array($kind, ['const', 'case', 'property', 'config', 'env'], true)) {
+                $named[] = ['kind' => $kind, 'symbol' => $name, 'file' => $path];
+            }
+        }
     }
 
     usort($files, static fn (array $a, array $b): int => $a['path'] <=> $b['path']);
 
     usort($methods, static fn (array $a, array $b): int => [$a['class'], $a['method']] <=> [$b['class'], $b['method']]);
 
-    return ['files' => $files, 'methods' => $methods];
+    // Grouped by kind and alphabetical inside it, so a diff shows one removal in one
+    // place rather than a file's worth of context around it.
+    usort($named, static fn (array $a, array $b): int => [$a['kind'], $a['symbol'], $a['file']] <=> [$b['kind'], $b['symbol'], $b['file']]);
+
+    return ['files' => $files, 'methods' => $methods, 'surface' => $named];
 }
 
 /**
@@ -1093,10 +1148,10 @@ function renderInventory(string $file, string $tag, array $columns, array $rows)
 }
 
 /**
- * The inventory as it should be for this tree and stamp: both files' bytes, and
+ * The inventory as it should be for this tree and stamp: every file's bytes, and
  * how many rows each holds.
  *
- * @return array{files: string, methods: string, count: array{files: int, methods: int}}
+ * @return array{files: string, methods: string, surface: string, count: array{files: int, methods: int, surface: int}}
  */
 function inventoryDocument(string $root, string $tag): array
 {
@@ -1105,12 +1160,17 @@ function inventoryDocument(string $root, string $tag): array
     return [
         'files' => renderInventory('files.tsv', $tag, ['name', 'path', 'symbol'], $records['files']),
         'methods' => renderInventory('methods.tsv', $tag, ['method', 'file', 'class', 'signature'], $records['methods']),
-        'count' => ['files' => count($records['files']), 'methods' => count($records['methods'])],
+        'surface' => renderInventory('surface.tsv', $tag, ['kind', 'symbol', 'file'], $records['surface']),
+        'count' => [
+            'files' => count($records['files']),
+            'methods' => count($records['methods']),
+            'surface' => count($records['surface']),
+        ],
     ];
 }
 
 /**
- * The one place the two files are compared and written, so both commands agree on
+ * The one place the three files are compared and written, so both commands agree on
  * what "out of step" means: the bytes on disk against the bytes this tree and
  * stamp produce, carriage returns normalised away first.
  *
@@ -1118,7 +1178,7 @@ function inventoryDocument(string $root, string $tag): array
  * release is how a file written at the wrong moment is caught, and it is the one
  * difference that must never be waved through.
  *
- * @return array{current: bool, written: bool, count: array{files: int, methods: int}}
+ * @return array{current: bool, written: bool, count: array{files: int, methods: int, surface: int}}
  */
 function syncInventory(string $root, string $tag, bool $write = true): array
 {
@@ -1127,7 +1187,7 @@ function syncInventory(string $root, string $tag, bool $write = true): array
 
     $current = true;
 
-    foreach (['files', 'methods'] as $file) {
+    foreach (['files', 'methods', 'surface'] as $file) {
         $onDisk = @file_get_contents($paths[$file]);
 
         if ($onDisk === false || str_replace(["\r\n", "\r"], "\n", $onDisk) !== $document[$file]) {
@@ -1140,7 +1200,8 @@ function syncInventory(string $root, string $tag, bool $write = true): array
     }
 
     $written = file_put_contents($paths['files'], $document['files']) !== false
-        && file_put_contents($paths['methods'], $document['methods']) !== false;
+        && file_put_contents($paths['methods'], $document['methods']) !== false
+        && file_put_contents($paths['surface'], $document['surface']) !== false;
 
     return ['current' => $current, 'written' => $written, 'count' => $document['count']];
 }
@@ -1199,6 +1260,67 @@ function readInventory(string $path): ?array
 }
 
 /**
+ * Two inventories' config keys, env vars, constants, enum cases and public
+ * properties, compared as symbols.
+ *
+ * The same two rules `surfaceDiff()` applies to a live surface, applied to two
+ * written-down ones instead: a row that disappeared is breaking, and one that
+ * appeared is a minor. A row cannot change shape — its kind is the row — so there is
+ * no third case, which is why these rows are stored as a kind and a name rather than
+ * as the description `surfaceDiff()` would have to compare.
+ *
+ * This is the half of the inventory that answers to a tree with no tag at all. The
+ * public-API signal diffs two tags, so with one tag there is nothing for it to see a
+ * removal in; a stored row is its own "before".
+ *
+ * @param list<array<string, string>> $stored the `surface.tsv` rows as the last release wrote them
+ * @param list<array{kind: string, symbol: string, file: string}> $current the rows for the tree now
+ * @return array{severity: string, evidence: list<string>}
+ */
+function surfaceRowDiff(array $stored, array $current): array
+{
+    $before = [];
+
+    foreach ($stored as $row) {
+        if (($row['kind'] ?? '') !== '' && ($row['symbol'] ?? '') !== '') {
+            $before[$row['kind'] . ':' . $row['symbol']] = true;
+        }
+    }
+
+    $after = [];
+
+    foreach ($current as $row) {
+        $after[$row['kind'] . ':' . $row['symbol']] = true;
+    }
+
+    $severity = 'patch';
+    $evidence = [];
+
+    foreach (array_keys($before) as $key) {
+        if (array_key_exists($key, $after)) {
+            continue;
+        }
+
+        $severity = 'breaking';
+        $evidence[] = 'removed ' . describeSymbol($key);
+    }
+
+    foreach (array_keys($after) as $key) {
+        if (array_key_exists($key, $before)) {
+            continue;
+        }
+
+        if (severityRank('minor') > severityRank($severity)) {
+            $severity = 'minor';
+        }
+
+        $evidence[] = 'added ' . describeSymbol($key);
+    }
+
+    return ['severity' => $severity, 'evidence' => $evidence];
+}
+
+/**
  * The inventory's verdict on the working tree, weighed exactly as the tag diff
  * weighs a surface.
  *
@@ -1209,8 +1331,12 @@ function readInventory(string $path): ?array
  * A method's stored signature is what catches the breaking kind a name alone
  * cannot see: a required argument that was not there before.
  *
- * @param array{files: array{stamp: string, columns: list<string>, rows: list<array<string, string>>}|null, methods: array{stamp: string, columns: list<string>, rows: list<array<string, string>>}|null} $stored
- * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>} $current
+ * The rows that are neither files nor methods are weighed by `surfaceRowDiff()`,
+ * which is where a config key or a constant removed since the last release is
+ * witnessed — by nothing else at all when the tree carries no tag.
+ *
+ * @param array{files: array{stamp: string, columns: list<string>, rows: list<array<string, string>>}|null, methods: array{stamp: string, columns: list<string>, rows: list<array<string, string>>}|null, surface: array{stamp: string, columns: list<string>, rows: list<array<string, string>>}|null} $stored
+ * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>} $current
  * @return array{severity: string, evidence: list<string>}
  */
 function diffInventory(array $stored, array $current): array
@@ -1334,6 +1460,14 @@ function diffInventory(array $stored, array $current): array
 
         $evidence[] = "added public method {$key}()";
     }
+
+    $named = surfaceRowDiff($stored['surface']['rows'] ?? [], $current['surface']);
+
+    if (severityRank($named['severity']) > severityRank($severity)) {
+        $severity = $named['severity'];
+    }
+
+    $evidence = [...$evidence, ...$named['evidence']];
 
     return ['severity' => $severity, 'evidence' => $evidence];
 }

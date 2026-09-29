@@ -422,9 +422,9 @@ function surfaceSignals(string $root, string $latestTag): array
 }
 
 /**
- * The inventory — files.tsv and methods.tsv — read as a fourth signal.
+ * The inventory — files.tsv, methods.tsv and surface.tsv — read as a fourth signal.
  *
- * The two files are written into the release commit by this script, stamped with
+ * The three files are written into the release commit by this script, stamped with
  * the tag it creates, so on the next release they describe exactly what was
  * shipped last time. They are read here only when that stamp names the tag being
  * released from. An inventory that was regenerated at some other moment — by hand,
@@ -436,7 +436,7 @@ function surfaceSignals(string $root, string $latestTag): array
  * This signal can only ever raise the bump. Nothing here lowers what the notes, the
  * commits or the surface say, which is what makes a second opinion affordable.
  *
- * @return array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int}, stamp: string, fresh: bool}
+ * @return array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool}
  */
 function inventorySignal(string $root, ?string $latestTag): array
 {
@@ -445,25 +445,50 @@ function inventorySignal(string $root, ?string $latestTag): array
     $stored = [
         'files' => readInventory($paths['files']),
         'methods' => readInventory($paths['methods']),
+        'surface' => readInventory($paths['surface']),
     ];
 
     $current = inventoryRecords($root);
-    $counts = ['files' => count($current['files']), 'methods' => count($current['methods'])];
+    $counts = [
+        'files' => count($current['files']),
+        'methods' => count($current['methods']),
+        'surface' => count($current['surface']),
+    ];
     $expected = $latestTag ?? '(no tag)';
 
-    if ($stored['files'] === null && $stored['methods'] === null) {
+    // The inventory is weighed as a whole or not at all. A file that is not there cannot
+    // say whether the rows it should hold were never written or were just removed, and the
+    // difference is the whole question — so a missing one is reported rather than read as
+    // an empty one, which would count every row of that kind as added since the last
+    // release. The case this is really for is an upgrade: an inventory written before
+    // `surface.tsv` existed is two files and a stamp that matches.
+    $missing = [];
+
+    foreach (['files', 'methods', 'surface'] as $file) {
+        if ($stored[$file] === null) {
+            $missing[] = basename($paths[$file]);
+        }
+    }
+
+    if ($missing !== []) {
         return [
             'source' => 'inventory',
             'severity' => 'patch',
-            'summary' => sprintf('%d file(s), %d method(s) on disk, but no inventory to weigh against', $counts['files'], $counts['methods']),
-            'evidence' => ['files.tsv and methods.tsv are missing: run php bin/inventory.php'],
+            'summary' => sprintf(
+                '%d file(s), %d method(s), %d key(s)/member(s) on disk, but no complete inventory to weigh against — %s missing',
+                $counts['files'],
+                $counts['methods'],
+                $counts['surface'],
+                implode(', ', $missing),
+            ),
+            'evidence' => [implode(', ', $missing) . ' missing: run php bin/inventory.php — an inventory is weighed as a whole, because rows a file never held would weigh as changes since the last release'],
             'counts' => $counts,
             'stamp' => '(missing)',
             'fresh' => false,
         ];
     }
 
-    $stamp = $stored['files']['stamp'] ?? $stored['methods']['stamp'] ?? 'unknown';
+    $stamp = $stored['files']['stamp'] ?? $stored['methods']['stamp'] ?? $stored['surface']['stamp'] ?? 'unknown';
 
     if ($stamp !== $expected) {
         return [
@@ -483,7 +508,7 @@ function inventorySignal(string $root, ?string $latestTag): array
         'source' => 'inventory',
         'severity' => $diff['severity'],
         'summary' => $diff['evidence'] === []
-            ? sprintf('current — %d file(s), %d method(s), nothing removed, renamed or added since %s', $counts['files'], $counts['methods'], $stamp)
+            ? sprintf('current — %d file(s), %d method(s), %d key(s)/member(s), nothing removed, renamed or added since %s', $counts['files'], $counts['methods'], $counts['surface'], $stamp)
             : sprintf('%d change(s) since %s', count($diff['evidence']), $stamp),
         'evidence' => $diff['evidence'],
         'counts' => $counts,

@@ -105,9 +105,9 @@ final class ReleaseFailureTest extends TestCase
     }
 
     /**
-     * The inventory is written as a pair, so a path that cannot hold it fails both — and the
-     * refusal names both files rather than the one that happened to be first, because the
-     * reader has two paths to look at.
+     * The inventory is written as a set, so a path that cannot hold it fails all of it — and
+     * the refusal names every file rather than the one that happened to be first, because the
+     * reader has three paths to look at.
      */
     public function test_an_inventory_that_cannot_be_written_is_refused(): void
     {
@@ -122,7 +122,7 @@ final class ReleaseFailureTest extends TestCase
 
         $this->assertSame(1, $run->exitCode, $run->describe());
         $this->assertTrue(
-            $run->refused('Could not write files.tsv / methods.tsv.'),
+            $run->refused('Could not write files.tsv / methods.tsv / surface.tsv.'),
             $run->describe(),
         );
 

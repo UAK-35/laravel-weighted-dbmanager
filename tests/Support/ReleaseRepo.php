@@ -294,7 +294,7 @@ final class ReleaseRepo
      */
     public function restampInventory(string $tag): void
     {
-        foreach (['files.tsv', 'methods.tsv'] as $inventory) {
+        foreach (['files.tsv', 'methods.tsv', 'surface.tsv'] as $inventory) {
             $stamped = (string) preg_replace(
                 '/(describes the tree at ).*$/m',
                 '$1' . $tag,
@@ -665,7 +665,25 @@ final class ReleaseRepo
         PHP . "\n";
     }
 
+    /**
+     * The same class with its constant gone: what a removal looks like on disk, for the
+     * tests about the inventory witnessing one.
+     */
+    public function dropClassConstant(): void
+    {
+        $this->write('src/Thing.php', self::thing(withVersion: false));
+    }
+
     /** The config file's keys, which the surface rows cover beside the class members. */
+    public function dropConfigKey(string $key): void
+    {
+        $this->write('config/sample.php', str_replace(
+            "    '" . $key . "' => true,\n",
+            '',
+            $this->read('config/sample.php'),
+        ));
+    }
+
     /**
      * @param list<string> $paths
      */
