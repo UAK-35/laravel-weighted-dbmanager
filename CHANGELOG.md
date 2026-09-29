@@ -4,6 +4,29 @@
 
 ### Added
 
+- **The weighing's two quiet halves are pinned by the headings and the keys they weigh, so a
+  severity cannot be edited by accident.** `changelogSignal()` maps a `###` heading onto a rung —
+  `Added`/`Changed`/`Deprecated` a minor, `Fixed`/`Security` a patch — and three of those six rows
+  were exercised by nothing: turning `### Changed` into a patch, `### Deprecated` into a patch or
+  `### Security` into a minor left the whole suite green, and the table is the policy's own statement
+  of what a heading is worth, so a row nothing reads is a severity that moves by accident. The same
+  was true of the two ways a release note can shout louder than its heading — a `### Breaking
+  changes` heading, and a `BREAKING` marker in the body, which is the spelling a changelog may use
+  in place of one — and of the surface's config half, where a dropped key was pinned at the evidence
+  line and not at the severity it produces.
+
+  The four cases drive `bin/release.php` in a real repository rather than a helper: one walks every
+  heading the policy names from a `v0.4.0` tag and asserts both the bump line *and* the next version,
+  one weighs the two breaking spellings, one writes a heading the policy does not know and asserts
+  that it weighs a patch and says so (`the Unreleased section has no \`###\` heading the policy knows`
+  beside `not a Keep a Changelog heading, so read as a patch: ### Notes`, which is also the case that
+  tells an unknown vocabulary from an empty section), and one drops a config key under a `feat!:`
+  commit and asserts the `breaking config 1 change(s)` row *and* the `patch CHANGELOG ### Fixed — 1
+  entry` row, so the config half of the surface is pinned at its severity and not only at the
+  sentence that names it. Six mutations are measured against them — `### Changed` weighed a patch,
+  `### Deprecated` a patch, `### Security` a minor, the `BREAKING` marker read as a heading rather
+  than as a claim, an unknown heading read as empty, and the config half's severity read as a patch —
+  and each fails its own case.
 - **The surface says when one name is declared by more than one file, which is the one change it
   cannot see.** The surface is keyed by name, so two files declaring one config key is a single entry
   in it, from the first of them read, and the second file's declaration is in neither map — so a change

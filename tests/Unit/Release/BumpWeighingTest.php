@@ -94,6 +94,151 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
+     * Every heading the policy names, in one table.
+     *
+     * The three rungs have a case each above, because each is a rung. The other three rows —
+     * `### Changed`, `### Deprecated` and `### Security` — were exercised by nothing at all:
+     * changing one to another severity left every test in the suite passing, and this table is
+     * the policy's own statement of what a heading is worth, so a row nothing reads is a
+     * severity that can be edited by accident. The base is `0.4.0` rather than a 1.0 line so
+     * that `### Removed` appears as the 0.x caveat makes it, which keeps the table about the
+     * headings rather than about the caveat.
+     */
+    public function test_the_notes_table_weighs_every_heading_the_policy_names(): void
+    {
+        $expected = [
+            'Fixed' => ['patch', '0.4.1'],
+            'Added' => ['minor', '0.5.0'],
+            'Changed' => ['minor', '0.5.0'],
+            'Deprecated' => ['minor', '0.5.0'],
+            'Removed' => ['minor', '0.5.0'],
+            'Security' => ['patch', '0.4.1'],
+        ];
+
+        foreach ($expected as $heading => [$bump, $version]) {
+            $repo = ReleaseRepo::make("### {$heading}\n\n- One entry under this heading.\n");
+            $repo->tag('v0.4.0');
+
+            $run = $repo->release('--weigh', '--dry-run');
+
+            $this->assertSame(0, $run->exitCode, "### {$heading}: " . $run->describe());
+            $this->assertStringStartsWith($bump, $run->plan('bump'), "### {$heading}: " . $run->describe());
+            $this->assertSame(
+                $version . '  (tag v' . $version . ')',
+                $run->plan('next version'),
+                "### {$heading}: " . $run->describe(),
+            );
+        }
+    }
+
+    /**
+     * A changelog that marks its release as breaking is believed, whatever headings it uses.
+     *
+     * The heading vocabulary is the usual way a note declares a change, and it is not the only
+     * one: `### Breaking changes` is a heading of its own in plenty of files, and `BREAKING` in
+     * the body is the marker a changelog may use in place of one. Both are the loudest thing
+     * the notes are able to say, so they weigh what `### Removed` weighs — and they are heeded
+     * with the rest of the section in view, because the marker is a claim about the release
+     * rather than about one entry in it.
+     */
+    public function test_notes_marked_breaking_weigh_a_major_whatever_heading_they_use(): void
+    {
+        $marked = [
+            "### Breaking changes\n\n- The old command is gone.\n",
+            "### Fixed\n\n- A ported defect, fixed.\n\nBREAKING: the old command is gone.\n",
+        ];
+
+        foreach ($marked as $notes) {
+            $repo = ReleaseRepo::make($notes);
+            $repo->tag('v1.2.3');
+
+            $run = $repo->release('--weigh', '--dry-run');
+
+            $this->assertSame(0, $run->exitCode, $run->describe());
+            $this->assertSame('major  (weighed: a breaking change)', $run->plan('bump'), $run->describe());
+            $this->assertSame('2.0.0  (tag v2.0.0)', $run->plan('next version'), $run->describe());
+            $this->assertTrue($run->said('the notes are marked breaking'), $run->describe());
+        }
+    }
+
+    /**
+     * Notes in a vocabulary the policy does not know weigh a patch, and the plan says which of
+     * the two things it is looking at.
+     *
+     * An empty section and a section full of headings the policy has never heard of are the
+     * same weight and not the same state: the first is a release with nothing to publish, the
+     * second is notes this policy cannot read a severity out of. Reporting them as one thing
+     * sends an author looking for entries that are already written.
+     */
+    public function test_notes_in_a_vocabulary_the_policy_does_not_know_weigh_a_patch_and_say_so(): void
+    {
+        $repo = ReleaseRepo::make("### Notes\n\n- Something happened, under a heading of our own.\n");
+        $repo->tag('v1.2.3');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
+        $this->assertSame('1.2.4  (tag v1.2.4)', $run->plan('next version'), $run->describe());
+        $this->assertTrue(
+            $run->said('the Unreleased section has no `###` heading the policy knows'),
+            $run->describe(),
+        );
+        $this->assertTrue(
+            $run->said('not a Keep a Changelog heading, so read as a patch: ### Notes'),
+            $run->describe(),
+        );
+    }
+
+    /**
+     * The surface signal is two halves — the public API of `src/` and the keys of `config/` —
+     * and a dropped config key is a breaking change the public API half cannot see.
+     *
+     * Nothing else covers it: the tests that drop a key are about `bin/inventory.php --check`,
+     * and every case where the surface moves the bump does it through `src/`. A config key is
+     * the thing a consumer *sets* rather than imports, so it is also the change with no
+     * compile error to announce it — which is why the row is written down at all. The notes
+     * stay a patch here, so the severity in the plan is the config half's own and not a note
+     * the author happened to file under `### Removed`.
+     */
+    public function test_a_dropped_config_key_is_the_breaking_change_the_public_api_cannot_see(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.4.0');
+        $repo->dropConfigKey('enabled');
+        $repo->commit('feat!: the enabled key is gone');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('removed config key \'enabled\''),
+            "The config half has to name the key it lost.\n" . $run->describe(),
+        );
+
+        // The severity as the plan prints it, not just the evidence line: a removal read as a
+        // minor would still name the key and still leave the same bump behind it, since the
+        // notes and the caveat are the other half of it.
+        $this->assertMatchesRegularExpression(
+            '/^\s+breaking\s+config\s+1 change\(s\) to the surface since the last tag\r?$/m',
+            $run->output,
+            "The config half has to be the breaking one.\n" . $run->describe(),
+        );
+        $this->assertMatchesRegularExpression(
+            '/^\s+patch\s+CHANGELOG\s+### Fixed — 1 entry, the loudest heading the notes use\r?$/m',
+            $run->output,
+            "The notes stay a patch, so the breaking severity is the config half's own.\n" . $run->describe(),
+        );
+
+        $this->assertSame(
+            'minor  (weighed: a breaking change, which is a minor while the package is pre-1.0)',
+            $run->plan('bump'),
+            $run->describe(),
+        );
+        $this->assertSame('0.5.0  (tag v0.5.0)', $run->plan('next version'), $run->describe());
+    }
+
+    /**
      * The surface keys a name once, so two files declaring one key is one entry in it — and
      * the file that loses is a file no surface signal reads. That is the difference the note
      * exists for: the plan says `nothing removed, renamed or added` about the config half
