@@ -44,6 +44,14 @@ declare(strict_types=1);
  *   properties, which are the rows that witness a removal on a tree with no tag at
  *   all, since the public-API signal above diffs two tags.
  *
+ *   A name two files declare is one entry in the public-API map — the first file read
+ *   holds it, and the second file's declaration is not in the surface at all — so a
+ *   change to that second file's key is a change the tag diff cannot see. The plan says
+ *   so in a note that names the names and the files behind each one. The inventory writes
+ *   both declarations down — its rows carry the file they came from — but its verdict is
+ *   keyed by name for the same reason, so it is the file, and not a verdict, that keeps
+ *   them apart.
+ *
  *   The name is the verb on purpose: it does not only work the bump out, it
  *   takes it, which is why it is not called --detect.
  *
@@ -638,6 +646,14 @@ foreach ($weighing['signals'] as $signal) {
 
 foreach ($weighing['notes'] as $weighingNote) {
     echo '  note: ' . $weighingNote . PHP_EOL;
+}
+
+// The surface's own caveat, kept out of the notes list so the reader that asks about one
+// name can narrow it instead of repeating the whole sentence: what the surface holds is one
+// entry per name, so a name two files declare is in it from the first of them, and a change
+// to the other file's declaration is a change this signal cannot see.
+if ($weighing['shadow'] !== null) {
+    echo '  note: ' . $weighing['shadow'] . PHP_EOL;
 }
 
 if ($declared !== null && severityRank($declared) > severityRank($required)) {

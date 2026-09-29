@@ -354,6 +354,17 @@ for. So a tree whose inventory predates `surface.tsv` is told its inventory is
 incomplete, and the tag diff and the notes carry the weighing until the next release
 writes all three.
 
+One thing the public-API signal cannot see about itself: it keys a name once, so a name two
+files declare is in it once — from the first of them read — and the second file's
+declaration is in neither surface. A change to that declaration is then invisible, because
+the name is still held by the file that did not change. A config key two files return is
+the real case; in this package it is `config:timezone`, from `config/app.php` and
+`config/db-manager.php`. The plan has a note for it — the names, the files behind each one,
+and a pointer at the inventory, which writes both declarations down — its rows carry the file
+they came from — even though its own verdict is keyed by name for the same reason the tag
+diff is, so it is the file, and not a verdict, that keeps the two apart. `bin/blame.php` says the same thing about the one name you asked it
+about, rather than reprinting the plan's sentence about the whole surface.
+
 With no tag yet there is nothing to diff against, so only the notes are read —
 which is why the first release is `0.1.0` when its notes have anything under
 `### Added` or `### Changed`, and `0.0.1` when they are all `### Fixed`.
@@ -387,6 +398,11 @@ severity it weighed, and the two surface halves are asked twice: once about the 
 they changed, and once about whether they hold the name at all. A symbol that is at the
 last tag and unchanged since it is in neither, and that is the answer too — the bump moved
 for another reason, which the report names.
+
+A name more than one file declares gets a `Shadowed names` section of its own, naming the
+files behind it and which of them the surface took: the two reports above say the surface
+holds the name, and this is the part of that which is worth knowing before you go looking
+— one of the files is not in the map at all.
 
 Named and responsible are not the same thing, and the report keeps them apart: a `docs:`
 commit that mentions the symbol is `caught` at a patch while the `### Added` heading above

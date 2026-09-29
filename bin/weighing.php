@@ -69,12 +69,13 @@ function bumpFor(string $severity, string $base): string
  * returned with the evidence behind it, so the plan shows its working rather than
  * asserting a version.
  *
- * @return array{severity: string, bump: string, signals: list<array{source: string, severity: string, summary: string, evidence: list<string>}>, notes: list<string>, inventory: array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool}}
+ * @return array{severity: string, bump: string, signals: list<array{source: string, severity: string, summary: string, evidence: list<string>}>, notes: list<string>, shadow: string|null, inventory: array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool}}
  */
 function weigh(string $root, ?string $latestTag, string $unreleased, string $base): array
 {
     $signals = [changelogSignal($unreleased)];
     $notes = [];
+    $declaredBy = [];
 
     if ($latestTag === null) {
         // With no tag there is nothing to diff against: the whole package is new,
@@ -93,8 +94,19 @@ function weigh(string $root, ?string $latestTag, string $unreleased, string $bas
             $signals[] = $commits;
         }
 
-        $signals = array_merge($signals, surfaceSignals($root, $latestTag));
+        $signals = array_merge($signals, surfaceSignals($root, $latestTag, $declaredBy));
     }
+
+    // The surface is keyed by symbol name, so a name two files declare is in it once, from
+    // the first file read — and the tag diff cannot see a change to the other one. Nothing
+    // in the weighing can make that visible; saying it is what keeps the difference between
+    // "nothing this signal can see moved" and "nothing moved" out of the plan's silence.
+    //
+    // Held apart from `notes` rather than pushed into them: the plan states it once for the
+    // whole surface, and `bin/blame.php` — which prints these notes verbatim — states it
+    // once for the one name it was asked about. One fact, said once per reader, in the
+    // terms each of them is answering in.
+    $shadow = surfaceDropped($declaredBy, $root);
 
     // Read either way: with no tag to diff against, a written-down inventory is the
     // only thing that can still witness a change made after it was written.
@@ -114,8 +126,58 @@ function weigh(string $root, ?string $latestTag, string $unreleased, string $bas
         'bump' => bumpFor($severity, $base),
         'signals' => $signals,
         'notes' => $notes,
+        'shadow' => $shadow,
         'inventory' => $inventory,
     ];
+}
+
+/**
+ * The names two files declare, as one plan note — or null when every name in the surface
+ * came from one file, which is the normal state and says nothing.
+ *
+ * What it is for is the difference between a signal that is quiet because nothing moved and
+ * one that is quiet because it cannot see the change: the surface keys a symbol by name, so
+ * the second file's declaration is not in it, and a change to that file leaves both surfaces
+ * holding the name. The note names the symbols and the files behind each one — the file that
+ * won is as important as the ones that lost — and points at the artefact that does keep both:
+ * the inventory's rows carry the file they came from, so `surface.tsv` writes both
+ * declarations down, even though its verdict is keyed by name like this one.
+ *
+ * @param array<string, list<string>> $declaredBy one entry per symbol the surface merge saw
+ */
+function surfaceDropped(array $declaredBy, string $root): ?string
+{
+    $collisions = array_filter($declaredBy, static fn (array $paths): bool => count($paths) > 1);
+
+    if ($collisions === []) {
+        return null;
+    }
+
+    $shown = [];
+
+    foreach (array_slice($collisions, 0, 3, true) as $symbol => $paths) {
+        $shown[] = sprintf(
+            '%s (%s)',
+            $symbol,
+            implode(' + ', array_map(static fn (string $path): string => relativeTo($root, $path), $paths)),
+        );
+    }
+
+    if (count($collisions) > 3) {
+        $shown[] = sprintf('… and %d more', count($collisions) - 3);
+    }
+
+    return sprintf(
+        'the surface holds one entry per name, and %d name(s) are declared by more than one'
+        . ' file, so only the first of each is in it: %s. A change to the other file\'s'
+        . ' declaration is a change no name-keyed verdict can see — the name is still in both'
+        . ' surfaces, from the file that did not change. The inventory writes both files down'
+        . ' in its rows, which carry the file they came from, and its verdict is keyed by name'
+        . ' for the same reason this one is: it is that file, and not a verdict, that keeps the'
+        . ' two declarations apart',
+        count($collisions),
+        implode(', ', $shown),
+    );
 }
 
 /**
@@ -414,14 +476,23 @@ function inventorySource(): string
 /**
  * The whole surface as the working tree declares it, both halves in one map.
  *
+ * The `+=` here is safe where the same line inside a half is not: the two halves are keyed
+ * by disjoint prefixes — a class, a method, a constant, an enum case and a property are
+ * spelled `kind:name`, and a config key and an env var are the only things spelled
+ * `config:` and `env:` — so no name one half declares can be a name the other already
+ * holds. It is the merge across the files *within* a half that can drop a declaration, and
+ * that one is reported.
+ *
+ * @param array<string, list<string>>|null $declaredBy filled in by mergeSurface(), one
+ *        entry per symbol naming the files that declare it, when the caller asks
  * @return array<string, string>
  */
-function workingSurfaceAll(string $root): array
+function workingSurfaceAll(string $root, ?array &$declaredBy = null): array
 {
     $surface = [];
 
     foreach (surfaceParts() as $directory => $parse) {
-        $surface += workingSurface($root . '/' . $directory, $parse);
+        $surface += workingSurface($root . '/' . $directory, $parse, $declaredBy);
     }
 
     return $surface;
@@ -433,7 +504,7 @@ function workingSurfaceAll(string $root): array
  *
  * @return array<string, string>
  */
-function taggedSurfaceAll(string $root, ?string $latestTag): array
+function taggedSurfaceAll(string $root, ?string $latestTag, ?array &$declaredBy = null): array
 {
     if ($latestTag === null) {
         return [];
@@ -442,7 +513,7 @@ function taggedSurfaceAll(string $root, ?string $latestTag): array
     $surface = [];
 
     foreach (surfaceParts() as $directory => $parse) {
-        $surface += taggedSurface($root, $latestTag, $directory, $parse);
+        $surface += taggedSurface($root, $latestTag, $directory, $parse, $declaredBy);
     }
 
     return $surface;
@@ -456,17 +527,37 @@ function taggedSurfaceAll(string $root, ?string $latestTag): array
  *
  * @return list<array{source: string, severity: string, summary: string, evidence: list<string>}>
  */
-function surfaceSignals(string $root, string $latestTag): array
+function surfaceSignals(string $root, string $latestTag, ?array &$collisions = null): array
 {
     $labels = surfaceLabels();
     $signals = [];
 
+    // Per side, not per call: the two sides hold the same names on a tree that did not
+    // rename anything, so one registry would report every symbol in the package as declared
+    // twice — once by the tag and once by the checkout. A name two *different* files declare
+    // within one side is the question. Each side is read once, into a registry of its own,
+    // and the tree is asked first because it is the side the report goes on to describe.
+    $treeSide = [];
+    $tagSide = [];
+
     foreach (surfaceParts() as $directory => $parse) {
-        $before = $latestTag === null ? [] : taggedSurface($root, $latestTag, $directory, $parse);
-        $after = workingSurface($root . '/' . $directory, $parse);
+        $before = $latestTag === null
+            ? []
+            : taggedSurface($root, $latestTag, $directory, $parse, $tagSide);
+        $after = workingSurface($root . '/' . $directory, $parse, $treeSide);
 
         if ($before !== [] || $after !== []) {
             $signals[] = surfaceSignal($labels[$directory], $before, $after);
+        }
+    }
+
+    if ($collisions !== null) {
+        foreach ([$treeSide, $tagSide] as $side) {
+            foreach ($side as $symbol => $paths) {
+                if (count($paths) > 1 && !isset($collisions[$symbol])) {
+                    $collisions[$symbol] = $paths;
+                }
+            }
         }
     }
 

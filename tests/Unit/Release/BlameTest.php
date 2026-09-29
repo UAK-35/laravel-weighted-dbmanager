@@ -205,6 +205,73 @@ final class BlameTest extends TestCase
     }
 
     /**
+     * The one thing the two surface reports cannot say about a name they hold: whose
+     * declaration the entry is. Two config files returning one key is one entry in the
+     * surface — the first file read holds it — and the other file is in neither map, so
+     * "the surface holds it" is true and incomplete for exactly the name the reader came
+     * to ask about.
+     *
+     * The release plan states the same fact about the whole surface, and this command
+     * prints the weighing's notes verbatim; the shadow is kept out of them so that it is
+     * said once here, in the terms of the question that was actually asked. That is the
+     * second assertion: the plan's sentence about every collision is not reprinted beside
+     * the sentence about this one.
+     */
+    public function test_a_name_two_files_declare_says_which_file_the_surface_holds(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->duplicateConfigKey('enabled');
+        $repo->commit('chore: a second config file returns the same key');
+        $repo->tag('v0.1.0');
+
+        $run = $repo->scriptRun('blame.php', 'enabled');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertStringContainsString('Shadowed names' . PHP_EOL, $run->output, $run->describe());
+        $this->assertStringContainsString(
+            "    • config key 'enabled' — declared by config/extra.php and config/sample.php;"
+            . ' the surface holds the first of them' . PHP_EOL,
+            $run->output,
+            $run->describe(),
+        );
+        $this->assertStringNotContainsString(
+            'declared by more than one file',
+            $run->output,
+            "The plan's sentence about every collision is not this report's, narrowed.\n" . $run->describe(),
+        );
+
+        // Every line the section prints names two files, because one file is not a shadow:
+        // a section that listed a name a single file declares would be the note firing on
+        // the ordinary state of the tree, which is how a caveat stops being read.
+        $section = substr($run->output, (int) strpos($run->output, 'Shadowed names'));
+        $this->assertSame(1, preg_match_all('/^    • (.+)$/m', $section, $bullets), $run->describe());
+
+        foreach ($bullets[1] as $bullet) {
+            $this->assertMatchesRegularExpression(
+                '/declared by \S+ and \S+;/',
+                $bullet,
+                "A shadowed line has to name both files.\n" . $run->describe(),
+            );
+        }
+    }
+
+    /**
+     * The ordinary state, and the one this section has to stay out of: one file per name.
+     * The note is about a collision, so a name that has none is not mentioned at all.
+     */
+    public function test_a_name_one_file_declares_is_not_shadowed(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+
+        $run = $repo->scriptRun('blame.php', 'enabled');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertStringNotContainsString('Shadowed names', $run->output, $run->describe());
+        $this->assertStringContainsString('In the surface now: 1 symbol(s)' . PHP_EOL, $run->output, $run->describe());
+    }
+
+    /**
      * A removed public constant: the surface signal names it, the severity is breaking,
      * and the bump is nevertheless a minor because the package is pre-1.0. Both halves of
      * that sentence have to appear — a report that said only "breaking" would send a

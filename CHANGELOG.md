@@ -4,6 +4,45 @@
 
 ### Added
 
+- **The surface says when one name is declared by more than one file, which is the one change it
+  cannot see.** The surface is keyed by name, so two files declaring one config key is a single entry
+  in it, from the first of them read, and the second file's declaration is in neither map — so a change
+  to that second declaration moves nothing the public-API signal can observe: the name is held by the
+  file that did not change, at both ends of the diff. The plan was silent about that in exactly the way
+  it is silent when nothing moved, which is the difference this closes. This package is in that state:
+  `config:timezone` comes from both `config/app.php` and `config/db-manager.php`, so dropping it from
+  the second file is a change no signal reports. `--weigh` now carries a note naming the names and the
+  files behind each one — up to three, then a count — and pointing at the inventory, whose rows carry
+  the file they came from: that is what writes both declarations down. Its verdict is a name-keyed one
+  too, for the same reason the tag diff's is, and the note says so rather than promising a signal that
+  cannot deliver — the file is what keeps the two apart, and finding the change in it is `git diff`
+  away.
+
+  The note belongs to the plan; `bin/blame.php`, which prints the weighing's notes verbatim, answers
+  the same question for the one name it was asked about instead, in a `Shadowed names` section — one
+  fact, said once per reader, in the terms each of them is answering in. The registries are kept per
+  side rather than per surface: folding the tree's and the tag's into one would report every symbol in
+  the package as declared twice, by the same file both times.
+
+  A second fold of the same shape did show up under the audit: `surfaceRowDiff()` keys the inventory's
+  rows by `kind:symbol` without the file, so a key two files return is one name there as well and the
+  inventory's *verdict* cannot see one of the declarations going either. That one is kept — a name is
+  what a consumer imports, and the file column is what makes a row a row — so it is documented rather
+  than changed, and the note is the thing that says it out loud.
+
+  Pinned by three cases in `BumpWeighingTest`
+  (`test_a_key_two_files_declare_is_the_change_no_surface_signal_can_see`,
+  `test_a_surface_whose_names_all_come_from_one_file_says_nothing`,
+  `test_the_note_names_three_names_and_counts_the_rest`) and two in `BlameTest`
+  (`test_a_name_two_files_declare_says_which_file_the_surface_holds`,
+  `test_a_name_one_file_declares_is_not_shadowed`). Seven mutations are measured against it: an
+  unfilled registry fails three tests, one registry for both sides fails three, recording only the last
+  file fails three, reporting every symbol fails one, showing two names instead of three fails one,
+  never printing the plan's note fails two, blame reporting a name one file declares fails one, and
+  dropping the `nothing to say` early return fails one: the quiet case asserts the note's absence by
+  the sentence's own opening line rather than by one clause of it, so a note that fired on every
+  release fails something.
+
 - **The inventory records what a consumer can name besides the files and the methods — config keys,
   env vars, public constants, enum cases and public properties — in a third file, `surface.tsv`.**
   The inventory is the one versioning signal that does not need a tag: `bin/release.php` diffs the

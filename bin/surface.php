@@ -176,9 +176,11 @@ function latestTag(string $root): ?string
  * of the checkout, so an uncommitted edit cannot be mistaken for a released one.
  *
  * @param callable(string): array<string, string> $parse
+ * @param array<string, list<string>>|null $declaredBy filled in by mergeSurface(), one
+ *        entry per symbol naming the files that declare it, when the caller asks
  * @return array<string, string>
  */
-function taggedSurface(string $root, string $tag, string $directory, callable $parse): array
+function taggedSurface(string $root, string $tag, string $directory, callable $parse, ?array &$declaredBy = null): array
 {
     $listing = git($root, ['ls-tree', '-r', '--name-only', $tag, '--', $directory]);
 
@@ -199,7 +201,7 @@ function taggedSurface(string $root, string $tag, string $directory, callable $p
             continue;
         }
 
-        $surface += $parse($blob['output']);
+        $surface = mergeSurface($surface, $parse($blob['output']), $path, $declaredBy);
     }
 
     return $surface;
@@ -209,9 +211,11 @@ function taggedSurface(string $root, string $tag, string $directory, callable $p
  * The surface of a directory as it sits on disk.
  *
  * @param callable(string): array<string, string> $parse
+ * @param array<string, list<string>>|null $declaredBy filled in by mergeSurface(), one
+ *        entry per symbol naming the files that declare it, when the caller asks
  * @return array<string, string>
  */
-function workingSurface(string $directory, callable $parse): array
+function workingSurface(string $directory, callable $parse, ?array &$declaredBy = null): array
 {
     $surface = [];
 
@@ -222,7 +226,48 @@ function workingSurface(string $directory, callable $parse): array
             continue;
         }
 
-        $surface += $parse($content);
+        $surface = mergeSurface($surface, $parse($content), $path, $declaredBy);
+    }
+
+    return $surface;
+}
+
+/**
+ * One file's surface folded into another's — the map's `+=`, with the collision said out
+ * loud when the caller asks for it.
+ *
+ * The surface is keyed by name, so a name two files declare is one entry here and the
+ * first file read is the one it came from. That is right for the map, and it is silent in
+ * a way that matters, because the two declarations are not always the same thing: a config
+ * key read by two files is `timezone` in one file and `timezone` in the next, one entry in
+ * this surface, and two distinct keys at runtime — `app.timezone` and `db-manager.timezone`.
+ * A change to the second file's key is then a change the tag diff cannot see: the name is
+ * still in both surfaces, from the file that did not change.
+ *
+ * So the drop is *reported* rather than left implicit, and the caller decides how loudly.
+ * The weighing turns it into a plan note, because the surface it diffs is the surface this
+ * narrows; `bin/blame.php` asks about the names it was given, and `bin/inventory.php` passes
+ * nothing and reads the map alone. The inventory is the one artefact that keeps both: its
+ * rows carry the file, so a symbol two files declare is two rows there, which is why the
+ * note can point at it.
+ *
+ * @param array<string, list<string>>|null $declaredBy out: symbol => the files declaring it,
+ *        one entry per symbol the merge saw. Collisions are the entries with two or more,
+ *        which is what the caller filters for — recording the single-file case too is what
+ *        lets the report name the file that *won*, not merely the ones that lost.
+ */
+function mergeSurface(array $surface, array $declares, string $path, ?array &$declaredBy): array
+{
+    foreach ($declares as $symbol => $description) {
+        if ($declaredBy !== null) {
+            $declaredBy[$symbol] = [...($declaredBy[$symbol] ?? []), $path];
+        }
+
+        if (array_key_exists($symbol, $surface)) {
+            continue;
+        }
+
+        $surface[$symbol] = $description;
     }
 
     return $surface;
@@ -1272,6 +1317,13 @@ function readInventory(string $path): ?array
  * This is the half of the inventory that answers to a tree with no tag at all. The
  * public-API signal diffs two tags, so with one tag there is nothing for it to see a
  * removal in; a stored row is its own "before".
+ *
+ * The `file` column is not part of the identity, and that is a decision with a cost: a
+ * config key two files return is two rows on disk and one name here, so a key dropped from
+ * the second file is a change this verdict cannot see — the name is still declared by the
+ * first, and here that is all a name is. The file is not folded away on purpose; the
+ * dropped row is still in `surface.tsv`, which is why the plan says the collision out loud
+ * rather than leaning on a verdict that cannot carry it.
  *
  * @param list<array<string, string>> $stored the `surface.tsv` rows as the last release wrote them
  * @param list<array{kind: string, symbol: string, file: string}> $current the rows for the tree now

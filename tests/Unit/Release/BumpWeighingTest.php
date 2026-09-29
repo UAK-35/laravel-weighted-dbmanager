@@ -94,6 +94,109 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
+     * The surface keys a name once, so two files declaring one key is one entry in it — and
+     * the file that loses is a file no surface signal reads. That is the difference the note
+     * exists for: the plan says `nothing removed, renamed or added` about the config half
+     * while a key has gone from one of the two files that declared it, and only the note
+     * tells a reader that the silence is not the same silence as "nothing moved".
+     *
+     * The key is dropped rather than added on purpose. An addition leaves a name the surface
+     * has never held, which it reports; a drop leaves a name the other file still declares,
+     * which it cannot.
+     */
+    public function test_a_key_two_files_declare_is_the_change_no_surface_signal_can_see(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->writeConfig(['enabled', 'only_here']);
+        $repo->duplicateConfigKey('enabled');
+        $repo->commit('chore: a second config file returns the same key');
+        $repo->tag('v0.4.0');
+
+        // `enabled` goes from config/sample.php while config/extra.php still returns it, so
+        // the name is in the surface at both ends — from the other file — and the tag diff
+        // has nothing to report.
+        $repo->dropConfigKey('enabled');
+        $repo->commit('refactor: sample.php stops returning a key extra.php still returns');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+
+        $this->assertMatchesRegularExpression(
+            '/^\s+patch\s+config\s+nothing removed, renamed or added since the last tag\r?$/m',
+            $run->output,
+            "The config half has to be quiet, or the note is not the only thing saying it.\n"
+            . $run->describe(),
+        );
+
+        $this->assertTrue(
+            $run->said('config:enabled (config/extra.php + config/sample.php)'),
+            "The note has to name the key and both files that declare it.\n" . $run->describe(),
+        );
+        $this->assertTrue($run->said('declared by more than one file'), $run->describe());
+
+        // Invisible, not weightless: the patch the notes ask for is the whole bump, because
+        // nothing the weighing can read moved.
+        $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
+        $this->assertSame('0.4.1  (tag v0.4.1)', $run->plan('next version'), $run->describe());
+    }
+
+    /**
+     * The note is about a state the tree is usually not in, and a note that fired on every
+     * release would stop being read. With one file per name there is nothing to say, and the
+     * plan says nothing.
+     */
+    public function test_a_surface_whose_names_all_come_from_one_file_says_nothing(): void
+    {
+        $repo = ReleaseRepo::make(self::ADDED);
+        $repo->tag('v0.4.0');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertFalse(
+            $run->said('declared by more than one file'),
+            "The fixture declares every name once, so there is no collision to report.\n" . $run->describe(),
+        );
+
+        // The note's own opening line as well, because "declared by more than one file" is a
+        // phrase the note carries however it was built: a filter that reported every name it
+        // had seen would say it about a whole surface of one-file names, and this is the
+        // assertion that reads the sentence rather than one clause of it.
+        $this->assertFalse(
+            $run->said('the surface holds one entry per name'),
+            "A note that fired on every release would stop being read.\n" . $run->describe(),
+        );
+    }
+
+    /**
+     * More collisions than the note names, and the count is what keeps a partial list honest:
+     * a note that listed three and stopped would read as three.
+     */
+    public function test_the_note_names_three_names_and_counts_the_rest(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $keys = ['alpha', 'beta', 'gamma', 'delta'];
+        $repo->writeConfig($keys);
+        $repo->writeConfig($keys, 'config/extra.php');
+        $repo->commit('chore: two config files return the same four keys');
+        $repo->tag('v0.4.0');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said(
+                '4 name(s) are declared by more than one file, so only the first of each is in it:'
+                . ' config:alpha (config/extra.php + config/sample.php),'
+                . ' config:beta (config/extra.php + config/sample.php),'
+                . ' config:gamma (config/extra.php + config/sample.php), … and 1 more',
+            ),
+            "The note has to name three of the four and count the rest.\n" . $run->describe(),
+        );
+    }
+
+    /**
      * The commit signal's job is to catch work nobody wrote a note for. The notes say
      * patch; a `feat` commit does not, and the louder of the two decides.
      */

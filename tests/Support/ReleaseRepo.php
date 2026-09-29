@@ -674,6 +674,35 @@ final class ReleaseRepo
         $this->write('src/Thing.php', self::thing(withVersion: false));
     }
 
+    /**
+     * A config file returning exactly these keys, in the order given.
+     *
+     * Written wholesale rather than added to, so a test about a name two files declare can
+     * say which keys the first file holds without depending on what the fixture happened to
+     * ship. `dropConfigKey()` is the other half of it — a key taken out of one file while
+     * another still declares it, which is the change the surface cannot see.
+     *
+     * @param list<string> $keys
+     */
+    public function writeConfig(array $keys, string $file = 'config/sample.php'): void
+    {
+        $lines = implode('', array_map(
+            static fn (string $key): string => "    '" . $key . "' => true,\n",
+            $keys,
+        ));
+
+        $this->write($file, "<?php\n\nreturn [\n" . $lines . "];\n");
+    }
+
+    /**
+     * A second config file that returns the same key as the first — two files declaring one
+     * name, which is a state the surface can only hold once.
+     */
+    public function duplicateConfigKey(string $key, string $file = 'config/extra.php'): void
+    {
+        $this->write($file, "<?php\n\nreturn [\n    '" . $key . "' => false,\n];\n");
+    }
+
     /** The config file's keys, which the surface rows cover beside the class members. */
     public function dropConfigKey(string $key): void
     {

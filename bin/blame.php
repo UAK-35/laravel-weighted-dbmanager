@@ -45,6 +45,14 @@ declare(strict_types=1);
  *   and that is the answer too. Without the second question a name nothing had
  *   changed would look the same as a name nothing could find.
  *
+ *   They are read with the files behind each name as well, which is the one thing the
+ *   maps cannot say about a name they hold: a name two files declare is in the map
+ *   once, from the first of them, so "the surface holds it" is true and incomplete.
+ *   A `Shadowed names` section names the files behind each such name the query
+ *   reached — the same sentence the release plan prints about the whole surface,
+ *   narrowed to the names asked about, which is why the plan's version of it is not
+ *   among the notes reprinted above.
+ *
  * WHAT IT DOES NOT DO
  * -------------------
  *   No preconditions. It does not read the branch, refuse a dirty tree or ask CI:
@@ -138,8 +146,14 @@ $unreleased = $section['body'] ?? '';
 $weighing = weigh($root, $latestTag, $unreleased, $base);
 $top = severityRank($weighing['severity']);
 
-$now = workingSurfaceAll($root);
-$then = taggedSurfaceAll($root, $latestTag);
+// One registry per side, because the two sides hold every path twice on a tree that renamed
+// nothing: folding them into one registry would make every symbol in the package read as
+// declared by two files. Within one side, two paths for one name is the question.
+$declaredNow = [];
+$declaredThen = [];
+
+$now = workingSurfaceAll($root, $declaredNow);
+$then = taggedSurfaceAll($root, $latestTag, $declaredThen);
 
 $reading = surfaceReading($now, $then, $query);
 $presentNow = $reading['now'];
@@ -281,6 +295,22 @@ reportSurface(
     array_map(describeSymbol(...), $presentThen),
     $query,
 );
+
+// The one thing the two reports above cannot say about a name they hold: whose declaration
+// it is. A name two files declare is in the surface once, from the first of them, so the
+// other file is absent from both maps — and a reader who has just been told the surface
+// holds the name has been told something true and incomplete.
+$shadowed = shadowedNames($root, [$declaredNow, $declaredThen], [...$presentNow, ...$presentThen]);
+
+if ($shadowed !== []) {
+    echo PHP_EOL . 'Shadowed names' . PHP_EOL;
+    echo '  The surface keys a name once, so where two files declare one, only the first of them is'
+        . ' in it — and a change to the other is a change no signal above can name:' . PHP_EOL;
+
+    foreach ($shadowed as $line) {
+        echo '    • ' . $line . PHP_EOL;
+    }
+}
 
 echo PHP_EOL . 'Diagnosis' . PHP_EOL;
 echo '  ' . clip(diagnosis($query, $latestTag, $reading, $named !== []), '', 460) . PHP_EOL;
@@ -476,6 +506,52 @@ function surfaceReading(array $now, array $then, string $query): array
         )),
         'changed' => $changed,
     ];
+}
+
+/**
+ * The names the query reached that more than one file declares, as the lines that say so.
+ *
+ * The surface keys a name once, so a name two files declare is in the map from the first
+ * file read. That is the right answer to "is this name public" and the wrong one to "why is
+ * this name like this", which is the question this command exists for: a config key two
+ * files both return is one entry in the surface and two keys at runtime, and the second
+ * file is in neither map at all.
+ *
+ * The registries are searched in order and the first that holds two distinct paths answers
+ * for the name. Distinct, because one registry per side: a name one file declares on each
+ * side is the same path twice, not two files. The keys are the two readings' own key lists,
+ * so a name only the tag held is asked about too.
+ *
+ * @param list<array<string, list<string>>> $registries the files behind each name, per side
+ * @param list<string> $keys the surface keys the query reached
+ * @return list<string>
+ */
+function shadowedNames(string $root, array $registries, array $keys): array
+{
+    $lines = [];
+
+    foreach (array_unique($keys) as $key) {
+        foreach ($registries as $declaredBy) {
+            $paths = array_values(array_unique($declaredBy[$key] ?? []));
+
+            if (count($paths) < 2) {
+                continue;
+            }
+
+            $lines[] = sprintf(
+                '%s — declared by %s; the surface holds the first of them',
+                describeSymbol($key),
+                implode(' and ', array_map(
+                    static fn (string $path): string => relativeTo($root, $path),
+                    $paths,
+                )),
+            );
+
+            break;
+        }
+    }
+
+    return $lines;
 }
 
 /**
