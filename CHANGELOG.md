@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- **`bin/inventory.php`'s rewrite warned about discarding a record it had never read.** The warning
+  compares the files on disk against the tree and names the changes a rewrite is about to forget,
+  and it did that whenever *either* file had been read — so a pair that is half there reported
+  every row of the missing side as `added public method ...`, under a sentence claiming this rewrite
+  discarded them. That state is not hypothetical: both files are written in one call and only the
+  second can fail, so an interrupted release leaves exactly it. The file that is not there recorded
+  nothing, so the guard is now "both, or neither" — a half-written pair is completed without a word
+  about a record, and the rows it *did* write are reported as before. Pinned by
+  `test_a_pair_that_is_half_there_discards_nothing_it_did_not_read`, which fails on the old
+  condition, and by seven more cases for the generator itself: `--root=PATH` writing into the
+  package it names and leaving the script's own alone, `--check` following that root rather than the
+  script's, both files named when neither is there, a row too long to print cut at 68 characters and
+  ended with an ellipsis, `-h` as the same run as `--help`, an unknown option *after* a valid one
+  still exiting `2` and writing nothing, and the second file failing to write while the first is
+  already on disk. Sixteen tests on the generator are twenty-four, and the shape of the new ones is
+  measured rather than assumed: ignoring `--root` fails three of them, removing the row cut one, and
+  writing `methods.tsv` before `files.tsv` two.
+
 - **`db:doctor`'s `store probe` row dates each of its two states from its own boot finding, so a
   preflight can say how long the installation has been unable to check its store rather than only
   that it is.** Both faults the row reports are the same kind of thing and it is the kind a row

@@ -134,7 +134,12 @@ if (!$result['written']) {
     exit(1);
 }
 
-$evidence = ($stored['files'] === null && $stored['methods'] === null)
+// Both of them, or neither: a rewrite can only lose a record it read, and a pair
+// that is half there — the state an interrupted release leaves, since the files are
+// written by one call and any but the first can fail — has no record on one side.
+// Diffing against a side that was never read reports every row of the other side as
+// a change this run is discarding, which names a change nothing ever recorded.
+$evidence = ($stored['files'] === null || $stored['methods'] === null)
     ? []
     : diffInventory($stored, inventoryRecords($root))['evidence'];
 

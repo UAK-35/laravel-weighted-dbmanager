@@ -136,6 +136,13 @@ was about to forget, then a count — because the rows it is replacing are the o
 record those changes left. It reports that and exits `0`: the tree is the
 authority, so the write goes ahead, and saying so is the whole of the remedy.
 
+Only a pair that was read whole can witness a change, so an inventory with one file
+missing is completed in silence: the file that is not there recorded nothing to lose,
+and the rows of the other one are written without being described as discarded. That
+is the state an interrupted release leaves — the two files are written by one call and
+only the second can fail — so the next run of either writer finishes the pair rather
+than reporting a loss nobody suffered.
+
 Do **not** wire `--check` into CI. An inventory kept in step with every commit can
 never witness a change, and witnessing one is the only thing it is for.
 
