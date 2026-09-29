@@ -1920,13 +1920,16 @@ bin/release.php          tag-driven releases (see RELEASING.md)
 bin/surface.php          the symbol reader, the surface differ and the inventory format
                          the release commands share
 bin/weighing.php         the four signals and the weighing release.php and blame.php share
-bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv from the working tree
+bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv from the working tree,
+                         or from any ref with --at= (see RELEASING.md)
 bin/blame.php            which signal names one symbol, and what it contributed to the bump
 bin/publish-config.php   publishes the sample config into an application
 files.tsv, methods.tsv,  what the last release shipped — its files, their public methods,
 surface.tsv              and the config keys, env vars, constants and properties a
                          consumer can name, stamped with the tag they describe,
-                         refreshed by bin/release.php and read back by the next release
+                         refreshed by bin/release.php, backfilled for a past tag from
+                         that tag's own tree with bin/inventory.php --at=REF, and read
+                         back by the next release
 ```
 
 ## Testing

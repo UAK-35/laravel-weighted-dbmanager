@@ -4,6 +4,44 @@
 
 ### Added
 
+- **The inventory generator can describe any git ref, so a tag with no written record can be
+  backfilled.** `files.tsv`, `methods.tsv` and `surface.tsv` are the one artefact a release
+  writes and the next release reads, and until now the only way to write them was from the
+  working tree: the rows came off the disk and the stamp was the latest tag, a pair that is
+  right only while the checkout *is* the tagged tree. That is the state a release commit is in,
+  and not the state a tag whose record was never written is in — it is behind the checkout by
+  however many unreleased commits, so a hand run describes the tree in front of it and names
+  the tag, and so describes neither. `php bin/inventory.php --at=REF` reads its rows out of git
+  — `ls-tree` and a `show` per file, the two calls the surface's tag diff makes — and stamps
+  what it writes with the ref's own tag, with the release tag on the commit it names, or with
+  `(no tag)` when no release names it. The rows and the stamp then come from one tree, which is
+  what makes them evidence rather than a claim. A ref is any ref — a tag, a branch, a commit,
+  `HEAD~3` — an uncommitted edit in the checkout is invisible to it, and `--check --at=REF` is
+  the read-only half: one record compared with the tree a past tag holds, which is how a set of
+  tags that predate the file is audited in a loop.
+
+  Reading a ref is also the one case where the record already on disk can belong to a different
+  release, and one slot cannot hold two, so a run is refused when a stamp on disk is not the
+  release it describes — the refusal names the stamp it read and the one it would write, and
+  the files carrying it. The harm there is quiet rather than loud: a substituted record is not
+  an error anybody sees, it is a second opinion that stops being weighed, which is why the
+  escape (`--force`) has to be asked for. A file that is not there carries no stamp to disagree
+  with, so a half-written set is completed rather than refused — an interrupted release's two
+  files, and the two-file inventory every tree written before `surface.tsv` existed, which is
+  the state this package's own repository is in. The flags that could not change anything are
+  usage errors rather than silent no-ops: an `--at=` naming no ref, and a `--force` on a run
+  that writes nothing, which is what a `--check` is and what a plain run without it already
+  does.
+
+  Measured against eight mutations: the ref reader reading the checkout, the stamp coming from
+  the latest tag instead of the ref, the refusal disabled, a missing file counted as a differing
+  stamp, `--at` parsed and then ignored for the rows, the drift header no longer naming the tree
+  the ref holds, the empty `--at=` guard removed, and the `--force` guard removed — each fails its
+  own test by name, and the tree is byte-identical afterwards. [RELEASING.md](RELEASING.md#the-inventory) gains the subsection,
+  [README.md](README.md) the line among the `bin/` scripts, and
+  [docs/inventory-surface-rows.md](docs/inventory-surface-rows.md) the limitation that rebuilding
+  a past tag's rows still leaves one record in one slot.
+
 - **The weighing's two quiet halves are pinned by the headings and the keys they weigh, so a
   severity cannot be edited by accident.** `changelogSignal()` maps a `###` heading onto a rung —
   `Added`/`Changed`/`Deprecated` a minor, `Fixed`/`Security` a patch — and three of those six rows

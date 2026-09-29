@@ -139,6 +139,8 @@ what makes the walk safe to extend rather than merely necessary.
 | rule | test | in |
 |---|---|---|
 | the third file holds the keys and members a tag diff cannot see, the typed property among them | `test_the_surface_rows_record_the_keys_and_members_a_tag_diff_cannot` | `InventoryTest` |
+| a record built for a ref holds that ref's rows and that ref's stamp, and not the checkout's | `test_at_reads_the_tree_the_ref_holds_rather_than_the_checkout` | `InventoryTest` |
+| a record of another release is refused rather than written over, with `--force` as the escape | `test_at_refuses_to_write_over_the_record_of_another_release` | `InventoryTest` |
 | `--check` reports a constant the tree no longer declares | `test_check_reports_a_constant_the_tree_no_longer_declares` | `InventoryTest` |
 | ...and a config key the config file no longer returns | `test_check_reports_a_config_key_the_file_no_longer_returns` | `InventoryTest` |
 | a constant removed on a tree with no tag is witnessed by the inventory alone | `test_a_constant_removed_with_no_tag_at_all_is_witnessed_by_the_inventory_alone` | `BumpWeighingTest` |
@@ -148,8 +150,9 @@ what makes the walk safe to extend rather than merely necessary.
 Mutations these were measured against: not reporting a removed row fails one test (the
 no-tag witness), reading an incomplete inventory as an empty one fails one (the bump moves
 to a minor the notes did not ask for), restoring the reader's behaviour of stopping at a
-type name fails two, and warning about a discarded record the rewrite did not read fails
-one.
+type name fails two, warning about a discarded record the rewrite did not read fails one,
+and building the rows off the checkout instead of out of the ref fails one (the backfill
+case, which is the only reason the second reader exists).
 
 ---
 
@@ -166,14 +169,18 @@ one.
 3. **The inventory is a snapshot, not a history.** It describes the tree at the moment the
    release wrote it, so a change made and reverted between two releases leaves no trace —
    which is the same reason a tag diff cannot see it, and the property the stamp depends
-   on.
+   on. A past tree's rows can be *rebuilt* — `bin/inventory.php --at=v0.2.0` reads them out
+   of git and stamps the release that tree is, which is what makes a tag with no written
+   record recoverable — but rebuilding does not add a record: there is still one slot, and
+   a ref whose tag is not the one the record describes is refused unless `--force`.
 
 ---
 
 ## What would change this decision
 
 - **A second stored inventory.** If the rail ever kept the inventory of *every* release,
-  values could be recorded and compared; today only one is written and only one is read.
+  values could be recorded and compared; today only one is written and only one is read —
+  and `--at` rebuilds any of them, one at a time, into that one slot.
 - **A consumer-facing API report.** If the package published a surface document for
   consumers, `surface.tsv` would be the artifact to derive it from rather than a signal
   doing double duty.
@@ -189,7 +196,7 @@ one.
 | file | role |
 |---|---|
 | `bin/surface.php` | the rows (`inventoryRecords()`), the comparison (`surfaceRowDiff()`, `diffInventory()`), and the reader they exposed (`fileSurface()`, `visibilityBefore()`) |
-| `bin/inventory.php` | writes all three files, reports drift, warns about a discarded record |
+| `bin/inventory.php` | writes all three files, reports drift, warns about a discarded record, and builds them for any ref (`--at`) |
 | `bin/release.php` | writes them in the release commit, weighs them as the fourth signal, reports an incomplete one |
 | `tests/Unit/Release/InventoryTest.php` | the generator: the rows, the drift, the exit codes |
 | `tests/Unit/Release/BumpWeighingTest.php` | the weighing: what a fresh, stale, missing or incomplete inventory may do |

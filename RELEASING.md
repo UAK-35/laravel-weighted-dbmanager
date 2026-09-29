@@ -127,8 +127,45 @@ php bin/inventory.php --check    # compare, write nothing, exit 1 when out of st
 | Exit | Means |
 |---|---|
 | `0` | written, or already current under `--check` |
-| `1` | out of step under `--check`, nothing could be written, or the path is not a package root |
-| `2` | usage error |
+| `1` | out of step under `--check`, nothing could be written, the path is not a package root, the ref is not one this repository has, or a record of another release is in the way |
+| `2` | usage error — an unknown option, an `--at=` with no ref, or a `--force` that could change nothing |
+
+### Backfilling a tag with `--at=REF`
+
+One slot holds the record, and it is the one the next weighing reads — so a tag cut
+before there was an inventory to write, or one whose record was never committed, has
+nothing to read. The rows came off the working tree and the stamp was the latest tag,
+a pair that is right only while the checkout *is* the tagged tree: a release commit,
+and not the state such a tag is in, where the checkout is ahead of it by however many
+unreleased commits. `--at=REF` builds the record for the tree that ref holds instead:
+
+```bash
+php bin/inventory.php --at=v0.2.0-alpha1          # the record for that tag's tree
+php bin/inventory.php --check --at=v0.2.0-alpha1  # audit it, write nothing
+```
+
+The rows and the stamp are read from the same place, which is the point: a hand run
+against the checkout describes the tree in front of it and names the latest tag, and
+so describes neither. The rows are read out of git — `ls-tree` and a `show` per file,
+the calls the surface's own tag diff makes — so an uncommitted edit in the checkout is
+invisible, for the same reason it is there: it is not something a release shipped. A
+ref is any ref — a tag, a branch, a commit, `HEAD~3` — and it is stamped with its own
+tag, with the release tag on the commit it names, or with `(no tag)` when no release
+names it, which is the same word the working-tree reader uses.
+
+Reading a ref is also the one case where the record already on disk can belong to a
+different release, and one slot cannot hold two. That run is refused, naming the stamp
+on disk and the one it would write, unless `--force` says the replacement is meant. The
+harm is quiet rather than loud — a substituted record is not an error anybody sees, it
+is a second opinion that stops being weighed — which is why it is refused and why the
+escape has to be asked for. A file that is *not there* carries no stamp to disagree
+with, so a half-written set is completed rather than refused: the interrupted release's
+two files, and the two-file inventory every tree written before `surface.tsv` existed.
+`--check --at=REF` is unaffected by all of it, and reports the difference without
+writing — which is how a set of tags that predate the file is audited in a loop. The
+reading half is unaffected by `--force` too, which is why that flag needs a run that
+writes: `--force` without `--at`, or under `--check`, is a usage error rather than a
+flag that changes nothing.
 
 `--check` names the files that differ and why — rows that are gone and rows that
 appear, a file it has never seen, a file that is not there at all, and the one

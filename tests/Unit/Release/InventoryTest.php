@@ -469,6 +469,277 @@ final class InventoryTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // --at: the tree a ref holds, rather than the checkout
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The flag's whole reason: the rows come from the tree git holds for the ref, not from
+     * the files in front of the person running it. The fixture's checkout is left dirty on
+     * purpose — a file the tag never had, and a constant it did — because a checkout is
+     * exactly what a hand regeneration would have read, and a record that describes one tree
+     * while naming another is the mistake every rule about a stamp exists to refuse.
+     *
+     * All three files are asserted: the ref is the tree for the rows as well as for the
+     * stamp, `surface.tsv` included — which is the file this package's own history needed
+     * backfilling for, since `v0.2.0-alpha1` was cut before it existed.
+     */
+    public function test_at_reads_the_tree_the_ref_holds_rather_than_the_checkout(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->write('src/Extra.php', self::extra());
+        $repo->dropClassConstant();
+
+        $run = $repo->scriptRun('inventory.php', '--at=v0.1.0');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('reading the tree at v0.1.0 out of git, not the checkout'),
+            $run->describe(),
+        );
+        $this->assertTrue($run->said('files.tsv — 2 files, described as v0.1.0'), $run->describe());
+
+        $this->assertStringContainsString('describes the tree at v0.1.0', $repo->read('files.tsv'));
+        $this->assertStringNotContainsString('Extra.php', $repo->read('files.tsv'), 'the checkout\'s file is not part of the tag');
+        $this->assertStringNotContainsString('src/Extra.php', $repo->read('methods.tsv'), 'nor the method it declares');
+
+        // The constant the checkout dropped is still a row, because the tag still declares
+        // it: the third file is read from the ref like the other two.
+        $this->assertStringContainsString(
+            "const\tFixture\\Thing::VERSION\tsrc/Thing.php",
+            $repo->read('surface.tsv'),
+        );
+    }
+
+    /**
+     * The read-only half, and the pair of assertions that make it a test of `--at` rather
+     * than of the checker: one record, two trees, and the verdict follows the tree that was
+     * named. `--at` is the only way to ask about a tree the checkout is no longer.
+     */
+    public function test_check_at_compares_the_record_with_the_tree_the_ref_holds(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->write('src/Extra.php', self::extra());
+        $repo->script('inventory.php', '--at=v0.1.0');
+
+        $at = $repo->scriptRun('inventory.php', '--check', '--at=v0.1.0');
+        $here = $repo->scriptRun('inventory.php', '--check');
+
+        $this->assertSame(0, $at->exitCode, $at->describe());
+        $this->assertTrue(
+            $at->said('inventory is current — 2 files, 2 public methods, 3 key(s)/member(s), described as v0.1.0'),
+            $at->describe(),
+        );
+
+        $this->assertSame(1, $here->exitCode, $here->describe());
+        $this->assertTrue($here->refused('new:  Extra.php | src/Extra.php | Fixture\\Extra'), $here->describe());
+    }
+
+    /**
+     * Two sentences that would otherwise be wrong about which tree was read: the drift
+     * header, and the line that says how to write the rows. "The inventory is out of step
+     * with the tree" is true of the checkout and not of the ref, and a remedy that named
+     * the script without the flag would write the other tree's rows — the one repair the
+     * reader must not be handed by mistake.
+     */
+    public function test_check_at_names_the_tree_and_the_flag_that_would_write_it(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->script('inventory.php', '--at=v0.1.0');
+        $repo->restampInventory('v9.9.9');
+
+        $run = $repo->scriptRun('inventory.php', '--check', '--at=v0.1.0');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->refused('✗ The inventory is out of step with the tree at v0.1.0:'),
+            $run->describe(),
+        );
+        $this->assertTrue(
+            $run->refused('Run php bin/inventory.php --at=v0.1.0 to write them and commit them'),
+            $run->describe(),
+        );
+    }
+
+    /**
+     * One inventory is kept, and it is the one the next weighing reads — so a record that
+     * describes another release is refused rather than written over, and the refusal names
+     * both releases rather than leaving the reader to work out which pair disagreed.
+     *
+     * The harm is quiet, which is why it is a refusal: a substituted record is not an error
+     * anybody sees, it is a second opinion that stops being weighed. `--force` is the escape
+     * for the one case a person means it, and the file it writes is the ref's own.
+     */
+    public function test_at_refuses_to_write_over_the_record_of_another_release(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->write('src/Extra.php', self::extra());
+        $repo->commit('feat: a file v0.1.0 never had');
+        $repo->tag('v0.2.0');
+        $repo->script('inventory.php');
+
+        $stamped = [$repo->read('files.tsv'), $repo->read('methods.tsv'), $repo->read('surface.tsv')];
+
+        $run = $repo->scriptRun('inventory.php', '--at=v0.1.0');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->refused('✗ Nothing was written: the record on disk describes v0.2.0, and this run describes v0.1.0.'),
+            $run->describe(),
+        );
+        $this->assertTrue(
+            $run->refused('files.tsv (v0.2.0), methods.tsv (v0.2.0), surface.tsv (v0.2.0)'),
+            $run->describe(),
+        );
+        $this->assertTrue($run->refused('--force writes this ref\'s rows anyway'), $run->describe());
+
+        // Refused is the whole of it: a refusal that had already written would have lost the
+        // record it was protecting.
+        $this->assertSame($stamped, [$repo->read('files.tsv'), $repo->read('methods.tsv'), $repo->read('surface.tsv')]);
+
+        $forced = $repo->scriptRun('inventory.php', '--at=v0.1.0', '--force');
+
+        $this->assertSame(0, $forced->exitCode, $forced->describe());
+        $this->assertStringContainsString('describes the tree at v0.1.0', $repo->read('files.tsv'));
+        $this->assertStringNotContainsString('Extra.php', $repo->read('files.tsv'));
+    }
+
+    /**
+     * The state an interrupted release leaves, reached here through a ref: one file gone, and
+     * the two that are there stamped with the release this run describes. Nothing is refused
+     * and nothing is described as discarded, because a file that is not there recorded nothing
+     * to lose — the same rule a plain run follows, now stated for the writer that reads git.
+     *
+     * It is also this package's own upgrade state, one tag older: an inventory written before
+     * `surface.tsv` existed is two files and a stamp, and the refusal must not stand in the
+     * way of completing it.
+     */
+    public function test_at_completes_a_record_that_is_half_there_when_the_stamp_agrees(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->script('inventory.php', '--at=v0.1.0');
+        unlink($repo->path('surface.tsv'));
+
+        $run = $repo->scriptRun('inventory.php', '--at=v0.1.0');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertFalse($run->said('discarded'), $run->describe());
+        $this->assertTrue($repo->exists('surface.tsv'), 'the set is completed rather than left half there');
+    }
+
+    /**
+     * A ref is any ref: the same commit named by a sha rather than by its tag reads the same
+     * rows and is stamped with the same release. The stamp says what the tree *was*, not how
+     * the caller happened to name it — so a backfill is not a different record depending on
+     * whether the tag or the commit was typed.
+     */
+    public function test_at_stamps_a_commit_that_carries_a_tag_with_its_release(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->write('src/Extra.php', self::extra());
+        $repo->commit('feat: a file v0.1.0 never had');
+
+        $sha = trim($repo->git('rev-parse', 'HEAD~1'));
+
+        $run = $repo->scriptRun('inventory.php', '--at=' . $sha);
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue($run->said('reading the tree at ' . $sha . ' out of git'), $run->describe());
+        $this->assertTrue($run->said('files.tsv — 2 files, described as v0.1.0'), $run->describe());
+    }
+
+    /**
+     * A commit no tag names is stamped `(no tag)` — the word the working-tree reader uses,
+     * so the rows are still comparable — and *not* with the repository's latest tag, which is
+     * what a run against the checkout would stamp. That is the whole difference between the
+     * two readers: the tree and the stamp come from the same side, and the ref's own tag is
+     * the only release either of them may name.
+     */
+    public function test_at_stamps_a_commit_no_release_names_with_no_tag(): void
+    {
+        $repo = ReleaseRepo::make();
+        $repo->tag('v0.1.0');
+        $repo->write('src/Extra.php', self::extra());
+        $repo->commit('feat: a file v0.1.0 never had');
+
+        $write = $repo->scriptRun('inventory.php', '--at=HEAD');
+
+        $this->assertSame(0, $write->exitCode, $write->describe());
+        $this->assertTrue($write->said('files.tsv — 3 files, described as (no tag)'), $write->describe());
+        $this->assertStringContainsString('describes the tree at (no tag)', $repo->read('files.tsv'));
+
+        $check = $repo->scriptRun('inventory.php', '--check', '--at=HEAD');
+
+        $this->assertSame(0, $check->exitCode, $check->describe());
+        $this->assertTrue($check->said('described as (no tag)'), $check->describe());
+
+        // And the same bytes are out of step with the checkout, whose stamp is the latest
+        // tag: the two runs are two questions about one file.
+        $here = $repo->scriptRun('inventory.php', '--check');
+
+        $this->assertSame(1, $here->exitCode, $here->describe());
+        $this->assertTrue($here->refused('✗ The inventory is out of step with the tree:'), $here->describe());
+    }
+
+    /**
+     * A ref this repository does not have is answered before the tree is read, because an
+     * unresolvable ref reads as a tree with no files in it — and writing that as an empty
+     * inventory under a tag's name is the one outcome worse than a refusal. git's own words
+     * are carried into the message, since "not a repository" and "no such ref" are the same
+     * exit code and not the same problem.
+     */
+    public function test_at_a_ref_this_repository_does_not_have_is_an_exit_one(): void
+    {
+        $repo = self::inventoried();
+        $stamped = [$repo->read('files.tsv'), $repo->read('methods.tsv')];
+
+        $run = $repo->scriptRun('inventory.php', '--at=v9.9.9');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->refused('✗ Nothing to read: v9.9.9 is not a ref this repository has'),
+            $run->describe(),
+        );
+        $this->assertFalse($run->said('reading the tree at'), $run->describe(), 'nothing is read once the ref is refused');
+        $this->assertSame($stamped, [$repo->read('files.tsv'), $repo->read('methods.tsv')]);
+    }
+
+    /**
+     * The flags that cannot mean what they say, refused the way an unknown option is: `--at=`
+     * names no ref, and `--force` is about a run that writes — so it is a no-op without `--at`
+     * (a plain run rewrites the record of the tree it stamps) and a no-op under `--check`
+     * (which compares and stops). A `--force` that quietly did nothing would read as one that
+     * did, and it is the flag a reader reaches for when they mean to replace a record.
+     */
+    public function test_a_flag_that_cannot_mean_anything_is_a_usage_error(): void
+    {
+        $repo = self::inventoried();
+
+        $empty = $repo->scriptRun('inventory.php', '--at=');
+        $lone = $repo->scriptRun('inventory.php', '--force');
+        $audit = $repo->scriptRun('inventory.php', '--check', '--at=v0.1.0', '--force');
+
+        $this->assertSame(2, $empty->exitCode, $empty->describe());
+        $this->assertTrue($empty->refused('--at= needs a ref: a tag, a branch or a commit.'), $empty->describe());
+        $this->assertTrue($empty->said('Usage:'), $empty->describe());
+
+        $this->assertSame(2, $lone->exitCode, $lone->describe());
+        $this->assertTrue($lone->refused('--force is about a run that writes: it needs --at=REF'), $lone->describe());
+        $this->assertTrue($lone->said('Usage:'), $lone->describe());
+
+        $this->assertSame(2, $audit->exitCode, $audit->describe());
+        $this->assertTrue($audit->refused('--force is about a run that writes'), $audit->describe());
+
+        $this->assertFalse($empty->said('files.tsv — '), $empty->describe());
+        $this->assertFalse($lone->said('files.tsv — '), 'a usage error is not a write either');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Exit codes
     // ─────────────────────────────────────────────────────────────────────────
 

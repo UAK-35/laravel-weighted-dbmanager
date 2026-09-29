@@ -1067,6 +1067,38 @@ function inventoryTag(string $root): string
 }
 
 /**
+ * The tag a ref describes: the ref's own name when it is a tag, the release tag on the
+ * commit it resolves to when it is not, and `(no tag)` when neither holds.
+ *
+ * The ref itself is asked first, so `--at=v0.2.0` stamps `v0.2.0` whatever else points
+ * at that commit; a commit named by sha, a branch or `HEAD~3` is asked second, so the
+ * rows of a tagged tree are still attributed to its release rather than to the way the
+ * caller happened to name it. Anything else names no release, which is what a stamp of
+ * `(no tag)` says — the same thing the working-tree reader says about a tree with no tag
+ * at all, and the value the weighing compares against.
+ *
+ * The pattern is `v[0-9]*`, the one `latestTag()` reads with: a tag that is not a release
+ * this package numbers is not a release to stamp a record with, however useful it is to
+ * name one on the command line.
+ */
+function inventoryTagAt(string $root, string $ref): string
+{
+    if (git($root, ['rev-parse', '-q', '--verify', 'refs/tags/' . $ref])['exit'] === 0) {
+        return $ref;
+    }
+
+    $described = git($root, ['describe', '--tags', '--exact-match', '--match', 'v[0-9]*', $ref]);
+
+    if ($described['exit'] !== 0) {
+        return '(no tag)';
+    }
+
+    $tag = trim(strtok($described['output'], "\n") ?: '');
+
+    return $tag === '' ? '(no tag)' : $tag;
+}
+
+/**
  * The files the inventory covers: the package's own source and its sample config,
  * root-relative and sorted.
  *
@@ -1083,9 +1115,118 @@ function inventoryCovers(string $root): array
 }
 
 /**
- * The rows the inventory holds, read off the working tree: the files the package
- * ships, the public methods they declare, and everything else a consumer can name
- * — config keys, env vars, public constants, enum cases and public properties.
+ * The rows the inventory holds for the working tree. Thin on purpose: the body is
+ * `inventoryRows()`, so this reader and the ref reader below cannot describe one tree
+ * two ways.
+ *
+ * @return array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}
+ */
+function inventoryRecords(string $root): array
+{
+    $sources = [];
+
+    foreach (inventoryCovers($root) as $path) {
+        $source = @file_get_contents($root . '/' . $path);
+
+        if ($source !== false) {
+            $sources[$path] = $source;
+        }
+    }
+
+    return inventoryRows($sources);
+}
+
+/**
+ * The same three lists for a ref — a tag, a branch or a commit — read out of git rather
+ * than out of the checkout.
+ *
+ * This is what lets a tag with no written record be backfilled: the rows come from the
+ * tree git holds for that ref, so they describe what that release published rather than
+ * what the checkout happens to hold now. The stamp comes from the same ref, which is what
+ * makes the pair right by construction: a hand regeneration of a moved-on tree stamped
+ * with the latest tag describes neither tree, and every rule about a stamp exists to
+ * refuse exactly that.
+ *
+ * An uncommitted edit is invisible here for the reason `taggedSurface()` reads the object
+ * store as well: it is not something a release shipped, and describing it under a tag's
+ * name is the mistake the stamp is for.
+ *
+ * @return array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}
+ */
+function refInventoryRecords(string $root, string $ref): array
+{
+    return inventoryRows(refSources($root, $ref));
+}
+
+/**
+ * The files the inventory reads as a ref holds them: relative path => bytes, in the shape
+ * `inventoryCovers()` builds for the working tree.
+ *
+ * `ls-tree` then a `show` per file, the two calls `taggedSurface()` makes — and, like it,
+ * a listing that fails (a ref this repository does not have) is no sources at all rather
+ * than an error here: the caller answers for the ref before it asks, because an empty tree
+ * written as an empty inventory is the one outcome worse than a refusal.
+ *
+ * A path under a dot-directory is skipped because `phpFilesUnder()` never descends into
+ * one for the working tree: two readers that disagreed about which files a tree holds
+ * would describe one tree two ways, and the whole point of the second reader is that the
+ * two answer the same question about different trees.
+ *
+ * @return array<string, string>
+ */
+function refSources(string $root, string $ref): array
+{
+    $listing = git($root, ['ls-tree', '-r', '--name-only', $ref, '--', 'src', 'config']);
+
+    if ($listing['exit'] !== 0) {
+        return [];
+    }
+
+    $sources = [];
+
+    foreach (lines($listing['output']) as $path) {
+        if (!inventoryReads($path)) {
+            continue;
+        }
+
+        $blob = git($root, ['show', $ref . ':' . $path]);
+
+        if ($blob['exit'] === 0) {
+            $sources[$path] = $blob['output'];
+        }
+    }
+
+    ksort($sources);
+
+    return $sources;
+}
+
+/**
+ * Whether the inventory reads a path at all: a `.php` file that is not under a
+ * dot-directory. The working-tree reader skips the directory and so does the ref reader.
+ */
+function inventoryReads(string $path): bool
+{
+    if (!str_ends_with($path, '.php')) {
+        return false;
+    }
+
+    $segments = explode('/', $path);
+    array_pop($segments);
+
+    foreach ($segments as $segment) {
+        if (str_starts_with($segment, '.')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * The rows one set of sources produces: the files the package ships, the public methods
+ * they declare, and everything else a consumer can name — config keys, env vars, public
+ * constants, enum cases and public properties.
  *
  * The `symbol` column is what stops a file rename from being mistaken for a move:
  * under PSR-4 the path and the class name are one fact, so a path that changed
@@ -1097,21 +1238,16 @@ function inventoryCovers(string $root): array
  * because the public-API signal compares the tree to a tag and has no "before" of its
  * own when there is none.
  *
+ * @param array<string, string> $sources relative path => bytes
  * @return array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}
  */
-function inventoryRecords(string $root): array
+function inventoryRows(array $sources): array
 {
     $files = [];
     $methods = [];
     $named = [];
 
-    foreach (inventoryCovers($root) as $path) {
-        $source = @file_get_contents($root . '/' . $path);
-
-        if ($source === false) {
-            continue;
-        }
-
+    foreach ($sources as $path => $source) {
         $surface = fileSurface($source);
         $symbol = '(none)';
 
@@ -1196,11 +1332,16 @@ function renderInventory(string $file, string $tag, array $columns, array $rows)
  * The inventory as it should be for this tree and stamp: every file's bytes, and
  * how many rows each holds.
  *
+ * The rows can be handed in — that is how a run describing a ref rather than the checkout
+ * reaches the one renderer and the one comparison — and are read off the working tree
+ * when they are not, which is what every caller but that one wants.
+ *
+ * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}|null $records
  * @return array{files: string, methods: string, surface: string, count: array{files: int, methods: int, surface: int}}
  */
-function inventoryDocument(string $root, string $tag): array
+function inventoryDocument(string $root, string $tag, ?array $records = null): array
 {
-    $records = inventoryRecords($root);
+    $records ??= inventoryRecords($root);
 
     return [
         'files' => renderInventory('files.tsv', $tag, ['name', 'path', 'symbol'], $records['files']),
@@ -1223,11 +1364,12 @@ function inventoryDocument(string $root, string $tag): array
  * release is how a file written at the wrong moment is caught, and it is the one
  * difference that must never be waved through.
  *
+ * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}|null $records the rows to compare and write, or null to read the working tree
  * @return array{current: bool, written: bool, count: array{files: int, methods: int, surface: int}}
  */
-function syncInventory(string $root, string $tag, bool $write = true): array
+function syncInventory(string $root, string $tag, bool $write = true, ?array $records = null): array
 {
-    $document = inventoryDocument($root, $tag);
+    $document = inventoryDocument($root, $tag, $records);
     $paths = inventoryPaths($root);
 
     $current = true;
