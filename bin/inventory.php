@@ -36,9 +36,13 @@ declare(strict_types=1);
  *   A run with `--at` reads its rows out of git — `ls-tree` and a `show` per file —
  *   instead of off the disk, and stamps what it writes with the tag that ref is.
  *   That is for the tag with no written record: one cut before there was an
- *   inventory to write, one whose record was never committed, and the two-file
- *   set this package's own repository still carries, written before `surface.tsv`
- *   existed. Reading the ref rather than checking it out is what makes the pair worth
+ *   inventory to write, one whose record was never committed, and a two-file set
+ *   written before `surface.tsv` existed. This package's own repository was the
+ *   last of those: its `files.tsv` and `methods.tsv` were stamped `v0.2.0-alpha1`
+ *   with no third file beside them, and `--at=v0.2.0-alpha1` completed the set
+ *   there — 34 files, 167 public methods and 165 keys and members — which is why
+ *   the fourth signal weighs here again instead of being reported incomplete.
+ *   Reading the ref rather than checking it out is what makes the pair worth
  *   trusting: the rows and the stamp come from one tree, where a hand run against a
  *   moved-on checkout describes the tree in front of it and names the latest tag,
  *   and so describes neither.

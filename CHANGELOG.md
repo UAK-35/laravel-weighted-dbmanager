@@ -247,6 +247,20 @@
 
 ### Fixed
 
+- **The package's own inventory record is whole at `v0.2.0-alpha1`: the third file it was missing
+  is written from that tag's own tree, so the fourth signal weighs here instead of being skipped.**
+  `files.tsv` and `methods.tsv` at the package root were stamped `v0.2.0-alpha1` and `surface.tsv`
+  was never written — the incomplete state the weighing reports and steps around, which cost every
+  `composer release --weigh` run in this repository the inventory's second opinion. `php
+  bin/inventory.php --at=v0.2.0-alpha1` builds it from the tree that ref holds, so the rows and the
+  stamp come from one tree and a row can only describe what that release published; it is the
+  backfill case `--at` was added for, and the one run of it that completes a record rather than
+  replacing one. The record is now 34 files, 167 public methods and 165 keys and members — 48 config
+  keys, 71 constants, 32 env vars and 14 public properties, the typed properties the surface reader
+  had been blind to. The generator's header and `docs/inventory-surface-rows.md` no longer say this
+  repository carries a two-file set, and `php bin/inventory.php --check --at=v0.2.0-alpha1` reports
+  the set current where it reported the missing file.
+
 - **`db:replica-status`'s one non-zero exit was documented and pinned by nothing, and the record
   described it as another command's row.** The command's rule is one input — is the weighted manager
   bound — so `docs/documented-exit-codes.md` listed it as "not a matrix", pointing at

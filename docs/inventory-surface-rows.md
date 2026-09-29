@@ -110,8 +110,15 @@ So the weighing now checks all three files before it weighs anything, and report
 inventory as **incomplete** when one is missing: the plan says which file, the evidence
 line says an inventory is weighed as a whole, and the bump is left to the notes, the
 commits and the tag diff. This is not a corner case. It is the state of every tree whose
-inventory was written before this file existed — including the repository this package is
-developed in, until the next release writes all three.
+inventory was written before this file existed, and until 2026-09-30 it was this
+repository's own: `files.tsv` and `methods.tsv` were stamped `v0.2.0-alpha1` with no
+`surface.tsv` beside them, so the one signal that needs no tag was skipped on every
+weighing this package's own development did. `php bin/inventory.php --at=v0.2.0-alpha1`
+completes the record from that tag's tree — 34 files, 167 public methods, and 165 config
+keys, env vars, constants and properties, the fourteen typed properties among them — which
+is the backfill case `--at` was added for, and the one run of it that leaves a record
+rather than replacing one. `--check --at=v0.2.0-alpha1` now reports the set current where
+it reported the third file missing.
 
 `bin/inventory.php`'s rewrite warning takes the same line for the same reason: a rewrite
 can only discard a record it read, so a half-present set is completed in silence rather
