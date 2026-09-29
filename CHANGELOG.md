@@ -75,6 +75,22 @@
   fails two, dropping the two surfaces from the exit code fails four, taking the name exactly as
   typed fails one, and ignoring an unknown option fails one.
 
+- **A release is refused when the public surface changed and the Unreleased notes do not account
+  for it, so a change cannot ship with no release note.** Every other rail is satisfied by a
+  section that is merely not empty, and the notes are the one signal a reader ever sees: a new
+  public method filed under `### Fixed` weighs a patch, `--weigh` takes the bump from the surface
+  signal instead, and the changelog then announces a fix while a consumer gained something to use.
+  The comparison is the notes' own severity against the loudest signal that reads the surface, so
+  a removal needs a `### Removed` entry and the refusal says which heading to use — the severity
+  comparison rather than a search of the entries for symbol names, because a release note that has
+  to spell every class it mentions is one authors route around. The refusal names the symbols, so
+  the missing note can be written from it, and the surface includes the inventory, which is the
+  only witness to a row the tree no longer backs on a release with a tag. `--allow-silent-notes`
+  releases anyway and prints what it let through, like every other escape here; `--dry-run` reports
+  the state and refuses nothing, like the dirty-tree and CI rails. On this package the rail is
+  silent — `### Added` and the surface are both a minor — and it changes no other release's
+  outcome. Pinned by nine cases in `SilentNotesTest`.
+
 ### Fixed
 
 - **`bin/inventory.php`'s rewrite warned about discarding a record it had never read.** The warning

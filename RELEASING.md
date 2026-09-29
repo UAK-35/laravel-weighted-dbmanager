@@ -242,6 +242,7 @@ row without one is a rail nobody has driven:
 | No `## Unreleased` section | There is nothing to promote | `test_a_changelog_with_no_unreleased_heading_is_refused` |
 | The Unreleased section is empty | Refused, with no override. The notes are what a release publishes and what a reader upgrades on, so there is nothing to release without them. `--weigh --dry-run` is the one run let past it — and it is not a release: it reports the bump the other signals weigh and prints, in the plan, that a real run refuses here. The two answers differ because they answer different questions: the bump is read off the changes, the version is what a reader gets | `test_a_dev_tag_with_no_notes_is_refused_and_has_no_override`, `test_a_weighing_dry_run_reports_the_bump_while_a_release_of_it_refuses` |
 | The declared bump is smaller than `--weigh`'s | Shipping a breaking change as a patch is the accident this policy exists to prevent. `--ignore-policy` overrides it, and the plan says so | `test_a_declared_bump_below_the_weighed_one_is_refused`, `test_ignore_policy_releases_anyway_and_says_so` |
+| The public surface changed and the notes do not account for it | The notes are the one signal a reader ever sees, and every other rail is satisfied by a section that is merely not empty: a new public method filed under `### Fixed` weighs a patch, the bump is taken from the surface, and the changelog then announces a fix while a consumer gained something to use. The comparison is the notes' own severity against the loudest signal that reads the surface, so a removal needs a `### Removed` entry and the refusal points at the heading to use. The refusal names the symbols. `--allow-silent-notes` overrides it, and `--dry-run` reports it instead of refusing | `test_an_addition_the_notes_do_not_account_for_is_refused`, `test_a_removal_the_notes_call_a_fix_is_refused`, `test_a_removal_filed_under_changed_is_refused_with_the_heading_to_use`, `test_the_inventory_alone_can_trip_the_rail`, `test_allow_silent_notes_releases_anyway_and_says_so`, `test_a_dry_run_warns_instead_of_refusing` |
 | Non-interactive shell | It asks before committing and tagging. `--yes` (or `--dry-run`) is required when stdin is not a terminal | `test_a_non_interactive_shell_is_refused_without_yes` |
 
 Every test named in this file is checked to exist, so a renamed test is a doc failure
@@ -259,6 +260,14 @@ still consults CI: it releases on a repository with no remote at all, which is w
 machine with no `gh`, no token or no network needs — and "nothing verified" otherwise
 means no tag, because the rail is only allowed to be wrong in one direction. The plan
 prints `not checked (--skip-ci)` so a release that skipped it says so.
+
+`--allow-silent-notes` is the escape for the notes rail, and it is the one override that is
+not about the tree being wrong. It releases a genuine public surface change that nothing in
+`## Unreleased` accounts for — an internally visible symbol nobody meant to publish, or an
+entry going in with the follow-up commit — which is a thing a maintainer sometimes knows and
+the script cannot. What it is not is a way to skip writing the entry: the plan prints the
+surface severity against the notes', so a release that shipped with an undocumented change
+says so in its own output.
 
 The question itself is `gh run list --commit <sha> --limit 20 --json
 name,status,conclusion,event,headBranch`, asked of the commit being released and read for
@@ -353,6 +362,12 @@ The notes are the signal you control, so they are also the answer to a weighing
 you disagree with: an entry that is really a fix belongs under `### Fixed`, and
 a change nobody meant to make public belongs behind a `private` modifier. Moving
 the entry is the fix; there is no flag that lowers the policy.
+
+They are also the one signal a reader ever sees, which is why they are a rail as well as a
+signal: a public surface change heavier than the notes stops the release. A changelog that
+announces a fix while a consumer gained a method to use is not a versioning disagreement —
+the version already moved — but a note that was never written, and the refusal names the
+symbols so it can be ([the safety rails](#safety-rails)).
 
 ### Which signal caught it
 

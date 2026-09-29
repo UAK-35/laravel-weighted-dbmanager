@@ -158,6 +158,19 @@ function commitTypes(): array
 }
 
 /**
+ * The signal the release notes are read through.
+ *
+ * Named here because it is asked about by name twice — the weighing puts it first so a tree
+ * with no tag still has a signal, and the rail in bin/release.php that asks whether a surface
+ * change was written down has to compare against it specifically. A source spelled in two
+ * files is a source that can be renamed in one of them.
+ */
+function notesSource(): string
+{
+    return 'CHANGELOG';
+}
+
+/**
  * The Unreleased notes, read as the declaration of what changed: their `###`
  * headings are the Keep a Changelog categories the policy table is written
  * against, so this signal is the author's own words rather than a guess about
@@ -230,7 +243,7 @@ function changelogSignal(string $unreleased): array
     }
 
     return [
-        'source' => 'CHANGELOG',
+        'source' => notesSource(),
         'severity' => $severity,
         'summary' => $summary,
         'evidence' => $evidence,
@@ -360,6 +373,45 @@ function surfaceParts(): array
 }
 
 /**
+ * The label each half of the surface reports under, keyed by the directory it is read from.
+ *
+ * The two halves are one thing to a reader — the public surface — and two signals to a
+ * weighing, because a consumer breaks on a config key and a config key is not a class. This
+ * is the only place the two names are written.
+ *
+ * @return array<string, string>
+ */
+function surfaceLabels(): array
+{
+    return ['src' => 'public API', 'config' => 'config'];
+}
+
+/**
+ * The signal sources whose evidence is a statement about the public surface: the two halves
+ * of the tag diff, and the inventory — the file rows a tag diff cannot see, a config key or a
+ * constant removed since the last release.
+ *
+ * One list, in the file that owns the signals, so the three readers that have to decide what
+ * counts as the surface — this weighing, the blame report and the release rail that asks
+ * whether a surface change was written down — cannot come to different conclusions about it.
+ *
+ * @return list<string>
+ */
+function surfaceSources(): array
+{
+    return [...array_values(surfaceLabels()), inventorySource()];
+}
+
+/**
+ * The inventory signal's source name, spelled once: the weighing reads it from three returns
+ * and the surface rail has to know it is one of the surface's signals.
+ */
+function inventorySource(): string
+{
+    return 'inventory';
+}
+
+/**
  * The whole surface as the working tree declares it, both halves in one map.
  *
  * @return array<string, string>
@@ -406,7 +458,7 @@ function taggedSurfaceAll(string $root, ?string $latestTag): array
  */
 function surfaceSignals(string $root, string $latestTag): array
 {
-    $labels = ['src' => 'public API', 'config' => 'config'];
+    $labels = surfaceLabels();
     $signals = [];
 
     foreach (surfaceParts() as $directory => $parse) {
@@ -472,7 +524,7 @@ function inventorySignal(string $root, ?string $latestTag): array
 
     if ($missing !== []) {
         return [
-            'source' => 'inventory',
+            'source' => inventorySource(),
             'severity' => 'patch',
             'summary' => sprintf(
                 '%d file(s), %d method(s), %d key(s)/member(s) on disk, but no complete inventory to weigh against — %s missing',
@@ -492,7 +544,7 @@ function inventorySignal(string $root, ?string $latestTag): array
 
     if ($stamp !== $expected) {
         return [
-            'source' => 'inventory',
+            'source' => inventorySource(),
             'severity' => 'patch',
             'summary' => sprintf('stale — it describes %s, and this release is built on %s', $stamp, $expected),
             'evidence' => ['a stale inventory cannot tell "nothing changed" from "not refreshed", so it was not weighed; the tag diff still covers the surface'],
@@ -505,7 +557,7 @@ function inventorySignal(string $root, ?string $latestTag): array
     $diff = diffInventory($stored, $current);
 
     return [
-        'source' => 'inventory',
+        'source' => inventorySource(),
         'severity' => $diff['severity'],
         'summary' => $diff['evidence'] === []
             ? sprintf('current — %d file(s), %d method(s), %d key(s)/member(s), nothing removed, renamed or added since %s', $counts['files'], $counts['methods'], $counts['surface'], $stamp)

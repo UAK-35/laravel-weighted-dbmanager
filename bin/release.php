@@ -59,7 +59,8 @@ declare(strict_types=1);
  *   satisfies every other rail — the section is not empty, and the bump is the loudest of the
  *   four signals — so the changelog would then announce a fix while a consumer gained
  *   something to use, and nobody reading it would have been told. So a surface change
- *   heavier than the notes stops the release in the plan.
+ *   heavier than the notes stops the release, names the symbols in the refusal, and
+ *   --allow-silent-notes is the escape, printed in the plan like every other one.
  *
  *   The comparison is severity against severity rather than a search of the entries for the
  *   symbol names: the headings are the vocabulary the changelog and the policy already
@@ -117,6 +118,9 @@ declare(strict_types=1);
  *   --allow-dirty    Release even though tracked files have uncommitted changes.
  *   --ignore-policy  Release even though the declared bump undersells the
  *                    changes. Loud on purpose, and printed in the plan.
+ *   --allow-silent-notes
+ *                    Release even though the public surface changed and the Unreleased
+ *                    notes do not account for it. Loud on purpose, and printed in the plan.
  *
  * EXIT CODES
  * ----------
@@ -144,6 +148,7 @@ $options = [
     'allow-dirty' => false,
     'skip-ci' => false,
     'ignore-policy' => false,
+    'allow-silent-notes' => false,
 ];
 
 foreach (array_slice($argv, 1) as $argument) {
@@ -229,6 +234,11 @@ foreach (array_slice($argv, 1) as $argument) {
 
     if ($argument === '--skip-ci') {
         $options['skip-ci'] = true;
+        continue;
+    }
+
+    if ($argument === '--allow-silent-notes') {
+        $options['allow-silent-notes'] = true;
         continue;
     }
 
@@ -448,6 +458,60 @@ if ($declared !== null && severityRank($declared) < severityRank($required)) {
     }
 
     note("--ignore-policy: releasing {$version}, below the {$required} the changes call for");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The public surface changed — the notes have to account for it
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A release note is read by people and the public surface is read by nobody but the policy,
+// so `### Fixed` ships a new public method without a line about it and every other rail is
+// satisfied: the section is not empty, the bump is the loudest of the four signals, and the
+// changelog says the release fixed a defect. This is the rail that tells "there are notes"
+// apart from "the notes are about this", and it compares the two the only way they can be
+// compared without reading prose for symbol names: the notes signal's own severity against
+// the loudest severity the signals that read the surface reported. A `### Added` heading
+// weighs a minor and covers a new method; a removal needs a `### Removed` entry, because
+// that is what a removal is in the vocabulary the changelog and the policy share.
+$surface = weighedAcross($weighing, surfaceSources());
+$notes = weighedAcross($weighing, [notesSource()]);
+$unaccounted = severityRank($surface) > severityRank($notes);
+
+if ($unaccounted && !$options['allow-silent-notes'] && !$dryRun) {
+    fail(sprintf(
+        'The public surface changed, and the Unreleased notes do not account for it.'
+        . PHP_EOL . PHP_EOL
+        . '%s' . PHP_EOL . PHP_EOL
+        . '  %s, so a reader of the CHANGELOG would find nothing about any of that.'
+        . PHP_EOL
+        . '  File each change under a heading that weighs at least as much — ### Removed for a'
+        . ' removal,' . PHP_EOL
+        . '  ### Added or ### Changed for an addition — or release with --allow-silent-notes'
+        . ' and say so in the plan.',
+        surfaceReason($weighing),
+        $entries === 0
+            ? 'The Unreleased section has no entries at all'
+            : sprintf(
+                'The notes weigh a %s (%d %s)',
+                $notes,
+                $entries,
+                $entries === 1 ? 'entry' : 'entries',
+            ),
+    ));
+}
+
+// Reached on a dry run, and on an override. The first is a warning about a release that
+// would be refused — a plan is where that belongs — and the second is the release saying what
+// it let through, which is why every other escape here does the same.
+if ($unaccounted) {
+    note(sprintf(
+        'The public surface changed (weighed %s) and the notes are quieter (weighed %s) — %s.',
+        $surface,
+        $notes,
+        $options['allow-silent-notes']
+            ? 'released anyway (--allow-silent-notes)'
+            : 'a real run would refuse to tag on this',
+    ));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -708,6 +772,69 @@ note(sprintf(
 ));
 
 exit(0);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The notes rail
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The loudest severity the named signals reported, or `patch` when none of them found
+ * anything — and when the weighing does not carry them at all, which is the state of the
+ * commits and the two surface halves on a tree with no tag at all.
+ *
+ * The name is the question rather than a signal: the release notes are one source and the
+ * public surface is three, so "how loud is the surface" is a maximum over a set, and spelling
+ * the set once is what keeps the two sides of the rail comparable.
+ *
+ * @param array{signals: list<array{source: string, severity: string}>} $weighing
+ * @param list<string>                                                 $sources
+ */
+function weighedAcross(array $weighing, array $sources): string
+{
+    $severity = 'patch';
+
+    foreach ($weighing['signals'] as $signal) {
+        if (in_array($signal['source'], $sources, true)
+            && severityRank($signal['severity']) > severityRank($severity)) {
+            $severity = $signal['severity'];
+        }
+    }
+
+    return $severity;
+}
+
+/**
+ * The surface changes a release is carrying, for the error a refused release prints: the
+ * signals that read the public surface and weighed more than a patch, which is the list a
+ * reader has to file under `## Unreleased`.
+ *
+ * The threshold is what leaves the wrong lines out. A `patch` from one of these signals is
+ * not a change to a symbol: it is the inventory saying its file is stale or missing, or a
+ * file that moved with its symbol intact, and neither belongs in a list of things to write a
+ * note for. Every line that survives the threshold is a symbol that was added, removed or
+ * reshaped, because that is the only thing a surface diff produces above a patch.
+ *
+ * @param array{signals: list<array{source: string, severity: string, evidence: list<string>}>} $weighing
+ */
+function surfaceReason(array $weighing): string
+{
+    $lines = [];
+
+    foreach ($weighing['signals'] as $signal) {
+        if (!in_array($signal['source'], surfaceSources(), true)
+            || severityRank($signal['severity']) === severityRank('patch')) {
+            continue;
+        }
+
+        $lines[] = sprintf('  %s (%s):', $signal['source'], $signal['severity']);
+
+        foreach (array_slice($signal['evidence'], 0, 8) as $evidence) {
+            $lines[] = '    • ' . $evidence;
+        }
+    }
+
+    return implode(PHP_EOL, $lines);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Version maths
@@ -1399,6 +1526,9 @@ function usage(): void
                            passed. Set RELEASE_CI_COMMAND to ask a gh that lives
                            somewhere else, or to answer from a fixture.
           --ignore-policy  Release even though the bump undersells the changes.
+          --allow-silent-notes
+                           Release even though the public surface changed and the
+                           Unreleased notes do not account for it; the plan says so.
       -h, --help           Show this help.
 
     Prerelease:

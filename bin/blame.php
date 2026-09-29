@@ -165,7 +165,7 @@ foreach ($weighing['signals'] as $signal) {
     // not in its evidence at all. It is still what a reader means by "the changelog
     // caught this", which is why the bullets are searched separately and reported with
     // the heading they sit under — the heading is the part that carried a weight.
-    if ($signal['source'] === 'CHANGELOG') {
+    if ($signal['source'] === notesSource()) {
         $lines = [...$lines, ...notesNaming($unreleased, $query)];
     }
 

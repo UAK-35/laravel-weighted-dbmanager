@@ -2014,7 +2014,12 @@ finished, passing workflow run for it, since the release commit itself cannot ha
 one yet; `--skip-ci` tags anyway and says so in the plan. An empty `## Unreleased`
 is the one rail `--weigh --dry-run` is let past: the notes are what a release
 publishes, and a plan publishes nothing, so it reports the bump the other three
-signals weigh and says in the plan that a real run refuses there. A
+signals weigh and says in the plan that a real run refuses there. A surface change
+has to be accounted for by the notes as well: the notes are the one signal a reader
+ever sees, so a new public method filed under `### Fixed` is refused and pointed at
+the heading that covers it — the version moves on the surface either way, and the
+changelog would otherwise announce a fix — with `--allow-silent-notes` as the escape,
+printed in the plan like every other one. A
 version may also be a prerelease — `--version=0.0.1-alpha1`, cut from `dev` — which
 promotes the notes and stamps the inventory exactly as a release does; a consumer
 opts in with `minimum-stability: alpha` or a constraint like `"^0.0.1@alpha"`. The
