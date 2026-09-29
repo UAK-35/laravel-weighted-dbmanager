@@ -349,7 +349,7 @@ The register of rows that can name several problems is where the change is measu
 asserted: `store probe` used to be the one entry in it that survived the "`datedRow()` names only the
 first problem" mutation, because the row assembled its own sentences instead of going through the
 shared builder. Once the two states are findings it goes through the builder like every other row, so
-the mutation reaches it — 19 tests fail against it now rather than 15 — and the register's `store
+the mutation reaches it — 24 tests fail against it now rather than 15 — and the register's `store
 probe` case is no longer the only test that would notice a row regressing to its first problem.
 
 ---

@@ -383,6 +383,13 @@ class DbDoctor extends Command
      * reader of these docs is most likely to make: pointing at the `swrr` block itself instead of
      * the file that returns it.
      *
+     * What the file printed is a problem *beside* the shape rather than instead of it, whichever
+     * state the file is in — a file whose shape is wrong can print as well, and the two are
+     * repaired differently, so a row that named only the shape would send an operator back through
+     * the pipeline to hear about the output. That is the whole reason this row is assembled out of
+     * a list of problems rather than out of one sentence chosen from several, and it is the same
+     * assembly the installation rows use (`configFileRow()`).
+     *
      * @return array{
      *     row: array{status: string, name: string, detail: string, suggestions: list<string>},
      *     swrr: array<string, mixed>|null,
@@ -392,38 +399,58 @@ class DbDoctor extends Command
     {
         if (!is_file($path)) {
             return [
-                'row' => $this->row('config file', self::FAIL, sprintf(
-                    '%s is not a file that can be read — name the candidate config/db-manager.php this host can open',
-                    $path,
-                )),
+                'row' => $this->configFileRow([
+                    self::problem(self::FAIL, sprintf(
+                        '%s is not a file that can be read — name the candidate config/db-manager.php this host can open',
+                        $path,
+                    )),
+                ]),
                 'swrr' => null,
             ];
         }
 
         $printed = '';
+        $depth = ob_get_level();
 
         try {
             ob_start();
             $loaded = (static fn (string $file): mixed => require $file)($path);
             $printed = (string) ob_get_clean();
         } catch (Throwable $e) {
-            while (ob_get_level() > 0) {
+            // The buffer this command opened, read before the flush below drops it: a file that
+            // printed and then threw is the same two problems as one that printed and returned a
+            // shape nobody can judge. Read only while it is still the innermost buffer, because an
+            // outer one belongs to whatever called this command and is not this file's output.
+            $printed = ob_get_level() === $depth + 1 ? (string) ob_get_contents() : '';
+
+            // Down to where this read started, and no further: the loop used to empty every buffer
+            // to zero, which under a test runner is the buffer the runner itself is using — a
+            // candidate file that throws is not a reason to close somebody else's output. The
+            // buffers above `$depth` are this command's own, and the ones a throwing file left
+            // open are above it too, so both are closed here rather than only the first.
+            while (ob_get_level() > $depth) {
                 ob_end_clean();
             }
 
             return [
-                'row' => $this->row('config file', self::FAIL, sprintf('%s could not be read: %s', $path, $e->getMessage())),
+                'row' => $this->configFileRow([
+                    self::problem(self::FAIL, sprintf('%s could not be read: %s', $path, $e->getMessage())),
+                    ...self::printedProblems($printed),
+                ]),
                 'swrr' => null,
             ];
         }
 
         if (!is_array($loaded)) {
             return [
-                'row' => $this->row('config file', self::FAIL, sprintf(
-                    '%s returned %s, not an array — the vet reads the file the way config:cache does, as whatever it returns',
-                    $path,
-                    get_debug_type($loaded),
-                )),
+                'row' => $this->configFileRow([
+                    self::problem(self::FAIL, sprintf(
+                        '%s returned %s, not an array — the vet reads the file the way config:cache does, as whatever it returns',
+                        $path,
+                        get_debug_type($loaded),
+                    )),
+                    ...self::printedProblems($printed),
+                ]),
                 'swrr' => null,
             ];
         }
@@ -432,13 +459,16 @@ class DbDoctor extends Command
             $blockKeys = array_values(array_intersect(['pgcat', 'reader_windows', 'reader_days', 'allow_local_fallback'], array_keys($loaded)));
 
             return [
-                'row' => $this->row('config file', self::FAIL, $blockKeys === []
-                    ? sprintf('%s returns an array without a "swrr" key, so there is nothing to judge', $path)
-                    : sprintf(
-                        '%s holds %s at the top level, not under a "swrr" key — name the config file that returns it (the array is read under "swrr"), not the block inside it',
-                        $path,
-                        implode(', ', $blockKeys),
-                    )),
+                'row' => $this->configFileRow([
+                    self::problem(self::FAIL, $blockKeys === []
+                        ? sprintf('%s returns an array without a "swrr" key, so there is nothing to judge', $path)
+                        : sprintf(
+                            '%s holds %s at the top level, not under a "swrr" key — name the config file that returns it (the array is read under "swrr"), not the block inside it',
+                            $path,
+                            implode(', ', $blockKeys),
+                        )),
+                    ...self::printedProblems($printed),
+                ]),
                 'swrr' => null,
             ];
         }
@@ -447,29 +477,90 @@ class DbDoctor extends Command
 
         if (!is_array($swrr)) {
             return [
-                'row' => $this->row('config file', self::FAIL, sprintf(
-                    '%s holds "swrr" as %s, not a block of settings',
-                    $path,
-                    get_debug_type($swrr),
-                )),
+                'row' => $this->configFileRow([
+                    self::problem(self::FAIL, sprintf(
+                        '%s holds "swrr" as %s, not a block of settings',
+                        $path,
+                        get_debug_type($swrr),
+                    )),
+                    ...self::printedProblems($printed),
+                ]),
                 'swrr' => null,
             ];
         }
 
-        $detail = sprintf('%s read as an array holding a "swrr" block — its switches and reader settings are judged below', $path);
-
-        if ($printed !== '') {
-            return [
-                'row' => $this->row('config file', self::WARN, sprintf(
-                    '%s also printed %d byte(s) while being read, which config:cache writes into the cached file — the report below is unaffected',
-                    $detail,
-                    strlen($printed),
+        return [
+            'row' => $this->configFileRow([
+                self::problem(self::PASS, sprintf(
+                    '%s read as an array holding a "swrr" block — its switches and reader settings are judged below',
+                    $path,
                 )),
-                'swrr' => ConfigValue::assoc($swrr),
-            ];
+                ...self::printedProblems($printed),
+            ]),
+            'swrr' => ConfigValue::assoc($swrr),
+        ];
+    }
+
+    /**
+     * One problem, in the shape a row's problems are assembled from: the verdict, the finding key a
+     * boot record would date it by (null where nothing remembers the state), the sentence, and the
+     * repair line if the value reduces to one.
+     *
+     * The four keys are spelled once here because an absent one is silent: a missing `key` reads as
+     * a problem no boot ever saw, and a missing `suggestion` as a repair the row could not name.
+     * Only the vet's `config file` row builds its problems through this — the installation rows
+     * write theirs out, because their keys and repairs come from tables beside them — so nothing
+     * else depends on the defaults here.
+     *
+     * @return array{status: string, key: string|null, sentence: string, suggestion: string|null}
+     */
+    private static function problem(string $status, string $sentence): array
+    {
+        return ['status' => $status, 'key' => null, 'sentence' => $sentence, 'suggestion' => null];
+    }
+
+    /**
+     * What a file printed while it was being read, as a problem — or nothing at all, which is what
+     * an ordinary config file produces.
+     *
+     * A warning rather than a failure: the file is usable, and what it printed is a fact about it
+     * that `config:cache` would write into the cached config. It is a problem of the row's own
+     * rather than a clause of another one, so it is named whether or not the values could be read.
+     *
+     * @return list<array{status: string, key: string|null, sentence: string, suggestion: string|null}>
+     */
+    private static function printedProblems(string $printed): array
+    {
+        if ($printed === '') {
+            return [];
         }
 
-        return ['row' => $this->row('config file', self::PASS, $detail), 'swrr' => ConfigValue::assoc($swrr)];
+        return [self::problem(self::WARN, sprintf(
+            'the file printed %d byte(s) while being read, which config:cache writes into the cached file',
+            strlen($printed),
+        ))];
+    }
+
+    /**
+     * `config file`, assembled out of every problem the file has.
+     *
+     * The vet's row is a list rather than one sentence chosen from several, because a file can be
+     * wrong in two ways at once: the shape it needs to be judged at all, and the bytes it printed
+     * while it was being read. An operator has to clear both, and clearing one of them should not
+     * cost a second run of the pipeline to hear about the other.
+     *
+     * Nothing here is dated and nothing carries a repair, and both are deliberate. The subject is a
+     * file that has never been booted, so there is no finding to date a problem from — the same
+     * reason `switch values` reports a candidate's refusals without dates — and neither a wrong
+     * shape nor a stray byte reduces to a value the package can name exactly. So the record passed
+     * to the shared assembly is empty, which is the whole of what "the vet has no record" means.
+     *
+     * @param list<array{status: string, key: string|null, sentence: string, suggestion: string|null}> $problems
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function configFileRow(array $problems): array
+    {
+        return $this->datedRow('config file', $problems, []);
     }
 
     /**
@@ -1605,17 +1696,22 @@ class DbDoctor extends Command
     /**
      * A row assembled out of every problem a setting has, each dated from its own finding.
      *
-     * Shared rather than written twice because the two rows that use it — `reader windows` and
-     * `switch values` — make the same claim about their problems and would otherwise be able to
-     * make it two ways: that the verdict is the loudest problem in the row (`verdict()` is where
-     * that rule lives), that the detail is each problem's own sentence separated so an operator
-     * can tell where one ends and the next begins, that a problem naming a replacement adds a
-     * `suggestion` line — a list of them, since two refused settings have two repairs and
-     * printing one would leave the other to be re-spelled by hand — and that a problem is dated
-     * from *its own* key. The record holds one entry per finding key and either row can have
-     * several, so quoting the first key the record happens to hold would date a problem the row
-     * is not reporting: a claim about when this installation started being wrong, made about the
-     * wrong thing.
+     * Shared rather than written once per row because `reader windows`, `switch values`,
+     * `pgcat files` and `store probe` all make the same claim about their problems, and a row that
+     * made it for itself could make it differently: that the verdict is the loudest problem in the
+     * row (`verdict()` is where that rule lives), that the detail is each problem's own sentence
+     * separated so an operator can tell where one ends and the next begins, that a problem naming a
+     * replacement adds a `suggestion` line — a list of them, since two refused settings have two
+     * repairs and printing one would leave the other to be re-spelled by hand — and that a problem
+     * is dated from *its own* key. The record holds one entry per finding key and either row can
+     * have several, so quoting the first key the record happens to hold would date a problem the
+     * row is not reporting: a claim about when this installation started being wrong, made about
+     * the wrong thing.
+     *
+     * The vet's `config file` row is the fifth caller and the one that passes an *empty* record,
+     * which is not a shortcut: its subject is a file that has never been booted, so no finding of
+     * this installation is about what it read, and every problem arrives undated. The rule the row
+     * shares — a list of problems, joined rather than chosen between — is the part that travels.
      *
      * Every sentence ends in a full stop before it arrives here — that is what the age is
      * inserted in front of, so a dated problem reads as one sentence rather than a sentence with

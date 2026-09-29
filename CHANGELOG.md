@@ -205,6 +205,39 @@
   four (both of that route's cells, the object's own row, and the agreement test), and returning
   `SUCCESS` from the terminal guard fails one — the new cell.
 
+- **`db:doctor --config-file` reported one problem at a time, so a candidate file that was both
+  unusable and noisy was reported as unusable and nothing else.** The vet's `config file` row picked a
+  single sentence per state: a file that returned a string instead of an array was named for that, and
+  the bytes it printed while it was being read — the ones `config:cache` writes into the cached config,
+  which is the whole reason the row mentions them — were dropped, because the row returned before it
+  reached the branch that names them. An operator fixed the shape and heard about the output on the
+  next run of the pipeline, which is the shape the `reader windows`, `pgcat files` and `store probe`
+  rows lost when they learned to name every problem they have. This row is assembled the same way now:
+  the shape first, then what the file printed, each in its own sentence, with the loudest problem
+  setting the verdict. The vet's other two rows already used that assembly, so nothing about their
+  sentences or their lack of dates moved.
+
+  Two things fell out of writing the test. A candidate that prints and *then* throws used to lose the
+  bytes as well — the buffer this command opens is read now, before the flush that closes it, so the
+  throw and the output are named together. And that flush emptied *every* open output buffer rather
+  than the ones this read opened, which under a test runner is the runner's own: it stops at the depth
+  the read started at, so a candidate file that throws cannot close somebody else's output. Pinned by
+  three cases in `DbDoctorTest` — the shape beside the bytes, the bytes printed before a throw, and the
+  entry the register declares, which drives the vet's run rather than the installation fixture's because
+  the vet's row is the one whose problems are undated by design. Four mutations are measured against
+  it: giving `datedRow()` only the first problem fails twenty-four tests (the register's own case
+  among them), never reporting the bytes a candidate printed fails four, dropping the buffer this
+  command opened fails one, and emptying every buffer rather than the ones this read opened fails one.
+
+  Every other row was audited one at a time for the same shape, since the register's measure can only
+  see rows whose problems are dated. None of them drops a problem: the rows with two states are
+  mutually exclusive in the state the first one reports (`weighted factory`, `published config`,
+  `pgcat gate`, `replica metadata`), progressive readings of one thing (`store reachability`), one
+  chain nobody can shorten (`pgcat supervisor`), or a fact another row names in the same run
+  (`provider swap`). `replica metadata` names several problems already — one per replica — and stays
+  out of the register because the resolver's pool decisions are not findings to date. The table with
+  each row and its reason is in [docs/db-doctor-json.md](docs/db-doctor-json.md).
+
 - **A release after a dev tag was weighed from that tag, so promoting the version it announced was
   refused — and `--weigh` answered with a version that skipped it.** A prerelease does not *hold* the
   rung in its name, it announces it: `0.5.0-alpha1` is a prerelease of `0.5.0`, so a round of changes

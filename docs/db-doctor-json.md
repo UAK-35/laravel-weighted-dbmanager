@@ -197,19 +197,48 @@ the `FAIL` stands, and is counted, whether or not one is printed under it.
 
 `detail` is the row's own account of what it found, and several rows can find more than one thing:
 `reader windows` reports each refused reader setting, `switch values` each switch that is not a switch,
-`pgcat files` each file a flip needs and cannot use, and `store probe` a probe that is switched off
-beside a record that cannot be written. Each problem keeps its own sentence, and each is dated from
-its own finding, so a row that named whichever problem it noticed first would still read as a
-complete answer — which is why the row set is declared in `DbDoctorTest::rowsNamingSeveralProblems()`
-and every entry in it is given two problems and asked for both. The register is the test: a row that
-can report several problems and is not in it fails the set test, which measures the answer out of the
-run — the record dates each problem from its own finding, so the rows carrying more than one date are
-the rows naming several problems. Every row in the register is datable, and the store probe is the
-one that had to be made so: its two states were a sentence and nothing else, and a row that reports
-a state standing for weeks is a row an operator asks "since when" about. They are findings now —
-`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`, both warnings, the first
-because switching the probe off is a documented choice and the second because it is the fault the
-README sets against that choice — so the register's measure sees all four rows rather than three.
+`pgcat files` each file a flip needs and cannot use, `store probe` a probe that is switched off beside
+a record that cannot be written, and the vet's `config file` the shape nobody can judge beside the
+bytes the file printed while it was being read. Each problem keeps its own sentence, so a row that
+named whichever problem it noticed first would still read as a complete answer — which is why the row
+set is declared in `DbDoctorTest::rowsNamingSeveralProblems()` and every entry in it is given two
+problems and asked for both. The register is the test: a row that names several problems, and is not
+in it, is a row the register has stopped describing.
+
+The set test beside those cases measures the answer out of the run — the record dates each problem
+from its own finding, so the rows carrying more than one date are the rows naming several problems.
+That measure needs the problems to be *datable*, which is why the store probe's two states had to
+become findings: a state standing for weeks is a state an operator asks "since when" about, and
+`swrr.audit.store_probe_seconds.off` / `swrr.audit.file.unwritable` are what makes it answerable. The
+vet's `config file` row is the entry that cannot be measured that way at all: its subject is a file
+that has never been booted, so nothing dates what it read — the register's case test drives that run
+with `--config-file` instead of reading the installation, which is why the set test stays about the
+four installation rows.
+
+#### The rows that are one fact, and why
+
+Because the measure can only see dated rows, "every row that can name several problems" was audited
+one row at a time rather than inferred from the register. Each row of a full run, what it can be
+about, and which of the two it is:
+
+| Row | What it can be about | Disposition |
+|---|---|---|
+| `config file` (vet) | the shape the file needs to be judged at all, and the bytes it printed while it was being read | **both named** — the shape is the file's and the bytes are what `config:cache` would write into the cached config |
+| `provider swap` | a `db` that would not resolve, a provider that is not registered, a `db` that is not the weighted manager | one fact in three diagnoses: the last two are the same cause, and both `weighted factory` and `pgcat gate` name the missing provider in the same run |
+| `weighted factory` | `db.factory` that could not be resolved, and one that is not the weighted factory | mutually exclusive — a binding that threw has no class to inspect |
+| `published config` | no published file at all, and one byte-identical to the sample | mutually exclusive — a file that is not there cannot be identical to anything |
+| `pgcat gate` | the driver mismatch, and an armed flipper whose paths are unset | mutually exclusive by construction (`isMismatched()` and `isEnabled()` cannot both hold), and `pgcat files` names the paths |
+| `pgcat files` | every file precondition a flip needs | **several, named all** — the register |
+| `pgcat supervisor` | an empty command, an executable that does not resolve, an unquoted program, a supervisord that does not know the program | one chain: each fault is what physically prevents seeing the next, and the same verdict is what a flip refuses on |
+| `replica metadata` | every replica whose metadata the resolver cannot read, and every replica left out of the pool on purpose | **several, named all**, undated: the pool's own decisions are not findings |
+| `switch values` | each switch written as something that is not a switch | **several, named all** — the register |
+| `reader windows` | each refused reader setting, and each window that can never be entered | **several, named all** — the register |
+| `store probe` | a probe switched off, a record that cannot be written, an in-process store | **several, named all** — the register |
+| `store reachability` | a primary store that failed in this process, a process already degraded, an in-process store, a store that would not answer a PING | one store, one state: a store that failed is *why* the process is degraded |
+
+The vet's other two rows are the installation's, by name and by sentence: a candidate's refused
+switches and reader settings are the same problems, read from a file, and they are dated from nothing
+for the same reason — a file has never been booted.
 
 ### What the flag does not change
 
@@ -260,8 +289,9 @@ exits correctly (10 cells fail on the field), `strict` pinned to `false` (7 cell
 profile carries a repair — and the dedicated suggestions test fails, which is why that test exists),
 and the README's `FAIL` row relabelled `FATAL` (the vocabulary guard fails naming both sets). The rule
 about a row with several problems has its own: `datedRow()` printing only the first problem's
-sentence fails **19** tests, and the register's four cases and its set test are five of them — the
-other fourteen are the rows' own tests, including the three `store probe` row tests. The store probe
+sentence fails **24** tests, and the register's five cases and its set test are six of them — the
+other eighteen are the rows' own tests, including the three `store probe` row tests and the four the
+vet's `config file` row has. The store probe
 used to be the case that survived this mutation, because the row built its two sentences itself
 instead of asking `datedRow()` for them; once its two states were findings it built them the same way
 every other row does, so the mutation reaches it and the register's case is no longer the only thing

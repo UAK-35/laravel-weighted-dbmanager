@@ -2299,11 +2299,28 @@ class DbDoctorTest extends TestCase
      * would be guessing at what was meant — so the two halves of a row are not the same number and
      * are not wired to each other here.
      *
-     * @return array<string, array{0: string, 1: list<string>, 2: int}>
+     * The fourth element is the case's *run*, and only one entry needs it: `config file` is the
+     * vet's row, so its subject is a candidate file rather than an installation, and the run that
+     * reports it is `--config-file`. Null means the installation fixture, which is what every other
+     * entry is about. The vet's entry is the one row of the pair whose problems are undated by
+     * design, so the set test below — which measures dated rows in the installation run — stays
+     * about the four it names.
+     *
+     * @return array<string, array{0: string, 1: list<string>, 2: int, 3?: string}>
      */
     public static function rowsNamingSeveralProblems(): array
     {
         return [
+            // The vet's own row, and the only one with two problems in *different* states of the
+            // same file: the shape nobody can judge, and the bytes the file printed while it was
+            // being read — which `config:cache` would write into the cached file, so both are the
+            // operator's to fix and neither is a detail of the other. `not config` is ten bytes.
+            'config file — a shape that cannot be judged, and bytes printed while it was read' => [
+                'config file',
+                ['returned string, not an array', 'printed 10 byte(s) while being read, which config:cache writes into the cached file'],
+                0,
+                "<?php\n\necho 'not config';\n\nreturn 'swrr';\n",
+            ],
             // A window written without its list, and a day list written as the `.env` string: two
             // refused settings, each re-spelled by the rule that refused it, so two repairs.
             'reader windows — both reader settings refused' => [
@@ -2350,8 +2367,11 @@ class DbDoctorTest extends TestCase
         string $row,
         array $fragments,
         int $repairs,
+        ?string $candidate = null,
     ): void {
-        $record = $this->everyRowWithSeveralProblems();
+        // The vet's `config file` row is about a file, so its problems are built by a run pointed
+        // at one; every other entry is a row of the installation the fixture below describes.
+        $record = $candidate === null ? $this->everyRowWithSeveralProblems() : '';
 
         if ($row === 'store probe' && is_writable($record)) {
             // Running as root, or on a filesystem that ignores the read-only bit: the row's second
@@ -2359,7 +2379,11 @@ class DbDoctorTest extends TestCase
             $this->markTestSkipped('This environment cannot make the record read-only.');
         }
 
-        $check = $this->checkNamed($this->report($this->doctorJson()[0]), $row);
+        $report = $candidate === null
+            ? $this->report($this->doctorJson()[0])
+            : $this->report($this->vetConfig($this->rawConfigFile($candidate), json: true)[0]);
+
+        $check = $this->checkNamed($report, $row);
 
         foreach ($fragments as $fragment) {
             $this->assertStringContainsString(
@@ -3080,6 +3104,65 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringContainsString('returned string, not an array', $output);
         $this->assertStringContainsString('the vet reads the file the way config:cache does', $output);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * Two problems about one file, both named and neither a detail of the other.
+     *
+     * A file whose shape nobody can judge can *also* print while it is being read, and the two are
+     * repaired differently: the shape is the file's, the printed bytes are what `config:cache`
+     * would write into the cached config. Naming the shape alone is what the row used to do, and it
+     * sent an operator back through the pipeline to hear the second — the same shape the `reader
+     * windows`, `pgcat files` and `store probe` rows lost, reached through the vet instead of
+     * through an installation.
+     */
+    public function test_the_config_file_flag_names_a_shape_it_cannot_judge_beside_the_bytes_printed(): void
+    {
+        $path = $this->rawConfigFile("<?php\n\necho 'not config';\n\nreturn 'swrr';\n");
+
+        [$output, $exit] = $this->vetConfig($path);
+        $row = $this->rowContaining($output, 'config file');
+
+        $this->assertStringStartsWith('FAIL  config file', $row, 'the shape is a failure, and a warning beside it cannot lower that');
+        $this->assertStringContainsString('returned string, not an array', $row);
+        $this->assertStringContainsString('printed 10 byte(s) while being read, which config:cache writes into the cached file', $row);
+
+        // The file's own order, so the row reads as the file was met: the shape first, then what it
+        // printed on the way to being that shape.
+        $this->assertLessThan(
+            strpos($row, 'printed 10 byte(s)'),
+            strpos($row, 'returned string'),
+            'the row names the problems in the order it reached them: ' . $row,
+        );
+
+        $this->assertSame(1, $exit);
+
+        // Nothing was judged and nothing claims to have been: the two rows that need a `swrr` block
+        // are absent rather than passing on the output of a file nobody could read.
+        $this->assertStringNotContainsString('switch values', $output);
+        $this->assertStringNotContainsString('reader windows', $output);
+    }
+
+    /**
+     * A file that printed and then threw: the bytes are still the file's own problem, and they are
+     * still readable — the buffer this command opened holds them, and the row is built before the
+     * flush that drops the buffers a throwing file may have left open.
+     *
+     * The bytes are reported rather than printed, which is the same reason the buffer exists: a
+     * candidate that echoes must not be able to write into the report it is being judged in.
+     */
+    public function test_the_config_file_flag_names_the_bytes_printed_before_a_file_threw(): void
+    {
+        $path = $this->rawConfigFile("<?php\n\necho 'before the throw';\n\nthrow new RuntimeException('no config here');\n");
+
+        [$output, $exit] = $this->vetConfig($path);
+        $row = $this->rowContaining($output, 'config file');
+
+        $this->assertStringStartsWith('FAIL  config file', $row);
+        $this->assertStringContainsString('could not be read: no config here', $row);
+        $this->assertStringContainsString('printed 16 byte(s) while being read', $row);
+        $this->assertStringNotContainsString('before the throw', $output, 'what the file printed is the row\'s problem, not the report');
         $this->assertSame(1, $exit);
     }
 
