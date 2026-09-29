@@ -1993,8 +1993,8 @@ Windows-only `ext-*` platform requirements to `install` / `update` / `require` /
 `composer checks` (`bin/checks.php`) runs every applicable check and prints one
 summary with one exit code: `php -l` over every file (including `bin/`), an
 independent AST parse of the same files, a write-back scan of `src/` and `config/`,
-`composer validate --strict`, `check-platform-reqs`, the workflow YAML, PHPStan,
-Pint and PHPUnit. The schema
+`composer validate --strict`, `check-platform-reqs`, the workflow YAML, a scan of
+the records for a sentence boundary that lost its space, PHPStan, Pint and PHPUnit. The schema
 check asks about `composer.lock` only when the repository contains one — it is
 gitignored here, so a lock a local `composer.json` edit has made stale cannot turn
 the gate red over a file no clone has, which is the same question CI answers after
@@ -2015,6 +2015,23 @@ fails the check, and a register entry the code has left behind fails it too. The
 detector is run against fixtures of its own first, so a shape it has stopped
 recognising fails the check rather than reporting an empty result — the limitation
 of a static scan is written up beside the register.
+
+The records are read as prose as well. A sentence that ends and the next one that
+begins with nothing between them is a word the language does not have, and it is what
+an edit that eats a space leaves behind:
+
+```
+…written by the release.Diffing it is the next sentence…
+```
+
+The check reads `README.md`, `RELEASING.md` and every `docs/*.md`, and leaves fenced
+blocks alone, because the code these records quote — a PowerShell member, a PHP string
+concatenation, a version — is what a sentence rule reports. It needs a capital with a
+lowercase letter after it as well, which is why the dotted `production.ERROR` these
+records mention is not one of its findings. A finding prints the file, the line and
+the join, and the detector runs against fixtures of its own first — the same rule the
+write-back scan follows — so a pattern that has stopped matching fails the gate
+instead of reporting no fused sentence.
 
 `phpstan.neon.dist` runs at **level `max`** over `src` with **no ignore entries
 and no baseline file** — every finding is fixed, not silenced.

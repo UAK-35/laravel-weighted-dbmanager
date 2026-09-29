@@ -9,7 +9,8 @@ declare(strict_types=1);
  * One entry point for every check this package can run: PHP syntax, an
  * independent AST parse of the same files, a scan for files read and written
  * back whole, the composer.json schema, the platform requirements, the workflow
- * YAML, the counts the records render from their derivations, PHPStan, Pint and
+ * YAML, the counts the records render from their derivations, a scan of the
+ * records for a sentence boundary that lost its space, PHPStan, Pint and
  * PHPUnit.
  *
  * WHY THIS EXISTS IN ADDITION TO `composer test`
@@ -103,6 +104,23 @@ const STRUCTURE_WRITE_BACKS = [
  * as a structure written back rather than as a sentence this run composed.
  */
 const VALUE_ENCODERS = ['json_encode', 'var_export', 'serialize', 'yaml_emit'];
+
+/**
+ * The shape a sentence boundary makes when its space is eaten: a terminator — `.`, `?`, `!` —
+ * with the capitalised word that begins the next sentence against it.
+ *
+ * The lookbehind is what makes the match *start* at the terminator, so a finding can show the
+ * repair without repeating the word before it. The capital has to be followed by a lowercase
+ * letter, and that is the whole width of the rule: `production.ERROR` is a config key written in
+ * prose twice in these records and `.PGSQL.5432` is a socket path in the changelog, so a rule
+ * that fired on any capital after a dot would fail this gate over names rather than over
+ * sentences. `checkRecordSentences()` has the measurement and the cost.
+ *
+ * It is declared here rather than beside its reader because the checks run before the file's own
+ * execution reaches the bottom of it: a `const` is bound when the statement runs, and the run
+ * loop is above every function.
+ */
+const FUSED_SENTENCE = '/(?<=[a-z0-9)"\'`*\]])[.?!]["\'`)\]]*[A-Z][a-z]+/';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI
@@ -264,6 +282,11 @@ $checks = [
         // check skips too, and this one would fail with the reason the skip already states.
         'skip' => is_file($root . '/vendor/autoload.php') ? null : 'composer install has not been run',
         'run' => static fn (): array => runCommand([PHP_BINARY, $root . '/bin/counts.php', '--check'], $root),
+    ],
+    'sentences' => [
+        'title' => 'Fused sentences (a sentence boundary in a record with no space after it)',
+        'skip' => recordFiles($root) === [] ? 'no records to read' : null,
+        'run' => static fn (): array => checkRecordSentences($root),
     ],
     'phpstan' => [
         'title' => "Static analysis (phpstan, level {$level})",
@@ -758,6 +781,338 @@ function checkAst(string $root, array $files): array
     return $failures === []
         ? ['exit' => 0, 'output' => count($files) . ' files parsed']
         : ['exit' => 1, 'output' => implode(PHP_EOL, $failures)];
+}
+
+/**
+ * A record read as prose, checked for a sentence boundary that has lost its space.
+ *
+ * WHY THIS IS A CHECK
+ * -------------------
+ *   The records are read as prose and this is what an edit does to them: the space at the one
+ *   place a reader cannot recover it from is eaten, the last word of one sentence becomes the
+ *   first of the next, and the join reads as a word that is not in the language — `…written by
+ *   the release.Diffing it is…`. Nothing else notices: `php -l` has no opinion about a paragraph,
+ *   the suite asserts behaviour rather than wording, and the records' own prose is one copy-paste
+ *   away from the shape at all times. It is a typo, and it is
+ *   the same kind of guard as the write-back register below: a defect that is invisible in the
+ *   diff that makes it and cheap to look for afterwards.
+ *
+ * THE RULE, AND WHY IT IS THIS WIDE
+ * ---------------------------------
+ *   A terminator touches a capitalised word that has at least one lowercase letter after it, and
+ *   the character before the terminator is a letter, a digit or a closing `)`, `]`, quote,
+ *   backtick or emphasis marker. That is narrower than "a capital after a dot" on purpose, and
+ *   the width is a measurement rather than a preference: read that way, the records carry
+ *   `production.ERROR` twice and the changelog a `/var/run/postgresql/.s.PGSQL.5432`, both of
+ *   which are names rather than sentences, so the loose rule fails the gate over a config key.
+ *   The price is the other direction — a fused sentence whose next word is all capitals
+ *   (`release.PHP`) is not reported — and it is a price paid out loud: that string is one of the
+ *   fixtures, so a rule widened later has to keep it silent and the trade cannot be undone by
+ *   accident.
+ *
+ * WHAT IS NOT READ
+ * ----------------
+ *   Fenced blocks. A fence holds code, this is a rule about sentences, and the code in these
+ *   records is exactly what a sentence rule reports: `$_.Subject`, `'. '.ClassName`, `1.0.0`. The
+ *   line that says so found this out rather than argued it — the paragraph documenting this check
+ *   was reported twice before it was fixed, once for quoting the example in prose and once because
+ *   the PHP idiom quoted beside it lost a space in the quoting, which is a fused sentence. Both
+ *   are in a fence now.
+ *
+ *   The CHANGELOG is not read either: everything below its `## Unreleased` heading is a published
+ *   record and RELEASING.md leaves every released section byte for byte alone, so a finding there
+ *   would have no repair that is not an edit to a release. What is left is the records —
+ *   `README.md`, `RELEASING.md` and every `docs/*.md` — and the fixtures are run before them, so
+ *   a detector that has stopped matching fails by name instead of reporting no fused sentence.
+ *
+ * @return array{exit: int, output: string}
+ */
+function checkRecordSentences(string $root): array
+{
+    $fixtures = fusedSentenceFixtures();
+    $disagreements = [];
+
+    foreach ($fixtures as $name => [$text, $expected]) {
+        $reported = array_column(fusedSentences(proseIn($text)), 1);
+        sort($reported);
+        sort($expected);
+
+        if ($reported !== $expected) {
+            $disagreements[] = sprintf(
+                '  %-64s expected %s, reported %s',
+                $name,
+                $expected === [] ? 'nothing' : implode(', ', $expected),
+                $reported === [] ? 'nothing' : implode(', ', $reported),
+            );
+        }
+    }
+
+    // The fixtures are run against the same detector the records are, and before them, because a
+    // detector that has stopped seeing the shape reports an empty result: without this, the check
+    // that is meant to catch a fused sentence would pass by finding none.
+    if ($disagreements !== []) {
+        return [
+            'exit' => 1,
+            'output' => implode(PHP_EOL, [
+                'The detector no longer agrees with its own fixtures, so what it says about the',
+                'records is not worth having — a shape it has stopped recognising is a finding it',
+                'reports as an empty result:',
+                '',
+                ...$disagreements,
+            ]),
+        ];
+    }
+
+    $records = recordFiles($root);
+    $findings = [];
+    $prose = 0;
+
+    foreach ($records as $record) {
+        $text = @file_get_contents($root . '/' . $record);
+
+        if ($text === false) {
+            continue;
+        }
+
+        $reading = proseIn($text);
+        $prose += count(array_filter(
+            explode("\n", $reading),
+            static fn (string $line): bool => trim($line) !== '',
+        ));
+
+        foreach (fusedSentences($reading) as [$offset, $join]) {
+            $lineStart = strrpos(substr($reading, 0, $offset), "\n");
+            $lineStart = $lineStart === false ? 0 : $lineStart + 1;
+            $lineEnd = strpos($reading, "\n", $offset);
+
+            $findings[] = sprintf(
+                '  %s:%d  %s',
+                $record,
+                substr_count(substr($reading, 0, $offset), "\n") + 1,
+                joinedWindow(
+                    substr($reading, $lineStart, ($lineEnd === false ? strlen($reading) : $lineEnd) - $lineStart),
+                    $offset - $lineStart,
+                    strlen($join),
+                ),
+            );
+        }
+    }
+
+    if ($findings !== []) {
+        return [
+            'exit' => 1,
+            'output' => implode(PHP_EOL, [
+                'A sentence boundary in a record has lost its space, so the last word of one sentence',
+                'and the first of the next are written as one:',
+                '',
+                ...$findings,
+                '',
+                'A space goes back after the terminator — the join reads as one word only because',
+                'nothing separates the two sentences — and a sentence that is wrapped rather than',
+                'joined is not one of these, because a newline is a space.',
+            ]),
+        ];
+    }
+
+    return [
+        'exit' => 0,
+        'output' => sprintf(
+            '%d prose line(s) in %d record(s), no fused sentence; the detector agreed with all %d fixtures',
+            $prose,
+            count($records),
+            count($fixtures),
+        ),
+    ];
+}
+
+/**
+ * The records: the two documents at the root, and every design record under `docs/`.
+ *
+ * The CHANGELOG is deliberately not one of them — a published section is left byte for byte
+ * alone, so a record whose repair is an edit is not a record this can read. The set is the one
+ * the citations guard reads, and both take `docs/` as a glob rather than a list, because a
+ * record added there is a record in both.
+ *
+ * @return list<string>
+ */
+function recordFiles(string $root): array
+{
+    $records = ['README.md', 'RELEASING.md'];
+
+    foreach (glob($root . '/docs/*.md') ?: [] as $record) {
+        $records[] = 'docs/' . basename($record);
+    }
+
+    sort($records);
+
+    return $records;
+}
+
+/**
+ * A record's text with its fenced blocks blanked out.
+ *
+ * The lines are kept — an empty line for each one dropped — so a finding's line number is the
+ * file's own, and the fence delimiters go with the code, indented or not.
+ */
+function proseIn(string $text): string
+{
+    $lines = [];
+    $fenced = false;
+
+    foreach (explode("\n", $text) as $line) {
+        if (str_starts_with(ltrim($line), '```')) {
+            $fenced = ! $fenced;
+            $lines[] = '';
+
+            continue;
+        }
+
+        $lines[] = $fenced ? '' : $line;
+    }
+
+    return implode("\n", $lines);
+}
+
+/**
+ * The joins in a piece of prose: the offset of each, and the terminator with the word it is
+ * touching, as it reads — `release.Diffing`.
+ *
+ * @return list<array{0: int, 1: string}>
+ */
+function fusedSentences(string $prose): array
+{
+    preg_match_all(FUSED_SENTENCE, $prose, $matches, PREG_OFFSET_CAPTURE);
+
+    return array_map(
+        static fn (array $match): array => [$match[1], $match[0]],
+        $matches[0],
+    );
+}
+
+/**
+ * One line of prose, cut to a window around a join: enough to read the word two sentences made,
+ * and short enough that a report prints one line per finding.
+ */
+function joinedWindow(string $line, int $start, int $length): string
+{
+    $from = max(0, $start - 32);
+    $to = min(strlen($line), $start + $length + 32);
+
+    return ($from > 0 ? '…' : '') . substr($line, $from, $to - $from) . ($to < strlen($line) ? '…' : '');
+}
+
+/**
+ * The strings the detector is proven against before it is trusted with the records: the shapes a
+ * sentence can be fused in, and the shapes it has to leave alone.
+ *
+ * The second half is not padding. A rule that fired on any capital after a dot reports
+ * `production.ERROR` — a config key written in prose twice in these records — and a fence full of
+ * `$_.Subject` and `'. '.ClassName`; a filename, a version, a URL and a namespace are the same
+ * kind of shape; a sentence wrapped onto the next line is not fused, because a newline is a
+ * space; and `log.FLUSH` is the one fusion this rule cannot tell from a name. Each negative is a
+ * case the detector must *not* report, so a rule widened for one more fusion has to keep them
+ * silent or fail here by name.
+ *
+ * @return array<string, array{0: string, 1: list<string>}>
+ */
+function fusedSentenceFixtures(): array
+{
+    return [
+        'a full stop with the next sentence against it' => [
+            "The rows describe the tree the release published.Diffing them is what the next release does.\n",
+            ['.Diffing'],
+        ],
+        'a question mark' => [
+            "Which of the three rows is the one?The answer is in the record.\n",
+            ['?The'],
+        ],
+        'an exclamation mark' => [
+            "That is the whole of the reason!Writing it down is what the next reader has.\n",
+            ['!Writing'],
+        ],
+        'a sentence that ends in a bracket' => [
+            "The read is taken at the write site (see the flip).Diffing two of them is what it does.\n",
+            ['.Diffing'],
+        ],
+        'a sentence that ends in a quotation' => [
+            "The note says \"this is refused.\"Anything else is a change to the record.\n",
+            ['."Anything'],
+        ],
+        'a sentence that ends in an inline code span' => [
+            "The third file is `surface.tsv`.The rows are written from the ref.\n",
+            ['.The'],
+        ],
+        'a sentence that ends in emphasis' => [
+            "The register entry says **safe**.Writing the reason down is the point.\n",
+            ['.Writing'],
+        ],
+        'a sentence that ends in a digit, as a version does' => [
+            "The release tag is v0.2.0.The rows describe that tree.\n",
+            ['.The'],
+        ],
+        'prose after a fenced block is still read' => [
+            "The command is:\n\n```bash\nphp bin/checks.php --only=tests\n```\n\nEvery check passes.The next line is read from here.\n",
+            ['.The'],
+        ],
+        'a fenced block of PowerShell is code, not a sentence' => [
+            <<<'TXT'
+            The subject is read with:
+
+            ```powershell
+            $_.Subject -match 'Web/Mail Shield'
+            ```
+
+            TXT,
+            [],
+        ],
+        'a fenced block of PHP concatenation is code too' => [
+            <<<'TXT'
+            The sentence is assembled as:
+
+            ```php
+            return $offending.'. Refused: '.ReaderWindows::ACCEPTED.'. '.$consequence;
+            ```
+
+            TXT,
+            [],
+        ],
+        'a config key written in prose is a name, not a sentence' => [
+            "The handler is `production.ERROR` when the log is a line log.\n",
+            [],
+        ],
+        'a socket path in prose is a name too' => [
+            "The server listens on /var/run/postgresql/.s.PGSQL.5432 while writes go on.\n",
+            [],
+        ],
+        'a filename with a capital in it' => [
+            "The reader is `src/Console/JsonEnvelope.php` and it reads the record.\n",
+            [],
+        ],
+        'a version' => [
+            "The tag is v0.2.0-alpha1 and the rows describe it.\n",
+            [],
+        ],
+        'an abbreviation that kept its space' => [
+            "The state file, e.g. the four keys the flip carried, is one file.\n",
+            [],
+        ],
+        'a URL, whose capital follows a slash rather than a stop' => [
+            "The package lives at github.com/Uak35/WeightedDbManager today.\n",
+            [],
+        ],
+        'a word of capitals after a dot, which is the fusion this cannot tell from a name' => [
+            "The layer is log.FLUSH and the row is written.\n",
+            [],
+        ],
+        'two sentences with the space where it belongs' => [
+            "One sentence. The next one starts with its space.\n",
+            [],
+        ],
+        'a sentence wrapped onto the next line' => [
+            "One sentence.\nThe next one starts a line, which is a space.\n",
+            [],
+        ],
+    ];
 }
 
 /**

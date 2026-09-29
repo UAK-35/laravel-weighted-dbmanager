@@ -4,6 +4,36 @@
 
 ### Added
 
+- **The gate reads the records as prose, and fails when a sentence boundary has lost its space.**
+  `…written by the release.Diffing it is…` is a word the language does not have, and it is what an
+  edit that eats a space leaves at the one place a reader cannot recover it from: nothing else in
+  the  gate has an opinion about a paragraph — `php -l` reads code, the suite asserts behaviour, and the
+  records' whole prose is one copy-paste away from the shape at all times. The new `sentences`
+  check in `bin/checks.php` reads `README.md`, `RELEASING.md` and every
+  `docs/*.md` — the same set the citations guard reads — and reports a terminator touching the
+  capitalised word that begins the next sentence, with the file, the line and the join, so the
+  repair is in the report rather than in a hunt.
+
+  The width of the rule is a measurement rather than a preference. "A capital after a dot" reads
+  `production.ERROR` twice in these records and `/var/run/postgresql/.s.PGSQL.5432` in the
+  changelog — names, not sentences — so the capital has to be followed by a lowercase letter, and
+  that is the price: a fusion whose next word is all capitals (`release.PHP`) is not reported. What
+  is read is prose, so fenced blocks are dropped first — a fence holds `$_.Subject` and
+  `'. '.ClassName`, which a sentence rule reports — and the lines are blanked rather than removed,
+  so a finding's line number is the file's own. The CHANGELOG is not read at all: everything below
+  its `## Unreleased` heading is a published record and RELEASING.md leaves every released section
+  byte for byte alone, so a finding there would have no repair that is not an edit to a release.
+
+  Twenty fixtures run before the records are, because a detector that has stopped matching reports
+  an empty result — the rule the write-back register already follows: nine fusions (`.Diffing`,
+  `?The`, `!Writing`, a closing bracket, a quotation, an inline code span, emphasis, a version's
+  last digit, and prose after a fence) and eleven shapes it has to leave alone, the dotted config
+  key, the socket path, a filename, a version, a URL and a wrapped sentence among them, plus the
+  all-capitals fusion it cannot tell from a name. Four mutations are measured against it: a fused
+  sentence injected into `README.md` fails the check naming the line, and un-skipping the fences,
+  widening the rule to any capital, or dropping `?` and `!` each fails its own fixture by name. The
+  tree is byte-identical afterwards.
+
 - **The inventory generator can describe any git ref, so a tag with no written record can be
   backfilled.** `files.tsv`, `methods.tsv` and `surface.tsv` are the one artefact a release
   writes and the next release reads, and until now the only way to write them was from the
