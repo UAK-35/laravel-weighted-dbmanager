@@ -30,10 +30,16 @@ use Illuminate\Support\Facades\DB;
  * three. `reason` carries the sentence the rendered run prints for the two routes that have
  * no distribution to describe.
  *
- * The exit code does not move, and that is the point of this command: it reports, and
- * `db:doctor --strict` is the gate. Degradation is therefore a fact in the object
+ * The distribution does not move the exit code, and that is the point of this command: it
+ * reports, and `db:doctor --strict` is the gate. Degradation is therefore a fact in the object
  * (`status.degraded`, `status.store_healthy`) rather than a verdict of its own — a job that
  * wants "reads are being served from the local store" to stop a deploy asserts on the field.
+ *
+ * The one code that is not `0` is the guard below: a container with no weighted manager has no
+ * distribution to describe, so the run says so and exits `1` — on the terminal as well as in the
+ * object, because a deployment that never registered the manager is a failure whichever channel
+ * asked. Both of those returns are cells of `DbReplicaStatusTest::exitCodeProvider()` against the
+ * table the README documents them in, so the guard cannot report one code and exit another.
  *
  * @phpstan-import-type Block from BootAudit
  */
@@ -77,6 +83,9 @@ class DbReplicaStatus extends Command
         $manager = DB::getFacadeRoot();
 
         if (!$manager instanceof WeightedDatabaseManager) {
+            // One route, two channels, one code: both of these returns are `FAILURE`, and the
+            // README's `unbound` row is bound to the matrix that drives them — see the class
+            // docblock, and `DbReplicaStatusTest::exitCodeProvider()`.
             $reason = 'WeightedDatabaseManager is not registered. Check WeightedDatabaseServiceProvider.';
 
             if ($this->option('json')) {

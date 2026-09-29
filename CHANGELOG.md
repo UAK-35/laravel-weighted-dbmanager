@@ -179,6 +179,32 @@
 
 ### Fixed
 
+- **`db:replica-status`'s one non-zero exit was documented and pinned by nothing, and the record
+  described it as another command's row.** The command's rule is one input — is the weighted manager
+  bound — so `docs/documented-exit-codes.md` listed it as "not a matrix", pointing at
+  `db:probe-replicas`'s `unbound` cell for its single `1`. That cell pins the *probe's* guard, not this
+  one, and this one returns from two places: `--json` writes an object and its code, the terminal
+  writes the sentence and its code, and only the first was ever driven. The run an operator meets —
+  `ERROR  WeightedDatabaseManager is not registered. Check WeightedDatabaseServiceProvider.` and
+  exit `1` — was in the README's table and asserted nowhere.
+
+  The provider is an exit matrix now, six cells derived from the three routes rather than written a
+  second time, and every cell runs the real command: the code, the sentence the route carries, and —
+  on `--json` — the `exit_code` inside the object. `documentedSituations()` maps each cell to the
+  README row it is an instance of, which is the table's other claim: one `exit` column, so both
+  channels exit the same code. `DocumentedExitCounts::MATRICES` names the test file, so the record's
+  own count of the commands it is about is rendered from it — three became four, and so did the tables
+  and the mutation list, in the record and in the counted rows of `docs/prose-numbers.md`. Both places
+  an operator reads were saying the code never moves; the class docblock and the README's
+  `db:replica-status` section now name the one exception, and the guard's branch carries the reason
+  in a comment. The renamed `test_the_matrix_agrees_with_the_readme_exit_table` is the name the
+  other three matrices' guards use, and the two documents that named the old test were updated.
+  Pinned by `test_the_exit_code_is_a_function_of_the_route_and_the_channel` and the renamed guard —
+  13 tests in the file, from 8. Three mutations are measured against it: reverting the README's
+  `unbound` row to `0` fails one test naming the case, reverting the provider's `unbound` exit fails
+  four (both of that route's cells, the object's own row, and the agreement test), and returning
+  `SUCCESS` from the terminal guard fails one — the new cell.
+
 - **A release after a dev tag was weighed from that tag, so promoting the version it announced was
   refused — and `--weigh` answered with a version that skipped it.** A prerelease does not *hold* the
   rung in its name, it announces it: `0.5.0-alpha1` is a prerelease of `0.5.0`, so a round of changes

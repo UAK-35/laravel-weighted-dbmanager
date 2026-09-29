@@ -190,7 +190,7 @@ because neither has a flag it could contradict: each has the connection argument
 | every route of the sweep is the same run as one object, `-v` included | `DbProbeReplicasCommandTest::test_the_json_report_is_the_same_run_as_one_object` |
 | the sweep's kinds are documented with their codes | `DbProbeReplicasCommandTest::test_every_json_kind_is_documented_with_its_exit_code` |
 | every route of the distribution is the same run as one object | `DbReplicaStatusTest::test_the_json_report_is_the_same_run_as_one_object` |
-| the distribution's kinds are documented with their codes | `DbReplicaStatusTest::test_every_json_kind_is_documented_with_its_exit_code` |
+| the distribution's kinds are documented with their codes | `DbReplicaStatusTest::test_the_matrix_agrees_with_the_readme_exit_table` |
 | a record nobody could read is a block, not an empty one | `DbReplicaStatusTest::test_the_unreadable_record_is_a_block_the_object_carries` |
 | the flip's object keeps its key set and its codes | `DbFlipPgcatCommandTest::test_the_json_report_is_the_same_run_as_one_object`, `test_every_json_kind_is_documented_with_its_exit_code` |
 

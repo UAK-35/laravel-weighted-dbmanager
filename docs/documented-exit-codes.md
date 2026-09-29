@@ -5,8 +5,9 @@ two cannot drift apart.
 
 Everything below is implemented in `tests/Support/Readme.php`, and in one test in each file
 that owns a matrix: `DbProbeReplicasCommandTest::test_the_matrix_agrees_with_the_readme_exit_table`,
-`DbDoctorTest::test_the_matrix_agrees_with_the_readme_exit_table` and
-`DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table`.
+`DbDoctorTest::test_the_matrix_agrees_with_the_readme_exit_table`,
+`DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` and
+`DbReplicaStatusTest::test_the_matrix_agrees_with_the_readme_exit_table`.
 
 ## The answer in one line
 
@@ -19,7 +20,7 @@ the gate and by the suite.
 ## Why this needed deciding at all
 
 An exit code is a contract with whatever runs the command: a scheduler, a deploy gate, an
-alert. Three commands in this package are scheduled, and each has a matrix that pins its
+alert. Four commands in this package are scheduled, and each has a matrix that pins its
 codes against fixtures built for the purpose. The README states the same codes in a table an
 operator reads — a `what the sweep found` column and an `exit` column, a truth table over
 `--strict` — and that table was maintained by hand, next to the code, in a different file.
@@ -32,14 +33,17 @@ that should not have.
 ## Which commands compute a code from more than one condition
 
 Asked of every command the package registers, because a rule with one input does not need a
-table: the question is only interesting where several states have to map onto one number.
+table: the question is only interesting where several states have to map onto one number. The one
+input that does need one is the input whose answer is returned from more than one place, and that
+is `db:replica-status`: its guard writes a sentence on the terminal and an object under `--json`,
+so its single `1` is two returns to keep in step rather than one.
 
 | Command | The rule, in terms of what it decides from | Pinned by |
 |---|---|---|
 | `db:doctor` | anything failed, anything warned, `--strict` — three inputs into `gateFailed()` | a fourteen-cell matrix (`test_the_exit_code_is_a_function_of_the_rows_and_the_strict_flag`), the closing sentence from the same rule, and this guard |
 | `db:probe-replicas` | whether the read list held a replica at all, versus whether any of them answered — two ways to reach `1` | a nine-cell matrix, and this guard |
 | `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a seventeen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
-| `db:replica-status` | one input: is the weighted manager bound | not a matrix. It exits `0` on every path the suite drives; the single `1` is the same guard the probe's matrix pins as its own row |
+| `db:replica-status` | one input: is the weighted manager bound — and one return *per channel*, which is where the hole was | its six-cell matrix, and this guard: the three routes its table documents, each of them run on the terminal and again as an object. This row used to say "not a matrix", and borrowed the probe's `unbound` cell for its single `1` — a claim about another command's guard, while the terminal half of this command's own return was driven by nothing |
 
 `bin/checks.php` also exits non-zero from more than one check, but it is the gate that runs the
 other pins rather than a command this package ships, and its rule is one condition over an
@@ -115,6 +119,14 @@ against the **table** rather than the matrix — the table is the statement an o
 is already bound to the cells — so the chain reads sentence → table → matrix, and each link fails on
 its own terms.
 
+**The distribution's cells are the guard's two returns.** Its row above used to describe the
+command as one input and no matrix, which was true of the *rule* and false of the code: the guard
+returns `self::FAILURE` twice, once with the sentence the terminal prints and once inside the
+object `--json` writes, and the suite drove only the second. A matrix over routes alone would have
+missed the other half exactly as the borrowed row did, so the cells are the routes against the
+channels, and the pair the map assigns each cell to is the same README row either way — the table
+has one `exit` column, which is the claim that the code does not change with the channel.
+
 **The four failure modes.** Reverting a documented number; adding a documented case with no
 cell behind it; rewording a documented case so it is no longer the one the matrix names; and
 dropping a cell's assignment to a documented case. Each is a failing assertion with the case
@@ -167,13 +179,15 @@ the drift rather than the repair.
 | `DbProbeReplicasCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the sweep's five documented cases, their numbers, and that every one of its nine cells is an instance of one |
 | `DbDoctorTest::test_the_matrix_agrees_with_the_readme_exit_table` | the doctor's three documented cases, both `--strict` columns, and that the two sets of cases are the same |
 | `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's nine documented cases, their numbers, and that every one of its seventeen cells is an instance of one |
+| `DbReplicaStatusTest::test_the_matrix_agrees_with_the_readme_exit_table` | the three routes its table documents, their numbers, and that every cell of the matrix is an instance of one |
 | `DbFlipPgcatCommandTest::test_the_prose_that_restates_the_table_states_the_same_codes` | the sentences in three other sections that restate one of the flip's rows, the code each one writes, and the row it is a paraphrase of |
 | `DbFlipPgcatCommandTest::test_status_wins_when_a_rehearsal_is_asked_for_at_the_same_time` | the one rule the flip's table names that a row cannot hold |
 
-All three are checked by mutation rather than by argument: reverting `every replica failed` to
+All four are checked by mutation rather than by argument: reverting `every replica failed` to
 `0`, reverting `warnings, no failures` under `--strict` to `0`, reverting the flip's `a step a
-flip needs did not work` to `0`, inserting an extra documented row, rewording a documented row,
-and deleting one cell's assignment each produce exactly one failure naming the case.
+flip needs did not work` to `0`, reverting the distribution's `unbound` to `0`, inserting an
+extra documented row, rewording a documented row, and deleting one cell's assignment each produce
+exactly one failure naming the case.
 
 ## Known limitations
 
@@ -238,6 +252,7 @@ and deleting one cell's assignment each produce exactly one failure naming the c
 | `tests/Unit/Console/DbProbeReplicasCommandTest.php` | the sweep's matrix, its provider, and the map from each cell to its documented case |
 | `tests/Unit/Console/DbDoctorTest.php` | the doctor's matrix, its provider, and the case each cell's counts belong to |
 | `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the flip's matrix, its provider, and the map from each cell to its documented case |
-| `README.md` | the three tables, and the sentences naming the test that reads each one |
+| `tests/Unit/Console/DbReplicaStatusTest.php` | the distribution's matrix — its routes against the two channels — and the map from each cell to its documented case |
+| `README.md` | the four tables, and the sentences naming the test that reads each one |
 | `tests/Support/DocumentedExitCounts.php` | the counts this record states, each derived from its provider |
 | `bin/counts.php` | the renderer: writes this record from those derivations, or checks it without writing |

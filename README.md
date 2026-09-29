@@ -1062,8 +1062,11 @@ container that has stopped flipping is exactly the container a deploy wants to r
 
 Prints each weighted replica's host, port, CPU cores, RAM, resolved weight, share of reads, health
 and failure count — then the formula in force, the pool cache size, the store backend and whether
-it is healthy, pgcat's state, and the boot audit's standing findings. Nothing it prints moves an
-exit code: it reports, and `db:doctor --strict` is the gate.
+it is healthy, pgcat's state, and the boot audit's standing findings. Nothing it *finds* moves an
+exit code: it reports, and `db:doctor --strict` is the gate. The one code that is not `0` is the
+guard *before* the report — a container with no weighted manager, where there is no distribution to
+print — and it is `1` on both channels, so a pipeline that runs this command sees a failure exactly
+when the deployment never registered the manager.
 
 `--json` writes the same run as one object, in the envelope `db:pgcat-flip` and
 `db:probe-replicas` write: the command, the verdict, the exit code, and the evidence after them.
@@ -1090,10 +1093,14 @@ Degradation is a field rather than a verdict: `status.degraded` says the primary
 reads are being served from this process's own store, and the command still exits `0` — the number
 is not what a deploy should branch on, the field is.
 
-Every route is reported, including the two that found nothing to describe, and the
-`README`'s table is bound the same way the other commands' tables are:
-`DbReplicaStatusTest::test_every_json_kind_is_documented_with_its_exit_code` reads it and asserts
-that the kinds a run can reach are exactly the kinds written here, with the code each one exits.
+Every route is reported, including the two that found nothing to describe, and this table is bound
+the same way the other commands' tables are: `DbReplicaStatusTest::test_the_matrix_agrees_with_the_readme_exit_table`
+reads it and asserts that the routes a run can reach are exactly the rows written here, that every
+cell of the exit matrix is an instance of one of them — each route exits the same code whether the
+run renders a table or writes an object, which is why the table has one `exit` column — and the code
+each one exits. The one row that exits `1` is the guard, and it is driven down both channels:
+`DbReplicaStatusTest::test_the_exit_code_is_a_function_of_the_route_and_the_channel` runs every
+route on the terminal and again as an object.
 
 ### Probing: `db:probe-replicas`
 
@@ -1940,6 +1947,27 @@ The counts in `docs/documented-exit-codes.md` go one step further and are not wr
 all: `php bin/counts.php` renders them from the providers, `php bin/counts.php --check` reports
 drift without writing, and `composer checks` runs that check — so after adding a matrix cell, run
 the renderer rather than editing the sentence.
+
+### The tools this package installs
+
+Every tool a script here runs is one record of `bin/tools.php` and one row here, and the two are
+compared cell by cell by `ToolTableTest` rather than kept in step by hand. **Pin** is the constraint
+`composer.json`'s `require-dev` asks that package to be at; `none` is a tool that arrives with
+something else instead of being required here, which is why the manifest writes its pin as `null`.
+What a *machine* has installed is a different fact, and it is read where the machine is: `composer
+checks` reports every installed version against its pin, so a constraint raised without a `composer
+update` stops the gate instead of quietly running the older tool.
+
+| Tool | Package | Pin | What it is for |
+| --- | --- | --- | --- |
+| `pint` | `laravel/pint` | `^1.25` | the formatter behind `composer lint`, and the style gate `composer test:lint` runs |
+| `phpstan` | `phpstan/phpstan` | `^2.0` | static analysis of src/ at the level phpstan.neon.dist asks for |
+| `phpunit` | `phpunit/phpunit` | `^11.5` | the test runner the suite is written for |
+| `yaml-lint` | `symfony/yaml` | `none` | the linter the gate runs over the workflow YAML |
+
+`php bin/tool.php --list` prints the same records with their entry files, and
+`php bin/tool.php <tool> [arguments …]` runs one by name — which is what every composer script does,
+so a script and a check cannot end up running two builds of one tool.
 
 ### Composer on Windows behind a TLS scanner
 

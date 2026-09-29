@@ -9,6 +9,7 @@ use RuntimeException;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbDoctorTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbFlipPgcatCommandTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbProbeReplicasCommandTest;
+use Uak35\WeightedDbManager\Tests\Unit\Console\DbReplicaStatusTest;
 
 /**
  * The counts `docs/documented-exit-codes.md` states, each derived from the provider that owns it.
@@ -93,11 +94,17 @@ final class DocumentedExitCounts
     /**
      * The commands whose exit code this record is about, in the order it names them.
      *
-     * The record's own sentence — "three commands in this package are scheduled" — is the count of
+     * The record's own sentence — "four commands in this package are scheduled" — is the count of
      * *this* list, which is why it is a list here rather than a second sentence in the record: a
      * command that gains a matrix is added here, and the prose follows. Which commands those are
      * is a decision rather than a derivation (a command with one input does not need a table), so
      * this is the one count in the file that is not read out of the code — and the record says so.
+     *
+     * `db:replica-status` is the entry that argues for the list: its rule is one input, which was
+     * the reason its row was written as "not a matrix" while the row it borrowed — the probe's
+     * `unbound` cell — pinned a different command's return. A matrix over the routes alone would
+     * still have been thin; a matrix over the routes and the channels is what the command has, and
+     * the terminal half was the half nothing drove.
      *
      * @var list<class-string>
      */
@@ -105,6 +112,7 @@ final class DocumentedExitCounts
         DbDoctorTest::class,
         DbProbeReplicasCommandTest::class,
         DbFlipPgcatCommandTest::class,
+        DbReplicaStatusTest::class,
     ];
 
     /**
@@ -189,6 +197,21 @@ final class DocumentedExitCounts
                 'pinned' => '/(?|table is (\w+) documented cases against|flip\'s (\w+) documented cases)/',
                 'counts' => 'the distinct cases `DbFlipPgcatCommandTest::documentedSituations()` names',
                 'expected' => self::documentedCases(DbFlipPgcatCommandTest::class),
+            ],
+            'the replica-status exit matrix, as documented-exit-codes.md counts its cells' => [
+                'record' => self::RECORD,
+                // "its", where the probe's row says "a nine-cell matrix, and this guard": the two
+                // sentences would otherwise be one pattern matching two commands' matrices, and the
+                // counts differ.
+                'pinned' => '/its (\w+)-cell matrix, and this guard/',
+                'counts' => '`DbReplicaStatusTest::exitCodeProvider()`',
+                'expected' => self::cells(DbReplicaStatusTest::class),
+            ],
+            'the routes the replica-status table documents, as documented-exit-codes.md counts them' => [
+                'record' => self::RECORD,
+                'pinned' => '/the (\w+) routes its table documents/',
+                'counts' => 'the distinct cases `DbReplicaStatusTest::documentedSituations()` names',
+                'expected' => self::documentedCases(DbReplicaStatusTest::class),
             ],
             // The two halves of the sentence that explains the gap between the flip's sixteen cells
             // and its eight documented cases. The pattern carries the words that follow the number

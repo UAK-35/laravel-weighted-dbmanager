@@ -41,11 +41,10 @@ final class DbReplicaStatusTest extends TestCase
     /**
      * The three routes a run can take, as the kind, code and sentence each one carries.
      *
-     * This command has no exit matrix: it exits `0` on every path the suite drives apart from the
-     * guard, which is the same guard `db:probe-replicas`'s matrix pins as its own row — see
-     * `docs/documented-exit-codes.md`. The rows here are the routes of the *report* instead, and
-     * they are what the kind table is bound against: a verdict a job can read has to be one a run
-     * can reach, with the code beside it that the run exits.
+     * These are the *routes*, one per verdict; the exit matrix below is these against the two
+     * channels. The rows here are what the report is bound against — a verdict a job can read has
+     * to be one a run can reach, with the code beside it that the run exits — and the code in a row
+     * is the one both channels return, which is the matrix's claim rather than this table's.
      *
      * @return array<string, array{connection: string, bound: bool, kind: string, exit: int, reason: string|null}>
      */
@@ -74,6 +73,36 @@ final class DbReplicaStatusTest extends TestCase
                 'reason' => 'WeightedDatabaseManager is not registered. Check WeightedDatabaseServiceProvider.',
             ],
         ];
+    }
+
+    /**
+     * The exit matrix: every route against every channel it can be asked for.
+     *
+     * Six cells rather than three, because the one route that is not `0` returns from two places —
+     * `--json` writes an object and its code, the terminal writes the sentence and its code — and
+     * a matrix over routes alone would leave the second return unread. That is the hole this table
+     * closes: the guard was driven through `--json` and the rendered run was not, so the row an
+     * operator meets (a container with no weighted manager, `ERROR` on the terminal, exit `1`) was
+     * documented in the README and pinned by nothing here. The other two routes are cells for the
+     * same reason, and their rows are where the per-channel claims live: the sentence a route
+     * carries, and whether the run wrote an object at all.
+     *
+     * The cells are *derived* from `routeProvider()` rather than written a second time, so a route
+     * added there arrives as two cells with the code that route declares.
+     *
+     * @return array<string, array{connection: string, bound: bool, kind: string, exit: int, reason: string|null, json: bool}>
+     */
+    public static function exitCodeProvider(): array
+    {
+        $cells = [];
+
+        foreach (self::routeProvider() as $route => $row) {
+            foreach (['on the terminal' => false, 'as one object' => true] as $channel => $json) {
+                $cells["{$route}, {$channel}"] = $row + ['json' => $json];
+            }
+        }
+
+        return $cells;
     }
 
     /**
@@ -185,37 +214,123 @@ final class DbReplicaStatusTest extends TestCase
     }
 
     /**
-     * The JSON vocabulary is closed and documented, and the code beside each kind is the code the
-     * route exits with.
+     * The code is a function of the route and the channel, and the one route that is not `0` exits
+     * `1` down both of them.
      *
-     * The same guard the flip's and the probe's kind tables have, and it matters more here: this
-     * command exits `0` on the route a job is most likely to check (a connection that routes no
-     * reads is not a failure), so `kind` is the only thing in the object that tells a job which of
-     * the three runs it is reading.
+     * The channels are what a run can be asked through, so a cell is a run: the rendered one writes
+     * its sentence and returns the code, and `--json` writes one object carrying the same code
+     * inside it. Both halves of each cell are asserted, because either alone passes while the other
+     * is wrong: a command that returned `1` and printed nothing leaves a scheduler a code with no
+     * reason, and one that printed the reason and returned `0` is the failure a deploy gate is
+     * written against.
      */
-    public function test_every_json_kind_is_documented_with_its_exit_code(): void
-    {
-        $rows = Readme::table('### Reading the distribution: `db:replica-status`', 'kind');
-
-        $produced = [];
-
-        foreach (self::routeProvider() as $route) {
-            $produced[$route['kind']] = $route['exit'];
+    #[DataProvider('exitCodeProvider')]
+    public function test_the_exit_code_is_a_function_of_the_route_and_the_channel(
+        string $connection,
+        bool $bound,
+        string $kind,
+        int $exit,
+        ?string $reason,
+        bool $json,
+    ): void {
+        if (! $bound) {
+            $this->app->instance('db', new DatabaseManager($this->app, $this->app->make('db.factory')));
         }
 
+        $actual = Artisan::call('db:replica-status', ['connection' => $connection] + ($json ? ['--json' => true] : []));
+        $output = Artisan::output();
+
+        $this->assertSame($exit, $actual, "The {$kind} route exits {$exit} on this channel:\n".$output);
+
+        // The sentence the route carries, down whichever channel is writing it: the two routes that
+        // found nothing say so, and the guard names the dependency to check.
+        if ($reason !== null) {
+            $this->assertStringContainsString($reason, $output, "The {$kind} route says what its exit code means");
+        }
+
+        if (! $json) {
+            $this->assertStringStartsNotWith('{', ltrim($output), 'the rendered channel renders');
+
+            return;
+        }
+
+        $this->assertStringStartsWith('{', ltrim($output), 'the object is the report, and the report is the object');
+        $this->assertSame($exit, $this->report($output)['exit_code'], 'the code travels inside the report');
+    }
+
+    /**
+     * The README row each cell of the matrix is an instance of.
+     *
+     * The matrix is the routes against the channels, and the table is written for an operator, so
+     * each row of the table is two cells — the code is the same either way, which is the claim the
+     * table makes by having one `exit` column. This map is the correspondence, and it is the only
+     * thing either side has to keep in step: `test_the_matrix_agrees_with_the_readme_exit_table()`
+     * fails when the two disagree in either direction. The row is named by its sentence rather than
+     * by its `kind`, because the sentence is what an operator reads the table for; the kind column is
+     * bound separately, against the vocabulary the reports produce.
+     *
+     * @return array<string, string> key of exitCodeProvider() => the README row it documents
+     */
+    private static function documentedSituations(): array
+    {
+        return [
+            'a connection with weighted replicas, on the terminal' => 'the weighted replicas were read',
+            'a connection with weighted replicas, as one object' => 'the weighted replicas were read',
+            'a connection with no read list, on the terminal' => 'the connection has no weighted read replica to describe',
+            'a connection with no read list, as one object' => 'the connection has no weighted read replica to describe',
+            'the container has no weighted manager, on the terminal' => 'the container has no weighted manager, so nothing was read',
+            'the container has no weighted manager, as one object' => 'the container has no weighted manager, so nothing was read',
+        ];
+    }
+
+    /**
+     * The JSON vocabulary is closed and documented, and the code beside each kind is the code every
+     * cell of the matrix exits with.
+     *
+     * The same guard the flip's and the probe's tables have, and it matters more here: this command
+     * exits `0` on the route a job is most likely to check (a connection that routes no reads is not
+     * a failure), so `kind` is the only thing in the object that tells a job which of the three runs
+     * it is reading — and the one kind that exits `1` is the guard, which is the row this table had
+     * documented and nothing here had driven.
+     */
+    public function test_the_matrix_agrees_with_the_readme_exit_table(): void
+    {
+        $rows = Readme::table('### Reading the distribution: `db:replica-status`', 'what it means');
+        $situations = self::documentedSituations();
+
         $this->assertEqualsCanonicalizing(
-            array_keys($produced),
+            array_keys(self::exitCodeProvider()),
+            array_keys($situations),
+            'every cell of the matrix names the README row it is an instance of, and nothing else',
+        );
+
+        $this->assertEqualsCanonicalizing(
+            array_map([Readme::class, 'plain'], array_values(array_unique($situations))),
+            array_map([Readme::class, 'plain'], array_column($rows, 'what it means')),
+            'the README documents a route the matrix is not written as, or the matrix is written as one the README does not document',
+        );
+
+        // The vocabulary a job branches on, compared with the column a job reads it out of: a kind
+        // the report can carry is documented, and every documented kind is one the report carries.
+        $this->assertEqualsCanonicalizing(
+            array_values(array_unique(array_column(self::routeProvider(), 'kind'))),
             array_map([Readme::class, 'plain'], array_column($rows, 'kind')),
             'a kind the report can carry is documented, and every documented kind is one the report carries',
         );
 
-        foreach ($rows as $row) {
-            $kind = Readme::plain($row['kind']);
+        foreach (self::exitCodeProvider() as $name => $cell) {
+            $label = $situations[$name] ?? $this->fail("No README row is assigned to the [{$name}] cell.");
+            $documented = Readme::row($rows, 'what it means', $label);
 
             $this->assertSame(
-                $produced[$kind],
-                Readme::code($row['exit']),
-                sprintf('The README documents `%s` as exiting %s, while the routes assert %d.', $kind, $row['exit'], $produced[$kind]),
+                $cell['exit'],
+                Readme::code($documented['exit']),
+                sprintf(
+                    'The README documents [%s] as "%s", while the matrix asserts %d on every channel.',
+                    $label,
+                    $documented['exit'],
+                    $cell['exit'],
+                ),
             );
         }
     }
