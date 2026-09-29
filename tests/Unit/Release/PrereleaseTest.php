@@ -27,11 +27,25 @@ use Uak35\WeightedDbManager\Tests\Support\ReleaseRepo;
  * The suffix also decides the branch, and that is the other half of what these tests
  * cover: a prerelease precedes the release it is named after, so it is cut from `dev`,
  * and a version with no suffix is cut from `main`.
+ *
+ * The last thing the suffix decides is where a rung is *measured* from, and it is the one
+ * that is easy to get wrong: a prerelease does not hold the rung in its name, it announces
+ * it. So the release after a dev tag is weighed from the last release — 0.5.0 over v0.2.0
+ * is the minor its own notes call for — and not from the tag the branch is on, where 0.5.0
+ * over 0.5.0-alpha1 is a patch, a version the policy is satisfied by is refused, and
+ * `--weigh` answers 0.6.0 for a line that was being developed as 0.5.0. The tests at the
+ * end of this file are that reading at each rung, including the case it must still refuse.
  */
 final class PrereleaseTest extends TestCase
 {
     /** The notes declaring a patch — the lightest thing to weigh, so the gate is quiet. */
     private const FIXED = "### Fixed\n\n- A ported defect, fixed.\n";
+
+    /** The notes declaring a minor, which is what makes the gate speak about a promotion. */
+    private const ADDED = "### Added\n\n- A new command, `bin/thing.php`.\n";
+
+    /** The notes declaring a breaking change, for the rounds a major release is about. */
+    private const REMOVED = "### Removed\n\n- The `enabled` config key, and the deprecation it carried.\n";
 
     public function test_a_prerelease_is_cut_from_dev_and_promoted_like_a_release(): void
     {
@@ -457,6 +471,220 @@ final class PrereleaseTest extends TestCase
         $this->assertTrue(
             $weigh->said('1 commit(s) since v0.0.1-alpha1'),
             "The release commit was weighed as a change.\n" . $weigh->describe(),
+        );
+    }
+
+    /**
+     * The three steps a promotion starts from: a release to measure against, a dev tag cut
+     * over it, and a round of changes committed after that tag. The repo comes back on `dev`,
+     * where the tag was cut.
+     *
+     * A null `$release` is the other half of the first-release story — a dev tag with nothing
+     * behind it, which is a rung measured from 0.0.0 and the one bump a weighing cannot make.
+     *
+     * The cut is asserted rather than assumed. Every test below is about what happens *after*
+     * a dev tag exists, so a fixture that failed to make one would leave each of them
+     * measuring something else — and the failure would read as a rule being wrong.
+     */
+    private function devLine(?string $release, string $alpha, string $round): ReleaseRepo
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+
+        if ($release !== null) {
+            $repo->tag('v' . $release);
+        }
+
+        $repo->git('checkout', '-b', 'dev');
+
+        $cut = $repo->release('--version=' . $alpha, '--yes', '--skip-ci');
+        $this->assertSame(
+            0,
+            $cut->exitCode,
+            "The dev tag {$alpha} has to be cut for this to be about the promotion. " . $cut->describe(),
+        );
+
+        $repo->release_notes($round);
+        $repo->commit('docs: notes for the round after ' . $alpha);
+
+        return $repo;
+    }
+
+    /**
+     * The branch the release comes from: `dev` merged into `main`, which is the state a
+     * release is cut in and the only one where a promotion is a question at all.
+     */
+    private function onMain(ReleaseRepo $repo): ReleaseRepo
+    {
+        $repo->git('checkout', 'main');
+        $repo->git('merge', '--no-edit', 'dev');
+
+        return $repo;
+    }
+
+    /**
+     * A release after a dev tag is measured from the last release, not from the tag the branch
+     * is on — and the difference is the whole of this test.
+     *
+     * 0.5.0 over v0.2.0 is a minor, which is what the changes ask for. Over 0.5.0-alpha1 it is
+     * a patch, so a version the policy is satisfied by is refused and the author is told to
+     * step up to 0.6.0: the version their dev tag announced is never released, and the round's
+     * notes are filed under a number nobody was told to expect.
+     */
+    public function test_a_promotion_is_measured_from_the_last_release_not_from_the_dev_tag(): void
+    {
+        $repo = $this->onMain($this->devLine('0.2.0', '0.5.0-alpha1', self::ADDED));
+
+        $promotion = $repo->release('--version=0.5.0', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $promotion->exitCode, $promotion->describe());
+        $this->assertStringContainsString('v0.5.0', $repo->tags());
+        $this->assertStringContainsString('## 0.5.0 - ' . gmdate('Y-m-d'), $repo->read('CHANGELOG.md'));
+
+        // The plan shows the dev tag as "latest tag" beside a rung measured from a version that
+        // is not it, so it names the base it used rather than leaving a reader to work it out.
+        $this->assertSame('v0.5.0-alpha1', $promotion->plan('latest tag'), $promotion->describe());
+        $this->assertSame(
+            'minor  (declared as --version=0.5.0; the changes call for minor)',
+            $promotion->plan('bump'),
+            $promotion->describe(),
+        );
+        $this->assertTrue(
+            $promotion->said('the rung is measured from the last release v0.2.0'),
+            $promotion->describe(),
+        );
+    }
+
+    /**
+     * `--weigh` over a dev tag names the release that tag announced.
+     *
+     * That is the question the flag exists to answer, and the tag has already answered it:
+     * 0.5.0-alpha1 is a prerelease *of 0.5.0*, so a round of fixes since it is a reason to
+     * promote 0.5.0, not to skip it. `bump()` from the dev tag says 0.5.1 — a version that
+     * leaves the one consumers were told to expect unsaid, and files the round's notes under
+     * itself on the way past.
+     */
+    public function test_weigh_names_the_release_a_dev_tag_announced_instead_of_stepping_past_it(): void
+    {
+        $repo = $this->onMain($this->devLine('0.2.0', '0.5.0-alpha1', self::FIXED));
+
+        $plan = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $plan->exitCode, $plan->describe());
+        $this->assertStringContainsString('0.5.0  (tag v0.5.0)', $plan->plan('next version'), $plan->describe());
+        $this->assertSame('patch  (weighed: a patch change)', $plan->plan('bump'), $plan->describe());
+
+        // A plan writes nothing, so what it named cannot have been cut by naming it.
+        $this->assertSame(["v0.2.0", "v0.5.0-alpha1"], explode("\n", trim($repo->tags())));
+    }
+
+    /**
+     * The same rule one rung up, where stepping from the dev tag is not merely early but
+     * wrong: over a released 1.0.0 a 2.0.0-alpha1 announces a major, and the breaking change
+     * that lands while it is in alpha is what the 2.0.0 release is *for*. A major above the
+     * tag answers 3.0.0 instead — two lines ahead of the change, with the 2.0.0 the alpha was
+     * cut for never released at all.
+     */
+    public function test_a_dev_tag_on_a_major_line_does_not_inflate_the_step_the_changes_ask_for(): void
+    {
+        $repo = $this->devLine('1.0.0', '2.0.0-alpha1', self::REMOVED);
+        $repo->dropConfigKey('enabled');
+        $repo->commit('feat!: the enabled key is gone');
+        $repo = $this->onMain($repo);
+
+        $plan = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $plan->exitCode, $plan->describe());
+        $this->assertStringContainsString('2.0.0  (tag v2.0.0)', $plan->plan('next version'), $plan->describe());
+
+        // And the version it named is one the gate lets through, without an override: 2.0.0
+        // over 1.0.0 is the major the breaking change calls for.
+        $promotion = $repo->release('--version=2.0.0', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $promotion->exitCode, $promotion->describe());
+        $this->assertSame(
+            'major  (declared as --version=2.0.0; the changes call for major)',
+            $promotion->plan('bump'),
+            $promotion->describe(),
+        );
+        $this->assertStringContainsString('v2.0.0', $repo->tags());
+    }
+
+    /**
+     * The last release is a base, not a licence: a promotion is still refused when the changes
+     * since the dev tag ask for more than the promotion itself climbs.
+     *
+     * 1.0.1 over 1.0.0 is a patch, and the breaking change that landed after 1.0.1-alpha1 is
+     * not one — so the release stops, and the way out it names is a major: `--weigh` answers
+     * 2.0.0, which is what a breaking change over 1.0.0 asks for however the step is measured.
+     */
+    public function test_a_promotion_below_what_the_changes_ask_for_is_still_refused(): void
+    {
+        $repo = $this->devLine('1.0.0', '1.0.1-alpha1', self::REMOVED);
+        $repo->dropConfigKey('enabled');
+        $repo->commit('feat!: the enabled key is gone');
+        $repo = $this->onMain($repo);
+
+        $refused = $repo->release('--version=1.0.1', '--yes', '--skip-ci');
+
+        $this->assertSame(1, $refused->exitCode, $refused->describe());
+        $this->assertTrue(
+            $refused->refused('These changes call for a major release, but --version=1.0.1 was declared.'),
+            $refused->describe(),
+        );
+        $this->assertSame(["v1.0.0", "v1.0.1-alpha1"], explode("\n", trim($repo->tags())));
+
+        $plan = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $plan->exitCode, $plan->describe());
+        $this->assertStringContainsString('2.0.0  (tag v2.0.0)', $plan->plan('next version'), $plan->describe());
+    }
+
+    /**
+     * The same base reached the other way: cut the dev lane again.
+     *
+     * 0.5.0-alpha2 over 0.5.0-alpha1 is one patch step and reads as one, so a round whose
+     * notes weigh a minor is refused — "these changes call for a minor release" — and the way
+     * out it prints is `--weigh`, which answers 0.6.0. The lane loses the version it was
+     * developing one round before the release that would have carried it. Measured from the
+     * last release, a second dev tag is the minor it is and the lane keeps going.
+     */
+    public function test_a_second_dev_tag_in_a_lane_is_measured_from_the_last_release_too(): void
+    {
+        $repo = $this->devLine('0.2.0', '0.5.0-alpha1', self::ADDED);
+
+        $second = $repo->release('--version=0.5.0-alpha2', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $second->exitCode, $second->describe());
+        $this->assertStringContainsString('v0.5.0-alpha2', $repo->tags());
+        $this->assertSame('v0.5.0-alpha1', $second->plan('latest tag'), $second->describe());
+    }
+
+    /**
+     * With no release behind it at all, a dev tag is a *first* release's prerelease, and there
+     * is no rung it could have announced: `v1.0.0-alpha1` is the only tag, so 1.0.0 is measured
+     * from nothing and is the major it is.
+     *
+     * That is the first release RELEASING.md describes, one step earlier — the weighing has no
+     * base to compare against, `--weigh` offers the promotion the dev tag named, and the
+     * declaration the section prints is accepted rather than refused.
+     */
+    public function test_a_first_release_after_a_dev_tag_is_declared_and_not_refused(): void
+    {
+        $repo = $this->devLine(null, '1.0.0-alpha1', self::ADDED);
+        $repo = $this->onMain($repo);
+
+        $plan = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $plan->exitCode, $plan->describe());
+        $this->assertStringContainsString('1.0.0  (tag v1.0.0)', $plan->plan('next version'), $plan->describe());
+
+        $first = $repo->release('--version=1.0.0', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $first->exitCode, $first->describe());
+        $this->assertStringContainsString('v1.0.0', $repo->tags());
+        $this->assertTrue(
+            $first->said('the rung is measured from the last release (none yet, so this is a first release)'),
+            $first->describe(),
         );
     }
 

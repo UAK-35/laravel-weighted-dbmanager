@@ -155,6 +155,31 @@
 
 ### Fixed
 
+- **A release after a dev tag was weighed from that tag, so promoting the version it announced was
+  refused — and `--weigh` answered with a version that skipped it.** A prerelease does not *hold* the
+  rung in its name, it announces it: `0.5.0-alpha1` is a prerelease of `0.5.0`, so a round of changes
+  cut after it belongs to a 0.5.0 line rather than to a version anyone has released. Both halves of
+  the release read the latest tag as the base instead. `--weigh` counted `0.5.0-alpha1 + patch` as
+  `0.5.1`; with a `v1.0.0` released and a `2.0.0-alpha1` in flight it counted `2.0.0-alpha1 + major` as
+  **3.0.0**, two lines ahead of the change and a version that leaves the 2.0.0 the alpha was cut for
+  unreleased. The gate read it the same way: `0.5.0` over `v0.2.0` is the minor the round's notes ask
+  for, but against `0.5.0-alpha1` it reads as a patch, so a release the policy is satisfied by was
+  refused and `--minor` — 0.6.0, the same skip — printed as the way out. The rung of a declared
+  version is now measured from the newest *release* at or below the line being developed
+  (`precedingRelease()`), and `--weigh` offers the promotion a dev tag announced, stepping past it
+  only when the changes since the tag ask for more than the promotion itself climbs — and then from
+  the release, so the fourth row of `RELEASING.md`'s table is answered with 2.0.0 rather than with a
+  version above the tag. A lane cut again is measured the same way, so `0.5.0-alpha2` after a round of
+  features is no longer refused for being one patch step from `alpha1`, and a first release whose only
+  tag is a dev tag is declared rather than refused. The plan names the base it used, since it shows
+  the dev tag as `latest tag` beside a rung measured from a version that is not it. Pinned by six
+  cases in `PrereleaseTest` — the promotion at a minor and at a major, `--weigh` naming the promotion
+  rather than stepping past it, a second dev tag in a lane, the first release behind a dev tag, and
+  the promotion that is *still* refused because it is a smaller step than the changes ask for. Each
+  rule is measured against its own regression: measuring the rung against the dev tag again fails
+  four of them, stepping `--weigh` from the dev tag fails three, and offering the promotion as the
+  prerelease itself fails four.
+
 - **`bin/inventory.php`'s rewrite warned about discarding a record it had never read.** The warning
   compares the files on disk against the tree and names the changes a rewrite is about to forget,
   and it did that whenever *either* file had been read — so a pair that is half there reported

@@ -392,6 +392,29 @@ $latestTag = latestTag($root);
 $base = $latestTag === null ? '0.0.0' : ltrim($latestTag, 'vV');
 
 /*
+ * A prerelease does not hold the rung it is named after — it *announces* it. So there
+ * are two versions here, and telling them apart is the whole of what a dev tag changes
+ * about the release that follows it:
+ *
+ *   $base       the latest tag, suffix and all: what a candidate has to be newer than,
+ *               and the version the plan shows as the one this release is built on
+ *   $rungBase   the newest release at or below the line being developed: the version a
+ *               rung is measured from, so promoting a dev tag steps from 0.2.0 to
+ *               0.5.0 — a minor — rather than from 0.5.0-alpha1 to 0.5.0, which reads
+ *               as the patch it is not
+ *
+ * Measured from the dev tag, the promotion of one is always a patch, and a patch is
+ * below whatever the changes call for the moment they are more than a fix. The damage
+ * shows at both ends: a release the policy is satisfied by (0.5.0 over 0.2.0) is refused,
+ * and `--weigh`, asked for the version that does satisfy it, answers with `bump()` from
+ * the dev tag — 3.0.0 for the 2.0.0 line an alpha announced, a version that skips the
+ * release it was cut for.
+ */
+$line = releasePart($base);
+$rungBase = precedingRelease($root, $line);
+$promotion = isPrerelease($base) && version_compare($line, $rungBase, '>') ? $line : null;
+
+/*
  * Weighing runs either way. `--weigh` releases from it, and a declared bump is
  * checked against it, so a patch can no longer be asked for when the notes
  * describe a new command — which is the case that used to ship a breaking
@@ -402,7 +425,16 @@ $required = $weighing['bump'];
 
 if ($options['kind'] === 'weigh') {
     $declared = null;
-    $version = bump($base, $required);
+
+    // A dev tag's own release comes first, because that is the version its line is being
+    // developed for and the one a consumer is waiting on. It is only stepped past when the
+    // changes since the tag ask for more than the promotion itself climbs — and then the
+    // step is taken from the last release, since stepping one rung above a prerelease is
+    // how 0.5.0-alpha1 would come out as 0.6.0.
+    $version = $promotion !== null
+        && severityRank(kindBetween($rungBase, $promotion)) >= severityRank($required)
+            ? $promotion
+            : bump($rungBase, $required);
 } elseif ($options['version'] !== null) {
     $version = ltrim($options['version'], 'vV');
 
@@ -417,9 +449,15 @@ if ($options['kind'] === 'weigh') {
     // spelling: the repository cannot end up with two tags claiming a single version.
     $version = canonicalVersion($version);
 
-    $declared = kindBetween($base, $version);
+    // Against the last release, so that declaring the release a dev tag announced is the
+    // minor or major it is rather than the patch its own prerelease makes it look like.
+    $declared = kindBetween($rungBase, $version);
 } else {
     $declared = (string) $options['kind'];
+
+    // Stepped from the tag this branch is on rather than from $rungBase: `--minor` is a
+    // command about the line being developed, and a minor above the last *release* would
+    // answer with a version older than the dev tag it is meant to move past.
     $version = bump($base, $declared);
 }
 
@@ -665,6 +703,18 @@ if ($declared !== null && severityRank($declared) > severityRank($required)) {
     );
 }
 
+// Said out loud because the plan shows the dev tag as "latest tag" and the rung against a
+// version that is not it: a reader comparing the two would otherwise have to know that a
+// prerelease announces a rung instead of holding one.
+if ($promotion !== null) {
+    printf(
+        '  note: the rung is measured from the last release%s, not from the dev tag v%s this branch is on — a prerelease announces the rung it will take.%s',
+        $rungBase === '0.0.0' ? ' (none yet, so this is a first release)' : ' v' . $rungBase,
+        $base,
+        PHP_EOL,
+    );
+}
+
 echo PHP_EOL;
 
 echo 'CHANGELOG head after promotion:' . PHP_EOL . PHP_EOL;
@@ -896,6 +946,44 @@ function kindBetween(string $base, string $version): string
 }
 
 /**
+ * The newest release tag at or below the line a version is on — the version the rung of
+ * the next one is measured from, and where `--weigh` starts counting when the promotion
+ * it would otherwise offer is a smaller step than the changes ask for.
+ *
+ * "At or below the line" rather than "the newest release anywhere", because those are
+ * not the same version and only one of them is the right base: `git tag --merged HEAD`
+ * reaches every release on every merged line, so a maintenance branch cut from 1.0.0 can
+ * see a 2.0.0 that another line published. The rung of the next 1.5.x is still measured
+ * from 1.0.0 — measuring it from 2.0.0 would hold a patch release on an old line to a
+ * major it has nothing to do with.
+ *
+ * Ancestry is the same question `latestTag()` asks, and it is asked the same way: a tag
+ * on a branch HEAD cannot reach is a real tag and not one of this line's.
+ */
+function precedingRelease(string $root, string $line): string
+{
+    $listed = git($root, ['tag', '--merged', 'HEAD', '--list', 'v[0-9]*', '--sort=-v:refname']);
+
+    if ($listed['exit'] !== 0) {
+        return '0.0.0';
+    }
+
+    // Highest first, so the first one that is a release at or below the line is the
+    // newest of them rather than merely the first one found.
+    foreach (lines($listed['output']) as $tag) {
+        $version = ltrim($tag, 'vV');
+
+        if (!isPrerelease($version) && version_compare($version, $line, '<=')) {
+            return $version;
+        }
+    }
+
+    // No release yet: the whole package is new, which is the one bump the weighing cannot
+    // make and the reason a first release is declared rather than weighed.
+    return '0.0.0';
+}
+
+/**
  * The prerelease lane a version is in: `alpha` for `0.0.1-alpha1`, `dev` for
  * `0.0.1-dev`, and the empty string for a release.
  *
@@ -986,6 +1074,24 @@ function isReleasableVersion(string $version): bool
 function isPrerelease(string $version): bool
 {
     return prereleaseLane($version) !== '';
+}
+
+/**
+ * The release a prerelease announces: `0.5.0-alpha1` -> `0.5.0`, and a version with no
+ * suffix unchanged.
+ *
+ * The suffix is the whole of what a dev tag has to say about the rung, and dropping it is
+ * what makes the version readable as the one being developed for. A lane this package
+ * does not write is left alone rather than guessed at, which cannot happen here — every
+ * path that reaches this has been through the validator, and the suffix grammar is one
+ * place — but a version that somehow arrived with an unknown suffix keeps it, so the
+ * mistake is visible rather than quietly reshaped.
+ */
+function releasePart(string $version): string
+{
+    return isPrerelease($version)
+        ? substr($version, 0, (int) strpos($version, '-'))
+        : $version;
 }
 
 /**

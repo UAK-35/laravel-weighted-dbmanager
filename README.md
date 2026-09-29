@@ -1901,6 +1901,8 @@ docs/                    design records for decisions that are not obvious from 
                          kept in step with the code, and how a number a record states is
                          kept equal to the number the code has — rendered by a command
                          where that is possible, checked where it is not
+bin/tools.php            where each installed tool's entry file is written down, once
+bin/tool.php             runs one of them by name: what every composer script goes through
 bin/checks.php           every local check, summed up in one summary
 bin/counts.php           writes the counts a record states from the code that owns them
 bin/release.php          tag-driven releases (see RELEASING.md)
@@ -1922,7 +1924,7 @@ surface.tsv              and the config keys, env vars, constants and properties
 composer install
 composer test                     # the three gates CI runs: pint --test, phpstan, phpunit
 composer checks                   # everything that can be checked, in one summary
-vendor/bin/phpunit --testdox
+php bin/tool.php phpunit --testdox   # any installed tool by name (see bin/tools.php)
 ```
 
 The records under `docs/` are read by the suite as well as by people: the exit tables are compared
@@ -2025,6 +2027,15 @@ promotes the notes and stamps the inventory exactly as a release does; a consume
 opts in with `minimum-stability: alpha` or a constraint like `"^0.0.1@alpha"`. The
 suffixes it writes are the ones Composer's own parser reads, and the spellings it
 cannot read (`0.0.1-dev.1`, `0.0.1-alpha.1`) are refused rather than written.
+
+A dev tag is weighed as the version it *announced* rather than the one it holds:
+`0.5.0-alpha1` is a prerelease of `0.5.0`, cut from the branch developing it, so the
+rung is measured from the newest release at or below that line — `v0.2.0` — and
+`--weigh` answers `0.5.0` rather than stepping past it to `0.5.1`. A promotion that
+does not clear what the changes since the tag ask for is still refused, and the step
+then comes from that same release. The measurements and the cases are in
+[docs/prerelease-promotion.md](docs/prerelease-promotion.md).
+
 [RELEASING.md](RELEASING.md) has the policy, the safety rails and the first-release
 walkthrough.
 

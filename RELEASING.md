@@ -36,8 +36,8 @@ report the next version, it decides it.
 | Step | Detail |
 |---|---|
 | Base version | The most recent `v*` tag that is an **ancestor of HEAD** — `git describe`, and when that finds nothing, the same question asked of `git tag --merged HEAD` — so a release is built on what the branch actually contains, never on a tag cut on a branch it cannot reach |
-| Bump | `--weigh` lets the policy pick it; `--minor`, `--major` or `--version=X.Y.Z` declare it instead, and are refused when they undersell the changes |
-| Next version | The base plus the bump, or exactly `--version=X.Y.Z`; the suffix may be a prerelease |
+| Bump | `--weigh` lets the policy pick it; `--minor`, `--major` or `--version=X.Y.Z` declare it instead, and are refused when they undersell the changes — measured from the last *release*, not from a dev tag (see [promoting a dev tag](#promoting-a-dev-tag)) |
+| Next version | The base plus the bump, or exactly `--version=X.Y.Z`; a dev tag is promoted to the release it announced rather than stepped past, so `0.5.0-alpha1` weighs as `0.5.0` and not as `0.5.1`; the suffix may be a prerelease |
 | Branch | `main` for a release, `dev` for a prerelease — the suffix decides, and `--branch=NAME` overrides |
 | CI | HEAD has to be the tip of the remote branch and the workflow's run for it — a push run on that branch — has to have finished and passed. `--skip-ci` tags anyway |
 | No tags yet | The base is `0.0.0`, so the bump applies to it directly: a weighed minor is **0.1.0**, a weighed patch **0.0.1** |
@@ -222,6 +222,40 @@ from the tags rather than from the number that was typed:
 ✗ Tag v0.0.1-alpha1 already exists — a published tag is never moved or reused.
 
 The next free number in that lane is 0.0.1-alpha2.
+```
+
+### Promoting a dev tag
+
+A prerelease does not *hold* the rung in its name — it announces it. `0.5.0-alpha1` is a prerelease
+of `0.5.0`, cut from the branch developing that version, so everything weighed after it is measured
+from the last **release** rather than from the tag the branch happens to be on. The tag is not a
+version anybody can install, and counting a rung above it counts from a version that was never
+published.
+
+| The tree | `--weigh` | `--version=0.5.0` declared |
+|---|---|---|
+| `v0.2.0`, then `v0.5.0-alpha1`, then a round of fixes | **0.5.0** — the promotion, not `0.5.1` | **allowed**: `0.5.0` over `v0.2.0` is the minor the notes call for |
+| the same, with a round of features | **0.5.0** | **allowed** — the promotion clears the minor the round asks for |
+| `v1.0.0`, then `v2.0.0-alpha1`, then a breaking change | **2.0.0** — not `3.0.0` | **allowed**: `2.0.0` over `v1.0.0` is the major it calls for |
+| `v1.0.0`, then `v1.0.1-alpha1`, then a breaking change | **2.0.0** | **refused**: `1.0.1` over `v1.0.0` is a patch, and the changes call for a major |
+| no release at all, then `v1.0.0-alpha1` | **1.0.0** | **allowed** — the first release below, one step earlier |
+
+`--weigh` offers the promotion first, because that is the version the line is being developed for
+and the one a consumer was told to expect. It is stepped past only when the changes since the tag
+ask for more than the promotion itself climbs, and then the step is taken from the last release —
+which is how the fourth row is answered with `2.0.0` rather than with a version above the dev tag.
+Cutting the lane again reads from the same base: a second `-alpha2` after a round of features is not
+refused for being “one patch step” from the first alpha.
+
+The plan says which base it used, because it shows the dev tag as `latest tag` beside a rung that
+was measured from a version which is not it:
+
+```
+  latest tag    v0.5.0-alpha1
+  bump          minor  (declared as --version=0.5.0; the changes call for minor)
+  next version  0.5.0  (tag v0.5.0)
+  …
+  note: the rung is measured from the last release v0.2.0, not from the dev tag v0.5.0-alpha1 this branch is on — a prerelease announces the rung it will take.
 ```
 
 ## Safety rails
