@@ -361,6 +361,16 @@ finding is "fine". A consumer that wants to alert on the audit having *stopped r
 is: `available: false` reads as `severity: none` because nothing is **known** to stand, not
 because nothing is wrong.
 
+The same distinction is why the record's `severity` and the live half's `current.severity` are two
+fields rather than one. A rule written against the first pages whichever instance happens to answer
+for an entry another boot wrote, which is the defect the live half was added for; the second pages
+only when *this* process re-derived the refused value. `findings[].current.scope_matches` is where
+the difference is named: `false` means the entry is true about another scope, so it is the ticket in
+the table above rather than the page. An entry the live half was not asked about reads
+`evaluated: false` with `standing: null`, deliberately not "cleared" — and `current.available` is the
+third case, a live half that did not run here at all. The README's cookbook carries the two rules as
+paste-able patterns, run against real payloads by `ReadmeAlertingTest`.
+
 The same two names are in the boot log, so the rule can be written against a line instead of
 a polled host: every line `BootAudit` writes carries `severity` in its context beside the
 `finding` key, holding the level it was written at. That is a payload field rather than the

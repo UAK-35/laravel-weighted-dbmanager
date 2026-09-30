@@ -1010,6 +1010,54 @@ With no monitor at all, the same facts are on the terminal: `php artisan db:repl
 prints the store state and the audit list, and `php artisan db:doctor --strict` is a release
 gate that exits non-zero on any row that warns or fails.
 
+### The audit's live half: does it still stand here, or only in the record?
+
+`audit.severity` is the *record*: what this installation's boots have reported and no boot has
+closed out yet. It is per installation, and it says nothing about which process is reading it — a
+migration container, a queue worker and the web process share one record and do not necessarily
+resolve the same connection or the same environment, so an entry can be true of the boot that wrote
+it and false of the host printing it. `audit.current` is the other half: the same audited settings,
+read again **in the process answering the request**, with the one check that needs a socket left out.
+Both are published because they answer different questions, and a rule that reads only the record can
+page an instance for a finding that was never about it.
+
+The per-finding `current` object is where the two are compared. `evaluated` is `false` for a key this
+process deliberately did not look at — the store probe, because a failed PING is a connect timeout —
+and only then is `standing` `null`; `standing` is whether this process re-derived that finding now;
+and `scope_matches` compares the scope the entry was written in with the scope reading it.
+
+| what to do | the condition | what it means |
+|---|---|---|
+| page | `audit.current.severity == "error"` | a refused value reads as refused **here**, re-derived by this process rather than only remembered |
+| page, named | `audit.findings[].current.standing == true` | the key the record holds, re-reported here, so the entry and this process agree |
+| ticket the scope's owner, do not page here | `audit.findings[].current.scope_matches == false` | the entry was written by a boot on another connection or environment: it is true about *that* scope, and this process is not it |
+| re-check, do not read it as cleared | `audit.findings[].current.evaluated == false` | nothing here asked this setting, so its silence is not evidence of repair |
+| ticket | `audit.current.available == false` | the live half did not run here at all, so there is no "here" to compare with |
+
+The rule that pages on this process rather than on the record, for the same cron job or sidecar as the
+gate above:
+
+```sh
+curl -sS "$HEALTH_URL" | jq -e '
+  # the live half of the audit: a finding written in another scope must not page this instance
+  .audit.current.severity != "error"
+'
+```
+
+And the line that hands the other case to whoever owns it — the scope the entry was written in, which
+is what an operator needs before anything is done about it:
+
+```sh
+curl -sS "$HEALTH_URL" | jq -r '
+  .audit.findings[] | select(.current.standing != true)
+  | "\(.key) (\(.level)) recorded in \(.scope.connection)/\(.scope.app_env) — here: evaluated=\(.current.evaluated) same_scope=\(.current.scope_matches)"
+'
+```
+
+`audit.scope` is the scope reading this payload — `connection`, `driver`, the rule that named it, and
+`app_env` — and `audit.checked_at` is when the live half was taken, so a rule can say how stale its
+"here" is. Neither moves `status`: the live half is a reading, and `status` stays the pinned query's.
+
 ### The page: the installation's fault or the package's?
 
 A refused value and a defect in the package both arrive at `severity: "error"` — deliberately,

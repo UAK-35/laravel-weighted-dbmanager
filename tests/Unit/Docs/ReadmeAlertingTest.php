@@ -9,6 +9,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Exception\RuntimeException as ProcessRuntimeException;
 use Symfony\Component\Process\Process;
 use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
+use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
+use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Tests\Support\Readme;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
@@ -139,6 +141,81 @@ class ReadmeAlertingTest extends TestCase
     }
 
     /**
+     * The audit's live half, both ways: a finding this process re-derived must page, and one the
+     * record holds from another scope must not.
+     *
+     * The pair is the whole reason the payload publishes `audit.current` beside the record. A rule
+     * written against `audit.severity` alone pages whichever instance happens to answer for an entry
+     * a different boot wrote — the migration container's refused value, say — and the operator is
+     * sent to a host whose configuration is fine. The record says what the installation has been
+     * claiming; the live half says what this process can see now; and the two are told apart by
+     * reading them, which is what this runs the pasted rule to check.
+     */
+    public function test_the_live_half_gate_pages_a_finding_that_stands_here_and_not_one_written_elsewhere(): void
+    {
+        $program = self::liveGate();
+
+        // A boot on another connection recorded a reader-window refusal. This process reads the
+        // windows cleanly, so the entry stands in the record and not here: the record's `severity`
+        // is `error` while the live half's is not, and the pasted rule must stay quiet.
+        $elsewhere = $this->record([
+            WeightedDatabaseServiceProvider::KEY_READER_WINDOWS_REFUSED => $this->entry(
+                'swrr.reader_windows is "10:00-14:20", not a list of windows.',
+                ['connection' => 'sqlite', 'driver' => 'sqlite', 'source' => 'db-manager.swrr.connection', 'app_env' => 'sqlite-live'],
+            ),
+        ]);
+
+        $recordOnly = $this->payload(':memory:', config: ['db-manager.swrr.audit.file' => $elsewhere]);
+        $block = json_decode($recordOnly, true);
+
+        $this->assertSame('error', $block['audit']['severity'], 'the record still claims the finding');
+        $this->assertNotSame('error', $block['audit']['current']['severity'], 'nothing stands here');
+        $this->assertSame(
+            ['evaluated' => true, 'standing' => false, 'scope_matches' => false],
+            $block['audit']['findings'][0]['current'],
+            'the key is re-read here, does not stand, and was written in another scope',
+        );
+
+        $passed = $this->jq($program, $recordOnly);
+
+        $this->assertSame(
+            0,
+            $passed['exit'],
+            "The live-half rule pages this instance for a finding written in another scope, which is the case it exists to exclude. jq said {$passed['error']}",
+        );
+
+        // The same shape, this time refused here too: the record's entry stands in this process as
+        // well, so the page is this instance's after all.
+        $here = $this->record([
+            WeightedDatabaseServiceProvider::KEY_FALLBACK_REFUSED => $this->entry(
+                'swrr.allow_local_fallback is "nope", not on or off.',
+                ['connection' => 'sqlite', 'driver' => 'sqlite', 'source' => 'db-manager.swrr.connection', 'app_env' => 'sqlite-live'],
+            ),
+        ]);
+
+        $standing = $this->payload(':memory:', config: [
+            'db-manager.swrr.audit.file' => $here,
+            'db-manager.swrr.allow_local_fallback' => 'nope',
+        ]);
+        $live = json_decode($standing, true);
+
+        $this->assertSame('error', $live['audit']['current']['severity'], 'a refused value reads as refused here');
+        $this->assertSame(
+            ['evaluated' => true, 'standing' => true, 'scope_matches' => false],
+            $live['audit']['findings'][0]['current'],
+            'the entry stands in this process as well as in the record',
+        );
+
+        $paged = $this->jq($program, $standing);
+
+        $this->assertNotSame(
+            0,
+            $paged['exit'],
+            'The live-half rule passes a finding that stands in this very process, so it pages nobody.',
+        );
+    }
+
+    /**
      * One `/health/db` body, as JSON, from the real controller.
      *
      * The fixture is the sibling HTTP test's: the connection the package follows is pinned at
@@ -172,6 +249,12 @@ class ReadmeAlertingTest extends TestCase
         foreach (array_merge($baseline, $config) as $key => $value) {
             config()->set($key, $value);
         }
+
+        // The audit is a singleton built from the config, so a test that points it at a record of
+        // its own has to let it be rebuilt — otherwise the path it was constructed with wins and
+        // the payload is answered from the default file.
+        $this->app->forgetInstance(BootAudit::class);
+
         config()->set('database.connections', [
             $name => ['driver' => 'sqlite', 'database' => $database],
         ]);
@@ -200,6 +283,66 @@ class ReadmeAlertingTest extends TestCase
         }
 
         self::fail('The cookbook pastes no jq program, so there is no gate to run.');
+    }
+
+    /**
+     * The live half's rule: the `sh` block that carries the marker, so the second paste-able rule is
+     * run rather than counted. The first `jq -e` block under the heading is the endpoint gate above,
+     * so a rule that reads the audit's live half says which half it reads and is found by that.
+     *
+     * @throws \PHPUnit\Framework\AssertionFailedError when the cookbook has lost it
+     */
+    private static function liveGate(): string
+    {
+        foreach (Readme::fenced(self::HEADING, 'sh') as $block) {
+            if (!str_contains($block, 'the live half of the audit')) {
+                continue;
+            }
+
+            if (preg_match("/jq -e '(.+?)'\s*$/ms", $block, $matches) === 1) {
+                return $matches[1];
+            }
+        }
+
+        self::fail('The cookbook pastes no live-half rule, so there is no rule to run.');
+    }
+
+    /**
+     * A boot audit record of this test's own, so a payload can be built with an entry a previous boot
+     * wrote. Both keys are written because they are the two the file has: a reader that found one and
+     * not the other would report the file rather than the finding, which is a different case.
+     *
+     * @param array<string, mixed> $findings
+     */
+    private function record(array $findings): string
+    {
+        $file = sys_get_temp_dir().'/swrr-alert-audit-'.bin2hex(random_bytes(6)).'.json';
+
+        file_put_contents($file, (string) json_encode([
+            'findings' => $findings,
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        return $file;
+    }
+
+    /**
+     * One recorded finding, in the shape a boot writes: enough to name it, date it, and say which
+     * scope it was written in — the four things the live half is compared against.
+     *
+     * @param array<string, mixed> $scope
+     * @return array<string, mixed>
+     */
+    private function entry(string $warning, array $scope): array
+    {
+        return [
+            'resolution' => 'The setting reads as written again.',
+            'warning' => $warning,
+            'level' => 'error',
+            'context' => [],
+            'first_reported_at' => '2026-09-21T08:15:00+00:00',
+            'scope' => $scope,
+        ];
     }
 
     /**

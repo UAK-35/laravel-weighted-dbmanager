@@ -4,6 +4,27 @@
 
 ### Added
 
+- **The audit's live half has alert rules, and both halves are run rather than described.**
+  `audit.severity` is the record — what the installation's boots reported — and `audit.current` is the
+  same settings read in the process answering the request, which the payload has carried since the two
+  readings were published. What was missing was the rule an operator writes against the second one:
+  `severity == "error"` pages an instance for an entry another boot wrote, and the two cases it has to
+  tell apart — a finding this process re-derived, and one recorded in another scope — were only
+  visible to somebody who walked `findings[].current` themselves.
+
+  The README's cookbook now has the live half as its own table and two paste-able rules: the `jq`
+  gate that pages only on `audit.current.severity`, so a record-only entry stays a ticket, and a
+  `jq -r` triage line that prints the scope each non-standing finding was written in, which is what an
+  operator needs before anything is done about it. `docs/boot-audit-surfaces.md` records why the
+  record's `severity` and the live half's are two fields rather than one.
+
+  Both rules are run rather than read. `ReadmeAlertingTest` builds two real payloads — one whose
+  record holds a foreign-scope reader-window refusal while the live half is clean, one whose record
+  holds a fallback refusal this process re-derives — and asserts the gate stays quiet on the first and
+  pages on the second, so a rule that regressed to the record alone fails here instead of paging the
+  wrong host. The new case needs the audit singleton rebuilt per payload, which is why the fixture now
+  forgets it.
+
 - **The gate reads the records as prose, and fails when a sentence boundary has lost its space.**
   `…written by the release.Diffing it is…` is a word the language does not have, and it is what an
   edit that eats a space leaves at the one place a reader cannot recover it from: nothing else in
