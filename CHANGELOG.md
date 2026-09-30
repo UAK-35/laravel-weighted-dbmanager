@@ -4,6 +4,23 @@
 
 ### Added
 
+- **The inventory publishes a public API page, so the rows a release weighs are also the page a
+  consumer reads.** `API.md` is rendered from `files.tsv`, `methods.tsv` and `surface.tsv` by
+  `php bin/api.php`: every class with its public methods and their argument shapes, the config keys
+  and environment variables the package reads, and the constants and properties a host can name —
+  grouped by namespace, and by the file that declares it for the configuration. Nothing asks the
+  tree a second time, so the page cannot describe a different package from the one the release
+  weighed; a run refuses when the three files do not describe one tree, and when there is no record
+  to render rather than publishing an empty API. `--check` is the read-only half and the command a
+  pipeline can call.
+
+  `PublicApiReportTest` runs the generator backwards: the bytes on disk are compared with the bytes
+  the record produces, every class and every method row has to have reached the page, and the counts
+  the page prints have to be the record's own — so a row that stopped being rendered fails a test
+  rather than living on a page until somebody notices. The README's layout lists the page and the
+  command, and `docs/inventory-surface-rows.md` records the decision, which is the candidate that
+  record had been holding open.
+
 - **The audit's live half has alert rules, and both halves are run rather than described.**
   `audit.severity` is the record — what the installation's boots reported — and `audit.current` is the
   same settings read in the process answering the request, which the payload has carried since the two
@@ -267,6 +284,23 @@
   outcome. Pinned by nine cases in `SilentNotesTest`.
 
 ### Fixed
+
+- **A method's recorded shape counts its arguments, one part each, instead of the whole list as
+  one.** `parameterShape()` splits a parameter list on a comma at nesting depth zero, and inside a
+  parameter list the depth is one — the opening parenthesis is what set it — so no comma ever split
+  anything: every method was recorded as one part, `1/1` for a signature whose every argument was
+  required and `0/1` for one with a default anywhere. That number is what `describeChange()` reads
+  to tell an added required argument, which breaks every caller, from an added optional one, so the
+  sentence it printed — "needs N required argument(s), was M" — was about a value that could not
+  move. The fix is the depth the comma is compared against, and the separator the parts are joined
+  with so a shape reads the way the declaration was written. Forty-three rows of `methods.tsv`
+  changed and neither of the other two files did, which is the shape of the defect: it was the
+  method list and nothing else.
+
+  Rendering the new API page is what surfaced it — a page makes a wrong number visible where a
+  signal that compares two rows cannot tell a wrong count from a changed method — and the reader is
+  now pinned directly by `SurfaceReaderTest`, because a fixture package can only say that a row
+  changed, and a wrong count is a plausible string.
 
 - **`db:doctor --config-file` judges a candidate read list, so a weight the next boot would refuse
   cannot pass the vet.** The vet read one `config/db-manager.php` and reported the switches and

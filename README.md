@@ -2031,6 +2031,8 @@ bin/surface.php          the symbol reader, the surface differ and the inventory
 bin/weighing.php         the four signals and the weighing release.php and blame.php share
 bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv from the working tree,
                          or from any ref with --at= (see RELEASING.md)
+bin/api.php              renders API.md — the public API page — from that record, so the
+                         rows a release weighs are also the page a consumer reads
 bin/blame.php            which signal names one symbol, and what it contributed to the bump
 bin/publish-config.php   publishes the sample config into an application
 files.tsv, methods.tsv,  what the last release shipped — its files, their public methods,
@@ -2039,6 +2041,11 @@ surface.tsv              and the config keys, env vars, constants and properties
                          refreshed by bin/release.php, backfilled for a past tag from
                          that tag's own tree with bin/inventory.php --at=REF, and read
                          back by the next release
+API.md                   the same rows as a page a person reads — every class with its
+                         public methods, their argument shapes, and the config the
+                         package reads — rendered from the record by bin/api.php and
+                         guarded by PublicApiReportTest, so the page cannot describe a
+                         different tree from the one the release weighed
 ```
 
 ## Testing
@@ -2054,6 +2061,9 @@ The records under `docs/` are read by the suite as well as by people: the exit t
 cell by cell with the matrices the commands are written as, the test names they cite are checked
 against the classes that declare them, and every count they state about this package's code is
 compared with the number the code has — see [docs/prose-numbers.md](docs/prose-numbers.md).
+[API.md](API.md) is checked the same way, against the inventory it is rendered from: the page has
+to be the bytes the record produces, or `PublicApiReportTest` fails and names
+the command that writes it.
 
 The counts in `docs/documented-exit-codes.md` go one step further and are not written by hand at
 all: `php bin/counts.php` renders them from the providers, `php bin/counts.php --check` reports

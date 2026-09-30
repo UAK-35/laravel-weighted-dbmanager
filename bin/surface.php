@@ -661,7 +661,13 @@ function parameterShape(array $tokens, int $index): string
             continue;
         }
 
-        if ($text === ',' && $nested === 0) {
+        // The list is nesting level one — the opening parenthesis set it — so a comma that
+        // separates two arguments is the one at *that* level. Comparing against zero instead
+        // read every list as a single part: `1/1` for a method whose every argument was
+        // required, and for one with a default anywhere `0/1`, so the count this string exists
+        // to carry said nothing about the arguments and `describeChange()`'s "needs N required
+        // arguments" was a sentence about a number that never moved.
+        if ($text === ',' && $nested === 1) {
             $parts[] = $current;
             $current = '';
 
@@ -686,7 +692,10 @@ function parameterShape(array $tokens, int $index): string
         $required += str_contains($part, '=') ? 0 : 1;
     }
 
-    return sprintf('%d/%d %s', $required, count($shape), implode(',', $shape));
+    // One argument per part, so the separator is this function's own rather than whatever
+    // spacing the source happened to have after each comma: `, ` reads the same however the
+    // declaration was wrapped.
+    return sprintf('%d/%d %s', $required, count($shape), implode(', ', $shape));
 }
 
 /**

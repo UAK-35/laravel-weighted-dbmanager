@@ -163,6 +163,39 @@ intersection type, when the walk started at a variable. Only a variable is read 
 so nothing else can stand between a visibility and the member it belongs to — which is
 what makes the walk safe to extend rather than merely necessary.
 
+### And the method shape counted the whole list as one argument
+
+Rendering the rows as a page — `bin/api.php`, below — exposed the second. `parameterShape()`
+splits a method's arguments on a comma at nesting depth zero, and inside a parameter list the
+depth is one, because the opening parenthesis is what set it. No comma ever split anything, so
+every method was recorded as one part: `1/1` for a method whose every argument was required, and
+`0/1` — "no required arguments" — for one with a default anywhere. A method taking five arguments
+read as `1/1 OutputInterface $output, string $command, …`, which is how it reached the page before
+the number was read back.
+
+The count is not decoration. `describeChange()` uses it to tell an added required argument, which
+breaks every caller, from an added optional one, and the sentence it printed — "needs N required
+argument(s), was M" — was about a number that could not move. The fix is the depth the comma is
+compared against, and the separator the parts are joined with so a shape reads the way the
+declaration was written. Forty-three rows of `methods.tsv` changed and neither of the other two
+files did, which is the shape of the defect: it was the method list and nothing else.
+
+### The rows are also the page a consumer reads
+
+`bin/api.php` renders `API.md` from the three files, which closes the candidate this record has
+been holding open: a consumer-facing surface document derived from `surface.tsv` rather than a
+signal doing double duty. Nothing asks the tree again — the classes come from `files.tsv`, the
+methods and their argument shapes from `methods.tsv`, and the config keys, env vars, constants and
+properties from `surface.tsv` — so the page and the weighing cannot disagree about what a release
+published.
+
+The three files have to describe one tree, and a run refuses when their stamps disagree rather than
+rendering a page true of neither. `--check` is the read-only half. `PublicApiReportTest` runs the
+generator backwards: the bytes on disk are compared with the bytes the record produces, every class
+and every method row has to have reached the page, and the counts the page prints have to be the
+record's own — so a row that stopped being rendered fails a test rather than living on a page until
+somebody notices.
+
 ---
 
 ## Tests that pin the rules
@@ -180,6 +213,9 @@ what makes the walk safe to extend rather than merely necessary.
 | an entirely absent inventory does not block the release that writes it | `test_an_absent_inventory_does_not_block_the_release_that_writes_it` | `BumpWeighingTest` |
 | the named `--at` repair turns the refusal into a release that weighs the record | `test_the_named_repair_turns_the_refusal_into_a_weighed_release` | `BumpWeighingTest` |
 | a rewrite that read only part of the set says nothing about discarding | `test_a_pair_that_is_half_there_discards_nothing_it_did_not_read` | `InventoryTest` |
+| a method's shape counts its arguments, one per part, and a nested call or an attribute on one does not split it | `test_a_shape_counts_the_arguments_of_a_method`, `test_a_nested_call_or_an_attribute_stays_one_argument` | `SurfaceReaderTest` |
+| the page is the bytes the record renders, every class and method row reaches it, and its counts are the record's own | `test_the_published_page_is_the_one_the_record_renders`, `test_every_row_of_the_record_reaches_the_page`, `test_the_summary_counts_are_the_records_own` | `PublicApiReportTest` |
+| the page names the tree it describes, a root with no record is refused rather than rendered empty, and `--check` agrees with the committed page | `test_the_page_names_the_tree_the_record_describes`, `test_a_root_without_a_record_is_refused_rather_than_rendered_empty`, `test_the_command_reports_the_page_current` | `PublicApiReportTest` |
 
 Mutations these were measured against: not reporting a removed row fails one test (the
 no-tag witness), reading an incomplete inventory as an empty one fails one (the bump moves
@@ -218,9 +254,11 @@ record.
 - **A second stored inventory.** If the rail ever kept the inventory of *every* release,
   values could be recorded and compared; today only one is written and only one is read —
   and `--at` rebuilds any of them, one at a time, into that one slot.
-- **A consumer-facing API report.** If the package published a surface document for
-  consumers, `surface.tsv` would be the artifact to derive it from rather than a signal
-  doing double duty.
+- **Done: a consumer-facing API report.** `bin/api.php` renders `API.md` from the three
+  files, so the record no longer only weighs a release — it publishes what the release
+  shipped. It is why the shape defect above was found: a page makes a wrong number in a row
+  visible, where a signal that only compares two rows cannot tell a wrong count from a
+  changed method.
 - **If `--check` were wired into CI.** Then a missing third file is a red build rather
   than a note in a plan, and the entirely-absent case would become a failure too.
   RELEASING.md says why it is not: an inventory kept in step with every commit can never
@@ -235,8 +273,12 @@ record.
 |---|---|
 | `bin/surface.php` | the rows (`inventoryRecords()`), the comparison (`surfaceRowDiff()`, `diffInventory()`), and the reader they exposed (`fileSurface()`, `visibilityBefore()`) |
 | `bin/inventory.php` | writes all three files, reports drift, warns about a discarded record, and builds them for any ref (`--at`) |
+| `bin/api.php` | renders `API.md` from the three files, and refuses to render one that is not there or that describes two trees (`--check`) |
+| `API.md` | the page itself: the rows as a consumer reads them, generated and therefore never a second tree to keep in step |
 | `bin/release.php` | writes them in the release commit, weighs them as the fourth signal, reports an incomplete one |
 | `tests/Unit/Release/InventoryTest.php` | the generator: the rows, the drift, the exit codes |
+| `tests/Unit/Release/SurfaceReaderTest.php` | the shared reader's method shape: one part per argument, and what does not split one |
+| `tests/Unit/Docs/PublicApiReportTest.php` | the page against the record: the bytes, every row, the counts, and the refusal when there is no record |
 | `tests/Unit/Release/BumpWeighingTest.php` | the weighing: what a fresh, stale, missing or incomplete inventory may do |
 | `tests/Support/ReleaseRepo.php` | the fixture the two suites drive the real scripts in |
 | `RELEASING.md` | the reader-facing specification of all three files and the signal |
