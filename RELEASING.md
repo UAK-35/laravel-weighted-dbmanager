@@ -116,6 +116,36 @@ That is the one direction a versioning signal must never be wrong in: believing 
 lazily refreshed inventory would ship a breaking change as a patch. Losing one
 costs a second opinion and nothing else, because no signal ever lowers the bump.
 
+### A record that is partly there stops the release
+
+An incomplete inventory is not only a reading problem. An inventory that is *entirely*
+absent is a tree that has never written one — every checkout before the release that
+writes them, and every first release — so there is nothing to reproduce, and
+`bin/release.php` writes them and goes ahead. A *stale* stamp is repaired by the release
+that proceeds, so refusing it would block an ordinary between-releases state. A file
+missing from a record that still holds the others is neither: a stamp on disk says a
+previous release published this record, so the missing file cannot be "never written",
+and the rows it held are exactly the ones nothing else can witness. A release that
+weighs three signals instead is under-weighing, so a real run refuses and names the one
+command that repairs it:
+
+```bash
+php bin/inventory.php --at=<the stamp the record carries>
+```
+
+`--at` matters here. A plain `php bin/inventory.php` writes the *working tree's* rows and
+stamps them with the latest tag, which describes a tree that tag never held — the
+hand-regeneration the stamp rule exists to catch. `--at=<stamp>` reproduces the rows the
+tag actually published, so the record is fresh and the diff against the working tree is
+the changes since that tag, which is what the weighing needs. `--weigh --dry-run` reports
+the state instead of refusing, like every other rail: a plan publishes nothing.
+
+The limit is stated rather than hidden: deleting all three files produces the
+entirely-absent state, which is reported and not refused. The files alone cannot tell a
+tree that never adopted the inventory from one whose files were removed, the release
+writes them either way, and refusing would make the record a precondition of ever
+creating it.
+
 Regenerating by hand is for looking — `php bin/inventory.php` rewrites all three
 files with the latest tag and prints the evidence that rewrite discarded:
 
@@ -194,7 +224,13 @@ reader that stopped at the type name could not see —
 `BumpWeighingTest::test_a_constant_removed_with_no_tag_at_all_is_witnessed_by_the_inventory_alone`
 holds the weighing it exists for, and
 `BumpWeighingTest::test_an_inventory_missing_one_of_its_files_is_incomplete_and_never_moves_the_bump`
-holds the whole-or-nothing rule.
+holds the whole-or-nothing rule, and the refusal the rule feeds is held by
+`BumpWeighingTest::test_a_half_written_inventory_refuses_a_release_rather_than_weighing_without_it`,
+`BumpWeighingTest::test_a_half_written_inventory_is_a_note_on_a_plan_rather_than_a_refusal`
+and `BumpWeighingTest::test_an_absent_inventory_does_not_block_the_release_that_writes_it`,
+which together pin what refuses, what only reports, and what a plan does with either, and
+`BumpWeighingTest::test_the_named_repair_turns_the_refusal_into_a_weighed_release` drives the
+named `--at` command through to the release it unblocks.
 
 Do **not** wire `--check` into CI. An inventory kept in step with every commit can
 never witness a change, and witnessing one is the only thing it is for.
@@ -313,6 +349,7 @@ row without one is a rail nobody has driven:
 | No `## Unreleased` section | There is nothing to promote | `test_a_changelog_with_no_unreleased_heading_is_refused` |
 | The Unreleased section is empty | Refused, with no override. The notes are what a release publishes and what a reader upgrades on, so there is nothing to release without them. `--weigh --dry-run` is the one run let past it — and it is not a release: it reports the bump the other signals weigh and prints, in the plan, that a real run refuses here. The two answers differ because they answer different questions: the bump is read off the changes, the version is what a reader gets | `test_a_dev_tag_with_no_notes_is_refused_and_has_no_override`, `test_a_weighing_dry_run_reports_the_bump_while_a_release_of_it_refuses` |
 | The declared bump is smaller than `--weigh`'s | Shipping a breaking change as a patch is the accident this policy exists to prevent. `--ignore-policy` overrides it, and the plan says so | `test_a_declared_bump_below_the_weighed_one_is_refused`, `test_ignore_policy_releases_anyway_and_says_so` |
+| The inventory is partly missing | The inventory is the only signal that carries the *file* a declaration came from, so it is the only thing that can witness a removal a second file's declaration hides, and the only thing that can witness anything on a tree with no tag. Weighing without it is the one direction a versioning signal must never be wrong in. Only a *partly present* record refuses: an entirely absent one has nothing to reproduce and is written by this release, and a stale stamp is repaired by the release that proceeds. The refusal names the missing file and `php bin/inventory.php --at=<stamp>`, and `--dry-run` reports it instead of refusing | `test_a_half_written_inventory_refuses_a_release_rather_than_weighing_without_it`, `test_the_named_repair_turns_the_refusal_into_a_weighed_release` |
 | The public surface changed and the notes do not account for it | The notes are the one signal a reader ever sees, and every other rail is satisfied by a section that is merely not empty: a new public method filed under `### Fixed` weighs a patch, the bump is taken from the surface, and the changelog then announces a fix while a consumer gained something to use. The comparison is the notes' own severity against the loudest signal that reads the surface, so a removal needs a `### Removed` entry and the refusal points at the heading to use. The refusal names the symbols. `--allow-silent-notes` overrides it, and `--dry-run` reports it instead of refusing | `test_an_addition_the_notes_do_not_account_for_is_refused`, `test_a_removal_the_notes_call_a_fix_is_refused`, `test_a_removal_filed_under_changed_is_refused_with_the_heading_to_use`, `test_the_inventory_alone_can_trip_the_rail`, `test_allow_silent_notes_releases_anyway_and_says_so`, `test_a_dry_run_warns_instead_of_refusing` |
 | Non-interactive shell | It asks before committing and tagging. `--yes` (or `--dry-run`) is required when stdin is not a terminal | `test_a_non_interactive_shell_is_refused_without_yes` |
 

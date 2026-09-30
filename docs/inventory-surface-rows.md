@@ -124,6 +124,30 @@ it reported the third file missing.
 can only discard a record it read, so a half-present set is completed in silence rather
 than described as discarded.
 
+### The half-present record is a refusal; the absent one is not
+
+Reporting the incompleteness was not enough of it. A *partly* present record is the state
+the whole-or-nothing rule cannot be read past: a stamp on disk says a previous release
+published the record, so the missing file cannot be "never written", and the rows it held
+are the only rows nothing else can witness. So the release script refuses that state
+rather than weighing three signals and calling it a verdict — which is the failure this
+section describes, and which this repository itself lived with for several releases.
+
+Only that state refuses. An inventory that is *entirely* absent is a tree that has never
+written one — every checkout before the release that writes them, and every first release —
+so there is nothing to reproduce, and the release writes them and goes ahead. A stale stamp
+is repaired by the release that proceeds, so refusing it would block an ordinary
+between-releases state. The refusal names the missing file and the one command that repairs
+it, `php bin/inventory.php --at=<the stamp the record carries>`, because a plain
+`bin/inventory.php` writes the working tree's rows and stamps them with a tag that never
+held them — the hand-regeneration the stamp rule exists to catch. A plan prints the state
+instead of refusing, like every other rail: it publishes nothing.
+
+The limit is deliberate and stated rather than hidden: deleting all three files produces
+the entirely-absent state, which is reported rather than refused. The files alone cannot
+tell that from a tree that never adopted the inventory, the release writes them either way,
+and refusing would make the record a precondition of ever creating it.
+
 ---
 
 ## What writing the rows exposed
@@ -152,14 +176,20 @@ what makes the walk safe to extend rather than merely necessary.
 | ...and a config key the config file no longer returns | `test_check_reports_a_config_key_the_file_no_longer_returns` | `InventoryTest` |
 | a constant removed on a tree with no tag is witnessed by the inventory alone | `test_a_constant_removed_with_no_tag_at_all_is_witnessed_by_the_inventory_alone` | `BumpWeighingTest` |
 | an inventory missing one of its files is incomplete and never moves the bump | `test_an_inventory_missing_one_of_its_files_is_incomplete_and_never_moves_the_bump` | `BumpWeighingTest` |
+| a half-written record refuses a release rather than being weighed without, and a plan reports it instead | `test_a_half_written_inventory_refuses_a_release_rather_than_weighing_without_it`, `test_a_half_written_inventory_is_a_note_on_a_plan_rather_than_a_refusal` | `BumpWeighingTest` |
+| an entirely absent inventory does not block the release that writes it | `test_an_absent_inventory_does_not_block_the_release_that_writes_it` | `BumpWeighingTest` |
+| the named `--at` repair turns the refusal into a release that weighs the record | `test_the_named_repair_turns_the_refusal_into_a_weighed_release` | `BumpWeighingTest` |
 | a rewrite that read only part of the set says nothing about discarding | `test_a_pair_that_is_half_there_discards_nothing_it_did_not_read` | `InventoryTest` |
 
 Mutations these were measured against: not reporting a removed row fails one test (the
 no-tag witness), reading an incomplete inventory as an empty one fails one (the bump moves
 to a minor the notes did not ask for), restoring the reader's behaviour of stopping at a
 type name fails two, warning about a discarded record the rewrite did not read fails one,
-and building the rows off the checkout instead of out of the ref fails one (the backfill
-case, which is the only reason the second reader exists).
+building the rows off the checkout instead of out of the ref fails one (the backfill case,
+which is the only reason the second reader exists), and the rail's own two mutations are measured the same way: forcing
+`blocks_release` to `false` fails three — the refusal, the plan that has to report it, and the
+repair run — and forcing it to `true` fails one, the release that writes an entirely absent
+record.
 
 ---
 
@@ -192,9 +222,10 @@ case, which is the only reason the second reader exists).
   consumers, `surface.tsv` would be the artifact to derive it from rather than a signal
   doing double duty.
 - **If `--check` were wired into CI.** Then a missing third file is a red build rather
-  than a note in a plan, and the incomplete case would need to be a failure instead of a
-  skip. RELEASING.md says why it is not: an inventory kept in step with every commit can
-  never witness a change.
+  than a note in a plan, and the entirely-absent case would become a failure too.
+  RELEASING.md says why it is not: an inventory kept in step with every commit can never
+  witness a change. The half-present case is a failure already, in the release rail rather
+  than in CI.
 
 ---
 

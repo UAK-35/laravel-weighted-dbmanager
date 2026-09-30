@@ -69,7 +69,7 @@ function bumpFor(string $severity, string $base): string
  * returned with the evidence behind it, so the plan shows its working rather than
  * asserting a version.
  *
- * @return array{severity: string, bump: string, signals: list<array{source: string, severity: string, summary: string, evidence: list<string>}>, notes: list<string>, shadow: string|null, inventory: array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool}}
+ * @return array{severity: string, bump: string, signals: list<array{source: string, severity: string, summary: string, evidence: list<string>}>, notes: list<string>, shadow: string|null, inventory: array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool, blocks_release: bool}}
  */
 function weigh(string $root, ?string $latestTag, string $unreleased, string $base): array
 {
@@ -579,7 +579,32 @@ function surfaceSignals(string $root, string $latestTag, ?array &$collisions = n
  * This signal can only ever raise the bump. Nothing here lowers what the notes, the
  * commits or the surface say, which is what makes a second opinion affordable.
  *
- * @return array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool}
+ * WHEN THE RECORD IS ONLY HALF THERE
+ * ----------------------------------
+ * A file that is not there is read as a whole-record question, as above, but it is not
+ * only a reading: `blocks_release` says whether the release script should *wait* for the
+ * record to be repaired first, and it is true for exactly one state — some of the three
+ * files present and at least one missing.
+ *
+ * The reason that state is different from the other two is what the files on disk prove.
+ * An inventory that is *entirely* absent cannot be told from a tree that never adopted one,
+ * which is what every checkout is before the release that writes them, so there is nothing
+ * to repair and `bin/release.php` goes ahead and writes them. A stale stamp is repaired by
+ * the release that proceeds — that is the whole reason the stamp is rewritten in the
+ * release commit — so refusing it would block an ordinary between-releases state. A
+ * *partly* present record is neither: at least one file carries a stamp, so a previous
+ * release demonstrably published this record, and a file missing from it cannot be "never
+ * written". The rows that file held are exactly the ones nothing else can witness, so the
+ * skip is silent in the only direction that matters, and the repair is one command:
+ * `php bin/inventory.php --at=<the stamp the record carries>`, which reproduces the tag's
+ * own rows rather than stamping the working tree with a tag that did not hold it.
+ *
+ * The limit is stated rather than hidden: deleting all three files produces the
+ * entirely-absent state, which is reported and not refused. That is deliberate — the two
+ * states are indistinguishable from the files alone, the release writes them either way,
+ * and refusing would make a first release impossible.
+ *
+ * @return array{source: string, severity: string, summary: string, evidence: list<string>, counts: array{files: int, methods: int, surface: int}, stamp: string, fresh: bool, blocks_release: bool}
  */
 function inventorySignal(string $root, ?string $latestTag): array
 {
@@ -598,6 +623,7 @@ function inventorySignal(string $root, ?string $latestTag): array
         'surface' => count($current['surface']),
     ];
     $expected = $latestTag ?? '(no tag)';
+    $stamp = $stored['files']['stamp'] ?? $stored['methods']['stamp'] ?? $stored['surface']['stamp'] ?? 'unknown';
 
     // The inventory is weighed as a whole or not at all. A file that is not there cannot
     // say whether the rows it should hold were never written or were just removed, and the
@@ -614,6 +640,12 @@ function inventorySignal(string $root, ?string $latestTag): array
     }
 
     if ($missing !== []) {
+        // Partly present and wholly absent are two states, and only the first one is a lost
+        // file: the names are read back above from whichever files *are* there, so a partial
+        // record is repaired by reproducing the tag's own rows, while an absent one has no
+        // record to reproduce and is written by the release. See the docblock.
+        $partial = count($missing) < 3;
+
         return [
             'source' => inventorySource(),
             'severity' => 'patch',
@@ -624,14 +656,19 @@ function inventorySignal(string $root, ?string $latestTag): array
                 $counts['surface'],
                 implode(', ', $missing),
             ),
-            'evidence' => [implode(', ', $missing) . ' missing: run php bin/inventory.php — an inventory is weighed as a whole, because rows a file never held would weigh as changes since the last release'],
+            'evidence' => [sprintf(
+                '%s missing: %s',
+                implode(', ', $missing),
+                $partial
+                    ? sprintf('run php bin/inventory.php --at=%s — that reproduces the rows and the stamp the tag holds, which is the record the file that is still there says these described; an inventory is weighed as a whole, because rows a file never held would weigh as changes since the last release', $stamp)
+                    : 'run php bin/inventory.php — nothing was published to reproduce, and a release writes them; an inventory is weighed as a whole, because rows a file never held would weigh as changes since the last release',
+            )],
             'counts' => $counts,
             'stamp' => '(missing)',
             'fresh' => false,
+            'blocks_release' => $partial,
         ];
     }
-
-    $stamp = $stored['files']['stamp'] ?? $stored['methods']['stamp'] ?? $stored['surface']['stamp'] ?? 'unknown';
 
     if ($stamp !== $expected) {
         return [
@@ -642,6 +679,9 @@ function inventorySignal(string $root, ?string $latestTag): array
             'counts' => $counts,
             'stamp' => $stamp,
             'fresh' => false,
+            // Repaired by the release that proceeds, so a refusal here would block an
+            // ordinary between-releases state rather than a lost record.
+            'blocks_release' => false,
         ];
     }
 
@@ -657,6 +697,7 @@ function inventorySignal(string $root, ?string $latestTag): array
         'counts' => $counts,
         'stamp' => $stamp,
         'fresh' => true,
+        'blocks_release' => false,
     ];
 }
 

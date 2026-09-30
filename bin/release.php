@@ -52,6 +52,16 @@ declare(strict_types=1);
  *   keyed by name for the same reason, so it is the file, and not a verdict, that keeps
  *   them apart.
  *
+ *   A record that is *partly* missing is the one state this script refuses over rather than
+ *   weighing three signals and calling it a verdict: at least one file carries a stamp, so a
+ *   previous release published the record, and a file missing from it cannot be "never
+ *   written" — the rows it held are the ones nothing else can witness. The refusal names the
+ *   file and `php bin/inventory.php --at=<the stamp the record carries>`, which reproduces the
+ *   rows the tag actually published. An inventory that is *entirely* absent is a tree that has
+ *   never written one, which this release does; a stale one is replaced by this release. Those
+ *   two are reported and skipped, and the refusal is reserved for the state that is
+ *   distinguishable.
+ *
  *   The name is the verb on purpose: it does not only work the bump out, it
  *   takes it, which is why it is not called --detect.
  *
@@ -482,6 +492,58 @@ if (version_compare($version, $base, '<=')) {
     fail("{$version} is not newer than the latest release ({$base}).");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The inventory — a record that has lost a file is repaired, not skipped
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The fourth signal is read as a whole or not at all, and every other signal here can be
+// reported and skipped without changing what the release ships — the notes, the commits and
+// the tag diff are code and prose in the tree. The inventory is the one that cannot: it is
+// the only signal that carries the *file* a declaration came from, so it is the only thing
+// that can witness a removal another file's declaration hides, and the only thing that can
+// witness anything at all on a tree with no tag. A release that weighs three signals and
+// calls the result a verdict is wrong in the one direction a version signal must never be
+// wrong in.
+//
+// Only one of the three ways the record can be incomplete is refused, and `inventorySignal()`
+// is where that is decided rather than here: an inventory that is *entirely* absent is a tree
+// that has never written one — what every checkout is before the first release that writes
+// them, and what a first release is — so there is nothing to repair and this release writes
+// them. A stale stamp is repaired by the release that proceeds. A *partly* present record is
+// a file that has demonstrably been published and has lost a piece, and it is repaired by one
+// command that reproduces the tag's own rows.
+//
+// Placed after the two rails that decide whether this run can cut a tag at all — those are
+// about the version, and this one is about the tree — and before the policy gate, because the
+// gate reads the weighing this rail says is incomplete: a shadowed removal the inventory would
+// have raised a minor over is a removal the gate would otherwise let past.
+//
+// A dry run notes rather than refuses, like every rail here: a plan publishes nothing.
+if ($weighing['inventory']['blocks_release']) {
+    if ($dryRun) {
+        note(sprintf(
+            'the inventory is incomplete — a real run refuses to release until it is repaired: %s. %s',
+            $weighing['inventory']['summary'],
+            $weighing['inventory']['evidence'][0] ?? '',
+        ));
+    } else {
+        fail(sprintf(
+            'The inventory is incomplete, so the weighing cannot read the one signal that witnesses'
+            . ' what the tag diff cannot see — a declaration a second file shadows, and a config key'
+            . ' or a constant removed on a tree with no tag to diff against. Releasing here would'
+            . ' weigh three signals and call it a verdict.'
+            . PHP_EOL . PHP_EOL
+            . '  %s' . PHP_EOL
+            . '  %s' . PHP_EOL . PHP_EOL
+            . 'Repair it and release again. An inventory that is entirely absent is a tree that has'
+            . ' never written one, and this release writes it, so that state is reported rather than'
+            . ' refused — this one is a record that has lost a file.',
+            $weighing['inventory']['summary'],
+            $weighing['inventory']['evidence'][0] ?? '',
+        ));
+    }
+}
+
 $asked = $declared === null
     ? '--weigh'
     : ($options['version'] !== null ? "--version={$options['version']}" : '--' . $declared);
@@ -638,11 +700,13 @@ printf(
         : sprintf('## Unreleased -> ## %s - %s, new Unreleased section above', $version, gmdate('Y-m-d')),
     PHP_EOL,
 );
-$inventoryLine = $weighing['inventory']['stamp'] === '(missing)'
-    ? 'written by this release'
-    : ($weighing['inventory']['fresh']
-        ? 'fresh, weighed against ' . $weighing['inventory']['stamp']
-        : 'stale, refreshed by this release and not weighed');
+$inventoryLine = $weighing['inventory']['blocks_release']
+    ? 'incomplete, and a real run refuses to release until it is repaired'
+    : ($weighing['inventory']['stamp'] === '(missing)'
+        ? 'written by this release'
+        : ($weighing['inventory']['fresh']
+            ? 'fresh, weighed against ' . $weighing['inventory']['stamp']
+            : 'stale, refreshed by this release and not weighed'));
 
 printf("  release notes %d bullet(s) in the promoted section%s", $promoted['entries'], PHP_EOL);
 printf(

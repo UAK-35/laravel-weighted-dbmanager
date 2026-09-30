@@ -247,6 +247,38 @@
 
 ### Fixed
 
+- **The weighing refuses a release on a half-written inventory instead of silently weighing three
+  signals.** The fourth signal is the only one that carries the *file* a declaration came from, so
+  it is the only thing that can witness a removal a second file's declaration hides — and the only
+  thing that can witness anything at all on a tree with no tag. An inventory with one of its three
+  files missing was reported as incomplete and skipped, which is under-weighing, and that is the
+  one direction a version signal must never be wrong in: this repository's own `files.tsv` and
+  `methods.tsv` sat stamped `v0.2.0-alpha1` with no `surface.tsv` beside them, so every weighing
+  the package's own development did ran with the second opinion silent and said so only in a note.
+
+  The rule is narrow on purpose, and the narrowness is the decision. A *partly present* record is
+  the one state that is unambiguously a lost file: at least one file carries a stamp, so a previous
+  release demonstrably published the record, and a file missing from it cannot be "never written".
+  An inventory that is *entirely* absent is a tree that has never written one — what every checkout
+  is before the release that writes them, and what a first release is — so refusing it would make
+  the record a precondition of ever creating it. A stale stamp is repaired by the release that
+  proceeds, so refusing it would block an ordinary between-releases state. The refusal names the
+  missing file and the one command that repairs it — `php bin/inventory.php --at=<the stamp the
+  record carries>` — because a plain `bin/inventory.php` writes the working tree's rows and stamps
+  them with a tag that never held them, which is the hand-regeneration the stamp rule exists to
+  catch. A dry run reports the state instead of refusing, like every other rail, because a plan
+  publishes nothing.
+
+  Pinned by four cases in `BumpWeighingTest` — the refusal on a real run, the same state on a
+  plan, the entirely absent record that still releases, and the named repair driven end to end
+  until the refused release proceeds with the record weighed — and the limit is stated rather
+  than hidden: deleting all three files produces the absent state, which is reported and not
+  refused, since the files alone cannot tell that from a tree that never adopted the
+  inventory.
+  `bin/release.php` and `bin/weighing.php` carry the rule,
+  [RELEASING.md](RELEASING.md#a-record-that-is-partly-there-stops-the-release) the procedure, and
+  [docs/inventory-surface-rows.md](docs/inventory-surface-rows.md) the decision and its limit.
+
 - **The audit block publishes the live reading beside the record, so a finding written by a boot on
   another connection or environment is labelled instead of read as this host's.** `/health/db`
   embedded `BootAudit::reported()` and nothing else, and the record is per installation while a

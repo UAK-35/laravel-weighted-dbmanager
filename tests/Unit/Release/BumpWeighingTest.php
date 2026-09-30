@@ -551,13 +551,18 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
-     * An inventory with two of its three files: the rule that makes a third file safe to add
-     * at all, and the state every tree is in the first time it is weighed after one exists.
+     * An inventory with two of its three files, on a plan: the *reading* rule that makes a
+     * third file safe to add at all.
      *
      * A file that is not there cannot say whether the rows it should hold were never written
      * or were just removed, so it is reported as incomplete rather than read as an empty file —
      * which would count every config key and constant in the tree as added since the last
-     * release, and raise a bump nothing changed asked for.
+     * release, and raise a bump nothing changed asked for. It never moves the bump, and a plan
+     * publishes nothing, so this run still exits 0.
+     *
+     * What a *real* run does with the same state is the rail's own question and is pinned by
+     * `test_a_half_written_inventory_refuses_a_release_rather_than_weighing_without_it`: the
+     * reading rule here says "not weighed", and the rail says "wait until it can be".
      */
     public function test_an_inventory_missing_one_of_its_files_is_incomplete_and_never_moves_the_bump(): void
     {
@@ -579,9 +584,15 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
-     * Nothing a signal may do: an inventory that is merely missing is not a reason to
-     * change the version, and a release should not be blocked by a file that is
-     * neither the version nor the tree.
+     * Nothing a signal may do: an inventory that is *entirely* absent is not a reason to
+     * change the version, and not a reason to block a release either — the release writes
+     * it, which is the only way the artefact can exist on a tree that has never had one.
+     *
+     * This is the half of the rail the refusal deliberately does not cover. The files alone
+     * cannot tell a tree that never adopted the inventory from one whose files were deleted,
+     * so the state is reported and the release goes ahead; the refusal is reserved for the
+     * state that *is* distinguishable, where at least one file is on disk and a series has
+     * lost a piece of itself.
      */
     public function test_a_missing_inventory_never_moves_the_bump(): void
     {
@@ -595,6 +606,128 @@ final class BumpWeighingTest extends TestCase
         $this->assertSame(0, $run->exitCode, $run->describe());
         $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
         $this->assertTrue($run->said('written by this release'), $run->describe());
+    }
+
+    /**
+     * The refusal itself: at least one inventory file is on disk with a stamp, so a previous
+     * release demonstrably published the record, and a file missing from it cannot be "never
+     * written" — it is a record that has lost a piece of itself.
+     *
+     * The rows in that file are the ones nothing else here can witness: the inventory is the
+     * only signal that carries the *file* a declaration came from, so a removal a second file's
+     * declaration hides, and anything at all on a tree with no tag, are its alone. Weighing
+     * without it is under-weighing, which is the one direction a version signal must never be
+     * wrong in — and the repair is named, because it is what makes refusing affordable here:
+     * one command reproduces the rows and the stamp the tag holds, rather than stamping the
+     * working tree with a tag that never held it.
+     */
+    public function test_a_half_written_inventory_refuses_a_release_rather_than_weighing_without_it(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+
+        $repo->refreshInventory();
+        $repo->commit('chore: keep an inventory');
+        $repo->drop('surface.tsv');
+        $repo->commit('chore: surface.tsv is gone');
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertNotSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue($run->refused('The inventory is incomplete'), $run->describe());
+        $this->assertTrue(
+            $run->refused('surface.tsv missing: run php bin/inventory.php --at=v0.1.0'),
+            $run->describe(),
+        );
+
+        // And nothing was cut: the refusal is a precondition, so no tag was made and the
+        // record on disk is still the one the tree had.
+        $this->assertSame('v0.1.0', trim($repo->tags()), $run->describe());
+    }
+
+    /**
+     * The refusal is affordable only because the repair is one command, so the command is
+     * driven here rather than described: `--at=<the stamp the record carries>` reproduces the
+     * rows the tag actually published, and the release that was refused then proceeds with the
+     * inventory *weighed* rather than skipped. A plain `bin/inventory.php` would not do this —
+     * it writes the working tree's rows and stamps them with the tag, which describes a tree
+     * that tag never held.
+     */
+    public function test_the_named_repair_turns_the_refusal_into_a_weighed_release(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+
+        $repo->refreshInventory();
+        $repo->commit('chore: keep an inventory');
+        $repo->drop('surface.tsv');
+        $repo->commit('chore: surface.tsv is gone');
+
+        $refused = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(1, $refused->exitCode, $refused->describe());
+
+        // Run exactly as the refusal names it.
+        $repo->script('inventory.php', '--at=v0.1.0');
+        $repo->commit('chore: restore surface.tsv from the tag it describes');
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue($run->said('fresh, weighed against v0.1.0'), $run->describe());
+        $this->assertFalse($run->refused('The inventory is incomplete'), $run->describe());
+        $this->assertTrue(
+            $repo->exists('surface.tsv'),
+            'the third file is back, written by the repair and carried into the release commit',
+        );
+    }
+
+    /**
+     * The same state on a plan: reported, not refused, because a plan publishes nothing —
+     * the shape every rail here has, and the one that lets "what would this release weigh?"
+     * be asked on a tree that is not ready.
+     */
+    public function test_a_half_written_inventory_is_a_note_on_a_plan_rather_than_a_refusal(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+
+        $repo->refreshInventory();
+        $repo->commit('chore: keep an inventory');
+        $repo->drop('surface.tsv');
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('a real run refuses to release until it is repaired'),
+            $run->describe(),
+        );
+        $this->assertTrue(
+            $run->said('incomplete, and a real run refuses to release until it is repaired'),
+            $run->describe(),
+        );
+        $this->assertSame('v0.1.0', trim($repo->tags()), $run->describe());
+    }
+
+    /**
+     * The other half, on a release that could tag: an entirely absent inventory does not stop
+     * it, because the release writes the files and there is nothing to reproduce. A refusal
+     * here would make the artefact a precondition of ever creating it.
+     */
+    public function test_an_absent_inventory_does_not_block_the_release_that_writes_it(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v1.0.0');
+
+        $this->assertFalse($repo->exists('files.tsv'));
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertFalse($run->refused('The inventory is incomplete'), $run->describe());
+        $this->assertTrue($run->said('written by this release'), $run->describe());
+        $this->assertSame('v1.0.0' . "\n" . 'v1.0.1', trim($repo->tags()), $run->describe());
     }
 
     /**
