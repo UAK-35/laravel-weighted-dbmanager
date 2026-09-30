@@ -80,6 +80,197 @@ class BootAuditTest extends TestCase
         $this->assertSame(0, $recorded['context']['windows_in_use'] ?? null);
     }
 
+    public function test_a_report_remembers_the_scope_the_finding_was_written_in(): void
+    {
+        $audit = $this->audit();
+
+        $scope = [
+            'connection' => 'pgsql_proxy',
+            'driver' => 'pgsql',
+            'source' => 'db-manager.swrr.connection',
+            'app_env' => 'production',
+        ];
+
+        $audit->report($this->emptyRecord(), [
+            new BootAuditFinding(
+                key: 'swrr.pgcat.gate',
+                warning: 'pgcat is armed where it cannot act.',
+                resolution: 'The pgcat mismatch no longer applies.',
+            ),
+        ], checked: ['swrr.pgcat.gate'], scope: $scope);
+
+        // Read back through the class, which is what the endpoint and the command do — and out
+        // of the record, because the record is what crosses processes.
+        $this->assertSame($scope, $audit->standing()[0]['scope']);
+        $this->assertSame($scope, $audit->read()['findings']['swrr.pgcat.gate']['scope'] ?? null);
+    }
+
+    public function test_a_record_written_before_scopes_were_kept_reads_as_no_scope(): void
+    {
+        // The scope is not a finding's identity, so an entry that predates it is still a finding:
+        // "not known" is what an empty scope says, and a reader must not round it to a match.
+        $audit = $this->audit();
+
+        $this->putRecord([
+            'swrr.pgcat.gate' => [
+                'resolution' => 'The pgcat mismatch no longer applies.',
+                'warning' => 'pgcat is armed where it cannot act.',
+                'level' => 'warning',
+                'context' => [],
+                'first_reported_at' => '2026-09-21T08:15:00+00:00',
+            ],
+        ]);
+
+        $this->assertSame([], $audit->standing()[0]['scope']);
+    }
+
+    public function test_the_block_carries_the_live_reading_beside_the_record(): void
+    {
+        $path = $this->tempDir() . '/audit.json';
+
+        file_put_contents($path, (string) json_encode([
+            'findings' => [
+                'swrr.reader_windows.refused' => [
+                    'resolution' => 'swrr.reader_windows is readable again.',
+                    'warning' => 'swrr.reader_windows is "10:00-14:20", not a list of windows.',
+                    'level' => 'error',
+                    'context' => [],
+                    'first_reported_at' => '2026-09-21T08:15:00+00:00',
+                    'scope' => [
+                        'connection' => 'sqlite',
+                        'driver' => 'sqlite',
+                        'source' => 'db-manager.swrr.connection',
+                        'app_env' => 'sqlite-live',
+                    ],
+                ],
+            ],
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $scope = [
+            'connection' => 'pgsql_proxy',
+            'driver' => 'pgsql',
+            'source' => 'db-manager.swrr.connection',
+            'app_env' => 'production',
+        ];
+
+        $audit = new BootAudit($path, 0, currentFindings: static fn (): array => [
+            'scope' => $scope,
+            'evaluated' => ['swrr.reader_windows.refused'],
+            'findings' => [],
+        ]);
+
+        $block = BootAudit::reported($audit);
+
+        // The recorded half is untouched: the finding, its sentence, and how long it has stood.
+        $this->assertSame(1, $block['count']);
+        $this->assertSame('2026-09-21T08:15:00+00:00', $block['oldest']);
+        $this->assertSame('error', $block['severity']);
+
+        // The live half is beside it, with the scope it was taken in.
+        $this->assertSame($scope, $block['scope']);
+        $this->assertNotNull($block['checked_at']);
+        $this->assertTrue($block['current']['available']);
+        $this->assertSame(0, $block['current']['count']);
+        $this->assertSame('none', $block['current']['severity']);
+
+        // And the recorded finding says what this process knows: it was evaluated here, it does
+        // not apply here, and the boot that wrote it was somewhere else entirely.
+        $this->assertSame(
+            ['evaluated' => true, 'standing' => false, 'scope_matches' => false],
+            $block['findings'][0]['current'],
+        );
+    }
+
+    public function test_a_key_the_live_half_did_not_evaluate_is_not_called_cleared(): void
+    {
+        // The store's reachability is the one key a surface cannot have answered without paying
+        // for a probe. "Not evaluated" and "does not apply" are different claims, and this is
+        // the field that keeps them apart.
+        $path = $this->tempDir() . '/audit.json';
+
+        file_put_contents($path, (string) json_encode([
+            'findings' => [
+                'swrr.primary_store.unreachable' => [
+                    'resolution' => 'The configured primary store is not unreachable any more.',
+                    'warning' => 'The primary store [redis(default)] could not serve a read: Connection refused.',
+                    'level' => 'warning',
+                    'context' => [],
+                    'first_reported_at' => '2026-09-27T08:15:00+00:00',
+                    'scope' => [
+                        'connection' => 'sqlite',
+                        'driver' => 'sqlite',
+                        'source' => 'db-manager.swrr.connection',
+                        'app_env' => 'sqlite-live',
+                    ],
+                ],
+            ],
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $audit = new BootAudit($path, 0, currentFindings: static fn (): array => [
+            'scope' => [
+                'connection' => 'pgsql_proxy',
+                'driver' => 'pgsql',
+                'source' => 'db-manager.swrr.connection',
+                'app_env' => 'production',
+            ],
+            'evaluated' => ['swrr.reader_windows.refused'],
+            'findings' => [],
+        ]);
+
+        $block = BootAudit::reported($audit);
+
+        $this->assertSame(
+            ['evaluated' => false, 'standing' => null, 'scope_matches' => false],
+            $block['findings'][0]['current'],
+        );
+    }
+
+    public function test_a_block_with_no_live_evaluator_says_so_rather_than_inventing_one(): void
+    {
+        $block = BootAudit::reported($this->audit());
+
+        $this->assertNull($block['scope']);
+        $this->assertNull($block['checked_at']);
+        $this->assertFalse($block['current']['available']);
+        $this->assertNotNull($block['current']['error']);
+    }
+
+    public function test_a_live_evaluation_that_throws_leaves_the_record_readable(): void
+    {
+        // A diagnostic must never be the thing that stops the page it reports on: a live half
+        // that could not run is published as unavailable, and the record still crosses.
+        $audit = $this->audit();
+
+        $audit->report($this->emptyRecord(), [
+            new BootAuditFinding(
+                key: 'swrr.pgcat.gate',
+                warning: 'pgcat is armed where it cannot act.',
+                resolution: 'The pgcat mismatch no longer applies.',
+            ),
+        ], checked: ['swrr.pgcat.gate'], scope: [
+            'connection' => 'pgsql',
+            'driver' => 'pgsql',
+            'source' => 'database.default',
+            'app_env' => 'production',
+        ]);
+
+        $exploding = new BootAudit((string) $this->auditFile, 0, currentFindings: static function (): array {
+            throw new \RuntimeException('the producers are not registered');
+        });
+
+        $block = BootAudit::reported($exploding);
+
+        $this->assertSame(1, $block['count']);
+        $this->assertFalse($block['current']['available']);
+        $this->assertStringContainsString('the producers are not registered', (string) $block['current']['error']);
+        $this->assertSame(
+            ['evaluated' => false, 'standing' => null, 'scope_matches' => null],
+            $block['findings'][0]['current'],
+        );
+    }
+
     public function test_a_finding_that_shares_a_key_is_logged_rather_than_replaced(): void
     {
         // The record is keyed by finding key, so two findings under one key are one entry.

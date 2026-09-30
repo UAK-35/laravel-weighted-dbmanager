@@ -76,11 +76,40 @@ use Illuminate\Support\Facades\Log;
  * written before those fields existed still read, as warnings with no sentence — the
  * failure mode is a line too few, never an invented claim.
  *
- * @phpstan-type Finding array{resolution: string, warning: string, level: string, context: array<string, mixed>, first_reported_at: string}
+ * AND WHAT IT REMEMBERS ABOUT WHERE
+ * ----------------------------------
+ * A record is per installation, and one installation has many boots: a migration container,
+ * a queue worker and the web process all boot the same application, and they do not
+ * necessarily resolve the same connection. A finding written by one of them is still true
+ * about the setting it names and can be false about the process reading it. Each recorded
+ * entry therefore carries the scope it was reported in — the connection the package
+ * followed, its driver, the rule that named it, and `app.env`. It changes nothing about the
+ * finding's identity; it is what lets a surface say that the process now reading the record
+ * is not the one the finding was written by.
+ *
+ * WHAT THE LIVE HALF IS
+ * ---------------------
+ * A surface that only reads the record can date a finding and cannot say whether it is
+ * still true: the boot that would close it out runs once per process, and a long-lived
+ * worker never runs it again. `reported()` therefore publishes the *current* reading beside
+ * the record — the same producers, run again in the process answering the request, with the
+ * network probe left out, because a failed PING is a connect timeout and a health payload
+ * is not the place to spend one. The two halves sit beside each other rather than replacing
+ * one another, because they answer different questions: the record says what the
+ * installation has been claiming, and the live half says what this process can see now. A
+ * key the live half cannot answer without a probe is reported as *not evaluated* rather than
+ * as cleared, which is the distinction that makes the pair worth reading.
+ *
+ * @phpstan-type Finding array{resolution: string, warning: string, level: string, context: array<string, mixed>, first_reported_at: string, scope: array<string, mixed>}
  * @phpstan-type Record array{findings: array<string, Finding>, store_probed_at: int|null}
- * @phpstan-type Standing array{key: string, level: string, warning: string, resolution: string, first_reported_at: string, age_seconds: int|null, age: string, context: array<string, mixed>}
+ * @phpstan-type Standing array{key: string, level: string, warning: string, resolution: string, first_reported_at: string, age_seconds: int|null, age: string, context: array<string, mixed>, scope: array<string, mixed>}
+ * @phpstan-type Current array{evaluated: bool, standing: bool|null, scope_matches: bool|null}
+ * @phpstan-type Reported array{key: string, level: string, warning: string, resolution: string, first_reported_at: string, age_seconds: int|null, age: string, context: array<string, mixed>, scope: array<string, mixed>, current: Current}
+ * @phpstan-type LiveFinding array{key: string, level: string, warning: string, resolution: string, context: array<string, mixed>}
+ * @phpstan-type Live array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, findings: list<LiveFinding>, error: string|null}
+ * @phpstan-type LiveReading array{available: bool, error: string|null, scope: array<string, mixed>|null, checked_at: string, evaluated: list<string>, findings: list<LiveFinding>}
  * @phpstan-type Summary array{severity: string, counts: array{error: int, warning: int}}
- * @phpstan-type Block array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, oldest: string|null, findings: list<Standing>, error: string|null}
+ * @phpstan-type Block array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, oldest: string|null, findings: list<Reported>, error: string|null, checked_at: string|null, scope: array<string, mixed>|null, current: Live}
  */
 final class BootAudit
 {
@@ -131,12 +160,19 @@ final class BootAudit
      *        or watch it being released without a second process
      * @param \Closure(mixed): void|null $lockReleaser what lets the lock go again, called with
      *        whatever the acquirer returned
+     * @param \Closure(): array{scope?: array<string, mixed>, evaluated?: list<string>, findings?: list<BootAuditFinding>}|null $currentFindings
+     *        how the audited settings read *now*, evaluated by the process answering the
+     *        request — the live half of the block. Injected by the provider, which is the
+     *        only place that knows every producer; absent for a bare audit (a test, a
+     *        hand-built one), and the block then says the live half was not evaluated rather
+     *        than inventing one
      */
     public function __construct(
         private readonly string $file,
         private readonly int $storeProbeSeconds = 60,
         ?\Closure $lockAcquirer = null,
         ?\Closure $lockReleaser = null,
+        private readonly ?\Closure $currentFindings = null,
     ) {
         $this->lockAcquirer = $lockAcquirer ?? static function (string $file): array {
             $handle = @fopen($file, 'c');
@@ -300,6 +336,10 @@ final class BootAudit
                 'age_seconds' => $seconds,
                 'age' => self::describeAge($seconds),
                 'context' => $finding['context'],
+                // What the finding was written by, so a surface can say that the process
+                // reading it now is somewhere else. Empty for a record written before the
+                // scope was kept, which reads as "not known" rather than as a match.
+                'scope' => $finding['scope'],
             ];
         }
 
@@ -354,20 +394,27 @@ final class BootAudit
      *
      * Nothing is probed, written or restarted: reading the record is the whole cost.
      *
+     * The block carries a live half as well, and it is the one thing here that runs
+     * producers rather than reads a file — see `live()`. It is still nothing that writes,
+     * and the network probe is deliberately not among it, so the cost is a few configuration
+     * reads and stats.
+     *
      * @param self|null $audit the audit the caller resolved — null when the application has
      *        none registered, which is a fact about the installation and not about the reader
      * @return Block
      */
     public static function reported(?self $audit): array
     {
+        $live = $audit?->live();
+
         if ($audit === null) {
-            return self::nothingToReport(null);
+            return self::nothingToReport(null, $live);
         }
 
         try {
             $findings = $audit->standing();
         } catch (\Throwable $e) {
-            return self::nothingToReport($e->getMessage());
+            return self::nothingToReport($e->getMessage(), $live);
         }
 
         $summary = self::standingSummary($findings);
@@ -379,8 +426,163 @@ final class BootAudit
             'counts' => $summary['counts'],
             // The list is oldest first, so the first entry is the oldest finding.
             'oldest' => $findings[0]['first_reported_at'] ?? null,
-            'findings' => $findings,
+            'findings' => self::annotate($findings, $live),
             'error' => null,
+            'checked_at' => $live['checked_at'] ?? null,
+            'scope' => $live['scope'] ?? null,
+            'current' => self::liveBlock($live),
+        ];
+    }
+
+    /**
+     * The audited settings as this process reads them *now*, or null when no evaluator is
+     * registered.
+     *
+     * This is the live half's one reader, and it answers three questions a surface needs:
+     * which keys could be evaluated at all, what those keys say now, and what scope the
+     * evaluating process is running as. The evaluator is supplied by the provider, so this
+     * class can publish the reading without knowing a single producer — the point of the
+     * split, since `BootAudit` owns the record and the provider owns the settings.
+     *
+     * An evaluator that throws is not a surface's problem: a diagnostic must not take down
+     * the page it is reporting on, so the failure is caught and published as
+     * `current.available: false` with the reason, exactly the way an unreadable record is.
+     * The recorded half is still returned either way — a live evaluation that could not run
+     * is no reason to withhold what the record already knows.
+     *
+     * @return LiveReading|null
+     */
+    private function live(): ?array
+    {
+        if ($this->currentFindings === null) {
+            return null;
+        }
+
+        $checkedAt = self::timestamp();
+
+        try {
+            $evaluation = ($this->currentFindings)();
+        } catch (\Throwable $e) {
+            return [
+                'available' => false,
+                'error' => 'the live reading of the audited settings did not run: '.$e->getMessage(),
+                'scope' => null,
+                'checked_at' => $checkedAt,
+                'evaluated' => [],
+                'findings' => [],
+            ];
+        }
+
+        $scope = $evaluation['scope'] ?? null;
+        $evaluated = $evaluation['evaluated'] ?? null;
+        $findings = [];
+
+        foreach ($evaluation['findings'] ?? [] as $finding) {
+            $findings[] = self::findingAsLive($finding);
+        }
+
+        return [
+            'available' => true,
+            'error' => null,
+            'scope' => is_array($scope) ? $scope : [],
+            'checked_at' => $checkedAt,
+            'evaluated' => is_array($evaluated) ? $evaluated : [],
+            'findings' => $findings,
+        ];
+    }
+
+    /**
+     * The live half as the block shaped it: the same summary and vocabulary the recorded
+     * half carries, so an alert can be written against either and a reader can hold the two
+     * side by side.
+     *
+     * @param LiveReading|null $live
+     * @return Live
+     */
+    private static function liveBlock(?array $live): array
+    {
+        if ($live === null || !$live['available']) {
+            $summary = self::standingSummary([]);
+
+            return [
+                'available' => false,
+                'count' => 0,
+                'severity' => $summary['severity'],
+                'counts' => $summary['counts'],
+                'findings' => [],
+                'error' => $live['error'] ?? 'no live reading of the audited settings is configured here',
+            ];
+        }
+
+        $summary = self::standingSummary($live['findings']);
+
+        return [
+            'available' => true,
+            'count' => count($live['findings']),
+            'severity' => $summary['severity'],
+            'counts' => $summary['counts'],
+            'findings' => $live['findings'],
+            'error' => null,
+        ];
+    }
+
+    /**
+     * Every recorded finding with what this process can see about it now.
+     *
+     * Three answers, and the third is why the first two are separate fields. `evaluated` is
+     * false for a key the live half deliberately did not look at — the store's reachability
+     * is the one, because a probe is a connect timeout — and only then is `standing` null.
+     * That is the difference between "this setting reads well here" and "nothing here asked
+     * it", and collapsing the two would let a payload call a setting cleared that nobody
+     * checked.
+     *
+     * `scope_matches` compares the scope the finding was recorded in with the scope
+     * evaluating it now. It is null when either side is unknown — a record written before
+     * scope was kept, or a live half that did not run — because "the same" is not a claim a
+     * missing half can support.
+     *
+     * @param list<Standing> $findings
+     * @param LiveReading|null $live
+     * @return list<Reported>
+     */
+    private static function annotate(array $findings, ?array $live): array
+    {
+        $liveKeys = $live === null ? [] : array_column($live['findings'], 'key');
+        $liveScope = $live['scope'] ?? null;
+
+        foreach ($findings as $index => $finding) {
+            $evaluated = $live !== null
+                && $live['available']
+                && in_array($finding['key'], $live['evaluated'], true);
+
+            $findings[$index]['current'] = [
+                'evaluated' => $evaluated,
+                'standing' => $evaluated ? in_array($finding['key'], $liveKeys, true) : null,
+                'scope_matches' => is_array($liveScope) && $liveScope !== [] && $finding['scope'] !== []
+                    ? self::canonical($finding['scope']) === self::canonical($liveScope)
+                    : null,
+            ];
+        }
+
+        return $findings;
+    }
+
+    /**
+     * One live finding as the block carries it: the setting, the level, the sentence and the
+     * context, with no age and no resolution. An age belongs to a record — the live half is
+     * now — and the resolution is the sentence a *later* boot logs, which a reading taken
+     * this instant has no reason to name.
+     *
+     * @return LiveFinding
+     */
+    private static function findingAsLive(BootAuditFinding $finding): array
+    {
+        return [
+            'key' => $finding->key,
+            'level' => $finding->level,
+            'warning' => $finding->warning,
+            'resolution' => $finding->resolution,
+            'context' => $finding->context,
         ];
     }
 
@@ -388,9 +590,10 @@ final class BootAudit
      * The block for a reader that has no record: the application registered no audit, or the
      * one it registered could not be read. Neither is a claim about the installation.
      *
+     * @param LiveReading|null $live the live half, still worth publishing over a record nobody could read
      * @return Block
      */
-    private static function nothingToReport(?string $error): array
+    private static function nothingToReport(?string $error, ?array $live): array
     {
         $summary = self::standingSummary([]);
 
@@ -402,6 +605,12 @@ final class BootAudit
             'oldest' => null,
             'findings' => [],
             'error' => $error,
+            // The live half is still worth publishing over a record nobody could read: an
+            // unreadable record says nothing about whether a setting reads on now, and the
+            // process is standing right here.
+            'checked_at' => $live['checked_at'] ?? null,
+            'scope' => $live['scope'] ?? null,
+            'current' => self::liveBlock($live),
         ];
     }
 
@@ -423,7 +632,11 @@ final class BootAudit
      * one, matching what a record is read as: an entry that cannot be substantiated is
      * never upgraded into a louder claim than the record supports.
      *
-     * @param list<Standing> $standing
+     * The parameter is the one field the rule reads rather than a whole `Standing`: the
+     * recorded half and the live half are different shapes and the summary is about neither,
+     * so both can be summarised without one being dressed up as the other.
+     *
+     * @param list<array{level: string}> $standing
      * @return Summary
      */
     public static function standingSummary(array $standing): array
@@ -541,8 +754,12 @@ final class BootAudit
      *        set was not looked at (a throttled store probe) and is carried over
      *        untouched rather than reported as resolved.
      * @param int|null $probedAt when the store was probed for this report, if it was
+     * @param array<string, mixed> $scope what this boot was running as — the connection the
+     *        package followed, its driver and `app.env` — remembered with every finding it
+     *        writes, so a later reader can tell this boot's findings from its own. Empty when
+     *        the caller knows of no scope, which reads as "not known" rather than as a match
      */
-    public function report(array $record, array $findings, array $checked, ?int $probedAt = null): void
+    public function report(array $record, array $findings, array $checked, ?int $probedAt = null, array $scope = []): void
     {
         $now = self::timestamp();
 
@@ -585,6 +802,7 @@ final class BootAudit
                 'level' => $finding->level,
                 'context' => $finding->context,
                 'first_reported_at' => $record['findings'][$key]['first_reported_at'] ?? $now,
+                'scope' => $scope,
             ];
         }
 
@@ -721,6 +939,13 @@ final class BootAudit
 
             $warning = $entry['warning'] ?? null;
 
+            // A record written before the scope was remembered carries none, and an empty
+            // map is the honest reading: the finding is still a fact about a setting, and
+            // which boot wrote it is simply not known.
+            $rawScope = $entry['scope'] ?? null;
+            /** @var array<string, mixed> $scope */
+            $scope = is_array($rawScope) ? $rawScope : [];
+
             $findings[$key] = [
                 'resolution' => $resolution,
                 'warning' => is_string($warning) ? $warning : '',
@@ -732,6 +957,7 @@ final class BootAudit
                 'first_reported_at' => is_string($firstReportedAt) && $firstReportedAt !== ''
                     ? $firstReportedAt
                     : self::timestamp(),
+                'scope' => $scope,
             ];
         }
 

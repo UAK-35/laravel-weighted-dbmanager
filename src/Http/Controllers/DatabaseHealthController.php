@@ -34,7 +34,11 @@ use Throwable;
  *     switched on but cannot act
  *   • the boot audit's standing findings — the settings that read as on but
  *     cannot act, with the sentence the boot log would have carried, so a
- *     misconfiguration is visible on a dashboard instead of only in a log
+ *     misconfiguration is visible on a dashboard instead of only in a log —
+ *     and, beside them, what this process sees *now*: which of those settings
+ *     still read as on here, which it cannot answer without a probe, and
+ *     whether the boot that recorded the finding was running the same
+ *     connection and environment this request is
  *   • the container's flip window — when it booted, whether the per-minute
  *     `db:pgcat-flip` run reached a usable mode inside it, and the sentence for
  *     a container that did not. A closed window that never converged makes the
@@ -398,7 +402,16 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * `available` can be false, are documented there rather than here. This method is
      * the endpoint's half: it embeds the block and leaves `status` alone.
      *
-     * @return array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, oldest: string|null, findings: list<array<string, mixed>>, error: string|null}
+     * The block carries two readings of the same settings, and both are deliberate. `findings`
+     * is the record — what this installation has been claiming, dated from when it first said
+     * it — and `current` is the live reading taken while building this response, with each
+     * recorded finding annotated by whether it still stands here, whether it could be
+     * evaluated here at all, and whether the scope it was recorded in is the scope this
+     * process resolved. A finding written by a boot on another connection or another
+     * environment is therefore visible as exactly that, instead of reading as a problem the
+     * instance answering the request has.
+     *
+     * @return array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, oldest: string|null, findings: list<array<string, mixed>>, error: string|null, checked_at: string|null, scope: array<string, mixed>|null, current: array<string, mixed>}
      */
     private function audit(): array
     {

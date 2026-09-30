@@ -213,7 +213,9 @@ same record, and a rule added to one is a rule added to both.
 | the boot itself (`report()`) | `read()`, the tolerant reader | it is the only writer: a record it cannot read is one it cannot carry over or close out, and a diagnostic never stops a boot. So it reads "nothing recorded" and then writes over the file — the repair the two surfaces never have to do, because neither of them writes anything |
 
 `standing()` returns, per finding: `key`, `level`, `warning`, `resolution`,
-`first_reported_at`, `age_seconds`, `age` and `context`.
+`first_reported_at`, `age_seconds`, `age`, `context` and the `scope` it was written in.
+`reported()` adds the live half — `checked_at`, `scope`, `current`, and each finding's own
+`current` — so both surfaces render the record and the present from the one call.
 
 It throws `UnreadableRecord` for a file that is there and is not a record, and `read()` is the
 `catch` around it. That split is what makes `available: false` with `error` *set* reachable at
@@ -254,10 +256,32 @@ support.
             "first_reported_at": "2026-09-21T08:15:00+00:00",
             "age_seconds": 345600,
             "age": "4 days",
-            "context": {"rejected_windows": [{"at": "[0]", "entry": "\"10:00-14:20\""}]}
+            "context": {"rejected_windows": [{"at": "[0]", "entry": "\"10:00-14:20\""}]},
+            "scope": {
+                "connection": "sqlite",
+                "driver": "sqlite",
+                "source": "db-manager.swrr.connection",
+                "app_env": "sqlite-live"
+            },
+            "current": {"evaluated": true, "standing": false, "scope_matches": false}
         }
     ],
-    "error": null
+    "error": null,
+    "checked_at": "2026-09-30T09:41:02+00:00",
+    "scope": {
+        "connection": "pgsql_proxy",
+        "driver": "pgsql",
+        "source": "db-manager.swrr.connection",
+        "app_env": "production"
+    },
+    "current": {
+        "available": true,
+        "count": 0,
+        "severity": "none",
+        "counts": {"error": 0, "warning": 0},
+        "findings": [],
+        "error": null
+    }
 }
 ```
 
@@ -271,12 +295,53 @@ it is the same array the command decides its four states from.
 | `severity` | the loudest level standing — `error`, `warning`, or `none` when nothing stands. The one field an alert is written against |
 | `counts` | how many findings stand at each level, both keys always present, so a rule can be `counts.error > 0` rather than a lookup that might be missing |
 | `oldest` | the first sighting of the oldest finding — the same value as `findings[0].first_reported_at`, because the list is ordered |
-| `findings` | `standing()` as-is, including the sentence and the level, so a reader that has the payload and not the log knows *how* the setting fails |
+| `findings` | `standing()` as-is, including the sentence and the level, so a reader that has the payload and not the log knows *how* the setting fails, plus the scope it was recorded in and what this process makes of it |
 | `error` | present either way, `null` whenever a record was read: the exception's message when it could not be |
+| `checked_at` | when the live reading below was taken |
+| `scope` | the connection, its driver, the rule that named it and `app.env` this process resolved — null when nothing evaluated the live half |
+| `current` | the audited settings as they read *now*, in the record's own vocabulary, with `available: false` and an `error` when there is no live reading to make |
 
 Both failure modes are still an HTTP `200` when the database itself is serving. A record
 that cannot be read is not a database that cannot answer, and the block says so rather
 than the routing layer.
+
+### Two readings, and why the second one exists
+
+The block carries the record and the present side by side, and the present half was added
+because of a defect the record alone could not show.
+
+A record is per installation; a boot is per process. One installation has many boots — a
+migration container, a queue worker, the web process — and they do not necessarily resolve the
+same connection or the same environment. A deployment whose entrypoint migrates under another
+environment before the web process starts is the concrete case, and it produced exactly the
+payload this document is written against: a `swrr.primary_store.unreachable` finding whose
+`context` named `sqlite` and a Redis host at `127.0.0.1`, published beside a payload whose live
+connection was `pgsql_proxy` and whose `replicas.store_healthy` was `true`. Every field was
+individually correct and the page read as a contradiction, because one boot's finding was being
+read as the answering instance's.
+
+So two things are recorded now, and they answer different questions. Each finding remembers the
+**scope** it was written in — the resolved connection, its driver, the rule that named it and
+`app.env` — and the block carries a **live reading**: the same producers run again in the process
+answering the request, with the network probe left out, because a failed PING is a connect timeout
+and a health payload is not the place to spend one. Each recorded finding then says whether this
+process evaluated it, whether it still stands here, and whether the scopes agree:
+
+| `findings[].current` | meaning |
+|---|---|
+| `evaluated` | `false` for a key the live half was not asked about — today only `swrr.primary_store.unreachable`, which needs the probe |
+| `standing` | whether the key reads on here; `null` when `evaluated` is `false`, because *nothing asked it* is not *it reads well* |
+| `scope_matches` | whether the recording boot and this one resolved the same scope; `null` when either side is unknown, because a missing half cannot support "the same" |
+
+The record is unchanged by any of this: the finding keeps its sentence, its level, its first
+sighting and its age, and the boot that finds it clean still closes it out. The live half writes
+nothing, logs nothing and probes nothing, and `current.findings` lists the keys that read on now
+even when the record holds none — which is the one thing the record cannot say, because a key no
+boot has written down yet is invisible in it.
+
+The block is still one accessor. `reported()` builds both halves, and the command renders both,
+so a payload and a terminal cannot disagree about the scope any more than they can about the
+record.
 
 ### The vocabulary an alert is written against
 
@@ -372,6 +437,13 @@ restarts anything.
 | rule | test | in |
 |---|---|---|
 | a finding's sentence and level survive the process that logged it | `test_a_report_remembers_the_sentence_and_the_level_it_was_logged_at` | audit |
+| a finding remembers the scope it was written in; a record without one reads as no scope | `test_a_report_remembers_the_scope_the_finding_was_written_in`, `test_a_record_written_before_scopes_were_kept_reads_as_no_scope` | audit |
+| the block carries the live reading beside the record, and a finding from another scope is labelled | `test_the_block_carries_the_live_reading_beside_the_record` | audit |
+| a key the live half did not evaluate is not called cleared | `test_a_key_the_live_half_did_not_evaluate_is_not_called_cleared` | audit |
+| no live evaluator, and an evaluator that throws, both read as "not evaluated" rather than as facts | `test_a_block_with_no_live_evaluator_says_so_rather_than_inventing_one`, `test_a_live_evaluation_that_throws_leaves_the_record_readable` | audit |
+| the payload labels a finding recorded in another scope instead of publishing it as this host's | `test_a_finding_recorded_in_another_scope_is_labelled_rather_than_published_as_this_host_s` | provider |
+| the store's reachability is `not evaluated here`, never `cleared here` | `test_the_store_s_reachability_is_not_evaluated_here_rather_than_reported_clear` | provider |
+| the terminal says the same thing about the same record, `now:` line and all | `test_the_replica_status_command_says_what_this_run_makes_of_a_recorded_finding` | provider |
 | a record written before levels were kept reads as a warning, not as an invented error | `test_a_record_written_before_levels_were_remembered_reads_as_a_warning` | audit |
 | oldest first; an unreadable timestamp is last, not first | `test_standing_findings_are_listed_oldest_first`, `test_a_timestamp_that_cannot_be_read_is_not_given_an_age`, `test_a_future_timestamp_reads_as_new_rather_than_negative` | audit |
 | an age in words, so no reader subtracts timestamps | `test_a_finding_carries_its_age_in_words` | audit |
@@ -433,9 +505,15 @@ restarts anything.
    and an installation that removed it is not claiming anything. An *unreadable* record is the
    other case and is not rounded into it: the block says `available: false` with the reason,
    so a record nobody can open cannot be mistaken for an installation with nothing to say.
-5. **The record is per installation, not per environment.** Two environments sharing an
-   audit file would share the date, the resolved/unresolved state and the age — the same
-   limitation the reader-windows finding carries.
+5. **The record is per installation, not per environment — and the block now says so rather
+   than hiding it.** Two environments sharing an audit file still share the date, the
+   resolved/unresolved state and the age; what changed is that each finding now carries the
+   scope it was written in and each surface marks a finding recorded under a scope it is not
+   running as. The finding is still published, because it is still true about the setting it
+   names and the boot that wrote it is the only evidence of that; it is labelled, not dropped.
+   A reader that wants only its own environment's findings filters on
+   `findings[].current.scope_matches`, and one that wants only what is true right now reads
+   `current`.
 6. **The order is by first *recording*, not by the first time the installation was wrong.**
    A finding that was introduced before this audit existed, or before the record's
    directory became writable, is dated from the first boot that could write it down.
@@ -478,19 +556,23 @@ restarts anything.
 - **If the doctor and the displays disagreed about what "standing" means.** They read the
   same record today, by key and by `standing()` respectively. A finding that could apply in
   one environment and not another — a driver-dependent key is the near case — would have to
-  decide whether the record is about the installation or about a deployment of it.
+  decide whether the record is about the installation or about a deployment of it. That case
+  arrived, and the decision recorded above is the answer: the record stays about the
+  installation, and the block says which deployment each finding came from. A surface that has
+  to *act* on the difference — dropping another scope's findings, or failing a gate over one —
+  is the next step, and it is not taken here because the finding is still evidence.
 
 ## Files
 
 | file | role |
 |---|---|
-| `src/Support/BootAudit.php` | the record, `standing()` — ordering, ages, the fields a surface renders — `reported()`, the block both surfaces publish and the one place either decides whether there is a record, `standingSummary()` with the severity vocabulary, and `fold()`, where a boot's findings become that record |
+| `src/Support/BootAudit.php` | the record, `standing()` — ordering, ages, the fields a surface renders, the scope each finding was written in — `reported()`, the block both surfaces publish and the one place either decides whether there is a record, `live()` and its annotation, which run the producers the provider injects and put the present beside the record, `standingSummary()` with the severity vocabulary, and `fold()`, where a boot's findings become that record |
 | `src/Support/BootAuditFinding.php` | one finding: key, warning, resolution, context, level |
 | `src/Support/UnreadableRecord.php` | the state that made the branch reachable: the record is there and is not a record, and the reason is the message both surfaces publish |
 | `src/Http/Controllers/DatabaseHealthController.php` | the `audit` block — `reported()`, embedded — and the status it deliberately does not move |
-| `src/Console/Commands/DbReplicaStatus.php` | the `Audit:` list in its four states, on both the table and the no-replicas path |
+| `src/Console/Commands/DbReplicaStatus.php` | the `Audit:` list in its four states, on both the table and the no-replicas path, each finding followed by its `now:` reading and the live half printed under the list |
 | `src/Console/Commands/DbDoctor.php` | the gate: `recordedFinding()` reads the record by key, adds the age clause, and fails under `--strict` — and `recordedFindings()`, which the `reader windows` row uses to date each of the problems it names from its own key |
-| `src/Providers/WeightedDatabaseServiceProvider.php` | the finding keys, `reportBootAudit()`, `readerRecordKeys()` |
+| `src/Providers/WeightedDatabaseServiceProvider.php` | the finding keys, `reportBootAudit()`, `readerRecordKeys()`, and `liveFindings()` with `auditScope()` — the live half the `BootAudit` singleton is handed, and the scope every recorded finding is stamped with |
 | `tests/Unit/Support/BootAuditTest.php` | the record and the view over it, including the two readers either side of `decode()`, every unreadable shape, and the boundary a missing file sits on |
 | `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | both surfaces, and that the payload stays `ok` |
 | `tests/Unit/Http/DatabaseHealthControllerTest.php` | the payload's own block: the unreadable record's `error`, and that it does not move `status` |

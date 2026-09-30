@@ -494,12 +494,21 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             $swrr = ConfigValue::assoc($app->make(Repository::class)->get('db-manager.swrr'));
             $audit = ConfigValue::assoc($swrr['audit'] ?? null);
 
+            // The provider is the only place that knows every producer of a finding, so it is
+            // the object the audit asks for the live half — and the audit owns the block, so it
+            // is the object that decides how a surface reads it. The closure is bound here and
+            // not passed as a method reference so this class stays the one place the producers
+            // are listed: `liveFindings()` is a private reading of the same six producers the
+            // boot uses, and neither surface has to know the list.
+            $provider = $this;
+
             return new BootAudit(
                 file: ConfigValue::string(
                     $audit['file'] ?? null,
                     sys_get_temp_dir() . '/swrr-audit.json',
                 ),
                 storeProbeSeconds: ConfigValue::int($audit['store_probe_seconds'] ?? null, 60),
+                currentFindings: static fn (): array => $provider->liveFindings(),
             );
         });
 
@@ -661,7 +670,8 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         }
 
         $record = $audit->read();
-        $swrr = ConfigValue::assoc($this->app->make(Repository::class)->get('db-manager.swrr'));
+        $config = $this->app->make(Repository::class);
+        $swrr = ConfigValue::assoc($config->get('db-manager.swrr'));
         $store = self::storeSelection($swrr);
 
         // The probe is the one check an FPM installation cannot afford per request, so
@@ -696,7 +706,85 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             $findings,
             checked: $checkeds,
             probedAt: $probeStore ? time() : null,
+            // What this boot was running as, remembered with every finding it writes. A
+            // finding is a claim about a setting *in a scope*: the same configuration read by
+            // a different process — a migration container, a worker on its own env — is a
+            // different claim, and a surface that cannot tell them apart reports one boot's
+            // problem as if it were the installation's. The reading of the scope is here
+            // rather than in `liveFindings()` because this is the boot that is being recorded.
+            scope: self::auditScope($config),
         );
+    }
+
+    /**
+     * The audited settings as this process reads them right now — the live half of the audit
+     * block.
+     *
+     * The same six producers the boot runs, in the same order, so a key that would be reported
+     * by a fresh boot is a key this reading reports too. It is deliberately *not* the same call:
+     * `primaryStoreFindings()` is asked with the probe off, because a reachability probe is the
+     * one check here that can cost a connect timeout and a health payload is not the place to
+     * spend one. The store's reachability is therefore absent from the returned findings, and
+     * `swrr.primary_store.unreachable` is absent from `evaluated` with it — so the block says
+     * "not evaluated here" rather than "cleared here", which is the whole reason the two
+     * lists are returned side by side.
+     *
+     * It writes nothing, logs nothing and probes nothing: a surface may call it as often as it
+     * serves a request, and the cost is a handful of configuration reads and stats.
+     *
+     * @return array{scope: array<string, mixed>, evaluated: list<string>, findings: list<BootAuditFinding>}
+     */
+    private function liveFindings(): array
+    {
+        $config = $this->app->make(Repository::class);
+        $swrr = ConfigValue::assoc($config->get('db-manager.swrr'));
+        $flipper = $this->app->make(PgcatConfigFlipper::class);
+        $audit = $this->app->make(BootAudit::class);
+        $store = self::storeSelection($swrr);
+
+        $evaluated = [...self::AUDITED_KEYS, ...array_values(self::PGCAT_FILE_KEYS)];
+
+        return [
+            'scope' => self::auditScope($config),
+            // The store's reachability is the one key a surface cannot have evaluated without
+            // paying for a probe, so it is named here as not evaluated rather than left to be
+            // inferred from a missing finding.
+            'evaluated' => $evaluated,
+            'findings' => [
+                ...$this->switchFindings($swrr, $flipper),
+                ...$this->pgcatFindings($flipper),
+                ...$this->pgcatFileFindings($flipper),
+                ...$this->readerFallbackFindings($swrr),
+                ...$this->replicaMetadataFindings($config),
+                ...$this->primaryStoreFindings($store, $swrr, probeStore: false),
+                ...$this->weightFormulaFindings($swrr),
+                ...$this->storeProbeFindings($audit),
+            ],
+        ];
+    }
+
+    /**
+     * What this process is running as, for the scope a finding is stamped with.
+     *
+     * The connection, its driver and the rule that named it come from `ActiveConnection` — the
+     * same resolution the pgcat gate, the flipper and both surfaces make, so a scope cannot name
+     * a connection the package is not following. `app.env` is here because the interesting case
+     * is precisely a boot under another environment: the production entrypoint migrates under
+     * `--env=sqlite-live` before the web process starts, and a finding written by that run is a
+     * fact about that run rather than about the deployment serving traffic.
+     *
+     * @return array{connection: string, driver: string, source: string, app_env: string}
+     */
+    private static function auditScope(Repository $config): array
+    {
+        $resolved = self::currentConnection($config);
+
+        return [
+            'connection' => $resolved['connection'],
+            'driver' => $resolved['driver'],
+            'source' => $resolved['source'],
+            'app_env' => ConfigValue::string($config->get('app.env'), 'production'),
+        ];
     }
 
     /**

@@ -647,7 +647,142 @@ use Uak35\WeightedDbManager\Tests\TestCase;
             'oldest' => null,
             'findings' => [],
             'error' => null,
+            // No provider is registered, so no live reading is either: the half is present
+            // and says so rather than being absent, so a consumer never has to guard for a
+            // field that might not exist.
+            'checked_at' => null,
+            'scope' => null,
+            'current' => [
+                'available' => false,
+                'count' => 0,
+                'severity' => 'none',
+                'counts' => ['error' => 0, 'warning' => 0],
+                'findings' => [],
+                'error' => 'no live reading of the audited settings is configured here',
+            ],
         ], $payload['audit']);
+    }
+
+    /**
+     * The payload carries two readings of the same settings: what the installation has recorded,
+     * and what this process can see right now.
+     *
+     * The failure this pins is the scope bug. A record can hold a finding written by a boot on
+     * another connection — the production entrypoint migrates under `--env=sqlite-live` before
+     * the web process starts — and publishing that sentence beside a `pgsql_proxy` payload made
+     * it read as a problem on the instance answering the request. It now reads as exactly what it
+     * is: a finding from another scope, which does not apply to this one.
+     */
+    public function test_a_finding_recorded_in_another_scope_is_labelled_rather_than_published_as_this_host_s(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        // Nothing is listening on the fixture replicas and the controller probes them with
+        // getPdo(), so the read lists are dropped — this test is about the audit block, and a
+        // replica error would make the payload `degraded` for an unrelated reason.
+        config()->set('database.connections', [
+            self::CONNECTION => ['driver' => 'pgsql', 'database' => 'app'],
+        ]);
+
+        // Nothing about this installation's windows is refused, so the live half reports nothing.
+        $this->useReaderFallback([['start' => '10:00:00', 'end' => '14:20:00']], [1, 2, 3]);
+
+        file_put_contents($this->auditFile(), (string) json_encode([
+            'findings' => [
+                'swrr.reader_windows.refused' => [
+                    'resolution' => 'swrr.reader_windows is readable again: every entry is a window, so nothing is refused.',
+                    'warning' => 'swrr.reader_windows is "10:00-14:20", not a list of windows. Refused: each window must be an array of start and end.',
+                    'level' => 'error',
+                    'context' => ['unreadable_value' => 'a string'],
+                    'first_reported_at' => '2026-09-21T08:15:00+00:00',
+                    'scope' => [
+                        'connection' => 'sqlite',
+                        'driver' => 'sqlite',
+                        'source' => 'db-manager.swrr.connection',
+                        'app_env' => 'sqlite-live',
+                    ],
+                ],
+            ],
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $response = $this->getJson('/health/db');
+        $response->assertOk()->assertJsonPath('status', 'ok');
+
+        $audit = $response->json('audit');
+
+        // The record is still the record: one finding, with the sentence and its first sighting.
+        $this->assertSame(1, $audit['count']);
+        $this->assertSame('2026-09-21T08:15:00+00:00', $audit['oldest']);
+        $this->assertSame('error', $audit['severity']);
+
+        // The finding is labelled by what this process knows about it: it was evaluated here, it
+        // does not apply here, and it was recorded somewhere else.
+        $this->assertSame(
+            ['evaluated' => true, 'standing' => false, 'scope_matches' => false],
+            $audit['findings'][0]['current'],
+        );
+
+        // The scope this reading was taken in is published too, so the mismatch is legible
+        // without walking the finding — and this run is not the sqlite-live boot that wrote it.
+        $this->assertSame(self::CONNECTION, $audit['scope']['connection']);
+        $this->assertSame('pgsql', $audit['scope']['driver']);
+        $this->assertIsString($audit['scope']['app_env']);
+        $this->assertNotSame('sqlite-live', $audit['scope']['app_env']);
+
+        // The live half is a reading of its own, and it is honestly empty here.
+        $this->assertTrue($audit['current']['available']);
+        $this->assertSame(0, $audit['current']['count']);
+        $this->assertSame('none', $audit['current']['severity']);
+        $this->assertSame([], $audit['current']['findings']);
+    }
+
+    /**
+     * The store's reachability is the one key the live half cannot answer: a PING is a connect
+     * timeout, and a health payload is not the place to spend one. It is therefore reported as
+     * *not evaluated* — never as cleared — which is the distinction that keeps a `Connection
+     * refused` finding written by another boot from reading as this host's problem.
+     */
+    public function test_the_store_s_reachability_is_not_evaluated_here_rather_than_reported_clear(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('database.connections', [
+            self::CONNECTION => ['driver' => 'pgsql', 'database' => 'app'],
+        ]);
+
+        file_put_contents($this->auditFile(), (string) json_encode([
+            'findings' => [
+                'swrr.primary_store.unreachable' => [
+                    'resolution' => 'The configured primary store is not unreachable any more, so the earlier warning no longer applies.',
+                    'warning' => 'The primary store [redis(default)] could not serve a read: Connection refused — reads fall back to an in-process rotation that is not shared between PHP workers.',
+                    'level' => 'warning',
+                    'context' => ['store' => 'redis(default)', 'redis_connection' => 'default'],
+                    'first_reported_at' => '2026-09-27T08:15:00+00:00',
+                    'scope' => [
+                        'connection' => 'sqlite',
+                        'driver' => 'sqlite',
+                        'source' => 'db-manager.swrr.connection',
+                        'app_env' => 'sqlite-live',
+                    ],
+                ],
+            ],
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $audit = $this->getJson('/health/db')->assertOk()->json('audit');
+
+        $this->assertSame(
+            ['evaluated' => false, 'standing' => null, 'scope_matches' => false],
+            $audit['findings'][0]['current'],
+            'a key nothing checked is not a key that reads well',
+        );
+
+        $this->assertNotContains(
+            'swrr.primary_store.unreachable',
+            array_column($audit['current']['findings'], 'key'),
+            'the live half never claims a store it did not probe',
+        );
     }
 
     public function test_the_replica_status_command_prints_the_standing_findings(): void
@@ -666,6 +801,43 @@ use Uak35\WeightedDbManager\Tests\TestCase;
             ->expectsOutputToContain('Audit:      1 finding standing')
             ->expectsOutputToContain('swrr.reader_windows.refused')
             ->expectsOutputToContain('standing less than a minute — first reported')
+            ->assertExitCode(0);
+    }
+
+    /**
+     * The terminal renders both halves too, so the two surfaces cannot describe one record
+     * differently — and the half that is a reading of *this* process is the one that says a
+     * finding is not this host's.
+     */
+    public function test_the_replica_status_command_says_what_this_run_makes_of_a_recorded_finding(): void
+    {
+        // The windows are well formed here, so the live half reports nothing: the finding on
+        // record is the other boot's, and the command has to say so rather than repeat it.
+        $this->useReaderFallback([['start' => '10:00:00', 'end' => '14:20:00']], [1, 2, 3]);
+
+        file_put_contents($this->auditFile(), (string) json_encode([
+            'findings' => [
+                'swrr.reader_windows.refused' => [
+                    'resolution' => 'swrr.reader_windows is readable again: every entry is a window, so nothing is refused.',
+                    'warning' => 'swrr.reader_windows is "10:00-14:20", not a list of windows.',
+                    'level' => 'error',
+                    'context' => [],
+                    'first_reported_at' => '2026-09-21T08:15:00+00:00',
+                    'scope' => [
+                        'connection' => 'sqlite',
+                        'driver' => 'sqlite',
+                        'source' => 'db-manager.swrr.connection',
+                        'app_env' => 'sqlite-live',
+                    ],
+                ],
+            ],
+            'store_probed_at' => null,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        $this->artisan('db:replica-status', ['connection' => self::CONNECTION])
+            ->expectsOutputToContain('Audit:      1 finding standing')
+            ->expectsOutputToContain('settings read as on without acting here')
+            ->expectsOutputToContain('now: does not apply here — recorded under "sqlite"')
             ->assertExitCode(0);
     }
 

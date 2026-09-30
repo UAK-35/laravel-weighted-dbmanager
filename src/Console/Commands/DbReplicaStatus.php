@@ -8,6 +8,7 @@ use Uak35\WeightedDbManager\Console\JsonEnvelope;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ConfigValue;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -269,16 +270,14 @@ class DbReplicaStatus extends Command
             $this->line(
                 'Audit:      <fg=green>nothing standing</> — no setting is recorded as reading on without being able to act'
             );
-
-            return;
+        } else {
+            $this->line(sprintf(
+                'Audit:      <fg=yellow>%d finding%s standing</> — oldest %s',
+                count($findings),
+                count($findings) === 1 ? '' : 's',
+                $findings[0]['age'],
+            ));
         }
-
-        $this->line(sprintf(
-            'Audit:      <fg=yellow>%d finding%s standing</> — oldest %s',
-            count($findings),
-            count($findings) === 1 ? '' : 's',
-            $findings[0]['age'],
-        ));
 
         foreach ($findings as $finding) {
             $this->line(sprintf(
@@ -296,6 +295,124 @@ class DbReplicaStatus extends Command
                 $finding['age'],
                 $finding['first_reported_at'],
             ));
+
+            $this->line('    now: ' . $this->currentLine($finding));
+        }
+
+        // The recorded half is one reading of the installation; this process is another one
+        // standing right here, and the two can disagree in a way the record alone cannot show:
+        // a long-lived worker never re-runs the boot, so a record can hold an empty list while
+        // the settings read on, or hold a finding this connection and environment never had.
+        // Both are worth one line rather than a silent surprise.
+        $this->liveLines($report, $findings);
+    }
+
+    /**
+     * What this run can see about one recorded finding, in a clause after `now:`.
+     *
+     * Three states, and the middle one is the point: a key the live reading was not asked
+     * about — the store's reachability, which costs a probe — is `not evaluated here`, which is
+     * not the same sentence as `does not apply here`. The scope clause is appended whenever the
+     * recording boot and this run resolved different scopes, because that is what turns a
+     * finding on one connection into a finding about this one.
+     *
+     * @param array<string, mixed> $finding one `Standing` entry of the block
+     */
+    private function currentLine(array $finding): string
+    {
+        $current = $finding['current'] ?? null;
+
+        $state = match (true) {
+            ! is_array($current) => 'not evaluated here',
+            ! ($current['evaluated'] ?? false) => 'not evaluated here',
+            ($current['standing'] ?? null) === true => 'still applies here',
+            default => 'does not apply here',
+        };
+
+        $scope = $this->scopeClause($finding);
+
+        return $scope === '' ? $state : $state . ' — ' . $scope;
+    }
+
+    /**
+     * The finding's recorded scope, when it is not the scope this run resolved — empty when
+     * there is nothing to say, so a caller can append it unconditionally.
+     *
+     * `scope_matches` is null when either side is unknown (a record written before scopes were
+     * kept, or a run that did not evaluate the live half), and silence is the honest answer
+     * there: the command cannot claim the scopes differ when it does not know both.
+     *
+     * @param array<string, mixed> $finding
+     */
+    private function scopeClause(array $finding): string
+    {
+        $current = $finding['current'] ?? null;
+
+        if (! is_array($current) || ($current['scope_matches'] ?? null) !== false) {
+            return '';
+        }
+
+        /** @var array<string, mixed> $scope */
+        $scope = is_array($finding['scope'] ?? null) ? $finding['scope'] : [];
+
+        return sprintf(
+            'recorded under "%s" (driver "%s") in %s, which is not the scope this run resolved',
+            ConfigValue::string($scope['connection'] ?? null, 'unknown'),
+            ConfigValue::string($scope['driver'] ?? null, 'unknown'),
+            ConfigValue::string($scope['app_env'] ?? null, 'unknown'),
+        );
+    }
+
+    /**
+     * The live reading as a line, plus any finding it holds that the record does not — the one
+     * thing the record cannot say, because a key no boot has written down yet is invisible in it.
+     *
+     * @param Block                      $report   the block `auditReport()` returned
+     * @param list<array<string, mixed>> $recorded the findings the record holds
+     */
+    private function liveLines(array $report, array $recorded): void
+    {
+        $current = $report['current'];
+
+        if (! $current['available']) {
+            $reason = $current['error'];
+
+            $this->line('  now:      <fg=yellow>not evaluated</>' . ($reason === null || $reason === '' ? '' : ' — ' . $reason));
+
+            return;
+        }
+
+        /** @var array<string, mixed> $scope */
+        $scope = is_array($report['scope']) ? $report['scope'] : [];
+
+        $live = $current['findings'];
+        $named = array_column($recorded, 'key');
+
+        $this->line(sprintf(
+            '  now:      <comment>%d setting%s read%s as on without acting here</comment>, evaluated %s — "%s" (driver "%s") in %s',
+            count($live),
+            count($live) === 1 ? '' : 's',
+            count($live) === 1 ? 's' : '',
+            (string) ($report['checked_at'] ?? 'unknown'),
+            ConfigValue::string($scope['connection'] ?? null, 'unknown'),
+            ConfigValue::string($scope['driver'] ?? null, 'unknown'),
+            ConfigValue::string($scope['app_env'] ?? null, 'unknown'),
+        ));
+
+        foreach ($live as $finding) {
+            if (in_array($finding['key'], $named, true)) {
+                continue;   // on record already: its own `now:` line above carries the reading
+            }
+
+            $this->line(sprintf(
+                '    %s  <comment>%s</comment>  <fg=yellow>(not on record)</>',
+                $finding['level'] === 'error' ? '<fg=red>error</>' : '<fg=yellow>warning</>',
+                $finding['key'],
+            ));
+
+            if ($finding['warning'] !== '') {
+                $this->line('      ' . $finding['warning']);
+            }
         }
     }
 

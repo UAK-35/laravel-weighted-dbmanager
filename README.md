@@ -773,10 +773,32 @@ cannot disagree about whether flipping is active:
                 "first_reported_at": "2026-09-21T08:15:00+00:00",
                 "age_seconds": 345600,
                 "age": "4 days",
-                "context": {"rejected_windows": [{"at": "[0]", "entry": "\"10:00-14:20\""}]}
+                "context": {"rejected_windows": [{"at": "[0]", "entry": "\"10:00-14:20\""}]},
+                "scope": {
+                    "connection": "sqlite",
+                    "driver": "sqlite",
+                    "source": "db-manager.swrr.connection",
+                    "app_env": "sqlite-live"
+                },
+                "current": {"evaluated": true, "standing": false, "scope_matches": false}
             }
         ],
-        "error": null
+        "error": null,
+        "checked_at": "2026-09-30T09:41:02+00:00",
+        "scope": {
+            "connection": "pgsql_proxy",
+            "driver": "pgsql",
+            "source": "db-manager.swrr.connection",
+            "app_env": "production"
+        },
+        "current": {
+            "available": true,
+            "count": 0,
+            "severity": "none",
+            "counts": {"error": 0, "warning": 0},
+            "findings": [],
+            "error": null
+        }
     },
     "errors": {}
 }
@@ -787,6 +809,35 @@ but cannot act, each with the sentence the boot log carried for it, the level it
 logged at, and how long it has stood — `age` in words, with `age_seconds` for a monitor
 that would rather do the arithmetic. `count` and `oldest` save a dashboard from walking
 the list.
+
+### What the installation recorded, and what this process sees
+
+The block is two readings of the same settings, and both are there on purpose. `findings` is the
+record — what this installation has been claiming, dated from the first boot that wrote it down —
+and `current` is a second reading taken while building *this* response, with every recorded
+finding annotated under its own `current`.
+
+| field | meaning |
+|---|---|
+| `scope` | the connection, its driver, the rule that named it and `app.env` that this process resolved while answering — read through the same `ActiveConnection::resolve()` the pgcat gate and the flipper make, so a scope cannot name a connection the package is not following |
+| `checked_at` | when the live reading was taken |
+| `current` | the audited settings as they read *now*, in the record's own vocabulary — `count`, `severity`, `counts` and the sentences — with `available: false` when there is no live reading to make at all |
+| `findings[].scope` | the scope the finding was **recorded** in |
+| `findings[].current.evaluated` | whether this process looked at that key. `false` for the one key it cannot answer without paying for a probe (`swrr.primary_store.unreachable`) |
+| `findings[].current.standing` | whether the key reads on here — `null` when `evaluated` is `false`, because *nothing asked it* is not the same claim as *it reads well* |
+| `findings[].current.scope_matches` | whether the boot that wrote the finding and this process resolved the same scope. `null` when either side is unknown |
+
+The pair exists because a record is per installation while a boot is per process. One installation
+has many boots — a migration container, a queue worker, the web process — and they do not
+necessarily resolve the same connection or the same environment. A deployment that migrates under
+another environment before its web process starts is the concrete case: its findings name a
+connection and a Redis host that are not the deployment's, and publishing that sentence beside a
+`pgsql_proxy` payload made it read as a problem on the instance answering the request. It now reads
+as exactly what it is — `scope_matches: false`, `standing: false`, and the scope it *was* written
+in — without the record itself changing: the finding is still dated, still carries its sentence, and
+is still closed out by the boot that finds it gone. The live reading costs a handful of
+configuration reads and stats and never opens a socket; the one check that needs the network is the
+one it deliberately does not make.
 
 `severity` and `counts` are the machine-readable half, and the reason the block is
 alertable at all: a level per finding can only be used by a reader that walks the list and

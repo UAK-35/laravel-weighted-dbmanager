@@ -247,6 +247,44 @@
 
 ### Fixed
 
+- **The audit block publishes the live reading beside the record, so a finding written by a boot on
+  another connection or environment is labelled instead of read as this host's.** `/health/db`
+  embedded `BootAudit::reported()` and nothing else, and the record is per installation while a
+  boot is per process: a deployment whose entrypoint migrates under another environment before its
+  web process starts writes findings that name *its* connection and *its* Redis host. The payload
+  published them beside a `pinned.connection` of `pgsql_proxy` with `replicas.store_healthy` true —
+  a `swrr.primary_store.unreachable` sentence about SQLite and `127.0.0.1` on an instance that was
+  serving reads from PostgreSQL. Every field was individually correct. The block was answering one
+  boot's question with another boot's answer, and nothing on the page said so.
+
+  Two things are recorded now. Each finding remembers the scope it was written in — the resolved
+  connection, its driver, the rule that named it and `app.env` — and `reported()` carries a *second*
+  reading taken while building the response: the same six producers a boot runs, in the same order,
+  handed to `BootAudit` by the provider as a closure, so the class that owns the block still knows
+  no producer and the provider that owns the settings still knows no rendering. `primaryStoreFindings()`
+  is asked with the probe off, because a reachability check is a connect timeout and a health payload
+  is not the place to spend one: the store key is therefore absent from the live findings and absent
+  from `evaluated`, so `findings[].current.evaluated` is false and `standing` is null — *nothing
+  asked it* is not *it reads well*, and the two are separate fields for exactly that reason.
+  `scope_matches` compares the recording boot's scope with this one's, and is null when either side
+  is unknown: a record written before scopes were kept, or a live reading that could not run.
+
+  The record is untouched by all of it. The finding keeps its sentence, its level, its first sighting
+  and its age, and the boot that finds it clean still closes it out; the live half writes nothing,
+  logs nothing and probes nothing, and costs a handful of configuration reads and stats per request.
+  `db:replica-status` renders both halves too, each finding followed by its `now:` line and the live
+  reading printed under the list — including the one thing the record cannot say, a key that reads on
+  now and that no boot has written down yet. No `status`, no HTTP code and no exit code moved.
+
+  Pinned by six cases in `BootAuditTest` (the scope a report remembers, a record that carries none,
+  the live reading beside the record, a key that was not evaluated, no evaluator at all, and an
+  evaluator that throws) and three in the provider suite (a finding from another scope labelled in
+  the payload, the store's reachability reported as not evaluated, and the terminal saying the same
+  thing about the same record).
+  [docs/boot-audit-surfaces.md](docs/boot-audit-surfaces.md) gains the two-readings section, and its
+  limitation 5 now says the block labels what it used to hide; the README's audit section documents
+  the new fields.
+
 - **The package's own inventory record is whole at `v0.2.0-alpha1`: the third file it was missing
   is written from that tag's own tree, so the fourth signal weighs here instead of being skipped.**
   `files.tsv` and `methods.tsv` at the package root were stamped `v0.2.0-alpha1` and `surface.tsv`
