@@ -247,6 +247,29 @@
 
 ### Fixed
 
+- **`db:doctor --config-file` judges a candidate read list, so a weight the next boot would refuse
+  cannot pass the vet.** The vet read one `config/db-manager.php` and reported the switches and
+  reader windows it would be refused for; the read list whose replicas are weighted lives in
+  `config/database.php`, so the file a deploy actually changes was the one the mode could not look
+  at. `--config-file` now accepts either shape: a `swrr` block is judged for its switches and reader
+  windows, a `connections` block for the read list of the connection named on the command line
+  (`pgsql` by default), and a file holding both for both.
+
+  The new row is the installation row's rule rather than a second one. It asks
+  `Support\ReplicaMetadata::refusals()` — the pure classifier the boot audit refuses on and the
+  `replica metadata` row already reads — about the connection's `read` list, so a weight, core count
+  or memory figure the next boot would refuse fails the vet here, with the same sentence and the
+  same named replica. A `weight: 0` drain is named on the pass, as it is there, because the package
+  means it. What the candidate row does *not* report is the pool's arithmetic — no size, no total
+  weight, no exclusion — because a file has no pool until it is booted; the vet's "refusals, not
+  warnings" line is drawn at the resolver, and this row is on the refusals side of it. A
+  `connections` block that does not define the connection the run named fails the `config file` row,
+  naming the connections the file does define rather than passing a read list it never found.
+
+  Pinned by four cases in `DbDoctorTest` — the refusal of a candidate read list, the pass that names
+  a drain, the wrong connection, and the JSON envelope for the new shape — and documented in
+  `docs/replica-metadata-refusal.md` and the README's vetting section.
+
 - **The weighing refuses a release on a half-written inventory instead of silently weighing three
   signals.** The fourth signal is the only one that carries the *file* a declaration came from, so
   it is the only thing that can witness a removal a second file's declaration hides — and the only

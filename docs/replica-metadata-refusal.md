@@ -285,10 +285,37 @@ if the value is fixed, the replica is dropped from the read list, or the whole l
 "no replica's weight is refused any more: every value written under it is a number" is true of all
 three.
 
+### The vet half: the same reading, before the file is installed
+
+The row above needs the pool, so it needs a boot, and the boot is long after the configuration was
+written. The file that will be booted next is a different subject, and `db:doctor --config-file=path`
+judges it: pointed at a `config/database.php`, it reads the read list of the connection named on the
+command line — `pgsql` by default — and asks `ReplicaMetadata` the same question the row and the audit
+ask: which values the resolver will not read as written. A weight the next boot would refuse therefore
+cannot pass the vet.
+
+It is the same class and the same sentences, and that is the whole reason the row can be there at all:
+`refusals()` is a pure function over one replica array, so a candidate needs no resolver. The row
+therefore reports the refusals and, on a pass, names the replicas written as `weight: 0` — the one value
+`disables()` calls a decision — and nothing else. It reports no pool size, no total weight and no
+exclusion, because those are the resolver's arithmetic and a file has no pool until it is booted.
+Nothing is dated, for the same reason nothing in the vet is: a boot record holds findings about this
+installation, and the candidate has never been booted.
+
+A `config/db-manager.php` holds no read list, so the vet accepts either file shape: a `swrr` block is
+judged for its switches and reader windows, a `connections` block for the named connection's read list,
+and a file holding both for both. A `connections` block that does not define the connection the run
+named fails the `config file` row naming the connections it does define, rather than passing a read
+list it never found.
+
 ## Tests that pin the rules
 
 | Rule | Test |
 |---|---|
+| a candidate `config/database.php` is refused on the values its read list holds, through the same classifier, before any boot | `DbDoctorTest::test_the_config_file_flag_refuses_the_replica_metadata_a_candidate_read_list_holds` |
+| a candidate read list that reads as written passes, and a `weight: 0` drain is named on the pass | `DbDoctorTest::test_the_config_file_flag_passes_a_candidate_read_list_it_reads_as_written` |
+| a `connections` block without the connection the run named fails, naming the connections it defines | `DbDoctorTest::test_the_config_file_flag_names_a_connection_the_candidate_read_list_does_not_hold` |
+| the vet keeps the envelope for a read list, naming `config_file` and the two rows the file earns | `DbDoctorTest::test_the_config_file_flag_reports_a_candidate_read_list_through_the_json_envelope` |
 | an unreadable weight fails, names the replica, and says the pool is smaller | `DbDoctorTest::test_the_metadata_row_fails_and_names_a_replica_whose_weight_cannot_be_read` |
 | an unreadable memory fails and says the replica **stays** in the pool | `test_the_metadata_row_fails_and_names_a_replica_whose_memory_cannot_be_read` |
 | an unreadable core count is read as one core, and says so | `test_the_metadata_row_fails_and_names_a_replica_whose_cores_cannot_be_read` |
@@ -415,12 +442,12 @@ the other without a test naming the value differently.
 | File | Role |
 |---|---|
 | `src/Support/ReplicaMetadata.php` | `refusals()`, `disables()`, `key()`, `describe()`, `isReadable()`, `atOrAboveFloor()`, and the three `*_FLOOR` constants the resolver clamps at — the one reading, its sentence, its floors, and the replica's identity |
-| `src/Console/Commands/DbDoctor.php` | `replicaMetadata()` — the row: the class above for which values are refused, `poolExclusions()` for what the pool does not hold |
+| `src/Console/Commands/DbDoctor.php` | `replicaMetadata()` — the row: the class above for which values are refused, `poolExclusions()` for what the pool does not hold; `replicaMetadataIn()` — the same classifier over a candidate read list, and the `--config-file` vet that reads it |
 | `src/Providers/WeightedDatabaseServiceProvider.php` | `replicaMetadataFindings()` — the `error`-level refusal at boot, the three keys and their consequences |
 | `src/Database/Weighted/WeightedDatabaseManager.php` | `replicaKey()` made public, so a replica the pool has dropped can be named; it delegates to the class above |
 | `src/Database/Weighted/WeightResolver.php` | `resolveWeight()`, which clamps at this class's floors rather than at numbers of its own, and `buildPool()` — the arithmetic and the drop the row and the finding are judging; `resolveWithExclusions()` and `exclusion()` are the report they now read |
 | `tests/Unit/Support/ReplicaMetadataTest.php` | the reading itself: readable values, the documented disable, each refusal's sentence, the refusal/disable exclusivity, and how a replica is keyed |
-| `tests/Unit/Console/DbDoctorTest.php` | the row's eight cases above |
+| `tests/Unit/Console/DbDoctorTest.php` | the row's eight cases above, and the four the vet's candidate read list adds |
 | `tests/Unit/Weighted/WeightResolverTest.php` | the exclusions: each of the three reasons, the partition, and the cache |
 | `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | the boot refusal (key, level, sentence, repair, vacuity guard) and the manager's two halves of a read list |
 | `docs/pool-exclusions.md` | the decision behind the exclusion report, and why the row stopped predicting |

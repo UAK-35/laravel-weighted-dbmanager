@@ -153,9 +153,13 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *
  * CONFIG FILE MODE
  * ----------------
- * `--config-file=path` judges one `config/db-manager.php` instead of the installation: the
- * switches and reader settings in it that the package would *refuse*, reported with the same
- * sentences, suggestions and exit rule, and read out of the file alone.
+ * `--config-file=path` judges one config file instead of the installation: the values in it that
+ * the package would *refuse*, reported with the same sentences, suggestions and exit rule, and
+ * read out of the file alone. The switches and reader settings live in `config/db-manager.php`
+ * and the replicas' metadata in `config/database.php`, so the file may be either shape — one
+ * returning a `swrr` block is judged for its switches and reader windows, one returning a
+ * `connections` block for the read list of the connection named on the command line, and a file
+ * holding both is judged for both.
  *
  * It exists for the one moment the eleven rows above cannot serve. A pipeline vetting a config
  * on a branch has the *old* configuration installed — the provider swap, the gate, the files,
@@ -168,15 +172,21 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * What it reports is the refusals — a value the package will not read — and not the "reads as on
  * but can never act" warnings the installation rows also carry. Those need the resolver built
  * over the value, which is a fact about a running installation's routing; `db:doctor --strict`
- * on a real deployment is where they fail a pipeline. The line is drawn there rather than at
- * "anything a file can be asked" so this mode stays honest about what it has not looked at.
+ * on a real deployment is where they fail a pipeline. `replica metadata` is the row that would
+ * look like the exception and is not: `Support\ReplicaMetadata` classifies a replica array on its
+ * own — it is the classifier the installation row and the boot audit share — so a candidate read
+ * list can be refused here without a resolver, which is exactly what this mode is for. The line
+ * is drawn at the resolver rather than at "anything a file can be asked" so this mode stays
+ * honest about what it has not looked at.
  *
- * Three rows: `config file` (readable, an array, a `swrr` block, nothing printed while it was
- * read), `switch values`, and `reader windows`. The last two are the same rule the installation
- * rows apply — `Support\SwitchValue`, `Support\ReaderWindows`/`ReaderDays`, and the flipper's
- * `switchReadingsIn()` classifying a block that has never been installed — so a value this mode
- * passes is a value the next boot will not refuse. Nothing is dated: a boot record holds
- * findings about this installation, and the candidate has never been booted.
+ * The rows are `config file` (readable, an array, a `swrr` and/or a `connections` block, nothing
+ * printed while it was read) and, for each block the file holds, the rows that judge it:
+ * `replica metadata`, `switch values` and `reader windows`. Each of the last three is the same
+ * rule the installation rows apply — `Support\ReplicaMetadata`, `Support\SwitchValue`,
+ * `Support\ReaderWindows`/`ReaderDays`, and the flipper's `switchReadingsIn()` classifying a
+ * block that has never been installed — so a value this mode passes is a value the next boot will
+ * not refuse. Nothing is dated: a boot record holds findings about this installation, and the
+ * candidate has never been booted.
  *
  * The exit rule, `--strict` and `--json` are the ones above, unchanged. The object's first keys
  * name the subject — `config_file` where an installation run names `connection` and
@@ -225,7 +235,7 @@ class DbDoctor extends Command
                             {connection=pgsql : Connection whose weighted replicas are inspected}
                             {--strict : Treat warnings as failures, for a deploy gate}
                             {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
-                            {--config-file= : Judge a config file instead of this installation: read the file, report the switch and reader-window refusals it holds, and read nothing from the running package — so a pipeline can vet a config before it is deployed}';
+                            {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}';
 
     protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — or vet one config file without the installation, with --config-file';
 
@@ -240,7 +250,7 @@ class DbDoctor extends Command
         $candidate = $this->option('config-file');
 
         if (is_string($candidate) && $candidate !== '') {
-            return $this->vetConfigFile($candidate);
+            return $this->vetConfigFile($candidate, $connection);
         }
 
         [$manager, $resolutionError] = $this->weightedManager();
@@ -316,8 +326,11 @@ class DbDoctor extends Command
     }
 
     /**
-     * A config file judged on its own: the switches and the reader settings it would be refused
-     * for, read out of the file and nothing else.
+     * A config file judged on its own: the values in it that the package would refuse, read out of
+     * the file and nothing else. The switches and reader windows come from a `swrr` block, the
+     * replicas' metadata from a `connections` block, so the caller names the connection whose read
+     * list to judge — the one the vet was asked about, which in an installation run is the argument
+     * the command was given.
      *
      * This is the whole of `--config-file`, and it is deliberately not a second doctor. The rows
      * above — the provider swap, the factory, the gate, the files, the supervisor step, the store
@@ -327,35 +340,41 @@ class DbDoctor extends Command
      * a branch has the old configuration installed, so a report that mixed the two would judge
      * the candidate with the incumbent's values and call it a review.
      *
-     * Three rows, and the last two are the two the package refuses values *in*, both read from
-     * the block alone:
+     * `config file` is the file itself — readable, an array, a `swrr` and/or a `connections` block,
+     * and nothing printed while it was read — and each row below it judges one block the file holds:
      *
-     *   - `config file` — the file itself: readable, an array, a `swrr` block, and nothing printed
-     *     while it was read;
+     *   - `replica metadata` — the `read` list of the named connection;
      *   - `switch values` — `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` and
      *     `swrr.allow_local_fallback`;
      *   - `reader windows` — `swrr.reader_windows` and `swrr.reader_days`.
      *
-     * Both of the last two are the *same rule* the installation rows apply, not a copy of it:
-     * `Support\SwitchValue` and `Support\ReaderWindows`/`ReaderDays` own the reading, the sentences
-     * come from `switchProblems()` and `readerRefusals()`, and the flipper's own
-     * `switchReadingsIn()` classifies its two switches from a block rather than from `$this->config`
-     * — so a value this mode passes is a value the next boot will not refuse. No container binding, no
-     * repository, no boot audit, no database and no Redis are touched: the file is the subject and
-     * the only thing read.
+     * All three are the *same rule* the installation rows apply, not a copy of it:
+     * `Support\ReplicaMetadata`, `Support\SwitchValue` and `Support\ReaderWindows`/`ReaderDays` own
+     * the reading, the sentences come from `ReplicaMetadata::refusals()`, `switchProblems()` and
+     * `readerRefusals()`, and the flipper's own `switchReadingsIn()` classifies its two switches
+     * from a block rather than from `$this->config` — so a value this mode passes is a value the
+     * next boot will not refuse. No container binding, no repository, no boot audit, no database and
+     * no Redis are touched: the file is the subject and the only thing read.
      *
      * What it reports is the *refusals* — the values the package will not read — and not the
      * "reads as on but can never act" warnings the installation rows also carry. Those need the
      * resolver built over the value (a window whose start is not before its end, a day list with no
-     * day in 1…7): they are facts about a running installation's routing, and `db:doctor --strict`
-     * on a real deployment is where they fail a pipeline. The line is drawn there rather than at
-     * "everything a file can be asked" so that this mode stays honest about what it has not looked
-     * at.
+     * day in 1…7, or the pool arithmetic a read list's weights add up to): they are facts about a
+     * running installation's routing, and `db:doctor --strict` on a real deployment is where they
+     * fail a pipeline. `replica metadata` is no exception: `ReplicaMetadata::refusals()` is a pure
+     * classifier over one replica array, so a candidate read list can be refused without the
+     * resolver — which is the whole reason this row is here and the pool arithmetic is not. The
+     * line is drawn at the resolver rather than at "everything a file can be asked" so that this
+     * mode stays honest about what it has not looked at.
      */
-    private function vetConfigFile(string $path): int
+    private function vetConfigFile(string $path, string $connection): int
     {
-        $file = $this->readConfigFile($path);
+        $file = $this->readConfigFile($path, $connection);
         $rows = [$file['row']];
+
+        if ($file['replicas'] !== null) {
+            $rows[] = $this->replicaMetadataIn($connection, $file['replicas']);
+        }
 
         if ($file['swrr'] !== null) {
             $rows[] = $this->switchValuesIn($file['swrr']);
@@ -370,8 +389,12 @@ class DbDoctor extends Command
     }
 
     /**
-     * The file a vet run was pointed at: the row that reports it, and the `swrr` block to judge —
-     * null when there is nothing to judge, which is every way the file itself can be wrong.
+     * The file a vet run was pointed at: the row that reports it, and the two blocks to judge —
+     * each null when the file does not hold it, which is every way the file itself can be wrong.
+     * The read list is the named connection's, because `config/db-manager.php` holds no replicas:
+     * a candidate `config/database.php` carries them under `connections`, next to the `read` list
+     * whose metadata is being weighed, and the connection whose list to judge is the one the run
+     * was told to inspect.
      *
      * The file is `require`d in an isolated closure and its output is captured, so a config file
      * that echoes or prints cannot corrupt the report it is being judged in: what it printed is
@@ -379,9 +402,10 @@ class DbDoctor extends Command
      * file too. A file that throws is a result rather than a stack trace, the same way every other
      * check in this command treats a failure as a row.
      *
-     * Every wrong shape names the mistake rather than only the symptom, including the one a
-     * reader of these docs is most likely to make: pointing at the `swrr` block itself instead of
-     * the file that returns it.
+     * Every wrong shape names the mistake rather than only the symptom, including the two a reader
+     * of these docs is most likely to make: pointing at the `swrr` block itself instead of the file
+     * that returns it, and pointing at a `connections` file that does not hold the connection the
+     * run named.
      *
      * What the file printed is a problem *beside* the shape rather than instead of it, whichever
      * state the file is in — a file whose shape is wrong can print as well, and the two are
@@ -390,12 +414,18 @@ class DbDoctor extends Command
      * a list of problems rather than out of one sentence chosen from several, and it is the same
      * assembly the installation rows use (`configFileRow()`).
      *
+     * Both blocks are returned rather than one shape being required, so a file holding only the one
+     * the run did not come for is still named for what it does hold: a vet that failed a
+     * `config/database.php` for lacking a `swrr` block would be refusing a file that is exactly what
+     * it was asked to read.
+     *
      * @return array{
      *     row: array{status: string, name: string, detail: string, suggestions: list<string>},
      *     swrr: array<string, mixed>|null,
+     *     replicas: list<array<string, mixed>>|null,
      * }
      */
-    private function readConfigFile(string $path): array
+    private function readConfigFile(string $path, string $connection): array
     {
         if (!is_file($path)) {
             return [
@@ -406,6 +436,7 @@ class DbDoctor extends Command
                     )),
                 ]),
                 'swrr' => null,
+                'replicas' => null,
             ];
         }
 
@@ -438,6 +469,7 @@ class DbDoctor extends Command
                     ...self::printedProblems($printed),
                 ]),
                 'swrr' => null,
+                'replicas' => null,
             ];
         }
 
@@ -452,53 +484,134 @@ class DbDoctor extends Command
                     ...self::printedProblems($printed),
                 ]),
                 'swrr' => null,
+                'replicas' => null,
             ];
         }
 
-        if (!array_key_exists('swrr', $loaded)) {
+        $hasSwrr = array_key_exists('swrr', $loaded);
+        $hasConnections = array_key_exists('connections', $loaded);
+
+        $problems = [];
+        $swrr = null;
+        $replicas = null;
+
+        // A file that holds neither block is not a config this mode can judge, and the two ways it
+        // can look like one are named apart: the `swrr` block itself passed instead of the file that
+        // returns it, and a connection definition passed instead of the `config/database.php` that
+        // returns it under `connections`.
+        if (!$hasSwrr && !$hasConnections) {
             $blockKeys = array_values(array_intersect(['pgcat', 'reader_windows', 'reader_days', 'allow_local_fallback'], array_keys($loaded)));
+            $connectionKeys = array_values(array_intersect(['host', 'driver', 'read', 'database', 'username'], array_keys($loaded)));
 
-            return [
-                'row' => $this->configFileRow([
-                    self::problem(self::FAIL, $blockKeys === []
-                        ? sprintf('%s returns an array without a "swrr" key, so there is nothing to judge', $path)
-                        : sprintf(
-                            '%s holds %s at the top level, not under a "swrr" key — name the config file that returns it (the array is read under "swrr"), not the block inside it',
-                            $path,
-                            implode(', ', $blockKeys),
-                        )),
-                    ...self::printedProblems($printed),
-                ]),
-                'swrr' => null,
-            ];
+            $problems[] = self::problem(self::FAIL, self::noBlockSentence($path, $blockKeys, $connectionKeys));
         }
 
-        $swrr = $loaded['swrr'];
+        if ($hasSwrr) {
+            $swrr = is_array($loaded['swrr']) ? ConfigValue::assoc($loaded['swrr']) : null;
 
-        if (!is_array($swrr)) {
-            return [
-                'row' => $this->configFileRow([
-                    self::problem(self::FAIL, sprintf(
-                        '%s holds "swrr" as %s, not a block of settings',
+            if ($swrr === null) {
+                $problems[] = self::problem(self::FAIL, sprintf(
+                    '%s holds "swrr" as %s, not a block of settings',
+                    $path,
+                    get_debug_type($loaded['swrr']),
+                ));
+            }
+        }
+
+        if ($hasConnections) {
+            $connections = $loaded['connections'];
+
+            if (!is_array($connections)) {
+                $problems[] = self::problem(self::FAIL, sprintf(
+                    '%s holds "connections" as %s, not a block of connections',
+                    $path,
+                    get_debug_type($connections),
+                ));
+            } elseif (!array_key_exists($connection, $connections)) {
+                $defined = array_map(static fn (mixed $key): string => (string) $key, array_keys($connections));
+
+                $problems[] = self::problem(self::FAIL, $defined === []
+                    ? sprintf('%s holds an empty "connections" block, so there is no read list for [%s] to judge', $path, $connection)
+                    : sprintf(
+                        '%s holds a "connections" block without [%s] — it defines: %s. Name the connection whose read list to judge, or a file that holds it',
                         $path,
-                        get_debug_type($swrr),
-                    )),
-                    ...self::printedProblems($printed),
-                ]),
-                'swrr' => null,
+                        $connection,
+                        implode(', ', $defined),
+                    ));
+            } else {
+                $replicas = ConfigValue::assocList(
+                    ConfigValue::assoc($connections[$connection])['read'] ?? [],
+                );
+            }
+        }
+
+        if ($problems !== []) {
+            return [
+                'row' => $this->configFileRow([...$problems, ...self::printedProblems($printed)]),
+                'swrr' => $swrr,
+                'replicas' => $replicas,
             ];
         }
 
         return [
             'row' => $this->configFileRow([
-                self::problem(self::PASS, sprintf(
-                    '%s read as an array holding a "swrr" block — its switches and reader settings are judged below',
-                    $path,
-                )),
+                self::problem(self::PASS, self::configFileSentence($path, $connection, $swrr !== null, $replicas !== null)),
                 ...self::printedProblems($printed),
             ]),
-            'swrr' => ConfigValue::assoc($swrr),
+            'swrr' => $swrr,
+            'replicas' => $replicas,
         ];
+    }
+
+    /**
+     * A file holding neither block, in the words that send the reader to the file that returns it.
+     *
+     * Both mistakes are named rather than the more likely one alone, because the two files this mode
+     * reads have two different blocks and a pipeline usually vets both: a reader who pointed at the
+     * wrong one should not have to guess which of the two shapes was expected.
+     *
+     * @param list<string> $blockKeys top-level keys that belong under `swrr`
+     * @param list<string> $connectionKeys top-level keys that belong under `connections.<name>`
+     */
+    private static function noBlockSentence(string $path, array $blockKeys, array $connectionKeys): string
+    {
+        if ($blockKeys !== []) {
+            return sprintf(
+                '%s holds %s at the top level, not under a "swrr" key — name the config file that returns it (the array is read under "swrr"), not the block inside it',
+                $path,
+                implode(', ', $blockKeys),
+            );
+        }
+
+        if ($connectionKeys !== []) {
+            return sprintf(
+                '%s holds %s at the top level, not under a "connections" key — name the config/database.php that returns it (connections are read under "connections"), not one connection inside it',
+                $path,
+                implode(', ', $connectionKeys),
+            );
+        }
+
+        return sprintf(
+            '%s returns an array without a "swrr" or a "connections" block, so there is nothing to judge',
+            $path,
+        );
+    }
+
+    /**
+     * What the vet read, in one sentence: which block(s) the file returned, and which rows judge
+     * them. The spelling follows the file rather than the mode, so a run pointed at a
+     * `config/database.php` says the read list was judged and a run pointed at a
+     * `config/db-manager.php` says the switches were, and a file holding both says both.
+     */
+    private static function configFileSentence(string $path, string $connection, bool $swrr, bool $replicas): string
+    {
+        if ($replicas) {
+            return $swrr
+                ? sprintf('%s read as an array holding a "swrr" block and a "connections" block — its switches and reader settings, and the read list of connection [%s], are judged below', $path, $connection)
+                : sprintf('%s read as an array holding a "connections" block — the read list of connection [%s] is judged below', $path, $connection);
+        }
+
+        return sprintf('%s read as an array holding a "swrr" block — its switches and reader settings are judged below', $path);
     }
 
     /**
@@ -666,6 +779,90 @@ class DbDoctor extends Command
             );
 
         return $this->row('reader windows', self::PASS, $detail);
+    }
+
+    /**
+     * `replica metadata` for a config file: the values in the candidate read list the next boot
+     * would refuse, from the classifier the installation row and the boot audit already share.
+     *
+     * There is no pool here and this row does not pretend otherwise. The installation row reads the
+     * pool the resolver built — `poolExclusions()` for what left it and why, `replicaStatus()` for
+     * what stayed — and none of that exists for a file nobody has booted. What does exist is
+     * `ReplicaMetadata::refusals()`, a pure function over one replica array: the same reading the
+     * boot refuses a value with, so a candidate this row passes is a candidate the next boot will
+     * not refuse. The row therefore reports the refusals and, on a pass, names the replicas written
+     * as `weight: 0` — the one value the classifier calls a decision rather than a fault — exactly
+     * as the installation row names them in its count. It reports no totals and no pool size,
+     * because those are the resolver's arithmetic and not a fact about the file.
+     *
+     * @param list<array<string, mixed>> $replicas
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function replicaMetadataIn(string $connection, array $replicas): array
+    {
+        if ($replicas === []) {
+            return $this->row(
+                'replica metadata',
+                self::PASS,
+                sprintf('no read list on [%s] — the connection reads from its writer, so there is no replica metadata to refuse', $connection),
+            );
+        }
+
+        $problems = [];
+        $disabled = [];
+
+        foreach ($replicas as $replica) {
+            $named = ReplicaMetadata::key($replica);
+
+            if (ReplicaMetadata::disables($replica)) {
+                $disabled[] = $named;
+            }
+
+            foreach (ReplicaMetadata::refusals($replica) as $refusal) {
+                $problems[] = '['.$named.'] '.$refusal['sentence'];
+            }
+        }
+
+        // The classifier's own words for a drain, shared with the installation row, so a replica
+        // named here and a replica named there carry the same sentence.
+        $drained = $disabled === [] ? '' : implode(', ', $disabled).' — '.ReplicaMetadata::DISABLED;
+
+        if ($problems !== []) {
+            return $this->row(
+                'replica metadata',
+                self::FAIL,
+                sprintf(
+                    'replica metadata the resolver cannot read on [%s]: %s — the value the next boot reads is not the one written here.%s',
+                    $connection,
+                    implode('; ', $problems),
+                    $drained === '' ? '' : ' Also drained on purpose: '.$drained.'.',
+                ),
+            );
+        }
+
+        if ($disabled !== []) {
+            return $this->row(
+                'replica metadata',
+                self::PASS,
+                sprintf(
+                    'the read list on [%s] holds %d replicas and %d of them are drained: %s — the rest are read as written, so nothing is refused',
+                    $connection,
+                    count($replicas),
+                    count($disabled),
+                    $drained,
+                ),
+            );
+        }
+
+        return $this->row(
+            'replica metadata',
+            self::PASS,
+            sprintf(
+                '%d replicas on [%s], and every value the file writes is the value the resolver reads — nothing is refused',
+                count($replicas),
+                $connection,
+            ),
+        );
     }
 
     /**

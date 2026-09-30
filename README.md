@@ -1745,12 +1745,17 @@ the gate can act, whether the files exist, what the replicas weigh, whether the 
 run against a candidate on a host running the incumbent would answer all of them about the incumbent
 and print the candidate's name above them.
 
-`--config-file=path` asks the other question. It reads one `config/db-manager.php`, reports the values
-the package would *refuse* in it — the switches, and the reader windows and days — and exits `1` if
-there are any, so a pipeline can fail the build before anything is deployed with that file:
+`--config-file=path` asks the other question. It reads one config file and reports the values the
+package would *refuse* in it, exiting `1` if there are any, so a pipeline can fail the build before
+anything is deployed with that file. The two files a deployment can change are read for what each
+holds: a `config/db-manager.php` for its switches and reader windows (as below), and a
+`config/database.php` for the replica metadata in the read list of the connection named on the
+command line — the `connection` argument, `pgsql` by default. A file holding both blocks is judged
+for both.
 
 ```bash
 php artisan db:doctor --config-file=config/db-manager.php
+php artisan db:doctor --config-file=config/database.php
 php artisan db:doctor --config-file=config/db-manager.php --json | jq -e '.exit_code == 0'
 ```
 
@@ -1778,15 +1783,20 @@ boot record holds findings about the installation, and the candidate has never b
 What it reports is the **refusals** — the values the package will not read. The rest of what `reader
 windows` says on a running installation, "this reads as a window but can never be entered", needs the
 resolver built over the value, and the switch warnings need the boot: `db:doctor --strict` on a real
-deployment is where those fail a pipeline. The line is drawn there rather than at "anything a file can
-be asked" so the mode stays honest about what it has not looked at.
+deployment is where those fail a pipeline. `replica metadata` is no exception to that line, and it is
+the reason the line is drawn at the resolver rather than at "anything a file can be asked":
+`Support\ReplicaMetadata` classifies one replica array on its own — it is the classifier the boot
+audit refuses on — so a candidate read list can be refused here without a resolver. A weight the next
+boot would refuse therefore cannot pass this vet.
 
-The three rows are `config file` (readable, an array, a `swrr` block, and nothing printed while it was
-read — a config file that echoes is a warning, because `config:cache` would bake those bytes into the
-cached file), `switch values` and `reader windows`. `--strict` and `--json` work as they do everywhere,
-and `config_file` replaces the connection pair in the object. A file that is not there, is not an
-array, or holds the `swrr` block itself instead of returning it fails the run with the mistake named —
-a vet that reported no refusal for a file it never read would be worse than no vet at all.
+The rows are `config file` (readable, an array, a `swrr` and/or a `connections` block, and nothing
+printed while it was read — a config file that echoes is a warning, because `config:cache` would bake
+those bytes into the cached file) and, for each block the file holds: `replica metadata` for the named
+connection's read list, `switch values` and `reader windows`. `--strict` and `--json` work as they do
+everywhere, and `config_file` replaces the connection pair in the object. A file that is not there, is
+not an array, holds the `swrr` block itself instead of returning it, or holds a `connections` block
+without the connection the run named, fails with the mistake named — a vet that reported no refusal
+for a file it never read would be worse than no vet at all.
 
 ### Flipping: `db:pgcat-flip`
 

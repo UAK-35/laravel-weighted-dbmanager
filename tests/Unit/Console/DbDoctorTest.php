@@ -3232,6 +3232,114 @@ class DbDoctorTest extends TestCase
     }
 
     /**
+     * The replica half of the vet, and the reason it reads a second file shape: the read list lives
+     * in `config/database.php`, so a candidate that replaces it is judged on the metadata it holds —
+     * through `Support\ReplicaMetadata`, the classifier the boot audit refuses on — rather than on
+     * the incumbent's pool. A weight the next boot would refuse therefore cannot pass this vet.
+     */
+    public function test_the_config_file_flag_refuses_the_replica_metadata_a_candidate_read_list_holds(): void
+    {
+        $path = $this->databaseConfigFile([
+            self::CONNECTION => [
+                'driver' => 'pgsql',
+                'read' => [
+                    ['host' => '10.1.0.2', 'port' => 5432, 'weight' => 'heavy'],
+                    ['host' => '10.1.0.3', 'port' => 5432, 'weight' => 5, 'cpu_cores' => 0],
+                ],
+            ],
+        ]);
+
+        [$output, $exit] = $this->vetConfig($path);
+
+        $this->assertStringStartsWith('PASS  config file', $this->rowContaining($output, 'config file'));
+        $this->assertStringContainsString('holding a "connections" block', $output);
+
+        $row = $this->rowContaining($output, 'replica metadata');
+        $this->assertStringStartsWith('FAIL  replica metadata', $row);
+        $this->assertStringContainsString('[10.1.0.2:5432] weight is "heavy", which the resolver reads as 0', $row);
+        $this->assertStringContainsString('[10.1.0.3:5432] cpu_cores is 0, which the resolver reads as 1 core', $row);
+
+        // The switches and reader settings are not in this file, so their rows are not invented
+        // for it: the vet reports what the file holds and nothing about the installation's config.
+        $this->assertStringNotContainsString('switch values', $output);
+        $this->assertStringNotContainsString('reader windows', $output);
+
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * A candidate read list the resolver reads as written passes, and the one value the package
+     * *means* — `weight: 0`, the documented drain — is named on the pass rather than failed, in the
+     * classifier's own sentence, exactly as the installation row names it.
+     */
+    public function test_the_config_file_flag_passes_a_candidate_read_list_it_reads_as_written(): void
+    {
+        $path = $this->databaseConfigFile([
+            self::CONNECTION => [
+                'read' => [
+                    ['host' => '10.1.0.2', 'port' => 5432, 'weight' => 8, 'cpu_cores' => 4, 'ram_gb' => 16],
+                    ['host' => '10.1.0.3', 'port' => 5432, 'weight' => 0],
+                ],
+            ],
+        ]);
+
+        [$output, $exit] = $this->vetConfig($path);
+        $row = $this->rowContaining($output, 'replica metadata');
+
+        $this->assertStringStartsWith('PASS  replica metadata', $row);
+        $this->assertStringContainsString('holds 2 replicas and 1 of them are drained', $row);
+        $this->assertStringContainsString('10.1.0.3:5432 — ' . ReplicaMetadata::DISABLED, $row);
+        $this->assertStringContainsString('the rest are read as written, so nothing is refused', $row);
+
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * A `config/database.php` that does not define the connection the run named is not a file with
+     * nothing to judge — it is the wrong connection, and the row says which ones the file does
+     * define rather than passing a read list it never found.
+     */
+    public function test_the_config_file_flag_names_a_connection_the_candidate_read_list_does_not_hold(): void
+    {
+        $path = $this->databaseConfigFile([
+            'sqlite' => ['driver' => 'sqlite', 'database' => ':memory:'],
+            'pgsql_proxy' => ['read' => [['host' => '10.1.0.2', 'weight' => 'heavy']]],
+        ]);
+
+        [$output, $exit] = $this->vetConfig($path);
+        $row = $this->rowContaining($output, 'config file');
+
+        $this->assertStringStartsWith('FAIL  config file', $row);
+        $this->assertStringContainsString('holds a "connections" block without [' . self::CONNECTION . ']', $row);
+        $this->assertStringContainsString('it defines: sqlite, pgsql_proxy', $row);
+
+        // The read list the file does hold is not judged under a connection it never named one for.
+        $this->assertStringNotContainsString('replica metadata', $output);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The same envelope, for the second file shape: `config_file` names the subject, the key set is
+     * unchanged, and the rows are the ones the file's single block earns.
+     */
+    public function test_the_config_file_flag_reports_a_candidate_read_list_through_the_json_envelope(): void
+    {
+        $path = $this->databaseConfigFile([
+            self::CONNECTION => ['read' => [['host' => '10.1.0.2', 'port' => 5432, 'weight' => 'heavy']]],
+        ]);
+
+        [$output, $exit] = $this->vetConfig($path, json: true);
+        $report = json_decode($output, true);
+
+        $this->assertIsArray($report, "The object did not parse:\n" . $output);
+        $this->assertSame(['command', 'config_file', 'strict', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame($path, $report['config_file']);
+        $this->assertSame(['config file', 'replica metadata'], array_column($report['checks'], 'name'));
+        $this->assertSame(['checks' => 2, 'passed' => 1, 'warnings' => 0, 'failed' => 1], $report['counts']);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
      * A config file for the vet: the shape a published `config/db-manager.php` returns, written
      * out with `var_export` so the values are PHP literals rather than a second parser's idea of
      * them.
@@ -3243,6 +3351,18 @@ class DbDoctorTest extends TestCase
         $body = $wrap ? ['swrr' => $swrr] : $swrr;
 
         return $this->rawConfigFile("<?php\n\nreturn " . var_export($body, true) . ";\n");
+    }
+
+    /**
+     * A config file shaped like `config/database.php`: the `connections` block the read list lives
+     * under, written out with `var_export` so the values are PHP literals rather than a second
+     * parser's idea of them. The connection the run names is the one whose `read` list is judged.
+     *
+     * @param array<string, mixed> $connections
+     */
+    private function databaseConfigFile(array $connections): string
+    {
+        return $this->rawConfigFile("<?php\n\nreturn " . var_export(['connections' => $connections], true) . ";\n");
     }
 
     /**

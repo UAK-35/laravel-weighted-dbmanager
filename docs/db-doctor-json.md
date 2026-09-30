@@ -236,9 +236,11 @@ about, and which of the two it is:
 | `store probe` | a probe switched off, a record that cannot be written, an in-process store | **several, named all** — the register |
 | `store reachability` | a primary store that failed in this process, a process already degraded, an in-process store, a store that would not answer a PING | one store, one state: a store that failed is *why* the process is degraded |
 
-The vet's other two rows are the installation's, by name and by sentence: a candidate's refused
-switches and reader settings are the same problems, read from a file, and they are dated from nothing
-for the same reason — a file has never been booted.
+The vet's other three rows are the installation's, by name and by sentence: a candidate's refused
+replica metadata, switches and reader settings are the same problems, read from a file, and they are
+dated from nothing for the same reason — a file has never been booted. Its `replica metadata` row
+carries only the classifier's refusals and the `weight: 0` drains it names, not the pool arithmetic:
+a file has no pool until it is booted.
 
 ### What the flag does not change
 
