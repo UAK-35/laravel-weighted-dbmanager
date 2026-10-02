@@ -77,6 +77,26 @@ use DateTimeZone;
  * flipper that is missing one of its three paths is warned about too, because
  * swap() would throw rather than flip.
  *
+ * IN STEP WITH THE WINDOW
+ * -----------------------
+ * The boot window answers "did this container ever come up". It does not answer the
+ * question that outlives it: with reader windows still moving the mode every day, is the
+ * pooler *still* on the configuration the window asks for? A flip that stopped — a scheduler
+ * that stopped running it, a mutex that cannot be taken, an exhausted boot window — leaves
+ * pgcat on whatever it last applied, and none of that is visible in a query that answers.
+ *
+ * readerWindowVerdict() is that second answer, and it is read off pgcat's own file rather
+ * than from the recorded mode. A flip that never got as far as recording anything still left
+ * a file behind, and `last_mode` is exactly the field that is empty in that case — which is
+ * the shape the 2026-10-02 incident arrived in: pgcat on the writer-only config through an
+ * open reader window, every flip run aborting before it reached the flipper, and a health
+ * endpoint reporting `ok` because nothing asked the file.
+ *
+ * One direction is a fault and the other is not, which is why the verdict is asymmetric. In
+ * a reader window, a pooler with no readers configured forces every read onto the writer and
+ * silently defeats the setting. Outside one, the resolver pins reads to the writer anyway, so
+ * readers left in the file are idle rather than wrong.
+ *
  * STATE FILE
  * ----------
  *   Path: configured via `state_file` (default sys_get_temp_dir())
@@ -273,7 +293,8 @@ final class PgcatConfigFlipper
      */
     public function applyCurrentState(): FlipResult
     {
-        if ($reason = $this->disabledReason()) {
+        $reason = $this->disabledReason();
+        if (!empty($reason)) {
             return FlipResult::noChange(
                 mode: $this->resolver->currentModeName(),
                 reason: $reason,
@@ -1089,7 +1110,13 @@ final class PgcatConfigFlipper
      * than a separate accessor because `/health/db` and `--status` must not be able to read
      * two different answers to "did this container ever work".
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>}
+     * `reader_window` is {@see readerWindowVerdict()}: whether the pooler is on the
+     * configuration the reader windows ask for *now*, which the boot window above cannot say.
+     * It travels with this block for the same reason the window does — `/health/db`,
+     * `db:replica-status` and `db:pgcat-flip --status` must not be able to read two different
+     * answers to one question.
+     *
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, reason: string|null}}
      */
     public function healthSummary(): array
     {
@@ -1106,7 +1133,145 @@ final class PgcatConfigFlipper
             'mismatch' => $this->isMismatched(),
             'warning' => $this->armingWarning(),
             'window' => $this->windowStatus(),
+            'reader_window' => $this->readerWindowVerdict(),
         ];
+    }
+
+    /**
+     * Whether the pooler is on the configuration the reader windows ask for right now.
+     *
+     * `expected` is what the resolver says the mode should be, `applied` is what pgcat's file
+     * actually holds, and `failed` marks the one disagreement that costs something: a reader
+     * window is open and the pooler is on the writer-only config, so every read the resolver
+     * meant for the replica pool reaches the writer instead.
+     *
+     * `applied` is null when the file cannot be compared to either variant — the target is not
+     * there, cannot be read, or holds bytes that are neither (an operator's own edit, a
+     * half-written file). That is reported as `in_step: null` rather than as a failure, because
+     * the package does not know enough to name a fault — the same line `ReaderWindows` draws
+     * when it refuses to guess at what a malformed setting meant.
+     *
+     * The check is not judged at all in two cases, and both report `failed: false`: while the
+     * flipper is inert (nothing was asked of the pooler, so there is no expectation to be out
+     * of step with), and while the resolver is permissive (with `reader_windows` unset there is
+     * no window to be inside of, and a pooler the setting leaves alone is not a pooler that is
+     * wrong).
+     *
+     * A third case is suppressed rather than judged: **while the container's boot window is still
+     * open**. A task that starts inside a reader window is out of step until its first flip lands —
+     * the entrypoint writes one of the two variants and the per-minute flip moves it — and failing
+     * that would fail every healthy deploy for as long as the pooler takes to converge, which is
+     * the exact reason the boot window is measured from boot rather than from "now". It is the
+     * same line `FlipWindow::closed()` already draws, reused rather than re-argued: a starting
+     * container gets its eight minutes, and the check begins where the boot window ends.
+     *
+     * The consequence is worth naming: with no boot stamp at all (`window.source: no_stamp` — a
+     * local run, or an image whose entrypoint predates the stamp) `closed()` is false, so this
+     * check stays quiet for the same reason the boot verdict does. That silence is inherited
+     * deliberately rather than worked around; `applied` is still reported, so a reader can see the
+     * file without a verdict being invented about it.
+     *
+     * This reads two small files, so it is deliberately not part of `armingWarning()`, which
+     * promises to look at configuration only. It is called by `healthSummary()` and
+     * `windowStatus()`'s consumers — surfaces that already read the state file — and never by
+     * `disabledReason()` or a flip's own hot path.
+     *
+     * @return array{expected: string, applied: string|null, in_step: bool|null, failed: bool, reason: string|null}
+     */
+    public function readerWindowVerdict(): array
+    {
+        $expected = $this->resolver->currentModeName();
+
+        if (!$this->isEnabled() || $this->resolver->isAlwaysReaderMode()) {
+            return [
+                'expected' => $expected,
+                'applied' => null,
+                'in_step' => null,
+                'failed' => false,
+                'reason' => null,
+            ];
+        }
+
+        $applied = $this->appliedMode();
+        $failed = $expected === 'readers' && $applied === 'writer' && $this->window->closed();
+
+        return [
+            'expected' => $expected,
+            'applied' => $applied,
+            'in_step' => $applied === null ? null : $applied === $expected,
+            'failed' => $failed,
+            'reason' => $failed ? $this->readerWindowReason() : null,
+        ];
+    }
+
+    /**
+     * The mode pgcat's own configuration is in, read off the file rather than remembered.
+     *
+     * The comparison is bytes, in the direction the flip copies them: the target holds the
+     * readers variant, the writer-only variant, or something else. Bytes because that is what a
+     * flip puts there — `swap()` writes the source's contents verbatim — so a file that differs
+     * from both is a file this package did not put in place, and the answer for it is null
+     * rather than the nearer-looking guess.
+     *
+     * It deliberately does not consult the state file's `last_mode`. That field records what a
+     * flip *applied*, and it is written only by a flip that got that far: a run that aborted
+     * before the flipper (a mutex that could not be taken, a scheduler that never fired) leaves
+     * the previous file in place and this field empty — the exact shape of the incident this
+     * exists to catch, where a `last_mode`-based check would have answered "unknown" while the
+     * pooler was provably writer-only.
+     *
+     * The rendered files are what is compared, not the templates: the entrypoint injects
+     * credentials into both variants at container start, so the copy a flip makes and the file
+     * it reads back stay byte-identical.
+     */
+    public function appliedMode(): ?string
+    {
+        $target = ConfigValue::string($this->config['config_path'] ?? null);
+
+        if ($target === '' || !is_file($target)) {
+            return null;
+        }
+
+        $contents = @file_get_contents($target);
+
+        if ($contents === false) {
+            return null;
+        }
+
+        foreach (['readers' => 'readers_path', 'writer' => 'no_readers_path'] as $mode => $key) {
+            $source = ConfigValue::string($this->config[$key] ?? null);
+
+            if ($source === '' || !is_file($source)) {
+                continue;
+            }
+
+            if (@file_get_contents($source) === $contents) {
+                return $mode;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Why a pooler left on the writer-only config during an open reader window matters, and what
+     * moves it: the sentence `/health/db` reports as `reader_window.reason` and logs beside the
+     * degraded status.
+     *
+     * It names the file that is in place, because that is the fact an operator checks by hand,
+     * and the command that moves it — a flip run by hand while the schedule is being repaired.
+     * It does not guess at *why* the flip stopped, which the boot window's own reason already
+     * does for the case it can see.
+     */
+    private function readerWindowReason(): string
+    {
+        return sprintf(
+            'a reader window is open, so reads should use the replica pool, but pgcat is still on '
+            .'the writer-only config [%s]: every read through the pooler reaches the writer. Run '
+            .'db:pgcat-flip (or db:pgcat-window-flip) to move it, and check why the scheduled flip '
+            .'stopped.',
+            ConfigValue::string($this->config['no_readers_path'] ?? null),
+        );
     }
 
     /**

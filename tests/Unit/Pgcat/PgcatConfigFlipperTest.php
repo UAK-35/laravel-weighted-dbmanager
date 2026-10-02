@@ -1977,4 +1977,185 @@ class PgcatConfigFlipperTest extends TestCase
         // that has not republished arrives.
         $this->assertSame(480, $this->build('readers')->window()->seconds());
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // In step with the window: what pgcat's file holds, versus what the windows ask
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The mode is read off pgcat's own file, because that is the only thing an operator can check
+     * by hand — and the only thing that survives a flip which aborted before it recorded
+     * anything. `last_mode` is exactly the field that is empty in that case, so a verdict built on
+     * it would have answered "unknown" on the container this was written for.
+     */
+    public function test_the_applied_mode_is_read_off_the_file_rather_than_the_record(): void
+    {
+        $flipper = $this->build('readers');
+
+        // The fixture's target matches neither variant: it is a file this package did not put
+        // there, and the answer for it is null rather than the nearer-looking of the two.
+        $this->assertNull($flipper->appliedMode());
+
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-no-readers.toml'));
+        $this->assertSame('writer', $flipper->appliedMode());
+
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-readers.toml'));
+        $this->assertSame('readers', $flipper->appliedMode());
+    }
+
+    public function test_a_target_that_is_not_there_has_no_applied_mode(): void
+    {
+        $flipper = $this->build('readers', ['config_path' => $this->tmp . '/not-there.toml']);
+
+        $this->assertNull($flipper->appliedMode());
+    }
+
+    /**
+     * The failure this was written for: a container booted outside a window converged to the
+     * writer-only config and then stopped tracking the windows, so when one opened the pooler
+     * stayed as it was. The boot window says the flip converged; this says it stopped.
+     */
+    public function test_a_pooler_left_writer_only_inside_a_reader_window_is_a_failure(): void
+    {
+        // Booted an hour ago, so the boot window is closed and the check is judging the file
+        // rather than a container that is still starting up.
+        $flipper = $this->build('readers', ['boot_file' => $this->stampBoot(time() - 3600)]);
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-no-readers.toml'));
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertSame('readers', $verdict['expected']);
+        $this->assertSame('writer', $verdict['applied']);
+        $this->assertFalse($verdict['in_step']);
+        $this->assertTrue($verdict['failed']);
+
+        // The sentence names the file that is in place and the command that moves it — the two
+        // things an operator acts on — and no guess at why the flip stopped.
+        $reason = (string) $verdict['reason'];
+        $this->assertStringContainsString('reader window is open', $reason);
+        $this->assertStringContainsString('pgcat-no-readers.toml', $reason);
+        $this->assertStringContainsString('db:pgcat-flip', $reason);
+
+        // It travels with the snapshot, so /health/db, db:replica-status and db:pgcat-flip
+        // --status cannot read two different answers to it.
+        $this->assertSame($verdict, $flipper->healthSummary()['reader_window']);
+    }
+
+    public function test_a_pooler_in_step_with_the_window_is_not_a_failure(): void
+    {
+        $flipper = $this->build('readers', ['boot_file' => $this->stampBoot(time() - 3600)]);
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-readers.toml'));
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertSame('readers', $verdict['expected']);
+        $this->assertSame('readers', $verdict['applied']);
+        $this->assertTrue($verdict['in_step']);
+        $this->assertFalse($verdict['failed']);
+        $this->assertNull($verdict['reason']);
+    }
+
+    /**
+     * The reverse disagreement is not a fault, and that asymmetry is deliberate: outside a window
+     * the resolver pins reads to the writer anyway, so readers left in the file are idle rather
+     * than wrong — and failing it would take a healthy installation out of rotation over a setting
+     * nothing is reading.
+     */
+    public function test_readers_left_in_the_file_outside_a_window_are_reported_but_not_failed(): void
+    {
+        $flipper = $this->build('writer', ['boot_file' => $this->stampBoot(time() - 3600)]);
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-readers.toml'));
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertSame('writer', $verdict['expected']);
+        $this->assertSame('readers', $verdict['applied']);
+        $this->assertFalse($verdict['in_step'], 'a reader can still see the disagreement');
+        $this->assertFalse($verdict['failed'], '...it is just not the one that costs anything');
+        $this->assertNull($verdict['reason']);
+    }
+
+    /**
+     * A file matching neither variant — an operator's own edit, a half-written file — is
+     * `in_step: null` rather than an invented verdict, the same line `ReaderWindows` draws when it
+     * refuses to guess at what a malformed setting meant.
+     */
+    public function test_a_file_that_matches_neither_variant_is_not_judged(): void
+    {
+        $flipper = $this->build('readers', ['boot_file' => $this->stampBoot(time() - 3600)]);   // the fixture's target is `pool = 'unknown'`
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertSame('readers', $verdict['expected']);
+        $this->assertNull($verdict['applied']);
+        $this->assertNull($verdict['in_step']);
+        $this->assertFalse($verdict['failed']);
+        $this->assertNull($verdict['reason']);
+    }
+
+    /**
+     * Nothing was asked of the pooler, so there is no expectation for it to be out of step with —
+     * even with the writer-only file in place. This is the case the driver gate exists for.
+     */
+    public function test_an_inert_flipper_has_no_window_verdict(): void
+    {
+        $flipper = $this->build('readers', [], driver: 'sqlite');
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-no-readers.toml'));
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertSame('readers', $verdict['expected']);
+        $this->assertNull($verdict['applied'], 'the file is not even read for a pooler this package does not front');
+        $this->assertNull($verdict['in_step']);
+        $this->assertFalse($verdict['failed']);
+    }
+
+    /**
+     * A container whose boot window is still open is starting up, not out of step: a task that
+     * begins inside a reader window is on the writer-only config until its first flip lands, and
+     * failing that would fail every healthy deploy for as long as the pooler takes to converge.
+     * The file is still reported — `applied` is there to be read — and only the verdict waits.
+     */
+    public function test_a_container_still_inside_its_boot_window_is_not_judged_on_the_file(): void
+    {
+        $flipper = $this->build('readers', ['boot_file' => $this->stampBoot(time() - 60)]);
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-no-readers.toml'));
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertFalse($flipper->window()->closed(), 'the premise: the window is still open');
+        $this->assertSame('writer', $verdict['applied'], 'the file is still reported');
+        $this->assertFalse($verdict['in_step']);
+        $this->assertFalse($verdict['failed'], '...but a starting container is not a failure');
+        $this->assertNull($verdict['reason']);
+    }
+
+    /**
+     * With no windows configured the resolver is permissive on purpose — the documented opt-out —
+     * so there is no window to be inside of, and a pooler the setting leaves alone is not a pooler
+     * that is wrong. The check stays quiet rather than inventing a window to fail against.
+     */
+    public function test_a_permissive_resolver_has_no_window_to_judge(): void
+    {
+        $flipper = new PgcatConfigFlipper(
+            resolver: new TimeWindowResolver(readerWindows: [], readerDays: [1, 2, 3, 4, 5]),
+            config: [
+                'enabled' => true,
+                'config_path' => $this->tmp . '/pgcat.toml',
+                'readers_path' => $this->tmp . '/pgcat-readers.toml',
+                'no_readers_path' => $this->tmp . '/pgcat-no-readers.toml',
+            ],
+            stateFile: $this->stateFile,
+            lockFile: $this->lockFile,
+            driver: 'pgsql',
+        );
+
+        file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-no-readers.toml'));
+
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertSame('readers', $verdict['expected'], 'permissive means always readers');
+        $this->assertNull($verdict['applied']);
+        $this->assertFalse($verdict['failed']);
+    }
 }

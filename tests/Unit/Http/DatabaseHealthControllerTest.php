@@ -454,6 +454,83 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
+     * The check the boot window cannot make, and the state the 2026-10-02 container was in: the
+     * flip converged inside its window (one run, `window.failed: false`), then stopped tracking
+     * the windows, so when one opened pgcat was still on the writer-only config and every read
+     * reached the writer while this endpoint answered `ok`.
+     *
+     * The boot verdict is deliberately healthy here — the window closed and the flip converged
+     * inside it — so the failure under test can only come from the file the flipper read.
+     */
+    public function test_a_pooler_left_writer_only_inside_a_reader_window_is_degraded_and_logged(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        // Booted an hour ago, so the boot window has closed and the flip converged inside it —
+        // the container came up fine and then stopped tracking the day, which is the state this
+        // check exists to separate from "still starting up".
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'writer');
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            // The database answered and the container converged: this verdict comes from the
+            // pooler's own file and from nothing else.
+            ->assertJsonPath('pinned.ok', true)
+            ->assertJsonPath('errors', [])
+            ->assertJsonPath('flip.failed', false)
+            ->assertJsonPath('pgcat.window.converged', true)
+            ->assertJsonPath('reader_window.applicable', true)
+            ->assertJsonPath('reader_window.failed', true)
+            ->assertJsonPath('reader_window.expected', 'readers')
+            ->assertJsonPath('reader_window.applied', 'writer');
+
+        $this->assertStringContainsString('reader window is open', (string) $response->json('reader_window.reason'));
+
+        // And it is in the log with the same facts, so an alarm can key on the endpoint and an
+        // operator arrives at the sentence rather than at a status code.
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(function (string $message, array $context = []): bool {
+                return str_contains($message, 'health/db degraded')
+                    && str_contains($message, 'writer-only config while a reader window is open')
+                    && ($context['reader_window']['failed'] ?? null) === true
+                    && ($context['reader_window']['applied'] ?? null) === 'writer';
+            });
+    }
+
+    /**
+     * The other half of the check: a pooler that is on the configuration the window asks for is
+     * not a failure, and the endpoint's status must not move for it. Without this the check could
+     * be satisfied by failing everything, which is not a check.
+     */
+    public function test_a_pooler_in_step_with_the_reader_window_is_not_a_failure(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'readers');
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reader_window.applicable', true)
+            ->assertJsonPath('reader_window.failed', false)
+            ->assertJsonPath('reader_window.applied', 'readers')
+            ->assertJsonPath('reader_window.reason', null);
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
      * Point the connection the package follows at SQLite.
      *
      * `$database` is a file, `:memory:` or a path under a directory that does not exist — the
@@ -483,8 +560,13 @@ class DatabaseHealthControllerTest extends TestCase
      * itself `enabled: false` and the endpoint would have no verdict to be wrong about. The driver
      * is the only thing that has to be PostgreSQL here; the flipper never runs, because every
      * closure it would need is the default one and `healthSummary()` only reads.
+     *
+     * `$appliedMode` puts the reader-window verdict under test instead: a file matching the named
+     * variant is written for pgcat's own config, so the pooler is provably on it. Left null, no
+     * target is written and the verdict is "not judged", which is what the boot-window cases need
+     * in order to be about the boot window alone.
      */
-    private function bindWindowFlipper(?int $bootedSecondsAgo): PgcatConfigFlipper
+    private function bindWindowFlipper(?int $bootedSecondsAgo, ?string $appliedMode = null): PgcatConfigFlipper
     {
         $dir = sys_get_temp_dir().'/swrr-health-window-'.bin2hex(random_bytes(4));
 
@@ -513,6 +595,35 @@ class DatabaseHealthControllerTest extends TestCase
             'boot_file' => $bootFile,
             'flip_window_seconds' => 480,
         ];
+
+        // The three files a reader-window verdict compares, written only when a test asks for a
+        // mode: the cases that are about the boot window keep the target absent, so their verdict
+        // is "not judged" and the status can only move for the reason they are about.
+        //
+        // The state record is written with them, and it is what lets the two verdicts be told
+        // apart: a run converged *inside* the boot window, so the boot verdict is healthy and the
+        // only thing left to fail on is the file the pooler is still sitting on.
+        if ($appliedMode !== null) {
+            file_put_contents($config['readers_path'], "pool = 'readers'\n");
+            file_put_contents($config['no_readers_path'], "pool = 'writer-only'\n");
+            file_put_contents(
+                $config['config_path'],
+                (string) file_get_contents($appliedMode === 'readers' ? $config['readers_path'] : $config['no_readers_path']),
+            );
+
+            if ($bootedSecondsAgo !== null) {
+                $convergedAt = gmdate(DATE_ATOM, time() - $bootedSecondsAgo + 60);
+
+                file_put_contents($config['state_file'], (string) json_encode([
+                    'last_mode' => $appliedMode,
+                    'last_run_at' => $convergedAt,
+                    'last_kind' => 'flipped',
+                    'runs' => 1,
+                    'converged_at' => $convergedAt,
+                    'converged_mode' => $appliedMode,
+                ]));
+            }
+        }
 
         $flipper = new PgcatConfigFlipper(
             resolver: new TimeWindowResolver(

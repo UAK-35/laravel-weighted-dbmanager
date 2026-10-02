@@ -46,6 +46,13 @@ use Throwable;
  *     that a query cannot see: pgcat can be answering while the container is
  *     still the wrong shape, and a scheduler that stopped running the flip is
  *     invisible from every other field here
+ *   • whether that pooler is still in step with the reader windows that move the
+ *     mode every day — `reader_window`, which holds what the windows ask for right
+ *     now beside what pgcat's own file actually is. The boot window above can only
+ *     say that a container came up once; a pooler left on the writer-only config
+ *     through an open reader window serves every read from the writer, and no
+ *     passing query says so. It makes the payload `degraded` too — see
+ *     readerWindowVerdict()
  *
  * EVERY FAILURE IS ALSO LOGGED
  *   A payload nobody is looking at is not a signal. Each response that is not
@@ -158,6 +165,11 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         $pgcat = $this->pgcat?->healthSummary();
         $flip = $this->flipVerdict($pgcat);
 
+        // The other half of the pgcat verdict, and the half the boot window cannot state: with
+        // the mode still moving at every window boundary, a pooler that stopped tracking them
+        // is the failure that outlives a successful boot.
+        $readerWindow = $this->readerWindowVerdict($pgcat);
+
         // pgcat being off is not ill health — on a MySQL connection there is
         // simply nothing to flip — so it does not feed $allHealthy. Neither does the
         // audit: a configuration that cannot act is not a database that cannot answer.
@@ -167,13 +179,19 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         // window closed without the flip ever converging is a container that cannot be trusted
         // to serve reads, whatever a query happens to answer right now. A window that is merely
         // still open is not a failure — see flipVerdict().
+        //
+        // So does the reader-window verdict, for the same reason one step later: a pooler on the
+        // writer-only config inside an open reader window is answering every read itself, so the
+        // database can answer and still not be the one the configuration asked for. Neither
+        // verdict is ever set while the container is starting, so a healthy deploy is unaffected.
         $allHealthy = empty($errors)
             && $this->allReplicasHealthy($replicas)
             && $probe['ok'] !== false
-            && !$flip['failed'];
+            && !$flip['failed']
+            && !$readerWindow['failed'];
 
         if (!$allHealthy) {
-            $this->logDegraded($probe, $replicas, $errors, $flip, $pgcat);
+            $this->logDegraded($probe, $replicas, $errors, $flip, $readerWindow, $pgcat);
         }
 
         return response()->json([
@@ -182,6 +200,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'replicas' => $replicas,
             'pgcat' => $pgcat,
             'flip' => $flip,
+            'reader_window' => $readerWindow,
             'audit' => $this->audit(),
             'errors' => $errors,
         ], $allHealthy ? 200 : 503);
@@ -241,6 +260,58 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
     }
 
     /**
+     * Whether the pooler is on the configuration the reader windows ask for right now.
+     *
+     * This is the check the boot window cannot make, and the one the 2026-10-02 container needed:
+     * a task booted outside a reader window converges to the writer-only config and looks perfect
+     * — one flip, one record, `window.failed: false` — until 10:00 arrives, the windows move the
+     * resolver to `readers`, and nothing moves pgcat with it. Every read then reaches the writer
+     * while the payload says `ok`, because a pooler that answers is not a pooler that is right.
+     *
+     * The verdict comes from the flipper, which reads it off pgcat's own file rather than off its
+     * recorded mode — a flip that never got as far as recording anything still left a file, and
+     * that is exactly the case this exists for. Three states are told apart here:
+     *
+     * - **Not applicable**: the flipper is inert (nothing was asked of the pooler) or the resolver
+     *   is permissive (no window is configured, so there is no window to be inside of). Nothing
+     *   fails, and `applicable` says so — the same line `flipVerdict()` draws for a connection
+     *   pgcat cannot front.
+     * - **Applicable and in step**: `failed` is false whether the modes agree or the file could
+     *   not be compared at all, and `applied` carries which of the two it was (`null` for the
+     *   second), so an unreadable file is "not judged" rather than "passed".
+     * - **Applicable and out of step**: a reader window is open and pgcat is on the writer-only
+     *   config. `reason` carries the sentence for it, naming the file in place and the command
+     *   that moves it.
+     *
+     * Only that last direction can be `failed`. The reverse — readers left in the file outside a
+     * window — is benign, because the resolver pins reads to the writer there anyway, and failing
+     * it would take a healthy installation out of rotation over an idle setting.
+     *
+     * @param array<string, mixed>|null $pgcat the summary `index()` already read
+     *
+     * @return array{applicable: bool, failed: bool, reason: string|null, expected: string|null, applied: string|null}
+     */
+    private function readerWindowVerdict(?array $pgcat): array
+    {
+        /** @var array<string, mixed>|null $block */
+        $block = is_array($pgcat['reader_window'] ?? null) ? $pgcat['reader_window'] : null;
+
+        $failed = ($block['failed'] ?? false) === true;
+
+        return [
+            'applicable' => $block !== null,
+            'failed' => $failed,
+            'reason' => $failed
+                ? (is_string($block['reason'] ?? null) && $block['reason'] !== ''
+                    ? $block['reason']
+                    : 'a reader window is open but pgcat is still on the writer-only config')
+                : null,
+            'expected' => is_string($block['expected'] ?? null) ? $block['expected'] : null,
+            'applied' => is_string($block['applied'] ?? null) ? $block['applied'] : null,
+        ];
+    }
+
+    /**
      * One error line per unhealthy response, carrying the same facts as the payload.
      *
      * Logged here rather than in the caller: `index()` is the only place that knows the whole
@@ -258,9 +329,10 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * @param array<string, array<string, mixed>> $replicas the `replicas` block of the payload
      * @param array<string, string>           $errors   the `errors` block of the payload
      * @param array<string, mixed>            $flip     the `flip` block of the payload
+     * @param array<string, mixed>            $readerWindow the `reader_window` block of the payload
      * @param array<string, mixed>|null       $pgcat    the `pgcat` block of the payload
      */
-    private function logDegraded(array $probe, array $replicas, array $errors, array $flip, ?array $pgcat): void
+    private function logDegraded(array $probe, array $replicas, array $errors, array $flip, array $readerWindow, ?array $pgcat): void
     {
         $reasons = [];
 
@@ -280,6 +352,10 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             $reasons[] = 'the pgcat flip never converged inside the container\'s boot window';
         }
 
+        if (($readerWindow['failed'] ?? false) === true) {
+            $reasons[] = 'pgcat is still on the writer-only config while a reader window is open';
+        }
+
         Log::error('health/db degraded: '.implode('; ', $reasons ?: ['no reason recorded']), [
             'status' => 'degraded',
             'reasons' => $reasons,
@@ -293,6 +369,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'pgcat_window' => $pgcat['window'] ?? null,
             'flip_failed' => $flip['failed'] ?? false,
             'flip_reason' => $flip['reason'] ?? null,
+            'reader_window' => $readerWindow,
         ]);
     }
 

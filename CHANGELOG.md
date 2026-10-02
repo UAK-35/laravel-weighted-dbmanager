@@ -4,6 +4,32 @@
 
 ### Added
 
+- **A pooler left on the writer-only config inside an open reader window is now a failure, not a
+  silent one.** The boot window answers whether a container came up; it cannot answer whether the
+  pooler is still tracking the day. A container booted outside a reader window converges to
+  writer-only and looks perfect — one run, `converged: true`, `window.failed: false` — and then
+  10:00 arrives, the windows move the resolver to `readers`, and nothing moves pgcat with it. Every
+  read reaches the writer while `/health/db` answers `ok`, because a pooler that answers is not a
+  pooler that is right.
+
+  `PgcatConfigFlipper::readerWindowVerdict()` is the second answer, carried in the flipper's own
+  snapshot as `reader_window` and reported by `/health/db` as a top-level block that also feeds the
+  status: `expected` is what the resolver says now, `applied` is what pgcat's file actually holds,
+  and `failed` marks the one disagreement that costs something — a reader window open with the
+  writer-only config in place. `applied` is read off pgcat's file (`appliedMode()`) rather than off
+  the state file's `last_mode`, deliberately: a flip that aborted before it recorded anything still
+  left a file behind, and `last_mode` is exactly the field that is empty in that case — the shape
+  the 2026-10-02 container arrived in, where a per-minute `schedule:run` was aborting on a missing
+  cache lock before it ever reached the flipper, and a `last_mode`-based check would have answered
+  "unknown" while the pooler was provably writer-only.
+
+  The verdict is asymmetric on purpose. Readers left in the file *outside* a window are idle
+  rather than wrong — the resolver pins reads to the writer there anyway — so only the one
+  direction fails, and failing the other would take a healthy installation out of rotation over a
+  setting nothing is reading. A file matching neither variant (an operator's edit, a half-written
+  copy) is `in_step: null` rather than an invented verdict, and the check is not judged at all on
+  an inert flipper or a permissive resolver, where `applicable` says so.
+
 - **The reader windows are scheduled tasks, and a mode change waits until the thing it points at
   answers.** The per-minute flip converges the pool at container start and then stops at the end of
   the boot window, deliberately — that is what makes a container that could not come up look broken
