@@ -4,6 +4,26 @@
 
 ### Added
 
+- **The flip schedules itself, with a cadence the installation chooses.** `db:pgcat-flip` was the
+  package's command and the application's entry to write: the provider now registers it, the first
+  time the container's `Schedule` is resolved, so there is no entry to write into
+  `routes/console.php` and none to forget to write. `Uak35\WeightedDbManager\Pgcat\FlipSchedule`
+  holds the entry and `swrr.pgcat.schedule` holds the settings (`enabled`, `interval_minutes`,
+  `name`, `log`), and two Laravel conveniences are deliberately absent because the flipper is
+  container-local: `onOneServer()` would let one container flip per minute and skip every other,
+  and the mutex `withoutOverlapping()` names by itself is `sha1(expression + command)` — the same
+  name in every container when the cache store is shared. The mutex is scoped to the container
+  instead, and the authoritative serialisation stays the flipper's own `flock`.
+
+  `interval_minutes` is a trade rather than a saving, and the record says so: what bounds the
+  attempts is `flip_window_seconds`, not the cadence — eight minutes holds eight runs at one
+  minute and two at five. A value the minute field cannot hold (zero, a negative, a non-number, or
+  more than `59`, past which a step *wraps* rather than meaning what it says) resolves to the
+  documented default rather than being written into an expression that means something else.
+  `FlipScheduleTest` pins the cadence, the switch, the refusal, the mutex name and the duplicate
+  guard, and the wrap itself is asserted through the cron library's own `nextRunDate()` rather than
+  taken on trust.
+
 - **The inventory publishes a public API page, so the rows a release weighs are also the page a
   consumer reads.** `API.md` is rendered from `files.tsv`, `methods.tsv` and `surface.tsv` by
   `php bin/api.php`: every class with its public methods and their argument shapes, the config keys

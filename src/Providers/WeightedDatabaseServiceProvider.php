@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Uak35\WeightedDbManager\Providers;
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\DatabaseServiceProvider;
@@ -20,6 +21,7 @@ use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
+use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
@@ -559,7 +561,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
     }
 
     /**
-     * Config publishing + artisan command registration.
+     * Config publishing + artisan command registration + the flip's schedule.
      *
      * Laravel auto-discovers commands only from the application's own
      * app/Console/Commands directory, so the package registers its three
@@ -594,6 +596,22 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 DbProbeReplicas::class,
                 DbFlipPgcatCommand::class,
             ]);
+
+            // The flip is this package's command, and every choice about how often it runs and
+            // how its runs are serialised follows from a fact about the container rather than
+            // about the installation — one mutex per container, no `onOneServer()` — so the
+            // entry that runs it belongs here rather than in every installation's own
+            // scheduling code. See FlipSchedule for the reasoning.
+            //
+            // Registered *against* the schedule, not at boot: the configuration is read the
+            // moment the framework builds its schedule (`schedule:run`, `schedule:list`), and a
+            // boot that never resolves one — every HTTP request — pays nothing for this. Null
+            // when the entry is already there, so a second boot cannot make a second run.
+            $this->app->afterResolving(Schedule::class, function (Schedule $schedule): void {
+                $config = $this->app->make(Repository::class);
+
+                FlipSchedule::register($schedule, $config);
+            });
         }
     }
 

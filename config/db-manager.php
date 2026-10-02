@@ -131,6 +131,49 @@ return [
             // re-begin. With no stamp the window is *not judged* — `closed()` stays false and
             // nothing fails — so a local run or an older image is quiet instead of guessing.
             'boot_file' => env('SWRR_PGCAT_BOOT_FILE', sys_get_temp_dir() . '/container-booted-at'),
+
+            // ── The per-minute schedule (optional) ──────────────────────────────────
+            //
+            // The provider registers `db:pgcat-flip` on the container's schedule the first
+            // time that schedule is resolved — `schedule:run` and `schedule:list` are what do
+            // that — so there is nothing to paste into the application's own scheduling code.
+            // Uak35\WeightedDbManager\Pgcat\FlipSchedule is where the reasoning lives: why
+            // every minute, why the attempts stop at the boot window above, and why the mutex
+            // is named per container rather than left as `withoutOverlapping()` names it.
+            //
+            // `enabled` is a switch, read as one — `(bool) 'off'` is true and this one decides
+            // whether a file is swapped every minute — so `yes`/`no` work and a value that is
+            // neither is reported instead of being cast. Left unset it follows `enabled` above,
+            // and so does a refused value: an installation that has not armed the flipper has
+            // nothing for a schedule to keep in step, and a typo must not be what stops the
+            // flip.
+            'schedule' => [
+                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED'),
+                // How often the flip runs, in whole minutes: 1 is the shipped cadence and 5 is
+                // `SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES=5`, which is a step of five in the minute
+                // field. Raising it is a trade rather than a saving — what bounds the attempts is
+                // `flip_window_seconds` above, not this: eight minutes holds eight runs at one and
+                // two at five, and an interval at or past the window is one attempt. Raise the
+                // window with it, or the pooler being repaired is given less time, not less work.
+                //
+                // A value this cannot express — 0, a negative, a non-number, or more than 59,
+                // because a minute step wraps rather than meaning what it says past the top of the
+                // hour — resolves to 1 rather than being written into an expression that means
+                // something else. An installation needing a cadence wider than an hour registers
+                // its own `db:pgcat-flip` entry, which the duplicate guard leaves alone.
+                'interval_minutes' => env('SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES', 1),
+                // What `schedule:list` shows the entry as, and what the duplicate guard matches
+                // against: an entry already carrying this name, or one already running the
+                // command, is left alone rather than joined by a second per-minute run.
+                // Applications with their own task-name conventions set their own here.
+                'name' => env('SWRR_PGCAT_SCHEDULE_NAME', 'pgcat_flip'),
+                // Where each run's output is appended. Unset, it is
+                // storage_path('logs/scheduled_tasks/pgcat_flip.log'), where Laravel itself
+                // puts the output of a scheduled event it names. The parent directory is
+                // created if it is missing, because a command event runs through a shell
+                // redirect: a log that cannot be opened is a command that never runs.
+                'log' => env('SWRR_PGCAT_SCHEDULE_LOG'),
+            ],
         ],
 
         // ── Boot self-audit (optional) ───────────────────────────────────────────

@@ -1094,27 +1094,6 @@ All four are registered by the provider.
 ```php
 // routes/console.php
 Schedule::command('db:probe-replicas')->everyThirtySeconds()->withoutOverlapping()->runInBackground();
-
-// The flipper is container-local — it replaces /etc/pgcat/pgcat.toml and talks to the
-// supervisord in its own container — so its overlap protection has to be per container
-// too, and two Laravel conveniences are wrong here:
-//
-//   * `onOneServer()` would let exactly one container flip per minute and skip every
-//     other, leaving the rest running a configuration nobody maintains;
-//   * the mutex `withoutOverlapping()` names by itself is `sha1(expression + command)`,
-//     which is the *same name in every container* when the cache store is shared — so
-//     one slow container holds the lock for all of them.
-//
-// `createMutexNameUsing()` scopes the name to the container. The authoritative
-// serialisation is still the flipper's own `flock` on `swrr.pgcat.lock_file`, which is
-// container-local and needs no shared cache: a concurrent run returns `skipped` rather
-// than queueing. Not `runInBackground()` for the same reason it is not for a doctor run —
-// a failure belongs in the schedule's own log, not in a detached process nobody reads.
-Schedule::command('db:pgcat-flip')
-    ->everyMinute()
-    ->withoutOverlapping(2)
-    ->createMutexNameUsing(fn (): string => 'framework/schedule-pgcat-flip-'.gethostname())
-    ->appendOutputTo(storage_path('logs/scheduled_tasks/pgcat_flip.log'));
 ```
 
 Each probe opens a throwaway single-host connection (the pooled `read`/`write`
@@ -1122,18 +1101,71 @@ lists are stripped) and purges it afterwards, so probing never feeds the weighte
 pool it is measuring. Diagnostics go to the replica's own `host:port` key, the
 same key `WeightResolver` uses.
 
+### The flipper schedules itself
+
+`db:pgcat-flip` is not yours to schedule. The provider registers it on the container's
+schedule the first time that schedule is resolved — which is what `schedule:run` and
+`schedule:list` do — so there is no entry to write into `routes/console.php`, and none to
+forget to write. The entry is one event, on the cadence the settings below ask for (a minute by
+default):
+
+```php
+$schedule->command('db:pgcat-flip')
+    ->cron('* * * * *')            // interval_minutes: 1 — `*/5 * * * *` for five
+    ->withoutOverlapping(2)
+    ->createMutexNameUsing(fn (): string => 'framework/schedule-pgcat-flip-'.gethostname())
+    ->name($name)
+    ->appendOutputTo($log);
+```
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `swrr.pgcat.schedule.enabled` | follows `swrr.pgcat.enabled` | Whether the entry is registered. A switch, read as one (`yes`/`no`, `on`/`off`, `1`/`0`), and a value that is neither resolves to `swrr.pgcat.enabled` and is reported at `warning` rather than obeyed — a typo must not be what stops the repair. |
+| `swrr.pgcat.schedule.interval_minutes` | `1` | How often the flip runs, in whole minutes: `5` is a step of five in the minute field, so the entry runs at :00, :05, :10 … Raising it is a trade rather than a saving, because the attempts are bounded by the boot window and not by the cadence — see below. A value the minute field cannot hold — `0`, a negative, a non-number, or more than `59`, past which a step *wraps* rather than meaning what it says — resolves to `1` rather than being written into an expression that means something else. An installation that needs a cadence wider than an hour registers its own `db:pgcat-flip` entry, which the guard below leaves alone. |
+| `swrr.pgcat.schedule.name` | `pgcat_flip` | What `schedule:list` shows the entry as, and what the duplicate guard matches against. |
+| `swrr.pgcat.schedule.log` | `storage_path('logs/scheduled_tasks/pgcat_flip.log')` | Where each run's output is appended. The directory is created if it is missing: a command event runs through a shell redirect, and a log that cannot be opened is a command that never runs. |
+
+Two Laravel conveniences are deliberately absent, because the flipper is container-local — it
+replaces `/etc/pgcat/pgcat.toml` and talks to the supervisord in its own container:
+
+- **`onOneServer()`** would let exactly one container flip per scheduled run and skip every other,
+  leaving the rest running a configuration nobody maintains;
+- **the mutex name `withoutOverlapping()` derives on its own** is `sha1(expression + command)`,
+  which is the *same name in every container* when the cache store is shared — so one slow
+  container would hold the lock for all of them.
+
+`createMutexNameUsing()` scopes the name to the container, and the hostname being unreadable
+falls back to a random suffix rather than to the empty string, which would put every container
+back on one shared name. The authoritative serialisation is still the flipper's own `flock` on
+`swrr.pgcat.lock_file` — container-local, needs no shared cache, and already what makes a
+concurrent run return `skipped` rather than queueing. Not `runInBackground()` for the same
+reason it is not for a doctor run: a failure belongs in the schedule's own log, not in a
+detached process nobody reads.
+
+An entry you wrote yourself is left alone rather than joined by a second one — the guard reads
+the name *and* the command — so an installation upgrading from a version that asked you to paste
+the entry keeps working, and should delete its own copy to get the package's name and log
+handling. Two entries would be two `schedule:run` passes a minute, and the overlap protection of
+one cannot serialise the other.
+
 ### How long the flip keeps trying: the boot window
 
-The flip is scheduled every minute and stops at the end of a window measured from the
-container's own boot — `swrr.pgcat.flip_window_seconds`, 480 (eight minutes) by default.
-Without a bound, a pooler that will never come up is retried every minute for as long as the
-container lives, and a container nobody replaced looks busy instead of broken.
+The flip is scheduled — every minute by default — and stops at the end of a window measured from
+the container's own boot — `swrr.pgcat.flip_window_seconds`, 480 (eight minutes) by default.
+Without a bound, a pooler that will never come up is retried for as long as the container lives,
+and a container nobody replaced looks busy instead of broken.
 
 Eight is the number the window is chosen in: ECS reports a healthy container within six or seven
-minutes of task start, so the window must not close before that, and eight per-minute attempts is
-far more than the first or second attempt a working flip needs. By the end of it the container has
-either flipped to the writer-only configuration — the database that is always up — or the pooler
+minutes of task start, so the window must not close before that, and eight attempts at the shipped
+minute is far more than the first or second one a working flip needs. By the end of it the container
+has either flipped to the writer-only configuration — the database that is always up — or the pooler
 cannot be made to serve at all, and one more attempt cannot tell those apart.
+
+**The window, and not the cadence, is what bounds the attempts.** An eight-minute window holds eight
+runs at `interval_minutes: 1` and two at `5`; an interval at or past the window's own length is *one*
+attempt. That is the trade the setting makes, and the reason to raise `flip_window_seconds` with it
+rather than on its own: an installation that slows the cadence without widening the window has given
+the pooler less time to be repaired, not less work to do.
 
 - **Where the clock starts.** A file `entrypoint.sh` writes before the pooler is started, holding
   `date +%s` (`swrr.pgcat.boot_file`). Deliberately not the PHP process start, which is a different
