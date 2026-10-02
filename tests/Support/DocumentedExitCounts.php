@@ -10,6 +10,7 @@ use Uak35\WeightedDbManager\Tests\Unit\Console\DbDoctorTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbFlipPgcatCommandTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbProbeReplicasCommandTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbReplicaStatusTest;
+use Uak35\WeightedDbManager\Tests\Unit\Console\DbWindowFlipCommandTest;
 
 /**
  * The counts `docs/documented-exit-codes.md` states, each derived from the provider that owns it.
@@ -94,11 +95,16 @@ final class DocumentedExitCounts
     /**
      * The commands whose exit code this record is about, in the order it names them.
      *
-     * The record's own sentence — "four commands in this package are scheduled" — is the count of
+     * The record's own sentence — "five commands in this package are scheduled" — is the count of
      * *this* list, which is why it is a list here rather than a second sentence in the record: a
      * command that gains a matrix is added here, and the prose follows. Which commands those are
      * is a decision rather than a derivation (a command with one input does not need a table), so
      * this is the one count in the file that is not read out of the code — and the record says so.
+     *
+     * `db:pgcat-window-flip` is the entry that argues the other way round: it has one input pair and
+     * fifteen routes, and the routes are the table — every one of them is a verdict a scheduler
+     * branches on, and the eight-minute probing means most of them are reachable in a single window.
+     * A command whose rows a scheduled run really reaches is one whose rows belong here.
      *
      * `db:replica-status` is the entry that argues for the list: its rule is one input, which was
      * the reason its row was written as "not a matrix" while the row it borrowed — the probe's
@@ -113,6 +119,7 @@ final class DocumentedExitCounts
         DbProbeReplicasCommandTest::class,
         DbFlipPgcatCommandTest::class,
         DbReplicaStatusTest::class,
+        DbWindowFlipCommandTest::class,
     ];
 
     /**
@@ -197,6 +204,23 @@ final class DocumentedExitCounts
                 'pinned' => '/(?|table is (\w+) documented cases against|flip\'s (\w+) documented cases)/',
                 'counts' => 'the distinct cases `DbFlipPgcatCommandTest::documentedSituations()` names',
                 'expected' => self::documentedCases(DbFlipPgcatCommandTest::class),
+            ],
+            // The window flip's two numbers are what its section of the record states, and they are two
+            // because they are different kinds of fact: the cells are the routes a run can take (each
+            // one is a fixture), and the documented kinds are the verdicts those routes report (each
+            // one is a row of the README's table). Here the map between them is one to one, which is
+            // why the two numbers happen to be the two sides of the same table.
+            'the window flip\'s exit matrix, as documented-exit-codes.md counts its cells' => [
+                'record' => self::RECORD,
+                'pinned' => "/the window flip's (\\w+)-cell matrix, and that each cell's verdict/",
+                'counts' => '`DbWindowFlipCommandTest::exitCodeProvider()`',
+                'expected' => self::cells(DbWindowFlipCommandTest::class),
+            ],
+            'the window flip\'s documented kinds, as documented-exit-codes.md counts them' => [
+                'record' => self::RECORD,
+                'pinned' => "/the window flip's (\\w+) documented kinds/",
+                'counts' => 'the distinct cases `DbWindowFlipCommandTest::documentedSituations()` names',
+                'expected' => self::documentedCases(DbWindowFlipCommandTest::class),
             ],
             'the replica-status exit matrix, as documented-exit-codes.md counts its cells' => [
                 'record' => self::RECORD,

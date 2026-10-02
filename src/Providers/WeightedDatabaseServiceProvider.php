@@ -14,6 +14,7 @@ use Uak35\WeightedDbManager\Console\Commands\DbDoctor;
 use Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand;
 use Uak35\WeightedDbManager\Console\Commands\DbProbeReplicas;
 use Uak35\WeightedDbManager\Console\Commands\DbReplicaStatus;
+use Uak35\WeightedDbManager\Console\Commands\DbWindowFlipCommand;
 use Uak35\WeightedDbManager\Database\Weighted\HealthMonitor;
 use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\RedisAtomicStateStore;
@@ -24,6 +25,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
+use Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\BootAuditFinding;
@@ -595,6 +597,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 DbReplicaStatus::class,
                 DbProbeReplicas::class,
                 DbFlipPgcatCommand::class,
+                DbWindowFlipCommand::class,
             ]);
 
             // The flip is this package's command, and every choice about how often it runs and
@@ -611,6 +614,13 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 $config = $this->app->make(Repository::class);
 
                 FlipSchedule::register($schedule, $config);
+
+                // The other half of the same decision, and registered from the same place: the
+                // flip's entry keeps the pool in step from boot, and the reader-window tasks move
+                // it at the boundaries of the day for the rest of the container's life. Only one of
+                // the two should be on — see WindowFlipSchedule — but which one that is is the
+                // installation's to say, so both are registered and each has its own switch.
+                WindowFlipSchedule::register($schedule, $config);
             });
         }
     }

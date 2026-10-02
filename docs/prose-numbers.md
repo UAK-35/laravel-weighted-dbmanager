@@ -106,7 +106,7 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 
 | Claim | The sentence, as the record writes it | What it counts, and what the number is derived from |
 |---|---|---|
-| the commands the provider registers, as README.md counts them | "All **four** are registered by the provider" | the command classes in `src/Console/Commands/` |
+| the commands the provider registers, as README.md counts them | "All **five** are registered by the provider" | the command classes in `src/Console/Commands/` |
 | the shapes the log-severity decision was weighed against, as README.md counts them | "the **seven** shapes it was weighed against" | the candidate headings of `boot-audit-log-severity.md`, less the chosen one |
 | the audit's finding keys, as boot-audit-surfaces.md counts them | "pgcat is one of **twenty-two** keys", "would put **twenty-two** keys' worth …" | the provider's `KEY_*` constants |
 | the finding lists one boot spreads, as boot-audit-finding-keys.md counts them | "the **eight** methods whose lists are spread into one boot's findings" | the `...$this->` spreads in `reportBootAudit()` |
@@ -115,7 +115,7 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the keys in the richest boot, as boot-audit-finding-keys.md counts them | "**eight** findings, **eight** keys, the exact set" | `WeightedDatabaseServiceProviderTest::RICHEST_BOOT_KEYS` |
 | the replica settings the audit refuses, as boot-audit-finding-keys.md counts them | "all **three** replica settings unreadable" | the provider's `REPLICA_METADATA` table |
 | the boot lines that carry a severity, as boot-audit-log-severity.md counts them | "`logContext()`, the **five** call sites" | the `self::logContext(` calls in `BootAudit.php` |
-| the commands whose exit code this record is about, as it counts them | "**Four** commands in this package are scheduled", "All **four** are checked by mutation rather than by argument", "the **four** tables, and the sentences naming the test that reads each one" | the matrices `DocumentedExitCounts` names — which commands have one is a decision, and the record counts the list |
+| the commands whose exit code this record is about, as it counts them | "**Five** commands in this package are scheduled", "All **five** are checked by mutation rather than by argument", "the **five** tables, and the sentences naming the test that reads each one" | the matrices `DocumentedExitCounts` names — which commands have one is a decision, and the record counts the list |
 | the doctor's exit matrix, as documented-exit-codes.md counts its cells | "a **fourteen**-cell matrix" | `DbDoctorTest::exitCodeProvider()` |
 | the probe's exit matrix, as documented-exit-codes.md counts its cells | "a **nine**-cell matrix" | `DbProbeReplicasCommandTest::exitCodeProvider()` |
 | the flip's exit matrix, as documented-exit-codes.md counts its cells | "a **seventeen**-cell matrix" | `DbFlipPgcatCommandTest::exitCodeProvider()` |
@@ -125,6 +125,8 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the probe's rows that document a zero, as documented-exit-codes.md counts them | "**two** of the probe's five rows document `0`" | the README's `db:probe-replicas` exit table, rows whose code is 0 |
 | the probe's rows that document a one, as documented-exit-codes.md counts them | "the probe's five rows document `0` and **three** document `1`" | the README's `db:probe-replicas` exit table, rows whose code is 1 |
 | the flip's documented cases, as documented-exit-codes.md counts them | "The flip's table is **nine** documented cases", "the flip's **nine** documented cases" | the distinct cases `DbFlipPgcatCommandTest::documentedSituations()` names |
+| the window flip's exit matrix, as documented-exit-codes.md counts its cells | "the window flip's **sixteen**-cell matrix, and that each cell's verdict …" | `DbWindowFlipCommandTest::exitCodeProvider()` |
+| the window flip's documented kinds, as documented-exit-codes.md counts them | "the window flip's **twelve** documented kinds" | the distinct cases `DbWindowFlipCommandTest::documentedSituations()` names |
 | the ways a flip can politely do nothing, as documented-exit-codes.md counts them | "the **three** ways a flip can politely do nothing are one case" | the cells `DbFlipPgcatCommandTest::documentedSituations()` assigns to the README row `a flip applied, nothing to do, or skipped by another instance` — the row is wider than the phrase sounds, and which row the phrase names is declared in `DocumentedExitCounts::FLIP_WAYS` |
 | the ways a command can be refused, as documented-exit-codes.md counts them | "the **three** ways a command can be refused are another" | the cells assigned to the row `a flag combination that is refused` |
 | the ways a flip can politely do nothing, as DbFlipPgcatCommandTest counts them | "the **three** ways a flip can politely do nothing are one documented case" | the same cells, stated in the map's own docblock — the copy that had drifted to "two" |

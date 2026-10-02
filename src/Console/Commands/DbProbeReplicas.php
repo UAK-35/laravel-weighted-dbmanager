@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Uak35\WeightedDbManager\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Arr;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 use Uak35\WeightedDbManager\Console\JsonEnvelope;
+use Uak35\WeightedDbManager\Database\Weighted\SingleHostProbe;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 
@@ -57,9 +57,6 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
  */
 class DbProbeReplicas extends Command
 {
-    /** Throwaway connection name used for probes. */
-    private const PROBE_CONNECTION = '__weighted_db_probe';
-
     /** At least one replica answered — a partial sweep is still this verdict. */
     public const KIND_ANSWERED = 'answered';
 
@@ -141,10 +138,13 @@ class DbProbeReplicas extends Command
 
             $replica = ConfigValue::assoc($rawReplica);
 
-            [$host, $port] = $this->replicaAddress($replica, $defaultPort);
+            [$host, $port] = SingleHostProbe::address($replica, $defaultPort);
 
             try {
-                $this->probe($manager, $config, $replica);
+                // The probe itself — one host, its own connection, a bare `SELECT 1`, purged on the
+                // way out — lives in SingleHostProbe, where the reader-window flip's readiness gate
+                // asks the same question of the same target.
+                SingleHostProbe::run($manager, $config, $replica);
 
                 $manager->markReplicaHealthy($host, $port);
                 $okCount++;
@@ -155,9 +155,6 @@ class DbProbeReplicas extends Command
                 $failCount++;
                 $swept[] = ['host' => $host, 'port' => $port, 'healthy' => false, 'error' => $e->getMessage()];
                 $this->verbose("  ✗ {$host}:{$port}  ({$e->getMessage()})");
-            } finally {
-                // Never leave the throwaway connection cached on the manager.
-                $manager->purge(self::PROBE_CONNECTION);
             }
         }
 
@@ -272,57 +269,6 @@ class DbProbeReplicas extends Command
         $manager = $this->laravel->make('db');
 
         return $manager instanceof WeightedDatabaseManager ? $manager : null;
-    }
-
-    /**
-     * Open one connection straight to a single replica and run SELECT 1.
-     *
-     * @param array<string, mixed> $base
-     * @param array<string, mixed> $replica
-     */
-    private function probe(WeightedDatabaseManager $manager, array $base, array $replica): void
-    {
-        $manager->connectUsing(
-            self::PROBE_CONNECTION,
-            $this->buildProbeConfig($base, $replica),
-            true,
-        );
-
-        $manager->connection(self::PROBE_CONNECTION)->select('SELECT 1');
-    }
-
-    /**
-     * Build a single-host config for the probe. The pooled read/write lists are
-     * dropped so Laravel connects straight to the replica under test.
-     *
-     * @param array<string, mixed> $base
-     * @param array<string, mixed> $replica
-     * @return array<string, mixed>
-     */
-    private function buildProbeConfig(array $base, array $replica): array
-    {
-        return ConfigValue::assoc(array_merge(Arr::except($base, ['read', 'write']), $replica));
-    }
-
-    /**
-     * The host:port a replica is tracked under, matching WeightResolver's key
-     * format so probe results and routing agree.
-     *
-     * @param array<string, mixed> $replica
-     * @return array{0: string, 1: int}
-     */
-    private function replicaAddress(array $replica, int $defaultPort): array
-    {
-        $host = $replica['host'] ?? null;
-
-        if (is_array($host)) {
-            $host = $host[0] ?? 'unknown';
-        }
-
-        return [
-            ConfigValue::string($host, 'unknown'),
-            ConfigValue::int($replica['port'] ?? null, $defaultPort),
-        ];
     }
 
     /**

@@ -4,6 +4,44 @@
 
 ### Added
 
+- **The reader windows are scheduled tasks, and a mode change waits until the thing it points at
+  answers.** The per-minute flip converges the pool at container start and then stops at the end of
+  the boot window, deliberately — that is what makes a container that could not come up look broken
+  rather than busy. It is also why nothing moves the pool at 10:00: a container booted at 03:00 has
+  converged to writer-only and, by the time the first window opens, is no longer allowed to change
+  its mind.
+
+  `Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule` is the other half. The provider registers two
+  tasks per window in `swrr.reader_windows` — `activate_readers:{start}` and
+  `deactivate_readers:{end}` — the first time the container's `Schedule` is resolved, each firing
+  once a minute from `lead_seconds` before its boundary to `grace_seconds` after it. Every firing
+  runs the new `db:pgcat-window-flip`, which resolves the boundary nearest the run, asks the mode's
+  target with one `SELECT 1` on a throwaway connection
+  (`Uak35\WeightedDbManager\Database\Weighted\ReadinessProbe`, built on the `SingleHostProbe` that
+  `db:probe-replicas` now shares rather than keeping a copy of), and applies the mode through the
+  flipper's forced path — no boot window, and no recorded run, so a mode applied at 10:00 cannot
+  move the convergence verdict `/health/db` reports. A target that is not answering yet is asked
+  again on the following minutes rather than given up for the day, and one that never answers
+  leaves the pool where it was and exits `1`, which is the one outcome a scheduler has to see.
+
+  `db-manager.swrr.pgcat.schedule.windows` is off by default, and an installation that turns it on
+  should turn `db-manager.swrr.pgcat.schedule.enabled` off in the same change: two mechanisms
+  deciding one mode can disagree. The README documents the settings, the exit code of every route
+  and the kind table, which `DbWindowFlipCommandTest` reads back — and it is the matrix that
+  earned the command its row in `docs/documented-exit-codes.md`, because a task that runs eight
+  times per boundary must not put eight error lines in a log for doing its job.
+
+  Each event also carries a `when()` filter built from its own window, evaluated by `schedule:run`
+  before the command is spawned. A cron minute field cannot hold "52 to 8 of the next hour", so a
+  range that crosses one is written as the union of the minutes on both sides and its expression
+  matches twenty-five firings a day where the boundary is for seventeen — minute 52 of hour 9 is
+  also matched by minute 0 of hour 9, because cron multiplies the two fields. The filter is what
+  narrows it back: a surplus minute costs a closure call and nothing else — no process, no probe,
+  no log line — where before it was a whole process whose only job was to report itself early or
+  expired. `WindowFlipScheduleTest` pins the filter's arithmetic (including a range that wraps past
+  midnight) and its per-event wiring, and the expression's own wider reach is still pinned beside
+  it.
+
 - **The flip schedules itself, with a cadence the installation chooses.** `db:pgcat-flip` was the
   package's command and the application's entry to write: the provider now registers it, the first
   time the container's `Schedule` is resolved, so there is no entry to write into

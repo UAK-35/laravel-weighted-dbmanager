@@ -96,6 +96,7 @@ final class JsonEnvelope
         'db:probe-replicas' => ['key' => 'kind', 'table' => '### Probing: `db:probe-replicas`'],
         'db:replica-status' => ['key' => 'kind', 'table' => '### Reading the distribution: `db:replica-status`'],
         'db:doctor' => ['key' => 'verdict', 'table' => '### The preflight as data: db:doctor --json'],
+        'db:pgcat-window-flip' => ['key' => 'kind', 'table' => '### The reader-window tasks: `db:pgcat-window-flip`'],
     ];
 
     /**
@@ -111,6 +112,15 @@ final class JsonEnvelope
      *   reaches it through its own vocabulary, so the dependency it names can be the flipper rather
      *   than the manager, and both are the same row of the same preflight.
      *
+     *   The window flip is the second kind of sharing, and the one that widened this constant past a
+     *   single word: it is a second entry point to the same flip, so the outcomes it shares with
+     *   `db:pgcat-flip` are genuinely the flip's — a mode that applied (`flipped`), a mode already
+     *   on record (`no_change`), the lock held elsewhere (`skipped`), a step that did not work
+     *   (`failed`), flipping turned off (`disabled`), a request refused before it started
+     *   (`refused`). Each is one fact with one meaning, decided the same way, whether the time of
+     *   day or the boot window is what asked for it; a pipeline that already branches on `flipped`
+     *   should not have to learn a second spelling for it because a second entry point produced it.
+     *
      *   Nothing else is shared, and that is kept apart on purpose: `no_read_list` and `no_replicas`
      *   are different sentences about different subjects, and naming them one word would be a
      *   consumer's problem rather than a tidiness. This constant is what keeps the rule checkable
@@ -120,6 +130,12 @@ final class JsonEnvelope
      */
     public const SHARED_KINDS = [
         'unbound' => 'the container has no weighted manager, or — for the flip — no flipper',
+        'disabled' => 'flipping is off, or pgcat cannot front this connection\'s driver',
+        'refused' => 'a flag, or a combination of them, was refused before anything was read',
+        'no_change' => 'the mode on record already matched, so there was nothing to do',
+        'flipped' => 'a flip applied',
+        'skipped' => 'another flipper instance held the lock',
+        'failed' => 'a step a flip needs did not work',
     ];
 
     /**

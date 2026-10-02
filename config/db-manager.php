@@ -173,6 +173,49 @@ return [
                 // created if it is missing, because a command event runs through a shell
                 // redirect: a log that cannot be opened is a command that never runs.
                 'log' => env('SWRR_PGCAT_SCHEDULE_LOG'),
+
+                // ── The reader windows, as tasks (optional) ──────────────────────────
+                //
+                // The entry above converges the pool at container start and is then a no-op for
+                // the rest of the container's life — the boot window bounds it, deliberately,
+                // because that is what makes a container that could not converge look broken
+                // rather than busy. These tasks are the other half: one moves the pool to the
+                // reader configuration as each window opens and one back to writer-only as it
+                // closes, for as long as the container lives.
+                //
+                // They are registered as `activate_readers:<HH:MM>` and
+                // `deactivate_readers:<HH:MM>` — one pair per window in `swrr.reader_windows`,
+                // named for the boundary they act at — and each runs `db:pgcat-window-flip` once
+                // a minute from `lead_seconds` before its boundary to `grace_seconds` after it.
+                // Every one of those runs probes the target the mode change would point at — the
+                // replicas, or the writer — and the mode is applied at the boundary only once
+                // that target has answered. A boundary whose target never answers is left alone
+                // and reported: the pool stays where it was rather than being pointed at
+                // something that is not there.
+                //
+                // LEFT OFF, AND DELIBERATELY SO. Turn this on and turn `enabled` above off in the
+                // same change: two mechanisms deciding one mode is two mechanisms that can
+                // disagree, and a flip this pair applies is deliberately not recorded as a boot
+                // convergence, so the two do not even share a record of what they did.
+                'windows' => [
+                    'enabled' => env('SWRR_PGCAT_WINDOW_FLIP_ENABLED', false),
+                    // How long before a boundary the probing starts. Eight minutes, the same eight
+                    // the boot window is: long enough that a flapping replica is seen to be
+                    // flapping rather than caught once, short enough that a window is not being
+                    // probed for while the previous one still applies.
+                    'lead_seconds' => (int) env('SWRR_PGCAT_WINDOW_FLIP_LEAD_SECONDS', 480),
+                    // How long after a boundary it keeps asking, so a target that comes up late is
+                    // still used rather than given up for the day. Nothing is applied twice: a run
+                    // whose mode is already the applied one reports that there was nothing to do.
+                    'grace_seconds' => (int) env('SWRR_PGCAT_WINDOW_FLIP_GRACE_SECONDS', 480),
+                    // The directory one log per task is written into, under the application's
+                    // storage path by default. A directory rather than a file, because a day of
+                    // windows is several tasks with several boundaries: each is named after its
+                    // task (`activate_readers-10-00.log`) and each holds one boundary's evidence.
+                    // The directory is created if it is missing — a command event runs through a
+                    // shell redirect, and a log that cannot be opened is a command that never runs.
+                    'log_directory' => env('SWRR_PGCAT_WINDOW_FLIP_LOG_DIRECTORY', storage_path('logs/scheduled_tasks')),
+                ],
             ],
         ],
 

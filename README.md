@@ -1082,7 +1082,7 @@ closes itself, and a page that never closes is a defect or a file.
 
 ## Artisan commands
 
-All four are registered by the provider.
+All five are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
@@ -1090,6 +1090,7 @@ All four are registered by the provider.
 | `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL |
+| `php artisan db:pgcat-window-flip --mode=readers\|writer --at=HH:MM[:SS] [--json]` | One firing of a reader-window task: probe the mode's target, then apply it at the boundary (scheduled by the provider as `activate_readers` and `deactivate_readers`) |
 
 ```php
 // routes/console.php
@@ -1188,6 +1189,95 @@ the pooler less time to be repaired, not less work to do.
 
 The window says nothing about `--dry-run`: a rehearsal answers what a flip *would* do, and a
 container that has stopped flipping is exactly the container a deploy wants to rehearse against.
+
+### The reader-window tasks: `db:pgcat-window-flip`
+
+The per-minute flip stops at the end of the container's boot window. That is the right bound for
+*converging at boot* and the wrong one for *following the day*: a container booted at 03:00
+converges to writer-only, and by the time the 10:00 window opens nothing is allowed to change its
+mind any more.
+
+The provider registers the other half — two tasks per reader window, derived from the same
+`swrr.reader_windows` and `swrr.reader_days` the resolver reads, the first time the schedule is
+resolved:
+
+| task                       | fires once a minute from | applies once                                            |
+|----------------------------|--------------------------|---------------------------------------------------------|
+| `activate_readers:{start}`   | `start − lead`           | `readers`, once at least one replica answers            |
+| `deactivate_readers:{end}`   | `end − lead`             | `writer`, once the primary answers                      |
+
+Each is one event per boundary, named for the task and the boundary (`activate_readers:10:00`),
+and each fires from `boundary − lead` to `boundary + grace` — the eight minutes of probing asked
+for, and eight more past the boundary so a target that is late is asked again rather than given up
+for the day. The event also carries a `when()` filter built from that same window, so a firing
+outside it is refused *before a process is spawned*: seventeen firings per boundary per reader-day,
+not the twenty-five a minute-and-hour cron expression otherwise matches when its range crosses an
+hour. Every firing that does run runs `db:pgcat-window-flip` with its own `--mode` and `--at`, and one run
+is: resolve the boundary, ask the mode's target with one `SELECT 1` on a throwaway connection, and
+— only at the boundary, and only when the target answered — apply the mode through the flipper's
+**forced** path. `forceMode()` has no boot window, because the boot window is a fact about starting
+up rather than about the time of day, and it records no run, so a mode applied at 10:00 cannot move
+the convergence verdict `/health/db` reports for the container.
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `swrr.pgcat.schedule.windows.enabled` | `false` | Whether the two tasks are registered. A switch, read as one; a value that is neither resolves to off and is reported at `warning`. |
+| `swrr.pgcat.schedule.windows.lead_seconds` | `480` | How far before a boundary the probing starts — the eight minutes. A negative resolves to `0`. |
+| `swrr.pgcat.schedule.windows.grace_seconds` | `480` | How far past a boundary it keeps asking, so a late target is not given up for the day. A negative resolves to `0`. |
+| `swrr.pgcat.schedule.windows.log_directory` | `storage_path('logs/scheduled_tasks')` | The directory one log per task is written into — a day of windows is several tasks with several boundaries, and each file holds one boundary's evidence. Created if it is missing, because a command event runs through a shell redirect and a log that cannot be opened is a command that never runs. |
+
+**Turn `swrr.pgcat.schedule.enabled` off in the same change.** Two mechanisms deciding one mode a
+minute apart are two mechanisms that can disagree, and the per-minute flip is the one that would
+undo a window task's work the next time it fires. A window is skipped, and logged at `warning`,
+when it cannot be expressed honestly rather than approximated: times that are not readable, an end
+at or before its start, or a window shorter than `lead + grace` (the deactivation would begin
+probing before the activation could have acted). That last check is also what keeps the range
+writable as a cron expression — the range *is* `lead + grace`, so a window long enough to schedule
+is a range shorter than a day. The lead window is written
+into each event's cron expression rather than into `between()`, because `between()` evaluates
+`strtotime()` in the server's own timezone while the event's timezone is `swrr.timezone` — a cron
+expression is evaluated in the configured zone. It is deliberately *wider* than the lead window
+when the range crosses an hour, because a cron minute field cannot hold "52 to 8 of the next
+hour" — cron multiplies the hour field by the minute field, so minute 52 of hour 9 is also
+matched by minute 0 of hour 9. What narrows it back is a `when()` filter registered on the event
+from its own `from`/`to`, evaluated by `schedule:run` in the scheduler process: a surplus minute
+never becomes a process, a probe, or a log line. The command's own `early`/`expired` verdicts are
+still there for a firing that is genuinely outside its bounds — a run that drifted, or the command
+invoked by hand — and it does nothing either way.
+
+The kinds are the flip's own vocabulary with the two boundaries' additions — `kind` is one
+vocabulary, so a job reading it does not have to know which half of the command produced the
+verdict:
+
+| `kind`        | what it means                                                        | exit |
+|---------------|----------------------------------------------------------------------|------|
+| `early`       | a firing before this task's own lead window — nothing was asked      | `0`  |
+| `waiting`     | inside the lead window and before the boundary: the target was asked | `0`  |
+| `flipped`     | the boundary arrived and the target answered: the mode was applied   | `0`  |
+| `no_change`   | the flipper already has that mode applied, so there was nothing to do | `0`  |
+| `skipped`     | another flipper instance held the lock                               | `0`  |
+| `expired`     | past the boundary and its grace — the chance to act is gone          | `0`  |
+| `not_my_day`  | the boundary resolves to a day that is not a reader day              | `0`  |
+| `disabled`    | the tasks are off, or pgcat cannot front this driver                 | `0`  |
+| `deferred`    | the boundary arrived and the target did not answer                   | `1`  |
+| `refused`     | `--mode` or `--at` was refused before anything was read              | `1`  |
+| `unbound`     | the container has no weighted manager, or no flipper                 | `1`  |
+| `failed`      | a step the flip needs did not work                                   | `1`  |
+
+The one row that is not a rule a reader would guess is `1` for a target that did not answer: the
+task exists to change the mode and *this* run could not, which is the outcome a scheduler should be
+able to see, and the next firing inside the grace asks again. `mode`, `at` and `boundary` are what
+the run was for; `mode_before` is the mode the flipper had when the run started — the fact the
+decision turns on, and `null` when nothing has ever applied one; `result` is the flipper's own report
+of what it did; and `probe` is the target's own verdict — `target`, `available`, the counts, and one
+row per host — which is `null` on a run that never asked.
+
+```bash
+php artisan db:pgcat-window-flip --mode=readers --at=10:00 --json > boundary.json
+jq -e '.kind == "flipped" and .exit_code == 0' boundary.json
+jq -e '.probe.available and .probe.answered >= 1' boundary.json
+jq -e '.applied_mode == "readers"' boundary.json
+```
 
 ### Reading the distribution: `db:replica-status`
 
@@ -2022,9 +2112,12 @@ src/Database/Weighted/   SWRR algorithm, weight resolver (and the exclusions it 
                          health monitor, state stores, connection factory, window resolver,
                          manager
 src/Pgcat/               pgcat.toml flipper, the supervisor step it runs afterwards,
-                         and the two result value objects (a flip, and a rehearsal)
+                         the two schedules the provider registers (the per-minute entry,
+                         and the reader-window tasks), and the two result value objects
+                         (a flip, and a rehearsal)
 src/Providers/           WeightedDatabaseServiceProvider (replaces the framework's)
-src/Console/Commands/    db:doctor, db:replica-status, db:probe-replicas, db:pgcat-flip
+src/Console/Commands/    db:doctor, db:replica-status, db:probe-replicas, db:pgcat-flip,
+                         db:pgcat-window-flip
 src/Http/Controllers/    DatabaseHealthController
 src/Support/             ConfigValue (typed config reads), ReaderWindows/ReaderDays (what the
                          reader fallback may contain), ReplicaMetadata (what a replica's
