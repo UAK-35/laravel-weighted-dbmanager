@@ -7,3 +7,4 @@
 /build/
 *.txt
 *-diagnose*.log
+/bin/*.bak

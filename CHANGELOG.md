@@ -406,6 +406,13 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
 
 ### Fixed
 
+- **A backup file an editor leaves beside a script in `bin/` is ignorable.** An editor that writes
+  `checks.php.bak` beside the file it is editing leaves it under `bin/`, where nothing names it and a
+  later `git add bin` picks it up with the script. The `.gitignore` now carries `/bin/*.bak` beside
+  the rules for the other artifacts this repository produces. Nothing here writes such a file
+  itself — the pattern is for the editor — so it changes no run of anything and only removes the
+  chance of one arriving by accident.
+
 - **`PUSHING.md` tells a reader to `cd` to where the package is.** The `git push` block named
   `LPR\side-projects\laravel-weighted-dbmanager`, a directory the package left when it moved to
   `LPR\packages\laravel-weighted-dbmanager`. The block is written to be pasted as it stands, so a
