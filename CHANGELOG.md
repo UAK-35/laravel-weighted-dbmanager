@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+BREAKING: parts of this release change what an installation reads at run time rather than only how
+the package is built, and each is named below.
+
+`/health/db` answers `degraded`, HTTP 503, in a state it used to answer `ok` to — a pooler left on
+the writer-only config inside an open reader window — so a monitor, a load-balancer health check or a
+deploy gate pointed at that endpoint changes its answer for the same installation. The boot audit's
+record line is triaged by `kept` and `keys_this_boot_read` rather than by the `discarded` and
+`keys_on_disk` an alert rule written against the old line selects on.
+
+Neither is a renamed class, a renamed config key or a removed method — `--weigh`'s public-API and
+config signals are a minor — and the rest of this section is either additive or tooling this package
+does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` records are all
+`export-ignore`d, so a change there cannot reach an installation.
+
 ### Added
 
 - **The tools this package installs are written down once, and three readers are held to the one
@@ -29,6 +43,11 @@
   10:00 arrives, the windows move the resolver to `readers`, and nothing moves pgcat with it. Every
   read reaches the writer while `/health/db` answers `ok`, because a pooler that answers is not a
   pooler that is right.
+
+  **What this asks of an installation, and why this release says it is breaking:** a monitor, a
+  load-balancer health check or a deploy gate pointed at `/health/db` now fails where it used to
+  pass, for the disagreement below. Whether that endpoint should gate a deployment is a decision to
+  make rather than one the package can make for you.
 
   `PgcatConfigFlipper::readerWindowVerdict()` is the second answer, carried in the flipper's own
   snapshot as `reader_window` and reported by `/health/db` as a top-level block that also feeds the
@@ -407,7 +426,7 @@
   Measured on this tree: `php bin/release.php --weigh --dry-run --branch=dev` answered
   `minor  (weighed: a breaking change, which is a minor while the package is pre-1.0)` before the
   change, with a `breaking CHANGELOG` row, and `minor  (weighed: a minor change)` after it, with
-  that row gone and `### Added — 13 entries` as the loudest heading. The version is 0.2.0 either
+  that row gone and the `### Added` heading the loudest one. The version is 0.2.0 either
   way, because what moved is the claim the plan makes about the notes. Pinned by two cases in
   `BumpWeighingTest`: `test_a_note_that_only_names_the_marker_weighs_the_heading_it_sits_under`
   drives the three mentions that used to trip it — a quoted word mid-sentence, a bullet naming it,
@@ -840,6 +859,10 @@
   is the second line, and its context carries `lock`, `attempts` and `waited_ms`. Both are logged at
   `error`, both name their subject in the context, and the README's triage table says which key tells
   which kind of page apart.
+
+  **What this asks of an installation:** an alert rule, a dashboard query or a log grep that selects
+  on `discarded` or `keys_on_disk` selects on nothing after the upgrade, because the keys are `kept`
+  and `keys_this_boot_read` and the sentence that carried `discarding N entries` is gone with them.
 
 ## 0.2.0-alpha1 - 2026-09-28
 
