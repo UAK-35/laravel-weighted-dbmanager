@@ -158,7 +158,7 @@ return [
 
     // courtesy: https://github.com/laravel/framework/discussions/50774#discussioncomment-8921534
     'providers' => \Illuminate\Support\ServiceProvider::defaultProviders()->replace([
-        \Illuminate\Database\DatabaseServiceProvider::class => \App\Providers\WeightedDatabaseServiceProvider::class,
+        \Illuminate\Database\DatabaseServiceProvider::class => \Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider::class,
     ])->toArray(),
 
 ];

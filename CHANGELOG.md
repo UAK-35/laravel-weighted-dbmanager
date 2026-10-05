@@ -406,6 +406,16 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
 
 ### Fixed
 
+- **The package's own app skeleton names the provider that exists.** `config/app.php` replaces
+  Laravel's `DatabaseServiceProvider` with this package's, and the class it named was
+  `\App\Providers\WeightedDatabaseServiceProvider` — a provider of the application the package was
+  built beside, which resolves nowhere here: `composer.json` autoloads one prefix,
+  `Uak35\WeightedDbManager\` from `src/`, and nothing maps `App\`. The replacement now names
+  `\Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider`. Nothing in this repository
+  loads the file — `bin/` and `tests/` run the package through its own autoloader and never boot the
+  skeleton — so no gate here reads it, which is the shape a dangling reference takes when it is an
+  application config rather than a class the suite exercises.
+
 - **The `BREAKING` marker is read where a changelog writes one, instead of wherever the word
   appears.** `changelogSignal()` asked `str_contains($unreleased, 'BREAKING')`, and the notes in
   this repository are the case that found it: the entry above this one, which documents the marker,
