@@ -13,8 +13,10 @@ use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
+use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
+use Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
@@ -29,7 +31,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * php artisan db:doctor [connection] [--strict] [--json] [--config-file=path]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Eleven things can be wrong while the application
+ * do", before traffic arrives. Twelve things can be wrong while the application
  * still boots and answers requests:
  *
  *   provider swap     the framework's DatabaseServiceProvider is still the one
@@ -66,6 +68,16 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *   reader windows    swrr.reader_windows holds entries that are not windows, which
  *                     are refused: the natural flat string '10:00-14:20' is read as
  *                     no window at all, leaving reads on the pool at every hour
+ *   flip schedule     nothing moves the pooler at the boundaries the configuration is
+ *                     written for: the reader-window tasks are on and no boundary is
+ *                     scheduled — every window is unusable, or too short to hold the
+ *                     lead and the grace — or nothing at all is scheduled while the
+ *                     flipper is armed, which leaves pgcat.toml where the last write
+ *                     put it while the resolver's mode moves on. The row also says
+ *                     which mechanism answers a boundary when the switches read
+ *                     cleanly, and refuses either of them written as something that
+ *                     is not on or off — the two switches `switch values` does not
+ *                     cover
  *   store probe       the store reachability check can never run: probing is
  *                     switched off, or the record that throttles it cannot be
  *                     written, so the PING is skipped on every boot in silence
@@ -161,7 +173,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * `connections` block for the read list of the connection named on the command line, and a file
  * holding both is judged for both.
  *
- * It exists for the one moment the eleven rows above cannot serve. A pipeline vetting a config
+ * It exists for the one moment the twelve rows above cannot serve. A pipeline vetting a config
  * on a branch has the *old* configuration installed — the provider swap, the gate, the files,
  * the replica metadata and the store are all question about the running application, and every
  * one of them would be answered about the incumbent and printed next to the candidate's name.
@@ -268,6 +280,7 @@ class DbDoctor extends Command
             $rows[] = $this->replicaMetadata($manager, $connection);
             $rows[] = $this->switchValues();
             $rows[] = $this->readerWindows();
+            $rows[] = $this->flipSchedule();
             $rows[] = $this->storeProbe();
             $rows[] = $this->storeReachability($manager, $connection);
         }
@@ -1888,6 +1901,198 @@ class DbDoctor extends Command
     private function readerRow(array $problems, array $recorded): array
     {
         return $this->datedRow('reader windows', $problems, $recorded);
+    }
+
+    /**
+     * Which mechanism moves the pooler, and what it is written to move it at.
+     *
+     * WHY THIS ROW EXISTS
+     *   The reader windows are a fact about routing and the flip is a fact about a file, and
+     *   between them is the question an operator actually asks before a release: *will anything
+     *   move pgcat when a window opens?* Nothing answered it. `reader windows` judges the setting
+     *   the resolver reads, `pgcat files` and `pgcat supervisor` judge a flip that runs, and
+     *   `switch values` covers pgcat's own three switches — not the two that decide whether
+     *   anything is *scheduled* to run one at all.
+     *
+     *   The state this is here for is the one that is silent by construction. A container booted
+     *   outside a reader window converges to writer-only in its first minutes and then, by design,
+     *   stops: the default bounds converging *at boot*, so the per-minute entry is a no-op for the
+     *   rest of the container's life. 10:00 arrives, the resolver moves to readers, nothing moves
+     *   pgcat with it, and every surface reads well — the flipper is armed, the files are
+     *   writable, the windows are well formed. `swrr.pgcat.schedule.windows.enabled` is the setting
+     *   that closes the gap, and this row is where a preflight says whether it is on.
+     *
+     * WHY NEITHER ON IS A WARNING AND ONLY ONE ON IS NOT
+     *   Neither entry scheduled is not a preference: the flipper is armed and no run will ever
+     *   apply a mode, so the file keeps whatever the last write left and the resolver's mode moves
+     *   away from it — the disagreement `reader_window.failed` exists to report, with nothing left
+     *   that could repair it. One of the two on is a configuration, both of them are documented:
+     *   the per-minute entry alone is *converged at boot, and no further*, which the sentence says
+     *   rather than implying a fault; the window tasks alone are *the pooler follows the day*.
+     *
+     *   Both on is not a warning, and the reason is worth writing down because the README used to
+     *   claim the opposite. The per-minute entry checks the boot window before it takes its lock
+     *   (`PgcatConfigFlipper::applyCurrentState()`), so after a container has converged it does not
+     *   act at all — it returns `window_closed` and exits without reading or writing a file. The
+     *   two therefore cannot write different modes for one boundary; inside the boot window they
+     *   read the same resolver and agree, and the flipper's own `flock` serialises the two runs
+     *   anyway. What is left is a second process a minute and a second line in the log, which the
+     *   row names so the choice to keep both is made rather than inherited.
+     *
+     * A REFUSED SWITCH IS THE THIRD STATE, AND IT HAS NO OTHER READER
+     *   Both switches are read by the class that owns them (`FlipSchedule::options()`,
+     *   `WindowFlipSchedule::settings()`), so a value that is not on or off is refused here exactly
+     *   as it is refused there — and this row is the only surface that reports it. The two resolve
+     *   to the value their setting documents rather than to garbage, which is what the sentence
+     *   says: a typo is named and does not disarm the repair.
+     *
+     * Nothing is suggested. The repair for the one warning is a choice between two settings, and a
+     * `suggestion` is a value a gate may apply without reading it — so which one to point at the
+     * boundary is the operator's to make, and the row names both keys instead.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function flipSchedule(): array
+    {
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row('flip schedule', self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row(
+                'flip schedule',
+                self::FAIL,
+                'the flipper could not be built, so nothing can move the pooler at a boundary: '.$e->getMessage(),
+            );
+        }
+
+        // An inert flipper has no file to move and no mode to move it to, so there is no
+        // schedule to keep in step and nothing for one to be wrong about — the same conclusion
+        // `pgcat files` and `pgcat supervisor` reach, said the same way.
+        if (!$flipper->isEnabled()) {
+            return $this->row('flip schedule', self::PASS, 'flipper is not armed — nothing moves the pooler, and nothing is waiting for it to');
+        }
+
+        $config = $this->laravel->make(Repository::class);
+
+        // Both readings come from the classes that act on them rather than from a second parse of
+        // the block, so this row cannot disagree with the entry that runs and the task that
+        // registers: `FlipSchedule` decides the cadence and the switch's fallback, and
+        // `WindowFlipSchedule` decides the plan.
+        $perMinute = FlipSchedule::options($config);
+        $windows = WindowFlipSchedule::settings($config);
+
+        /** @var list<array{status: string, key: string|null, sentence: string, suggestion: string|null}> $problems */
+        $problems = [];
+
+        // A switch written as something that is not on or off. No finding key: nothing in the boot
+        // audit remembers either of these two, so the sentence prints undated rather than dated
+        // from a finding about another setting.
+        if ($perMinute['refused'] !== null) {
+            $problems[] = [
+                'status' => self::FAIL,
+                'key' => null,
+                'sentence' => SwitchValue::describeRefused([$perMinute['setting'] => $perMinute['refused']])
+                    .' — '.SwitchValue::ACCEPTED.'. Refused: the per-minute entry is registered as '
+                    .self::switchWord($perMinute['enabled']).', the value the setting documents, because '
+                    .'a typo must not be what disarms a flip.',
+                'suggestion' => null,
+            ];
+        }
+
+        if ($windows['refused'] !== null) {
+            $problems[] = [
+                'status' => self::FAIL,
+                'key' => null,
+                'sentence' => SwitchValue::describeRefused([$windows['setting'] => $windows['refused']])
+                    .' — '.SwitchValue::ACCEPTED.'. Refused: the reader-window tasks are not registered, '
+                    .'the value the setting documents — the pooler moves at no window boundary.',
+                'suggestion' => null,
+            ];
+        }
+
+        // A refused switch is the whole answer: which mechanism answers a boundary is a question
+        // about the value the switch resolves to, and that is already in the sentence above — a
+        // second sentence about a value nobody wrote would be the row talking past itself.
+        if ($perMinute['refused'] !== null || $windows['refused'] !== null) {
+            return $this->datedRow('flip schedule', $problems, $this->recordedFindings());
+        }
+
+        try {
+            $plan = WindowFlipSchedule::plan($windows);
+        } catch (Throwable $e) {
+            return $this->row(
+                'flip schedule',
+                self::FAIL,
+                'the reader-window plan could not be built, so no boundary can be scheduled: '.$e->getMessage(),
+            );
+        }
+
+        if ($windows['enabled'] && $plan['entries'] === []) {
+            // On, and nothing scheduled: every window was skipped, and the reasons come from the
+            // planner rather than from a second reading of the same windows here. The registration
+            // logs each of these as a warning too — this is the row that makes one of them fail a
+            // preflight instead of waiting in a log file.
+            $problems[] = [
+                'status' => self::WARN,
+                'key' => null,
+                'sentence' => 'swrr.pgcat.schedule.windows.enabled is on and no boundary is scheduled: '
+                    .implode('; ', array_map(
+                        static fn (array $skip): string => $skip['window'].' — '.$skip['reason'],
+                        $plan['skipped'],
+                    )).'.',
+                'suggestion' => null,
+            ];
+        } elseif ($windows['enabled']) {
+            $problems[] = [
+                'status' => self::PASS,
+                'key' => null,
+                'sentence' => sprintf(
+                    'the pooler follows the day: %d boundary task(s) — %s — each probing from %ds before '
+                    .'its boundary to %ds after it, and the per-minute entry is %s.',
+                    count($plan['entries']),
+                    implode(', ', array_column($plan['entries'], 'name')),
+                    $windows['lead_seconds'],
+                    $windows['grace_seconds'],
+                    // The two are not in conflict: the per-minute entry stops at the end of the boot
+                    // window, so it cannot act on a boundary after a container has converged.
+                    $perMinute['enabled']
+                        ? 'on as well — no boundary is contended, because it stops at the end of the boot window'
+                        : 'off, so one mechanism decides the mode',
+                ),
+                'suggestion' => null,
+            ];
+        } elseif ($perMinute['enabled']) {
+            $problems[] = [
+                'status' => self::PASS,
+                'key' => null,
+                'sentence' => sprintf(
+                    'converged at boot only: the per-minute entry is on and the reader-window tasks are '
+                    .'off, so the pooler follows the resolver for the %ds after a container starts and is '
+                    .'a no-op for the rest of its life — nothing moves it as a reader window opens or '
+                    .'closes. swrr.pgcat.schedule.windows.enabled is the setting that does.',
+                    // The flipper's own reading of the bound — the class that stops the runs is the
+                    // one that answers how long they are allowed to keep trying.
+                    $flipper->window()->seconds(),
+                ),
+                'suggestion' => null,
+            ];
+        } else {
+            $problems[] = [
+                'status' => self::WARN,
+                'key' => null,
+                'sentence' => 'nothing is scheduled to move the pooler: the per-minute entry is off '
+                    .'(swrr.pgcat.schedule.enabled) and the reader-window tasks are off '
+                    .'(swrr.pgcat.schedule.windows.enabled), and the flipper is armed — so pgcat\'s file '
+                    .'stays where the last write left it while the resolver\'s mode moves on, with nothing '
+                    .'left that could repair it.',
+                'suggestion' => null,
+            ];
+        }
+
+        return $this->datedRow('flip schedule', $problems, $this->recordedFindings());
     }
 
     /**

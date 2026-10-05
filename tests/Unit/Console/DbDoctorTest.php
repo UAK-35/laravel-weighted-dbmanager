@@ -1565,7 +1565,7 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('11 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString('12 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
         $this->assertSame(1, $exit);
     }
 
@@ -1800,6 +1800,142 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('the documented opt-out', $row);
         $this->assertSame(0, $exit);
     }
+    // ─────────────────────────────────────────────────────────────────────────
+    // flip schedule — which mechanism moves the pooler, and at what
+    //
+    // The state this row is here for is silent by construction: the per-minute entry bounds
+    // *converging at boot*, so a container that came up outside a window stops following the
+    // day the moment its window closes. Every other row can read well in that installation —
+    // the flipper is armed, the files are writable, the windows are well formed — and this is
+    // the one that says nothing will move pgcat when 10:00 arrives.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public function test_the_flip_schedule_row_reports_a_pooler_converged_at_boot_only(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        $this->useReaderFallback([['start' => '10:00:00', 'end' => '14:20:00']], [1, 2, 3, 4, 5]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('PASS  flip schedule', $row);
+        $this->assertStringContainsString('converged at boot only', $row);
+        $this->assertStringContainsString('the reader-window tasks are off', $row);
+        $this->assertStringContainsString('nothing moves it as a reader window opens or closes', $row);
+        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled is the setting that does', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    public function test_the_flip_schedule_row_passes_the_window_tasks_and_names_their_boundaries(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        $this->useReaderFallback(
+            [['start' => '10:00:00', 'end' => '14:20:00'], ['start' => '17:00:00', 'end' => '20:30:00']],
+            [1, 2, 3, 4, 5],
+        );
+        config()->set('db-manager.swrr.pgcat.schedule.windows.enabled', true);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('PASS  flip schedule', $row);
+        $this->assertStringContainsString('the pooler follows the day: 4 boundary task(s)', $row);
+        $this->assertStringContainsString('activate_readers:10:00', $row);
+        $this->assertStringContainsString('deactivate_readers:14:20', $row);
+        $this->assertStringContainsString('activate_readers:17:00', $row);
+        $this->assertStringContainsString('deactivate_readers:20:30', $row);
+        $this->assertStringContainsString('probing from 480s before its boundary to 480s after it', $row);
+        // The per-minute entry is on here, and the row says why that is not a conflict rather
+        // than leaving the operator to wonder which of the two wins.
+        $this->assertStringContainsString('it stops at the end of the boot window', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    public function test_the_flip_schedule_row_warns_when_nothing_is_scheduled_to_move_the_pooler(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        config()->set('db-manager.swrr.pgcat.schedule', ['enabled' => false]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('WARN  flip schedule', $row);
+        $this->assertStringContainsString('nothing is scheduled to move the pooler', $row);
+        $this->assertStringContainsString('swrr.pgcat.schedule.enabled', $row);
+        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled', $row);
+        $this->assertStringContainsString('stays where the last write left it', $row);
+        $this->assertSame(0, $exit, 'a warning fails a preflight only under --strict');
+
+        [, $strictExit] = $this->doctor(strict: true);
+
+        $this->assertSame(1, $strictExit, '--strict fails the deploy for a pooler nothing moves');
+    }
+
+    public function test_the_flip_schedule_row_warns_when_the_tasks_are_on_and_no_boundary_is_scheduled(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        // Ten minutes long, where the lead and the grace ask for sixteen: the deactivation would
+        // begin probing before the activation could have acted, so the pair is skipped rather than
+        // approximated — the state a setting that reads on and does nothing leaves behind.
+        $this->useReaderFallback([['start' => '10:00:00', 'end' => '10:10:00']], [1, 2, 3, 4, 5]);
+        config()->set('db-manager.swrr.pgcat.schedule.windows.enabled', true);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('WARN  flip schedule', $row);
+        $this->assertStringContainsString('is on and no boundary is scheduled', $row);
+        $this->assertStringContainsString('10:00:00–10:10:00', $row);
+        $this->assertStringContainsString('the window is 10 minute(s) long', $row);
+        $this->assertSame(0, $exit, 'a warning fails a preflight only under --strict');
+
+        [, $strictExit] = $this->doctor(strict: true);
+
+        $this->assertSame(1, $strictExit, '--strict fails the deploy for tasks that are on and scheduled to nothing');
+    }
+
+    public function test_the_flip_schedule_row_fails_a_schedule_switch_that_is_not_on_or_off(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        config()->set('db-manager.swrr.pgcat.schedule', ['enabled' => 'maybe']);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('FAIL  flip schedule', $row);
+        $this->assertStringContainsString('swrr.pgcat.schedule.enabled is "maybe"', $row);
+        $this->assertStringContainsString('a switch is on or off', $row);
+        // The switch's own fallback, named rather than guessed at: the per-minute entry follows
+        // `swrr.pgcat.enabled`, so a typo does not disarm the flip.
+        $this->assertStringContainsString('the per-minute entry is registered as on', $row);
+        $this->assertSame(1, $exit);
+    }
+
+    public function test_the_flip_schedule_row_is_moot_while_the_flipper_is_not_armed(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('PASS  flip schedule', $row);
+        $this->assertStringContainsString('flipper is not armed', $row);
+        $this->assertSame(0, $exit);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // switch values — the three on/off settings, read as they were written
     //
@@ -2174,8 +2310,8 @@ class DbDoctorTest extends TestCase
      * The rows the README documents are the rows the command builds — by name, not by count.
      *
      * Three numbers in the records describe this list and nothing compared them with it: the
-     * README's "Eleven things can be wrong", `docs/documented-exit-codes.md`'s "the eleven-row
-     * description of what each check judges", and `docs/db-doctor-json.md`'s "eleven ... and six
+     * README's "Twelve things can be wrong", `docs/documented-exit-codes.md`'s "the twelve-row
+     * description of what each check judges", and `docs/db-doctor-json.md`'s "twelve ... and six
      * where it does not". The exit tables already have a guard for this class of drift one level
      * up; this is the same guard for the row list, and the comparison is by name because a count
      * can be right while the list is wrong — and it is the names a reader selects on.
@@ -2346,6 +2482,15 @@ class DbDoctorTest extends TestCase
             'store probe — off, and a record that cannot be written' => [
                 'store probe',
                 ['switched off (swrr.audit.store_probe_seconds = 0', 'cannot be written, and it is what throttles the probe'],
+                0,
+            ],
+            // Both schedule switches written as something that is not on or off: the two settings
+            // `switch values` does not cover, refused by the row that reads them for the boundary
+            // they decide. No repair: which mechanism to point at the boundary is the operator's
+            // choice, so the row names both keys and prints no line a gate could apply.
+            'flip schedule — both schedule switches refused' => [
+                'flip schedule',
+                ['swrr.pgcat.schedule.enabled is "flase"', 'swrr.pgcat.schedule.windows.enabled is "flase"'],
                 0,
             ],
         ];
@@ -2649,13 +2794,13 @@ class DbDoctorTest extends TestCase
     private static function exitCodeProfile(string $profile): array
     {
         return match ($profile) {
-            'healthy' => [11, 0, 0],
-            'warned' => [10, 1, 0],
-            'warned-twice' => [9, 2, 0],
-            'failed' => [10, 0, 1],
-            'failed-twice' => [9, 0, 2],
-            'mixed' => [9, 1, 1],
-            'mixed-twice' => [7, 2, 2],
+            'healthy' => [12, 0, 0],
+            'warned' => [11, 1, 0],
+            'warned-twice' => [10, 2, 0],
+            'failed' => [11, 0, 1],
+            'failed-twice' => [10, 0, 2],
+            'mixed' => [10, 1, 1],
+            'mixed-twice' => [8, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -3599,6 +3744,13 @@ class DbDoctorTest extends TestCase
         ]);
 
         config()->set('db-manager.swrr.allow_local_fallback', 'nope');
+        // Set after `armPgcat()`, which replaces the whole `swrr.pgcat` block: the two schedule
+        // switches are refused values beside the two pgcat ones, so the row that reads them has
+        // problems of its own rather than passing over the block it was handed.
+        config()->set('db-manager.swrr.pgcat.schedule', [
+            'enabled' => 'flase',
+            'windows' => ['enabled' => 'flase'],
+        ]);
         $this->useReaderFallback(['10:00-14:20'], '1,2,3');
 
         $record = $this->tempDir() . '/audit.json';

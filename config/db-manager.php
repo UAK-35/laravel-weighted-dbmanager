@@ -194,9 +194,14 @@ return [
                 // something that is not there.
                 //
                 // LEFT OFF, AND DELIBERATELY SO. Turn this on and turn `enabled` above off in the
-                // same change: two mechanisms deciding one mode is two mechanisms that can
-                // disagree, and a flip this pair applies is deliberately not recorded as a boot
-                // convergence, so the two do not even share a record of what they did.
+                // same change. The two read the same resolver and cannot both act on one boundary
+                // — the per-minute entry checks the boot window before it takes its lock, so once
+                // a container has converged it does nothing at a boundary — so this is a choice
+                // about which mechanism owns the mode rather than a race to avoid. A mode this
+                // pair applies goes through the flipper's forced path, which is deliberately not
+                // recorded as a boot convergence, so the two do not share a record of what they
+                // did either. `db:doctor`'s `flip schedule` row reports which of the two answers
+                // a boundary, and warns when neither does.
                 'windows' => [
                     'enabled' => env('SWRR_PGCAT_WINDOW_FLIP_ENABLED', false),
                     // How long before a boundary the probing starts. Eight minutes, the same eight

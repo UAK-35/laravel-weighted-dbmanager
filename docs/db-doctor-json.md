@@ -36,7 +36,7 @@ That is the same problem `db:pgcat-flip --json` was built for, and the reasoning
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
 here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
-eleven verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+twelve verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
 likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
@@ -171,7 +171,7 @@ sentence exists to prevent.
 
 ### The row list is not a fixed length
 
-`checks` is every row the run built. That is eleven on an installation where `db` resolves to the
+`checks` is every row the run built. That is twelve on an installation where `db` resolves to the
 weighted manager and **six** where it does not — the replica rows are only asked when there is a
 manager to ask them of, which is a property of the rendered command that predates this flag. So `name`
 is the row's identity and the thing to select on; the order and the count are the table's, and are
@@ -302,7 +302,7 @@ it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Six rows when `db` does not resolve, eleven otherwise. A gate
+- **The row set is not a fixed length.** Six rows when `db` does not resolve, twelve otherwise. A gate
   must select by `name` — the row's identity, and the same string the table prints — and nothing in the
   object states how many rows there "should" be, so a gate that expects a particular row to exist has
   to decide what its absence means on its own. The README's deploy gate is the worked example of that

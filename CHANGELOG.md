@@ -18,6 +18,28 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
 
 ### Added
 
+- **Nothing reported whether anything would move the pooler at a reader-window boundary, and now a
+  preflight does.** The per-minute entry bounds *converging at boot* — on purpose, so a container
+  that could not come up looks broken rather than busy — and it is a no-op for the rest of its life.
+  A window opens at 10:00, the resolver moves to `readers`, nothing moves pgcat with it, and every
+  surface reads well: `switch values` covers pgcat's three switches, `reader windows` judges the
+  setting the resolver reads, and `pgcat files` and `pgcat supervisor` judge a flip that runs. None
+  of them was asked whether one is *scheduled*, and the two settings that decide it —
+  `swrr.pgcat.schedule.enabled` and `swrr.pgcat.schedule.windows.enabled` — were the pair nothing
+  reported at all: a value that is neither on nor off was logged once at registration and read by
+  no preflight.
+
+  `db:doctor`'s `flip schedule` row is that reading, and both halves come from the class that owns
+  them (`FlipSchedule::options()`, `WindowFlipSchedule::settings()`), so the row cannot disagree
+  with the entry that runs and the tasks that register. It **fails** on either switch written as
+  something that is not on or off, naming the value, the accepted spellings and the value the
+  setting falls back to. It *warns* when the reader-window tasks are on and no boundary is scheduled
+  — every window unusable, or shorter than the lead and the grace — and when the flipper is armed
+  with neither mechanism on, which leaves pgcat's file where the last write put it while the
+  resolver's mode moves on. On a run that reads cleanly it names which mechanism answers a boundary,
+  and both on is reported as what it is rather than as a fault. `DbDoctorTest` pins the states and
+  both refusals.
+
 - **The tools this package installs are written down once, and three readers are held to the one
   copy.** The vendor paths existed twice and nothing compared them: `composer.json`'s scripts named
   the tools bare, for Composer to resolve against `vendor/bin`, and `bin/checks.php` held the same
@@ -405,6 +427,18 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
   outcome. Pinned by nine cases in `SilentNotesTest`.
 
 ### Fixed
+
+- **The notes said the per-minute flip would undo a window task's work, and it cannot.**
+  `config/db-manager.php` and the README's reader-window section both told a reader that the two
+  mechanisms "can disagree" and that the per-minute entry "would undo a window task's work the next
+  time it fires". It would not: `applyCurrentState()` checks the boot window before it takes its
+  lock, so once a container has converged every later run returns `window_closed` without reading or
+  writing a file — and inside the boot window the two read the same resolver, with the flipper's own
+  `flock` serialising them. What the per-minute entry has left after the boot window is a second
+  process a minute and a second line in the log; what the tasks have is the mode applied through
+  `forceMode()`, which records no run. The advice to keep one of them stands — one mechanism owning
+  the mode is easier to reason about, and only one of them can describe a mode change as a
+  convergence — and the reason it gives is now the true one.
 
 - **A backup file an editor leaves beside a script in `bin/` is ignorable.** An editor that writes
   `checks.php.bak` beside the file it is editing leaves it under `bin/`, where nothing names it and a

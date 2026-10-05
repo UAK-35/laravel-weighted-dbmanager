@@ -76,7 +76,7 @@ column, a row with a different number of cells — throws, because a guard that 
 nothing reports agreement with a table it never found.
 
 The heading parameter matters for `db:doctor` in particular: that section's first table is
-the eleven-row description of what each check judges, not the exit-code table, so "first table
+the twelve-row description of what each check judges, not the exit-code table, so "first table
 under the heading" would bind the wrong thing. Selecting by column is what makes the guard
 say what it is about.
 

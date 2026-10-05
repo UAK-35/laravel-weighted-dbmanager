@@ -566,12 +566,14 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * Config publishing + artisan command registration + the flip's schedule.
      *
      * Laravel auto-discovers commands only from the application's own
-     * app/Console/Commands directory, so the package registers its three
-     * commands here:
+     * app/Console/Commands directory, so the package registers all five of
+     * its commands here:
      *
-     *   db:replica-status   weighted replica traffic table
-     *   db:probe-replicas   active SELECT 1 probing of every replica
-     *   db:pgcat-flip       keep pgcat.toml in step with the reader window
+     *   db:doctor              preflight: every way the configuration cannot work
+     *   db:replica-status      weighted replica traffic table
+     *   db:probe-replicas      active SELECT 1 probing of every replica
+     *   db:pgcat-flip          keep pgcat.toml in step with the reader window
+     *   db:pgcat-window-flip   probe a boundary's target, then apply that mode
      *
      * parent::boot() is called first — it is what points Eloquent at this
      * manager (Model::setConnectionResolver) and hands models the event
