@@ -30,6 +30,8 @@
 /bin/weighing.php     export-ignore
 /bin/inventory.php    export-ignore
 /bin/blame.php        export-ignore
+/bin/tools.php        export-ignore
+/bin/tool.php         export-ignore
 /bin/composer-link.cmd export-ignore
 /files.tsv            export-ignore
 /methods.tsv          export-ignore

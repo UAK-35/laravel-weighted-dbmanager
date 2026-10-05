@@ -4,6 +4,24 @@
 
 ### Added
 
+- **The tools this package installs are written down once, and three readers are held to the one
+  copy.** The vendor paths existed twice and nothing compared them: `composer.json`'s scripts named
+  the tools bare, for Composer to resolve against `vendor/bin`, and `bin/checks.php` held the same
+  four as `$root . '/vendor/…'` strings. A package that moved its binary, or a tool that started
+  arriving from another package, would then leave `composer lint` and `composer checks` running two
+  builds of one tool — findable only by reading both files and noticing.
+
+  `bin/tools.php` is the manifest: the composer package each tool ships in, the constraint
+  `composer.json`'s `require-dev` asks that package to be at, the entry file PHP runs, and one
+  sentence on what the tool is for. `bin/tool.php` runs the composer scripts from it, so `composer
+  lint`, `composer test:lint`, `composer test:types` and `composer test:unit` name a tool rather
+  than a path. `bin/checks.php` reads the same records, both for the paths its own commands run and
+  for a new `tools` check that reports each installation against the pin its manifest states — the
+  half a test cannot see, because what is installed is the machine's rather than the tree's.
+  `ToolTableTest` holds the manifest to the README's tools table and to `require-dev`, cell by cell
+  and in both directions for the pins, so a constraint raised in one file and left alone in the
+  other stops the suite instead of quietly running the older tool.
+
 - **A pooler left on the writer-only config inside an open reader window is now a failure, not a
   silent one.** The boot window answers whether a container came up; it cannot answer whether the
   pooler is still tracking the day. A container booted outside a reader window converges to

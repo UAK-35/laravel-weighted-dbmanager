@@ -43,8 +43,14 @@ declare(strict_types=1);
  * Windows and neither is reliably executable from another process. The script
  * works on Windows and Linux with the same invocation, and reports a missing
  * tool as a skip rather than crashing on it.
+ *
+ * Which entry file, for every tool this package installs, is `bin/tools.php` — the
+ * same manifest `bin/tool.php` runs the composer scripts from, so a check here and
+ * `composer test:types` cannot end up running two builds of one tool.
  */
 
+use Composer\InstalledVersions;
+use Composer\Semver\Semver;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use PhpParser\ParserFactory;
@@ -199,12 +205,22 @@ $yamlFiles = yamlFiles($root);
 // has and the repository does not — see composerValidateCommand().
 $lockIsShipped = commitsLockFile($root);
 
-$tools = [
-    'pint' => $root . '/vendor/laravel/pint/builds/pint',
-    'phpstan' => $root . '/vendor/phpstan/phpstan/phpstan.phar',
-    'phpunit' => $root . '/vendor/phpunit/phpunit/phpunit',
-    'yaml-lint' => $root . '/vendor/symfony/yaml/Resources/bin/yaml-lint',
-];
+// The installed tools, from the one manifest that says where each of them lives: `bin/tool.php`
+// runs them for the composer scripts, this file runs them for the gate, and neither spells a
+// vendor path. The manifest holds them relative to the package root — nothing in it is about the
+// machine it is read on — and every command below wants an absolute one.
+/**
+ * @var array<string, array{package: string, pin: string|null, entry: string, purpose: string}> $manifest
+ */
+$manifest = require __DIR__ . '/tools.php';
+
+// The same tools as the path each command runs. The records are kept as well, because a record
+// says more than its path: the package is what a skip sentence names and what a version is asked
+// about, and the pin is what the tools check measures the installation against.
+$tools = array_map(
+    static fn (array $tool): string => $root . '/' . $tool['entry'],
+    $manifest,
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The checks
@@ -263,11 +279,26 @@ $checks = [
                 : "{$satisfied} platform requirements satisfied";
         },
     ],
+    'tools' => [
+        'title' => 'Installed tools (the version each pin asks for)',
+        // The manifest is one half of this question and Composer's own record of the installation is
+        // the other, so it can only be asked where there is an installation to ask: the autoloader
+        // is what brings InstalledVersions in, and composer/semver is what decides whether a version
+        // is inside a constraint. Both absences are the existing kind of skip rather than a failure
+        // — a checkout nobody has installed into cannot be wrong about what it installed.
+        'skip' => match (true) {
+            !is_file($root . '/vendor/autoload.php') => 'composer install has not been run',
+            !class_exists(InstalledVersions::class) => "Composer's installed-versions record is not loaded",
+            !class_exists(Semver::class) => 'composer/semver is not installed, so a pin cannot be evaluated',
+            default => null,
+        },
+        'run' => static fn (): array => checkTools($manifest),
+    ],
     'yaml' => [
         'title' => 'Workflow YAML (yaml-lint)',
         'skip' => match (true) {
             $yamlFiles === [] => 'no YAML outside vendor/',
-            !is_file($tools['yaml-lint']) => 'symfony/yaml is not installed',
+            !is_file($tools['yaml-lint']) => $manifest['yaml-lint']['package'] . ' is not installed',
             default => null,
         },
         'run' => static fn (): array => runCommand(
@@ -290,7 +321,7 @@ $checks = [
     ],
     'phpstan' => [
         'title' => "Static analysis (phpstan, level {$level})",
-        'skip' => is_file($tools['phpstan']) ? null : 'phpstan is not installed',
+        'skip' => is_file($tools['phpstan']) ? null : $manifest['phpstan']['package'] . ' is not installed',
         'run' => static fn (): array => runCommand(
             [PHP_BINARY, $tools['phpstan'], 'analyse', '--no-progress', '--no-ansi'],
             $root,
@@ -298,12 +329,12 @@ $checks = [
     ],
     'pint' => [
         'title' => 'Code style (pint --test)',
-        'skip' => is_file($tools['pint']) ? null : 'laravel/pint is not installed',
+        'skip' => is_file($tools['pint']) ? null : $manifest['pint']['package'] . ' is not installed',
         'run' => static fn (): array => runCommand([PHP_BINARY, $tools['pint'], '--test'], $root),
     ],
     'tests' => [
         'title' => 'Unit tests (phpunit)',
-        'skip' => is_file($tools['phpunit']) ? null : 'phpunit is not installed',
+        'skip' => is_file($tools['phpunit']) ? null : $manifest['phpunit']['package'] . ' is not installed',
         'run' => static fn (): array => runCommand([PHP_BINARY, $tools['phpunit']], $root),
     ],
 ];
@@ -781,6 +812,114 @@ function checkAst(string $root, array $files): array
     return $failures === []
         ? ['exit' => 0, 'output' => count($files) . ' files parsed']
         : ['exit' => 1, 'output' => implode(PHP_EOL, $failures)];
+}
+
+/**
+ * Every tool the manifest names, against the version its pin asks it to be at.
+ *
+ * WHY THIS IS A CHECK AND NOT A CLAIM OF THE MANIFEST
+ * ---------------------------------------------------
+ *   `bin/tools.php` says which package each tool comes from and which constraint `composer.json`
+ *   asks that package to be at, and both of those are statements about the tree. What a machine has
+ *   installed is a different fact, and it is the one that goes stale with nothing in the diff to
+ *   say so: raise `laravel/pint` to `^1.31` and vendor still holds 1.30.4 until someone runs
+ *   `composer update`, so `composer lint` and this gate keep running an older tool than the package
+ *   says it needs, on a manifest that reads as if they do not. The suite cannot ask it — what is
+ *   installed is the machine's rather than the tree's — which is why the manifest's agreement with
+ *   `composer.json` and with the README is a test and its agreement with the installation is here.
+ *
+ * WHAT IT DOES NOT OWN
+ * --------------------
+ *   A tool that is not installed is reported and is not a failure: three checks above report a
+ *   missing tool as a skip already, and a `composer install --no-dev` checkout is a state this
+ *   check must not turn red — what it says about such a tool is that it has no version to compare.
+ *   A pin that cannot be read is a failure, because the constraint is what everything else is
+ *   measured against and a claim nothing can check is worse than no claim.
+ *
+ * @param array<string, array{package: string, pin: string|null, entry: string, purpose: string}> $tools
+ * @return array{exit: int, output: string}
+ */
+function checkTools(array $tools): array
+{
+    $rows = [];
+    $failures = [];
+    $installed = [];
+
+    foreach ($tools as $name => $tool) {
+        $package = $tool['package'];
+
+        if (!InstalledVersions::isInstalled($package)) {
+            $rows[] = sprintf('  %-10s %-18s %-10s %s', $name, $package, '—', 'not installed');
+
+            continue;
+        }
+
+        $version = (string) InstalledVersions::getPrettyVersion($package);
+        $installed[] = "{$name} {$version}";
+
+        if ($tool['pin'] === null) {
+            $rows[] = sprintf('  %-10s %-18s %-10s %s', $name, $package, $version, 'no pin of its own');
+
+            continue;
+        }
+
+        try {
+            $satisfied = Semver::satisfies($version, $tool['pin']);
+        } catch (UnexpectedValueException $error) {
+            $failures[] = sprintf(
+                '  %-10s %-18s %s against the pin %s: %s',
+                $name,
+                $package,
+                $version,
+                $tool['pin'],
+                $error->getMessage(),
+            );
+
+            continue;
+        }
+
+        if (!$satisfied) {
+            $failures[] = sprintf(
+                '  %-10s %-18s %s is installed, and the pin asks for %s',
+                $name,
+                $package,
+                $version,
+                $tool['pin'],
+            );
+
+            continue;
+        }
+
+        $rows[] = sprintf('  %-10s %-18s %-10s %s', $name, $package, $version, 'satisfies ' . $tool['pin']);
+    }
+
+    if ($failures !== []) {
+        return [
+            'exit' => 1,
+            'output' => implode(PHP_EOL, [
+                'A pin is the constraint composer.json asks a package to be at, and this installation',
+                'does not answer it: vendor is behind the manifest, or the pin is a version nothing',
+                'can be. `composer update` is the repair for the first and an edit for the second.',
+                '',
+                ...$rows,
+                '',
+                ...$failures,
+            ]),
+        ];
+    }
+
+    // The last line is the one the summary shows, so it is a single line and it names every tool
+    // the manifest has — which is what makes the gate's summary a reading of this table.
+    return [
+        'exit' => 0,
+        'output' => implode(PHP_EOL, [
+            ...$rows,
+            '',
+            $installed === []
+                ? 'none of the tools in the manifest is installed'
+                : sprintf('%d installed: %s', count($installed), implode(', ', $installed)),
+        ]),
+    ];
 }
 
 /**
