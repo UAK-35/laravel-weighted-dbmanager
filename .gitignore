@@ -8,3 +8,4 @@
 *.txt
 *-diagnose*.log
 /bin/*.bak
+/.freebuff/project-id
