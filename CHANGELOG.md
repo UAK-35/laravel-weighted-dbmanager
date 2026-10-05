@@ -369,6 +369,35 @@
 
 ### Fixed
 
+- **The `BREAKING` marker is read where a changelog writes one, instead of wherever the word
+  appears.** `changelogSignal()` asked `str_contains($unreleased, 'BREAKING')`, and the notes in
+  this repository are the case that found it: the entry above this one, which documents the marker,
+  quotes the word mid-sentence, so the notes that *describe* the marker marked their own Unreleased
+  section breaking. On this tree that read as `minor  (weighed: a breaking change, which is a minor
+  while the package is pre-1.0)` from a claim nobody had made — and the day a 1.0 line exists, the
+  same sentence is the major the weighing is there to refuse, which is what makes a rule of this
+  rather than a rewording.
+
+  `breakingClaim()` is that rule. The marker weighs where a note makes a claim of it — at the start
+  of a line's prose, after the bullet, the emphasis or the quote it opens with — and not where it is
+  being named: a code span and a fenced block are removed with the word they show, so an entry is
+  stripped of what it is exhibiting and kept for what it says. The half it cannot do is read the
+  sentence, and that half is deliberate: a claim written mid-sentence weighs nothing, and the remedy
+  is the one a marker has always had — give it its own line. `RELEASING.md`'s signal table now says
+  so beside the heading the marker is an alternative to.
+
+  Measured on this tree: `php bin/release.php --weigh --dry-run --branch=dev` answered
+  `minor  (weighed: a breaking change, which is a minor while the package is pre-1.0)` before the
+  change, with a `breaking CHANGELOG` row, and `minor  (weighed: a minor change)` after it, with
+  that row gone and `### Added — 13 entries` as the loudest heading. The version is 0.2.0 either
+  way, because what moved is the claim the plan makes about the notes. Pinned by two cases in
+  `BumpWeighingTest`: `test_a_note_that_only_names_the_marker_weighs_the_heading_it_sits_under`
+  drives the three mentions that used to trip it — a quoted word mid-sentence, a bullet naming it,
+  and a fenced example — and asserts the patch their headings weigh, and
+  `test_the_marker_weighs_breaking_under_the_decoration_a_note_writes_it_with` drives the three
+  claim spellings that must still weigh a major, so the rule cannot narrow the marker to a bare line
+  nobody writes. Restoring `str_contains()` fails the first case by name.
+
 - **A method's recorded shape counts its arguments, one part each, instead of the whole list as
   one.** `parameterShape()` splits a parameter list on a comma at nesting depth zero, and inside a
   parameter list the depth is one — the opening parenthesis is what set it — so no comma ever split

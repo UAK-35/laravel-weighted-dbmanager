@@ -293,8 +293,11 @@ function changelogSignal(string $unreleased): array
         : sprintf('### %s — %d %s, the loudest heading the notes use', $top['name'], $top['count'], $top['count'] === 1 ? 'entry' : 'entries');
 
     // A `### Breaking changes` heading, or the uppercase marker a changelog can
-    // use in its place, is the loudest thing the notes are able to say.
-    if (preg_match('/^###[^\n]*\bbreaking\b/im', $unreleased) === 1 || str_contains($unreleased, 'BREAKING') === true) {
+    // use in its place, is the loudest thing the notes are able to say — the
+    // heading wherever a section carries it, and the marker only where a note
+    // writes it as a claim, because a note that describes the marker writes the
+    // word down without making the claim.
+    if (preg_match('/^###[^\n]*\bbreaking\b/im', $unreleased) === 1 || breakingClaim($unreleased) === true) {
         $severity = 'breaking';
         $summary = 'the notes are marked breaking';
         $evidence[] = 'the Unreleased notes are marked breaking';
@@ -746,4 +749,41 @@ function unreleasedSection(string $content): ?array
 function countBullets(string $content): int
 {
     return (int) preg_match_all('/^\s*[-*]\s+\S/m', $content);
+}
+
+
+/**
+ * The `BREAKING` marker a changelog writes in place of a `### Breaking changes`
+ * heading, told apart from a mention of the marker.
+ *
+ * The word weighs where a changelog makes a claim of it — at the start of a line’s
+ * prose, after the bullet, the emphasis or the quote the note opens with — and not
+ * where it is only being named. `str_contains($notes, 'BREAKING')` could not tell
+ * the two apart, and this repository’s own notes are the case that found it: the
+ * entry documenting this signal quotes the marker as `` `BREAKING` `` mid-sentence,
+ * so the notes that *describe* the marker marked their own Unreleased section
+ * breaking — a claim nobody made, and after 1.0.0 the major this weighing exists
+ * to refuse.
+ *
+ * Two things are read as a mention rather than as a claim, and both are how a word
+ * is shown rather than said: a code span, and a fenced block. The word goes with
+ * the span that quotes it and the rest of the line stays, so an entry is stripped
+ * of what it is exhibiting and kept for what it says.
+ *
+ * The half this cannot do is read the sentence: a claim written mid-sentence weighs
+ * nothing here, because weighing prose for intent is not something a release script
+ * can do, and the remedy has always been the same — give the marker its own line.
+ */
+function breakingClaim(string $notes): bool
+{
+    // A fenced block is an example being shown, so the fence goes whole, opening
+    // line to closing one; an unclosed fence is the same intent half-written.
+    $prose = preg_replace('/^[ \t]*```.*?^[ \t]*```[ \t]*$/ms', '', $notes) ?? $notes;
+
+    // Then the code spans, wherever the span sits on its line.
+    $prose = preg_replace('/`[^`\n]*`/', '', $prose) ?? $prose;
+
+    // A claim opens a line’s prose; the decoration a note writes in front of it —
+    // a bullet, a quote, an emphasis, a warning sign — is skipped, not required.
+    return preg_match('/^[ \t]*(?:[-*+>][ \t]*)*\W{0,4}BREAKING\b/m', $prose) === 1;
 }

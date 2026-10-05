@@ -439,7 +439,7 @@ with the evidence behind them:
 
 | Signal | What it reads |
 |---|---|
-| CHANGELOG | The `###` headings of `## Unreleased`. `### Removed` is breaking; `### Added`, `### Changed` and `### Deprecated` are a minor; `### Fixed` and `### Security` are a patch. A `### Breaking changes` heading, or the uppercase `BREAKING` marker, is breaking |
+| CHANGELOG | The `###` headings of `## Unreleased`. `### Removed` is breaking; `### Added`, `### Changed` and `### Deprecated` are a minor; `### Fixed` and `### Security` are a patch. A `### Breaking changes` heading is breaking, and so is the uppercase `BREAKING` marker where a note writes it as a claim — on a line of its own, outside a code span or a fenced block; a note that only names the marker is not |
 | commits | The subjects and footers of the commits since the last tag, read as Conventional Commits: `feat` is a minor, `fix`, `docs`, `test`, `chore`, `refactor`, `perf`, `style`, `build`, `ci` and `revert` are a patch, and a `!` or a `BREAKING CHANGE:` footer is breaking. Release commits and merges are skipped |
 | public API | `src/` and `config/` at HEAD against the last tag: a class, public method, constant, enum case, public property, config key or env var that disappeared is breaking; one that appeared is a minor; a method that gained a required argument is breaking |
 | inventory | `files.tsv`, `methods.tsv` and `surface.tsv` as the last release wrote them, against the tree now — read only when their stamp names the tag being released from, and reported as *stale* and skipped when it does not (see [the inventory](#the-inventory)) |

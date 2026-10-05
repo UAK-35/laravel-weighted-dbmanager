@@ -162,6 +162,73 @@ final class BumpWeighingTest extends TestCase
     }
 
     /**
+     * A note that only *names* the marker is not a note making the claim.
+     *
+     * `BREAKING` is the word this signal reads, and it is also the word an entry about this
+     * signal has to write down: the notes in this repository that describe the marker quote it
+     * mid-sentence, and `str_contains()` read those notes as the notes claiming a break — a
+     * claim nobody made, and after 1.0.0 the major the weighing exists to refuse. The claim is
+     * what is weighed, so where the word is shown rather than said — a code span, a fenced
+     * example, a bullet that names it and asserts nothing — the notes stay the patch their
+     * headings weigh.
+     */
+    public function test_a_note_that_only_names_the_marker_weighs_the_heading_it_sits_under(): void
+    {
+        $naming = [
+            // The shape this repository's own notes use: the marker, quoted, mid-sentence.
+            "### Fixed\n\n- The gate reads the records as prose, and a `BREAKING` marker in the body\n  is the spelling it reads as a claim.\n",
+            // A bullet that names the marker and claims nothing by it.
+            "### Fixed\n\n- `BREAKING` is the word this signal reads, and this entry is naming it.\n",
+            // An example being shown, inside the fence the note exhibits it with.
+            "### Fixed\n\n- Written down as an example:\n\n  ```\n  BREAKING: the old command is gone.\n  ```\n",
+        ];
+
+        foreach ($naming as $notes) {
+            $repo = ReleaseRepo::make($notes);
+            $repo->tag('v1.2.3');
+
+            $run = $repo->release('--weigh', '--dry-run');
+
+            $this->assertSame(0, $run->exitCode, $run->describe());
+            $this->assertSame('patch  (weighed: a patch change)', $run->plan('bump'), $run->describe());
+            $this->assertSame('1.2.4  (tag v1.2.4)', $run->plan('next version'), $run->describe());
+            $this->assertFalse(
+                $run->said('the notes are marked breaking'),
+                'a mention of the marker was read as a claim: ' . $run->describe(),
+            );
+        }
+    }
+
+    /**
+     * The claim is still read wherever a changelog writes one.
+     *
+     * Telling a claim from a mention must not become "only a bare `BREAKING:` line counts": the
+     * marker is written with the decoration the file around it uses — a bullet, an emphasis, a
+     * blockquote — and each of those is the release saying a break is in it. All three weigh what
+     * `### Removed` weighs, because the rule is where the word sits and not how it is dressed.
+     */
+    public function test_the_marker_weighs_breaking_under_the_decoration_a_note_writes_it_with(): void
+    {
+        $claims = [
+            "### Fixed\n\n- A ported defect, fixed.\n\nBREAKING: the old command is gone.\n",
+            "### Fixed\n\n- **BREAKING**: the old command is gone.\n",
+            "### Fixed\n\n> BREAKING: the old command is gone.\n",
+        ];
+
+        foreach ($claims as $notes) {
+            $repo = ReleaseRepo::make($notes);
+            $repo->tag('v1.2.3');
+
+            $run = $repo->release('--weigh', '--dry-run');
+
+            $this->assertSame(0, $run->exitCode, $run->describe());
+            $this->assertSame('major  (weighed: a breaking change)', $run->plan('bump'), $run->describe());
+            $this->assertSame('2.0.0  (tag v2.0.0)', $run->plan('next version'), $run->describe());
+            $this->assertTrue($run->said('the notes are marked breaking'), $run->describe());
+        }
+    }
+
+    /**
      * Notes in a vocabulary the policy does not know weigh a patch, and the plan says which of
      * the two things it is looking at.
      *
