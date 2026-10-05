@@ -406,6 +406,12 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
 
 ### Fixed
 
+- **`PUSHING.md` tells a reader to `cd` to where the package is.** The `git push` block named
+  `LPR\side-projects\laravel-weighted-dbmanager`, a directory the package left when it moved to
+  `LPR\packages\laravel-weighted-dbmanager`. The block is written to be pasted as it stands, so a
+  path that is not there is a paste that fails before anything is pushed; it now names the directory
+  the package is at, and no other path in the file's commands moves.
+
 - **The package's own app skeleton names the provider that exists.** `config/app.php` replaces
   Laravel's `DatabaseServiceProvider` with this package's, and the class it named was
   `\App\Providers\WeightedDatabaseServiceProvider` — a provider of the application the package was

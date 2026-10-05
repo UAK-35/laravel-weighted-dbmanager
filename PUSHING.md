@@ -42,7 +42,7 @@ because `origin` is HTTPS and no ssh process is ever started.
 Never from MSYS / Git Bash. Run it from PowerShell 7, whose console can answer a prompt:
 
 ```powershell
-cd E:\_WORKS\lpr\work\LPR\side-projects\laravel-weighted-dbmanager
+cd E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
 
 git push origin main --follow-tags
 ```
