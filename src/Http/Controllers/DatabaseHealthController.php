@@ -50,9 +50,10 @@ use Throwable;
  *     mode every day — `reader_window`, which holds what the windows ask for right
  *     now beside what pgcat's own file actually is. The boot window above can only
  *     say that a container came up once; a pooler left on the writer-only config
- *     through an open reader window serves every read from the writer, and no
- *     passing query says so. It makes the payload `degraded` too — see
- *     readerWindowVerdict()
+ *     through an open reader window serves every read from the writer, and one
+ *     left on the readers config outside a window sends every read through it to
+ *     a replica — no passing query says so about either. It makes the payload
+ *     `degraded` too — see readerWindowVerdict()
  *
  * EVERY FAILURE IS ALSO LOGGED
  *   A payload nobody is looking at is not a signal. Each response that is not
@@ -279,13 +280,15 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * - **Applicable and in step**: `failed` is false whether the modes agree or the file could
      *   not be compared at all, and `applied` carries which of the two it was (`null` for the
      *   second), so an unreadable file is "not judged" rather than "passed".
-     * - **Applicable and out of step**: a reader window is open and pgcat is on the writer-only
-     *   config. `reason` carries the sentence for it, naming the file in place and the command
-     *   that moves it.
+     * - **Applicable and out of step**: pgcat's file holds the variant the windows are not asking
+     *   for — the writer-only config while a reader window is open, or the readers config outside
+     *   one. `reason` carries the sentence for it, naming the file in place and the command that
+     *   moves it.
      *
-     * Only that last direction can be `failed`. The reverse — readers left in the file outside a
-     * window — is benign, because the resolver pins reads to the writer there anyway, and failing
-     * it would take a healthy installation out of rotation over an idle setting.
+     * Both directions are `failed`, and it is one fault rather than two: the file and the windows
+     * are two statements about one routing decision, and a stale one is stale whichever way round
+     * the disagreement is. Readers left in the file outside a window are the same evidence as a
+     * writer-only file inside one — the boundary flip that was asked for and never landed.
      *
      * @param array<string, mixed>|null $pgcat the summary `index()` already read
      *
@@ -304,7 +307,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'reason' => $failed
                 ? (is_string($block['reason'] ?? null) && $block['reason'] !== ''
                     ? $block['reason']
-                    : 'a reader window is open but pgcat is still on the writer-only config')
+                    : 'pgcat is on a configuration the reader windows are not asking for')
                 : null,
             'expected' => is_string($block['expected'] ?? null) ? $block['expected'] : null,
             'applied' => is_string($block['applied'] ?? null) ? $block['applied'] : null,
@@ -353,7 +356,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         }
 
         if (($readerWindow['failed'] ?? false) === true) {
-            $reasons[] = 'pgcat is still on the writer-only config while a reader window is open';
+            $reasons[] = 'pgcat is out of step with the reader windows';
         }
 
         Log::error('health/db degraded: '.implode('; ', $reasons ?: ['no reason recorded']), [

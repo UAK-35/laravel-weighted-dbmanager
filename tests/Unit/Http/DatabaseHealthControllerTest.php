@@ -498,7 +498,7 @@ class DatabaseHealthControllerTest extends TestCase
             ->once()
             ->withArgs(function (string $message, array $context = []): bool {
                 return str_contains($message, 'health/db degraded')
-                    && str_contains($message, 'writer-only config while a reader window is open')
+                    && str_contains($message, 'pgcat is out of step with the reader windows')
                     && ($context['reader_window']['failed'] ?? null) === true
                     && ($context['reader_window']['applied'] ?? null) === 'writer';
             });
@@ -528,6 +528,55 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('reader_window.reason', null);
 
         Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The mirror state, and the one a stale config arrives in outside a window: the container
+     * converged, the boot verdict is healthy, and pgcat's file still holds the readers variant
+     * after the last window closed — so every read through the pooler reaches a replica during
+     * the hours the fallback exists to keep them on the writer, while the payload would answer
+     * `ok`. The window is set two hours ahead of now, so "outside a window" holds for any moment
+     * the suite runs at.
+     */
+    public function test_a_pooler_left_on_the_readers_config_outside_a_reader_window_is_degraded_and_logged(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $slot = gmdate('H:00:00', time() + 7200);
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            readerWindows: [['start' => $slot, 'end' => gmdate('H:59:59', time() + 7200)]],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            // The database answered and the container converged: this verdict comes from the
+            // pooler's own file and from nothing else.
+            ->assertJsonPath('pinned.ok', true)
+            ->assertJsonPath('flip.failed', false)
+            ->assertJsonPath('reader_window.applicable', true)
+            ->assertJsonPath('reader_window.failed', true)
+            ->assertJsonPath('reader_window.expected', 'writer')
+            ->assertJsonPath('reader_window.applied', 'readers');
+
+        $this->assertStringContainsString('no reader window is open', (string) $response->json('reader_window.reason'));
+
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(function (string $message, array $context = []): bool {
+                return str_contains($message, 'health/db degraded')
+                    && str_contains($message, 'pgcat is out of step with the reader windows')
+                    && ($context['reader_window']['failed'] ?? null) === true
+                    && ($context['reader_window']['applied'] ?? null) === 'readers';
+            });
     }
 
     /**
@@ -565,8 +614,12 @@ class DatabaseHealthControllerTest extends TestCase
      * variant is written for pgcat's own config, so the pooler is provably on it. Left null, no
      * target is written and the verdict is "not judged", which is what the boot-window cases need
      * in order to be about the boot window alone.
+     *
+     * `$readerWindows` overrides the day's window. The default covers the whole day, so the mode
+     * is `readers` at any moment; a window whose hour is still ahead of "now" puts the test
+     * outside one, which is the direction where a stale readers config is the fault.
      */
-    private function bindWindowFlipper(?int $bootedSecondsAgo, ?string $appliedMode = null): PgcatConfigFlipper
+    private function bindWindowFlipper(?int $bootedSecondsAgo, ?string $appliedMode = null, ?array $readerWindows = null): PgcatConfigFlipper
     {
         $dir = sys_get_temp_dir().'/swrr-health-window-'.bin2hex(random_bytes(4));
 
@@ -627,7 +680,7 @@ class DatabaseHealthControllerTest extends TestCase
 
         $flipper = new PgcatConfigFlipper(
             resolver: new TimeWindowResolver(
-                readerWindows: [['start' => '00:00:00', 'end' => '23:59:59']],
+                readerWindows: $readerWindows ?? [['start' => '00:00:00', 'end' => '23:59:59']],
                 readerDays: [1, 2, 3, 4, 5, 6, 7],
             ),
             config: $config,

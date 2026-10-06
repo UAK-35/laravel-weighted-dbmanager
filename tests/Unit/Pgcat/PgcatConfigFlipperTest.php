@@ -2056,12 +2056,13 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
-     * The reverse disagreement is not a fault, and that asymmetry is deliberate: outside a window
-     * the resolver pins reads to the writer anyway, so readers left in the file are idle rather
-     * than wrong — and failing it would take a healthy installation out of rotation over a setting
-     * nothing is reading.
+     * The mirror disagreement, and now the same fault as the one above: outside a window the file
+     * still holds the readers variant, so every read through the pooler reaches a replica during
+     * the hours the fallback exists to keep them on the writer. It is also the same evidence —
+     * the mode the windows asked for at the end of the last window is the one that never arrived,
+     * and the file is what proves it.
      */
-    public function test_readers_left_in_the_file_outside_a_window_are_reported_but_not_failed(): void
+    public function test_a_pooler_left_on_the_readers_config_outside_a_window_is_a_failure(): void
     {
         $flipper = $this->build('writer', ['boot_file' => $this->stampBoot(time() - 3600)]);
         file_put_contents($this->tmp . '/pgcat.toml', (string) file_get_contents($this->tmp . '/pgcat-readers.toml'));
@@ -2071,8 +2072,14 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame('writer', $verdict['expected']);
         $this->assertSame('readers', $verdict['applied']);
         $this->assertFalse($verdict['in_step'], 'a reader can still see the disagreement');
-        $this->assertFalse($verdict['failed'], '...it is just not the one that costs anything');
-        $this->assertNull($verdict['reason']);
+        $this->assertTrue($verdict['failed'], '...and outside a window it costs the same as inside one');
+
+        // The sentence names which side of the window this is, the file in place, and the command
+        // that moves it — the three things an operator acts on.
+        $reason = (string) $verdict['reason'];
+        $this->assertStringContainsString('no reader window is open', $reason);
+        $this->assertStringContainsString('pgcat-readers.toml', $reason);
+        $this->assertStringContainsString('db:pgcat-flip', $reason);
     }
 
     /**

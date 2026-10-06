@@ -58,36 +58,38 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
   and in both directions for the pins, so a constraint raised in one file and left alone in the
   other stops the suite instead of quietly running the older tool.
 
-- **A pooler left on the writer-only config inside an open reader window is now a failure, not a
-  silent one.** The boot window answers whether a container came up; it cannot answer whether the
+- **A pooler out of step with the reader windows is now a failure, not a silent one — inside a
+  window and outside one.** The boot window answers whether a container came up; it cannot answer whether the
   pooler is still tracking the day. A container booted outside a reader window converges to
   writer-only and looks perfect — one run, `converged: true`, `window.failed: false` — and then
   10:00 arrives, the windows move the resolver to `readers`, and nothing moves pgcat with it. Every
   read reaches the writer while `/health/db` answers `ok`, because a pooler that answers is not a
-  pooler that is right.
+  pooler that is right. The mirror image is the same failure: with the readers config left in the
+  file outside a window, every read through the pooler reaches a replica during the hours the
+  fallback exists to keep them on the writer — and it is the same evidence, that a boundary flip
+  stopped landing.
 
   **What this asks of an installation, and why this release says it is breaking:** a monitor, a
   load-balancer health check or a deploy gate pointed at `/health/db` now fails where it used to
-  pass, for the disagreement below. Whether that endpoint should gate a deployment is a decision to
+  pass, for the disagreements below. Whether that endpoint should gate a deployment is a decision to
   make rather than one the package can make for you.
 
   `PgcatConfigFlipper::readerWindowVerdict()` is the second answer, carried in the flipper's own
   snapshot as `reader_window` and reported by `/health/db` as a top-level block that also feeds the
   status: `expected` is what the resolver says now, `applied` is what pgcat's file actually holds,
-  and `failed` marks the one disagreement that costs something — a reader window open with the
-  writer-only config in place. `applied` is read off pgcat's file (`appliedMode()`) rather than off
+  and `failed` marks either disagreement — the file holding the variant the windows are not
+  asking for, whichever way round it is. `applied` is read off pgcat's file (`appliedMode()`) rather than off
   the state file's `last_mode`, deliberately: a flip that aborted before it recorded anything still
   left a file behind, and `last_mode` is exactly the field that is empty in that case — the shape
   the 2026-10-02 container arrived in, where a per-minute `schedule:run` was aborting on a missing
   cache lock before it ever reached the flipper, and a `last_mode`-based check would have answered
-  "unknown" while the pooler was provably writer-only.
-
-  The verdict is asymmetric on purpose. Readers left in the file *outside* a window are idle
-  rather than wrong — the resolver pins reads to the writer there anyway — so only the one
-  direction fails, and failing the other would take a healthy installation out of rotation over a
-  setting nothing is reading. A file matching neither variant (an operator's edit, a half-written
-  copy) is `in_step: null` rather than an invented verdict, and the check is not judged at all on
-  an inert flipper or a permissive resolver, where `applicable` says so.
+  "unknown" while the pooler was provably writer-only.  The verdict is symmetric on purpose. The file and the windows are two statements about one
+  routing decision, and a stale one is stale whichever way round the disagreement is: readers left
+  in the file *outside* a window mean the mode the windows asked for at the end of the last window
+  is the one that never arrived, and the file is the evidence of that. A file matching neither
+  variant (an operator's edit, a half-written copy) is `in_step: null` rather than an invented
+  verdict, and the check is not judged at all on an inert flipper or a permissive resolver, where
+  `applicable` says so.
 
 - **The reader windows are scheduled tasks, and a mode change waits until the thing it points at
   answers.** The per-minute flip converges the pool at container start and then stops at the end of

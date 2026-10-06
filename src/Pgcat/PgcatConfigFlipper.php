@@ -92,10 +92,15 @@ use DateTimeZone;
  * open reader window, every flip run aborting before it reached the flipper, and a health
  * endpoint reporting `ok` because nothing asked the file.
  *
- * One direction is a fault and the other is not, which is why the verdict is asymmetric. In
- * a reader window, a pooler with no readers configured forces every read onto the writer and
- * silently defeats the setting. Outside one, the resolver pins reads to the writer anyway, so
- * readers left in the file are idle rather than wrong.
+ * Either direction is a fault, because the file and the windows are two statements about one
+ * routing decision and the stale one is stale whichever way round the disagreement is. In a
+ * reader window, a pooler with no readers configured forces every read onto the writer and
+ * silently defeats the setting. Outside one, a pooler still holding the readers config sends
+ * every read through it to a replica during the hours the fallback exists to keep them on the
+ * writer — and it is the same evidence that a boundary flip stopped landing, because the mode
+ * the windows asked for at the end of the last window is the one that never arrived. A file
+ * matching neither variant is still not judged: the package cannot tell an operator's own edit
+ * from a half-written copy, so it reports `in_step: null` rather than inventing a direction.
  *
  * STATE FILE
  * ----------
@@ -1141,9 +1146,17 @@ final class PgcatConfigFlipper
      * Whether the pooler is on the configuration the reader windows ask for right now.
      *
      * `expected` is what the resolver says the mode should be, `applied` is what pgcat's file
-     * actually holds, and `failed` marks the one disagreement that costs something: a reader
-     * window is open and the pooler is on the writer-only config, so every read the resolver
-     * meant for the replica pool reaches the writer instead.
+     * actually holds, and `failed` marks a disagreement between the two: the pooler holds the
+     * variant the windows are not asking for, so reads are routing the wrong way. Both
+     * directions fail, for the same reason — the file and the windows are two statements about
+     * one routing decision, and a stale one is stale whichever way round it is:
+     *
+     * - **A reader window is open and the writer-only config is in place.** Every read the
+     *   resolver meant for the replica pool reaches the writer instead.
+     * - **No reader window is open and the readers config is in place.** Every read through the
+     *   pooler reaches a replica during the hours the fallback holds reads on the writer — the
+     *   mode the windows asked for at the end of the last window was the one that never
+     *   arrived, and the file is the evidence of that.
      *
      * `applied` is null when the file cannot be compared to either variant — the target is not
      * there, cannot be read, or holds bytes that are neither (an operator's own edit, a
@@ -1157,7 +1170,7 @@ final class PgcatConfigFlipper
      * no window to be inside of, and a pooler the setting leaves alone is not a pooler that is
      * wrong).
      *
-     * A third case is suppressed rather than judged: **while the container's boot window is still
+     * One case is suppressed rather than judged: **while the container's boot window is still
      * open**. A task that starts inside a reader window is out of step until its first flip lands —
      * the entrypoint writes one of the two variants and the per-minute flip moves it — and failing
      * that would fail every healthy deploy for as long as the pooler takes to converge, which is
@@ -1193,14 +1206,14 @@ final class PgcatConfigFlipper
         }
 
         $applied = $this->appliedMode();
-        $failed = $expected === 'readers' && $applied === 'writer' && $this->window->closed();
+        $failed = $applied !== null && $applied !== $expected && $this->window->closed();
 
         return [
             'expected' => $expected,
             'applied' => $applied,
             'in_step' => $applied === null ? null : $applied === $expected,
             'failed' => $failed,
-            'reason' => $failed ? $this->readerWindowReason() : null,
+            'reason' => $failed ? $this->readerWindowReason($expected, $applied) : null,
         ];
     }
 
@@ -1254,24 +1267,39 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * Why a pooler left on the writer-only config during an open reader window matters, and what
-     * moves it: the sentence `/health/db` reports as `reader_window.reason` and logs beside the
-     * degraded status.
+     * Why a pooler holding the configuration the windows are not asking for matters, and what moves
+     * it: the sentence `/health/db` reports as `reader_window.reason` and logs beside the degraded
+     * status.
      *
-     * It names the file that is in place, because that is the fact an operator checks by hand,
-     * and the command that moves it — a flip run by hand while the schedule is being repaired.
-     * It does not guess at *why* the flip stopped, which the boot window's own reason already
-     * does for the case it can see.
+     * Both directions are one sentence's worth of a difference, so there are two sentences and the
+     * one that applies is chosen by `$expected` — the mode the windows ask for, which is by
+     * definition not the one the pooler is on. Each names the file that is in place, because that is
+     * the fact an operator checks by hand, and the command that moves it — a flip run by hand while
+     * the schedule is being repaired. Neither guesses at *why* the flip stopped, which the boot
+     * window's own reason already does for the case it can see.
+     *
+     * `$applied` cannot be null here: this is only called for a file the comparison could place, and
+     * which of the two paths to name follows from it.
      */
-    private function readerWindowReason(): string
+    private function readerWindowReason(string $expected, string $applied): string
     {
-        return sprintf(
-            'a reader window is open, so reads should use the replica pool, but pgcat is still on '
-            .'the writer-only config [%s]: every read through the pooler reaches the writer. Run '
-            .'db:pgcat-flip (or db:pgcat-window-flip) to move it, and check why the scheduled flip '
-            .'stopped.',
-            ConfigValue::string($this->config['no_readers_path'] ?? null),
-        );
+        $holding = ConfigValue::string($this->config[$applied === 'readers' ? 'readers_path' : 'no_readers_path'] ?? null);
+
+        return $expected === 'readers'
+            ? sprintf(
+                'a reader window is open, so reads should use the replica pool, but pgcat is still on '
+                .'the writer-only config [%s]: every read through the pooler reaches the writer. Run '
+                .'db:pgcat-flip (or db:pgcat-window-flip) to move it, and check why the scheduled flip '
+                .'stopped.',
+                $holding,
+            )
+            : sprintf(
+                'no reader window is open, so reads should use the writer, but pgcat is still on '
+                .'the readers config [%s]: every read through the pooler reaches a replica during the '
+                .'hours the fallback holds reads on the writer. Run db:pgcat-flip (or '
+                .'db:pgcat-window-flip) to move it, and check why the scheduled flip stopped.',
+                $holding,
+            );
     }
 
     /**

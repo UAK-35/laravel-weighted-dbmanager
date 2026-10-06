@@ -1182,14 +1182,16 @@ the pooler less time to be repaired, not less work to do.
   failed (the pooler is the problem), or the flip only converged after the window had closed (the
   container was too slow).
 - **What fails, one step later in the container's life.** `/health/db` also reports
-  `reader_window.failed: true` (HTTP 503) when a reader window is open and pgcat's own configuration
-  is still the writer-only one: a container that converged at boot and then stopped tracking the day
-  serves every read from the writer, and no passing `select 1` says so. `reader_window.applied` is
-  read off pgcat's file rather than off the recorded mode, so a flip that aborted before it recorded
-  anything is caught too, and `reader_window.expected` is what the windows ask for right now. Only
-  that direction fails — readers left in the file outside a window are idle rather than wrong,
-  because the resolver pins reads to the writer there anyway — and the check is not judged at all on
-  an inert flipper or on a permissive resolver (`reader_windows` unset), where `applicable` says so.
+  `reader_window.failed: true` (HTTP 503) whenever pgcat's own configuration is not the one the
+  windows ask for, in either direction. Inside a reader window, a container that converged at boot
+  and then stopped tracking the day serves every read from the writer, and no passing `select 1`
+  says so. Outside one, a pooler still holding the readers config sends every read through it to a
+  replica during the hours the fallback exists to keep them on the writer — both are the same
+  evidence, that a boundary flip was asked for and never landed. `reader_window.applied` is read
+  off pgcat's file rather than off the recorded mode, so a flip that aborted before it recorded
+  anything is caught too, and `reader_window.expected` is what the windows ask for right now. The
+  check is not judged at all on an inert flipper or on a permissive resolver (`reader_windows`
+  unset), where `applicable` says so.
 - **What does not fail.** A window that is still open, a container with no boot stamp at all
   (`window.source: no_stamp` — a local run, or an image whose entrypoint predates the stamp), and
   an installation where pgcat does not apply. `db:pgcat-flip --status` prints the whole window as
