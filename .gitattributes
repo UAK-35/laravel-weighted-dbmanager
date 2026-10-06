@@ -16,6 +16,7 @@
 /.gitignore         export-ignore
 /.editorconfig      export-ignore
 /tests              export-ignore
+/.agents             export-ignore
 /phpunit.xml.dist   export-ignore
 /phpstan.neon.dist  export-ignore
 /pint.json          export-ignore
@@ -24,6 +25,7 @@
 /.idea              export-ignore
 /RELEASING.md       export-ignore
 /PUSHING.md         export-ignore
+/HANDOFF.md         export-ignore
 /bin/checks.php       export-ignore
 /bin/release.php      export-ignore
 /bin/surface.php      export-ignore
@@ -33,9 +35,11 @@
 /bin/tools.php        export-ignore
 /bin/tool.php         export-ignore
 /bin/composer-link.cmd export-ignore
+/bin/composer-ca.ps1 export-ignore
 /files.tsv            export-ignore
 /methods.tsv          export-ignore
 /surface.tsv          export-ignore
+/.agents/machine.local.json export-ignore
 
 # The inventory is read line by line and compared byte for byte against what the
 # tree produces, so it is pinned to LF on disk as well as in the repository.

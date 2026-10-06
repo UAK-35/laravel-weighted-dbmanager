@@ -9,3 +9,4 @@
 *-diagnose*.log
 /bin/*.bak
 /.freebuff/project-id
+/.agents/machine.local.json

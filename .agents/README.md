@@ -17,3 +17,11 @@ The written-down procedures they wrap are [`RELEASING.md`](../RELEASING.md) (wha
 is, and what `bin/release.php` does at each step) and [`PUSHING.md`](../PUSHING.md) (the
 remote, what authenticates here, and why MSYS fails). Those two files are the authority; a
 skill here names them rather than restating them, so the two cannot drift.
+
+The state of the work itself — what is uncommitted, unpushed and in no release a consumer can
+install, as of the day it was taken — is in [`HANDOFF.md`](../HANDOFF.md). It is a snapshot
+rather than a rule, so [`tests/Unit/Docs/HandoffTest.php`](../tests/Unit/Docs/HandoffTest.php)
+holds it to the tree through [`tests/Support/Handoff.php`](../tests/Support/Handoff.php), in the
+register of the commit the note names as its basis: the paths, commits, tags and files it
+describes have to still be there, and the branch moving on is not what fails it. It opens by
+telling the reader which three commands to re-run before trusting it.
