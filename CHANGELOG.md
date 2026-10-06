@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha2 - 2026-10-06
+
 BREAKING: parts of this release change what an installation reads at run time rather than only how
 the package is built, and each is named below.
 
