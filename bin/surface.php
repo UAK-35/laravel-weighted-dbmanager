@@ -1411,10 +1411,22 @@ function syncInventory(string $root, string $tag, bool $write = true, ?array $re
  * carriage returns, and a `\r` left on the last cell would make two identical rows
  * compare unequal.
  *
+ * A path that is not a regular file is not an inventory and reads as `null`. The guard is
+ * `is_file()` rather than the read's own failure because `file_get_contents()` on a directory
+ * is not portable — `false` on one platform, an empty string on another — and the empty string
+ * is the one that lies: it decodes as a *present* record with no rows and no stamp, which is
+ * the state `inventorySignal()` calls a record that has lost a file and refuses a release
+ * over. A directory sitting where the record goes is something whose write will fail and name
+ * every file; it is not a record.
+ *
  * @return array{stamp: string, columns: list<string>, rows: list<array<string, string>>}|null
  */
 function readInventory(string $path): ?array
 {
+    if (!is_file($path)) {
+        return null;
+    }
+
     $raw = @file_get_contents($path);
 
     if ($raw === false) {

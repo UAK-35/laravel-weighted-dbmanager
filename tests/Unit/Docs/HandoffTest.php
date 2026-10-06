@@ -96,9 +96,20 @@ final class HandoffTest extends TestCase
         $missing = [];
 
         foreach ($paths as $claim) {
-            if (!file_exists(Handoff::root().'/'.$claim['path'])) {
-                $missing[] = sprintf('%s (line %d)', $claim['path'], $claim['source']);
+            if (file_exists(Handoff::root().'/'.$claim['path'])) {
+                continue;
             }
+
+            // A path git ignores is not one a checkout is meant to have, and the note says so
+            // about the machine record itself: "gitignored, so a clone without the file skips
+            // that comparison". An ignored path is therefore absent by design rather than
+            // stale, and the exclude rules — not the filesystem — are what let this answer for
+            // a fresh clone, which is the checkout this guard has to hold on CI.
+            if (Handoff::git('check-ignore', '-q', '--', $claim['path'])['exit'] === 0) {
+                continue;
+            }
+
+            $missing[] = sprintf('%s (line %d)', $claim['path'], $claim['source']);
         }
 
         self::assertSame(

@@ -1139,6 +1139,13 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         // record is truncated in the middle of a finding that would otherwise resolve.
         file_put_contents($this->auditFile(), '{"findings": {"swrr.pgcat.gate": {"resolution": ');
 
+        // The truncated record carries no `store_probed_at`, so this boot's store probe is due
+        // and will ask for a store. Binding one that answers is what keeps the probe out of the
+        // log: the subject here is the corrupt *record*, and whether a real Redis happens to be
+        // running is the machine's fact rather than this test's — an unreachable one logs a
+        // finding of its own, and the assertion below then reads as being about redis instead.
+        $this->bindRedis(reachable: true);
+
         $this->usePgcat(['enabled' => true]);
         self::resetBootAuditGuard();
 
