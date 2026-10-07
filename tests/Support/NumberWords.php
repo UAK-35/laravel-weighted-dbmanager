@@ -41,6 +41,10 @@ final class NumberWords
      * @var array<int, string>
      */
     private const WORDS = [
+        // Zero is here for a claim rather than for a count this package renders: a pending set
+        // can hold no new file at all, and the sentence that states it has no word otherwise.
+        // See `Handoff::pendingCounts()`.
+        0 => 'zero',
         1 => 'one',
         2 => 'two',
         3 => 'three',

@@ -214,7 +214,7 @@ final class HandoffTest extends TestCase
             $tree,
             sprintf(
                 'HANDOFF.md line %d says %d path(s) differ from the register, %d of them tracked paths that '
-                ."changed and %d files it does not carry; this checkout has %d, %d and %d.\n".
+                ."changed and %d file(s) it does not carry; this checkout has %d, %d and %d.\n".
                 'The sentence and the tree are both claims, and this is the one that moves every time a file is '
                 .'touched after the note is taken.',
                 $claim['source'],

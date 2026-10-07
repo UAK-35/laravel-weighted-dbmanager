@@ -342,6 +342,12 @@ final class Handoff
      * misled by rather than warned of. The shape is the claim: three words, each the number the
      * phrase after it is about.
      *
+     * The third noun is read as it is written — `new file` or `new files` — because a tree can hold
+     * exactly one such file, and a note that had to write a plural for a count of one would be
+     * failing over grammar rather than over a size. The teeth are unchanged either way: the word
+     * before the noun still has to be one `NumberWords` knows, and the number it names still has to
+     * be the tree's.
+     *
      * @return array{total: int, changed: int, new: int, source: int}
      *
      * @throws RuntimeException when the sentence stops stating the three numbers in that shape, or
@@ -374,11 +380,11 @@ final class Handoff
 
         if (preg_match('/\b'.$number.' paths differ\b/', $plain, $total) !== 1
             || preg_match('/\b'.$number.' tracked paths changed\b/', $plain, $changed) !== 1
-            || preg_match('/\b'.$number.' new files\b/', $plain, $new) !== 1
+            || preg_match('/\b'.$number.' new file(?:s)?\b/', $plain, $new) !== 1
         ) {
             throw new RuntimeException(sprintf(
                 'HANDOFF.md line %d no longer states the pending set as [N paths differ … N tracked paths '.
-                'changed, and N new files]: [%s]',
+                'changed, and N new file(s)]: [%s]',
                 $opening['source'],
                 trim($opening['text']),
             ));
@@ -604,6 +610,11 @@ final class Handoff
      * total the promotion would carry, the count under each heading it names, and the severity the
      * notes ask for.
      *
+     * The total is read as `entry` or `entries`, for the reason `pendingCounts()` reads its third
+     * noun either way: a section holding exactly one entry has no plural to write, and a note that
+     * had to write one would be failing over grammar rather than over a count. What the row calls
+     * the number is untouched — it is still digits, and the four numbers still have to be there.
+     *
      * @return array{total: int, added: int, fixed: int, changed: int, severity: string}
      *
      * @throws RuntimeException when either row stops saying it in the shape this reads
@@ -612,9 +623,9 @@ final class Handoff
     {
         $counts = self::claim(self::UNRELEASED, '## Unreleased at the basis');
 
-        if (preg_match('/^(\d+) entries — (\d+) added, (\d+) fixed, (\d+) changed$/', self::plain($counts['value']), $matches) !== 1) {
+        if (preg_match('/^(\d+) entr(?:y|ies) — (\d+) added, (\d+) fixed, (\d+) changed$/', self::plain($counts['value']), $matches) !== 1) {
             throw new RuntimeException(sprintf(
-                'HANDOFF.md line %d no longer states the Unreleased entries as [total entries — a Added, b '.
+                'HANDOFF.md line %d no longer states the Unreleased section as [total entry/entries — a Added, b '.
                 'Fixed, c Changed]: [%s]',
                 $counts['source'],
                 trim($counts['value']),

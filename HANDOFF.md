@@ -31,56 +31,47 @@ Every number below was read off this machine on 2026-10-07, with the remote aske
 
 ## 1. Pending — written, green, uncommitted
 
-Three batches are in the working tree and none of them is in the commit section 2 names as
-`HEAD`. Twenty-three paths differ from that commit: nineteen tracked paths changed, and four new
-files the register does not carry at all. They are unrelated work that happens to share a checkout
-— a guard for the half of `AGENTS.md` section 0 about *place on a machine*, the composer scripts
-the batch before it left pointing at a file a consumer's copy does not have, and this note's own
-re-take with the guard that holds its pending list in both directions — so a commit has to take
-them one at a time.
+Three batches that were pending when this note was last taken — and the reading that lets it be
+taken at all — are commits now, and this re-take is the fourth. They are the pgcat *direction*, the
+end of the last reader window a stale pooler is at, with the records and the changelog entry that
+describe it; the release script, which renders the published API page from the record it writes; and
+`AGENTS.md`, which now sends a session to `.agents/machine.local.json` for the interpreter every
+command here starts with. Two paths differ from the commit section 2 names as `HEAD`: two tracked
+paths changed, and zero new files.
+
+What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, and both of them are in `f10c318`:
 
 | File | What it is |
 |---|---|
-| `tests/Support/MachinePaths.php` | the reading of the other half of section 0: a path that names a machine — a drive, an account or a share — rather than a directory every machine of its kind has |
-| `tests/Unit/Support/MachinePathsTest.php` | the tests that hold that reading to the shapes it must report and the shapes it must leave alone |
-| `tests/Support/ComposerScripts.php` | the reading of the gap the last batch left: a lifecycle event that reaches a path `.gitattributes` holds back, with `@name` resolved and the directories above a path asked about too |
-| `tests/Unit/Support/ComposerScriptsTest.php` | the tests for it, exercised at the shape the two deleted events had |
+| `tests/Unit/Release/DryRunTest.php` | committed in `f10c318`: a `--weigh --dry-run` held to the tree, the refs and `HEAD` it left alone, read against the same command run for real |
+| `tests/Unit/Release/PublishedPageTest.php` | committed in `f10c318`: a fixture release held to the page it publishes — the bytes the record renders, the stamp both of them name, and the commit the tag points at |
 
-Nineteen tracked paths are changed rather than added, thirteen of them for the first batch. Every one
-of those edits is the same fix. `AGENTS.md` section 0 names `tests/Unit/Support/MachinePathsTest.php`
-beside the climb reading and gives both a row in the authority table; `.agents/README.md` and the
-three `pkg-*` skills stop spelling this checkout's own directory out, and so do `PUSHING.md` and the
-`cd` line in `bin/composer-link.cmd`; the backslash example in `src/Pgcat/SupervisorStep.php`,
-`tests/Unit/Pgcat/SupervisorStepTest.php` and `docs/pgcat-supervisor-preflight.md` now names a
-program's install root instead of one written on somebody's disk; `tests/Support/RepoEscapes.php`
-and `tests/Unit/Support/RepoEscapesTest.php` say which reading tolerates which shape; and
-`CHANGELOG.md` carries the batch's `### Added` entry — the one entry the working tree's Unreleased
-section holds, and what makes section 3's weighing read `minor`.
+`src/Support/BootAudit.php` and `src/Providers/WeightedDatabaseServiceProvider.php` are a concurrent
+thread's work in flight, nine lines between them, and this note did not read the change. What it can
+say about them is what it measured rather than what they do: they are in the tree, and the gate is
+red on them — `phpstan` on `src/Support/BootAudit.php` (a property assignment whose closure has the
+wrong signature, and a closure called with more parameters than it takes) and `pint` on
+`src/Providers/WeightedDatabaseServiceProvider.php` (`method_argument_space`) — so a thread that runs
+`bin/checks.php` and sees red should look here first. They travel with the thread whose work they are,
+and a release is blocked by them twice over: the plan refuses on a dirty tree while they sit here, and
+the CI rail would read the red `phpstan` and `pint` if they were committed as they stand. Neither is
+this thread's to finish.
 
-The second batch is the other three edited files and the two new ones above. `composer.json` loses
-its `post-install-cmd` and `post-update-cmd` events, which both ran `bin/publish-config.php` — a file
-`bin/` is `export-ignore`d whole, so an install from the dist tarball ran a file that is not in the
-copy it was installing. `bin/publish-config.php` and `README.md` are the prose that described it: an
-application wires the artisan tag, and the checkout's script is a command a human types.
-
-The third batch is this note's own re-take, and the two files that hold it. `tests/Support/Handoff.php`
-gained `uncarried()`, `uncommitted()` and `pendingCounts()` — the paths the tree has that no commit
-does, the size of that set, and the size section 1 states — and `tests/Unit/Docs/HandoffTest.php`
-holds each against the other, in both directions: every path the tree has and the register does not
-is named in the table above, and the counts the sentence states are the tree's.
-
-**Not committed, on purpose: the commits in section 2 are the rule and its guard, and all three of these
-batches are what has been written since.** Three unrelated batches are three commits rather than
-one. The package has no `core.hooksPath` (so stock `.git/hooks`, and no gate of this repository's own
-runs on commit), `commit.gpgsign=true` with `user.signingkey=9CE840D871DE7A62`, and the message
-shape `bin/weighing.php` reads back is the one `@pkg-commit` documents. The three subjects in that
-shape would be:
+The three commits this section used to describe:
 
 ```
-feat: a path that names a machine is a finding in the files a commit carries
-fix: the two install events that ran a script a consumer's copy does not have
-test: the pending list in the handoff note is held in both directions
+feat: the reader-window verdict names which end of the window disagreed   3f05cff
+fix: the release script renders the page its record publishes             f10c318
+docs: a session starts by reading the machine record for its interpreter  4f4967d
 ```
+
+**The four batches were four commits rather than one**, because they are unrelated work that happens
+to share a checkout — and the note rides with the last of them rather than the first, because its
+pending counts are a claim about this working tree and the only state they can be true in is the one
+after everything else has landed. The package has no `core.hooksPath` (so stock `.git/hooks`, and no
+gate of this repository's own runs on commit), `commit.gpgsign=true` with
+`user.signingkey=9CE840D871DE7A62`, and the message shape `bin/weighing.php` reads back is the one
+`@pkg-commit` documents.
 
 ### Also pending: the records carry the stamp of the last release
 
@@ -91,7 +82,7 @@ check reading the stamp rather than the rows. Against this checkout, the same co
 `--at` reports the inventory current:
 
 ```
-php bin/inventory.php --check --at=6f5cb6c
+php bin/inventory.php --check --at=f92abd2
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
@@ -113,19 +104,22 @@ fourth weighing signal reads.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `6f5cb6c` — *test: the handoff note's environment table is held to the machine's own record* |
+| HEAD | `f92abd2` — *test: the pending list in the handoff note is held in both directions* |
 | `origin/dev` | `0907fce8fb351c62863320cd78a0ec6e1cbf84dd` — *fix: the published API page is re-rendered for the tag the release cut* |
-| Unpushed | 7 commits — the ones from the table's `HEAD` back to the commit above it |
-| Since the last tag | chore 2, docs 2, feat 1, fix 1, test 1 |
+| Unpushed | 10 commits — the ones from the table's `HEAD` back to the commit above it |
+| Since the last tag | chore 2, docs 2, feat 2, fix 2, test 2 |
 
 The `HEAD` row is the basis every number in this file is read against. The tip of `origin/dev`
 was asked of the remote directly (`git ls-remote`, not the local ref) on the day — and again when
 this section was re-taken, which named the same commit; the commits between the two are what is
 unpushed.
 
-The seven most recent are the ones a reader is most likely to be standing in the middle of:
+The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+f92abd2  test: the pending list in the handoff note is held in both directions
+e5c4a7c  fix: the two install events that ran a script a consumer's copy does not have
+928808e  feat: a path that names a machine is a finding in the files a commit carries
 6f5cb6c  test: the handoff note's environment table is held to the machine's own record
 343d645  chore: the package stops shipping the scripts that write its records
 bcc64ea  docs: the handoff note is re-taken at the rule and its guard
@@ -161,22 +155,22 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2` |
 | The latest of them | `v0.2.0-alpha2` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 0 entries — 0 added, 0 fixed, 0 changed |
-| The notes weigh as | patch — an empty section weighs as nothing |
+| `## Unreleased` at the basis | 1 entry — 1 added, 0 fixed, 0 changed |
+| The notes weigh as | minor — the one `### Added` entry is the loudest heading the notes use |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease,
 and it may. The headings the weighing reads are the `### Added`, `### Fixed` and `### Changed` a
-Keep a Changelog section writes; the section carries none of them, so every count is zero and the
-severity is the one the weighing gives an empty section. The marker is the one a note claims
-rather than the word alone, which is why the last release could be declared breaking from a
-section that carries four headings and no `Removed` one.
+Keep a Changelog section writes; the section carries one of them — the machine-path guard's own
+entry — so `### Added` is the loudest heading it has and the severity is the one the weighing gives
+that. The marker is the one a note claims rather than the word alone, which is why the last release
+could be declared breaking from a section that carries four headings and no `Removed` one.
 
 ### The release the weighing would ask for, and the line that refuses it
 
-`v0.2.0-alpha2` was cut and pushed on 2026-10-06. Since then one entry has been written under
-`## Unreleased` — in the working tree rather than at the register, so the section the table above
-holds is still empty and the one the weighing reads is not. Asked on 2026-10-07 what a release
-would do, `exit 0`:
+`v0.2.0-alpha2` was cut and pushed on 2026-10-06. Since then two entries have been written under
+`## Unreleased` — one at the register and one in the working tree — so the section the table above
+holds carries the first and the one the weighing reads carries both. Asked on 2026-10-07 what a
+release would do, `exit 0`:
 
 ```bash
 php bin/release.php --weigh --branch=dev --dry-run
@@ -189,7 +183,7 @@ php bin/release.php --weigh --branch=dev --dry-run
   bump          minor  (weighed: a minor change)
   next version  0.2.0  (tag v0.2.0)
   CHANGELOG     ## Unreleased -> ## 0.2.0 - 2026-10-07, new Unreleased section above
-  release notes 1 bullet(s) in the promoted section
+  release notes 2 bullet(s) in the promoted section
   inventory     39 file(s), 198 method(s), 224 key(s)/member(s)  (fresh, weighed against v0.2.0-alpha2)
   branch-alias  dev-dev, dev-main -> 0.2.x-dev  (unchanged)
   commit        Release v0.2.0
@@ -198,35 +192,38 @@ php bin/release.php --weigh --branch=dev --dry-run
 ```
 
 One line is unsatisfied, and it is the check working rather than an obstacle: `ci` (section 2 is
-unpushed, so the commit being released is not one a consumer can fetch). The CHANGELOG line was
-the second of the two until the working tree's section gained its entry: at the register the
-section is empty, and an empty section is nothing to publish, which is why a release declared
-against that commit refuses there. The `minor` comes from both signals: the notes, whose
-`### Added` is the loudest heading they carry (the weighing reports `### Added — 1 entry, the
-loudest heading the notes use`), and the eight commits since the last tag — `test 1, chore 2,
-docs 2, feat 1, fix 2` — in which the `feat:` of section 2 is a new capability. The public API, the config and
-the inventory all weigh `patch`: *nothing removed, renamed or added since the last tag*.
+unpushed, so the commit being released is not one a consumer can fetch). The CHANGELOG line is
+satisfied twice over now — the register carries the machine-path entry, and the working tree carries
+that and this batch's — where, at the last taking, the section was empty at the register and a
+release declared against that commit had nothing to publish. The `minor` comes from both signals:
+the notes, whose `### Added` is the loudest heading they carry (the weighing reports `### Added —
+2 entries, the loudest heading the notes use`), and the eleven commits since the last tag — `test 2, fix 3,
+feat 2, chore 2, docs 2` — in which the two `feat:` commits are new capabilities. The public API,
+the config and the inventory all weigh `patch`: *nothing removed, renamed or added since the last
+tag*.
 
 That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers
 in it that *are* checkable are held, though they are two different readings now: the entries the
-notes carry **at the register** (the table at the top of this section — none) and the state of the
-three records (section 1). Its own `1 bullet(s)` is the weighing's answer about the working tree,
+notes carry **at the register** (the table at the top of this section — one) and the state of the
+three records (section 1). Its own `2 bullet(s)` is the weighing's answer about the working tree,
 which no guard here holds.
 
 ### What is actually in the unreleased section
 
-One entry, and it is not this batch's: the machine-path guard — a reading that refuses a path
-naming the drive, the account or the share it was written on, held beside the walk that refuses
-one climbing above the root, with every path it reported rewritten to name nobody. At the register
-the section is empty; in the working tree it carries that `### Added` entry, uncommitted like the
-files it describes.
+Two entries, and the register carries one of them: the machine-path guard — a reading that refuses
+a path naming the drive, the account or the share it was written on, held beside the walk that
+refuses one climbing above the root, with every path it reported rewritten to name nobody. The
+working tree adds the pgcat entry the paragraph below is about, uncommitted like the files it
+describes.
 
-The seven commits in section 2 are the rule at the root, the walk that reads it, the two records
+The ten commits in section 2 are the rule at the root, the walk that reads it, the two records
 whose path pointed outside the package, the ignore rule for the machine record, this note's own
-re-take, the decision that a consumer's copy carries none of the tools under `bin/`, and the guard
-that holds section 5's environment rows to the machine record. What they change for a consumer is
-`README.md` alone — prose about which commands are a checkout's — because `AGENTS.md`, `tests/`,
-`.gitattributes`, `.gitignore` and `bin/` are all `export-ignore`d. The weighing agrees with that
+re-take, the decision that a consumer's copy carries none of the tools under `bin/`, the guard that
+holds section 5's environment rows to the machine record, the reading that refuses a path naming
+the machine it was written on, the two install events that ran a script a consumer's copy does not
+have, and the guard that holds this pending list in both directions. What they change for a
+consumer is `README.md` alone — prose about which commands are a checkout's — because `AGENTS.md`,
+`tests/`, `.gitattributes`, `.gitignore` and `bin/` are all `export-ignore`d. The weighing agrees with that
 reading rather than with a summary of it: `public API` and `config` are *nothing removed, renamed
 or added since the last tag*, and the inventory is current.
 
@@ -234,9 +231,14 @@ The thing to know about is the **boundary flip**, which is released and not inst
 `db:pgcat-window-flip` (`src/Console/Commands/DbWindowFlipCommand.php`) and the reader windows as
 scheduled tasks the package registers are all in `v0.2.0-alpha2` — cut, tagged and pushed — so
 this cycle has nothing to add to them, and they reach no application until the pin in section 4
-moves. The pooler left on the writer-only config inside an open reader window that now answers
-`degraded` at HTTP 503 is part of the same release, and it is the one change in it that a monitor
-or a deploy gate can feel.
+moves. The pooler left on the writer-only config inside an open reader window answers `degraded` at
+HTTP 503, and so does the same fault from the other end — the readers config left in place outside
+every window — because what the verdict reads is whether the file and the windows disagree, not
+which of the two is ahead; either way round is part of that release, and it is the one change in it
+that a monitor or a deploy gate can feel. Which end a failure is at, rather than whether there is
+one, is this cycle's rather than `v0.2.0-alpha2`'s: `direction` (`inside_window`,
+`outside_window`) and the `db:doctor` row that prints it are in the working tree, uncommitted like
+the entry that describes them.
 
 ---
 
@@ -259,11 +261,11 @@ thread can otherwise spend a long time establishing.
 
 What a release of this cycle would still need, none of which is done:
 
-1. commit the three batches in the working tree (section 1), as three commits rather than one;
-2. push the seven commits on `dev` (section 2), or declare the run with `--skip-ci`;
-3. land the `## Unreleased` entry the working tree carries — it is part of the first batch, and at
-   the register the section is empty, so a release declared against that commit would have nothing
-   to publish;
+1. commit the four batches in the working tree (section 1), as four commits rather than one;
+2. push the ten commits on `dev` (section 2), or declare the run with `--skip-ci`;
+3. land the `## Unreleased` entry the working tree carries and the register does not — the pgcat
+   one: the register already carries the machine-path entry, so a release declared against that
+   commit would publish that entry alone;
 4. raise the consumer's pin, in the application repository, to the new tag;
 5. the application-side switches and schedule entries that a flip needs, which live in that
    repository and are not part of this package.
@@ -317,13 +319,20 @@ would carry. Where a row describes a machine that is not this one the comparison
 fails, which is what a fresh clone and CI's runner see — the same shape as the record itself:
 absent is a skip, present and different is a failure.
 
-Two of the note's own claims were checked by control rather than taken on trust. Editing section
+Four of the note's own claims were checked by control rather than taken on trust. Editing section
 3's count row to `3 entries — 3 added, 0 fixed, 0 changed` fails `HandoffTest` with *"HANDOFF.md
-says the Unreleased section carries added 3, changed 0, fixed 0; the weighing counts added 0,
-changed 0, fixed 0"*, and editing this table's Composer row to 2.10.4 fails the environment test,
-which names the row's line and both versions — *"…puts Composer at 2.10.4, and the phar it names
-reports 2.10.3"*. Both edits were restored byte for byte afterwards, which is why the file the
-suite reads is the file described here.
+says the Unreleased section carries added 3, changed 0, fixed 0; the weighing counts added 1,
+changed 0, fixed 0"*, and editing it to `1 entry — 2 added, 0 fixed, 0 changed` fails it with
+*"…carries added 2, changed 0, fixed 0; the weighing counts added 1, changed 0, fixed 0"*; editing
+section 1's counts sentence to state *one* file where the tree has two fails it at line 34 with
+*"…says 21 path(s) differ from the register, 19 of them tracked paths that changed and 1 file(s) it
+does not carry; this checkout has 21, 19 and 2"*; and editing this table's Composer row to 2.10.4
+fails the environment test, which names the row's line and both versions — *"HANDOFF.md line 323
+puts Composer at 2.10.4, and the phar it names reports 2.10.3"*. The second and third are the two
+readings that had to learn the singular, and each still fails on a count the tree does not have —
+which is what makes the reading the change widened a reading rather than a shrug.
+Every edit was restored byte for byte afterwards, which is why the file the suite reads is the file
+described here.
 
 ### What the test above cannot ask
 
