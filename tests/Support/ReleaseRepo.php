@@ -206,6 +206,15 @@ final class ReleaseRepo
         return $this->root . '/' . $relative;
     }
 
+    /**
+     * The package directory itself — what a script living in the fixture resolves as its root,
+     * for a test that has to hand the same directory to a reader of its own.
+     */
+    public function root(): string
+    {
+        return $this->root;
+    }
+
     public function read(string $relative): string
     {
         $contents = @file_get_contents($this->path($relative));
@@ -417,8 +426,9 @@ final class ReleaseRepo
         // The real scripts, copied rather than reimplemented: surface.php holds the
         // symbol reader and the inventory format, weighing.php the four signals and the
         // weighing both commands share, inventory.php is what a hand regeneration runs,
-        // blame.php answers about one symbol, and release.php is the thing under test.
-        foreach (['release.php', 'surface.php', 'weighing.php', 'inventory.php', 'blame.php'] as $script) {
+        // blame.php answers about one symbol, api.php renders the page the release writes
+        // from the record beside it, and release.php is the thing under test.
+        foreach (['release.php', 'surface.php', 'weighing.php', 'inventory.php', 'blame.php', 'api.php'] as $script) {
             if (!copy($package . '/bin/' . $script, $root . '/bin/' . $script)) {
                 throw new RuntimeException("Could not copy bin/{$script}");
             }

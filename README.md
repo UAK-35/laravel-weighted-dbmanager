@@ -2200,9 +2200,10 @@ surface.tsv              and the config keys, env vars, constants and properties
                          back by the next release
 API.md                   the same rows as a page a person reads — every class with its
                          public methods, their argument shapes, and the config the
-                         package reads — rendered from the record by bin/api.php and
-                         guarded by PublicApiReportTest, so the page cannot describe a
-                         different tree from the one the release weighed
+                         package reads — rendered from the record by bin/api.php,
+                         refreshed by bin/release.php in the release commit, and guarded
+                         by PublicApiReportTest, so the page cannot describe a different
+                         tree from the one the release weighed
 ```
 
 The scripts under `bin/` are this repository's tools rather than the package's:

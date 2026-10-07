@@ -44,9 +44,10 @@ report the next version, it decides it.
 | CHANGELOG | Promotes `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` and puts a fresh, empty `## Unreleased` section above it. Heading style (bracketed or not) follows the file |
 | Compare links | When the changelog has an `[Unreleased]:` link reference, it is repointed at the new tag and a `[X.Y.Z]` compare link is added |
 | Branch alias | Both dev-lane aliases (`dev-main`, `dev-dev`) are kept on the line being developed (see below) |
-| Commit | `Release vX.Y.Z`, touching only `CHANGELOG.md` and, when it moves, `composer.json` |
+| Commit | `Release vX.Y.Z`, touching `CHANGELOG.md`, the three inventory files and `API.md`, and `composer.json` when its alias moves |
 | Tag | Annotated: `git tag -a vX.Y.Z -m vX.Y.Z` |
 | Inventory | `files.tsv`, `methods.tsv` and `surface.tsv` are rewritten in the same commit, stamped with the tag being created (see [the inventory](#the-inventory)) |
+| API page | `API.md` is rendered from that record by `bin/api.php` and written into the same commit, so the page a consumer reads names the tag it was cut from rather than the one before it (see [the page a consumer reads](#the-page-a-consumer-reads)) |
 
 `--dry-run` prints all of the above, the CHANGELOG head after promotion, and the
 exact git commands it would run — without writing, committing or tagging
@@ -115,6 +116,23 @@ All three files open with two `#` lines — what the file is, and which tag it
 That is the one direction a versioning signal must never be wrong in: believing a
 lazily refreshed inventory would ship a breaking change as a patch. Losing one
 costs a second opinion and nothing else, because no signal ever lowers the bump.
+
+### The page a consumer reads
+
+The three files are written for a programme. `API.md` is the same rows as a page a person
+reads, rendered from them by `bin/api.php`: one section per class, one row per public
+method, the config keys and env vars grouped by the file that declares them, and a summary
+table whose counts are the record's own. Nothing asks the tree again, so the page and the
+weighing cannot disagree about what a release published.
+
+`bin/release.php` renders it into the same commit, after the record it renders. The order is
+the point: a page rendered from a record that is not on disk yet is the state a hand-run at
+the wrong moment leaves behind, and a page left at the previous release is worse than a
+missing one — it names a tag the record beside it does not, and a consumer reading it has no
+way to tell. The page is derived and is never weighed, so it has no signal of its own, and a
+page that cannot be written stops the release before the tag like every other step that
+writes. `PublicApiReportTest` runs the generator backwards against the committed pair, and
+`php bin/api.php --check` is the read-only half a pipeline calls.
 
 ### A record that is partly there stops the release
 
@@ -406,14 +424,15 @@ state the next run recovers from rather than one it is stuck in
 
 A rail is not the only way a release stops, and the difference is worth knowing before
 reading an exit code as "nothing happened". A step of the release *itself* can fail — the
-CHANGELOG, the inventory or `composer.json` cannot be written, git will not take the index,
-or the push cannot run. A rail refuses before anything is written; these do not, so the
-tree may already have a promoted CHANGELOG in it. What never happens is a new tag, because
+CHANGELOG, the inventory, the API page or `composer.json` cannot be written, git will not take
+the index, or the push cannot run. A rail refuses before anything is written; these do not, so
+the tree may already have a promoted CHANGELOG in it. What never happens is a new tag, because
 the commit and the tag are the last two steps: an unpublished failure leaves no version
 behind, and the remedy is to look at the tree and run again
 (`test_a_changelog_that_cannot_be_written_is_refused`,
 `test_a_composer_json_that_cannot_be_written_is_refused_after_the_notes_are_promoted`,
 `test_an_inventory_that_cannot_be_written_is_refused`,
+`test_a_page_that_cannot_be_written_is_refused_before_the_tag`,
 `test_an_index_that_cannot_be_locked_refuses_the_add`,
 `test_a_push_that_cannot_run_is_reported_after_the_tag_was_cut`). The push is the one
 exception to "no version behind": it runs after the tag, so a push that cannot run leaves the

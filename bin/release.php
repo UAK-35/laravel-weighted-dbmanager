@@ -44,6 +44,12 @@ declare(strict_types=1);
  *   properties, which are the rows that witness a removal on a tree with no tag at
  *   all, since the public-API signal above diffs two tags.
  *
+ *   Those three files are also what a consumer reads, as `API.md`: `bin/api.php` renders the
+ *   page from them, and this script writes it into the same commit — so a release publishes a
+ *   page that names the tag it was cut from rather than the one before it. The page is derived
+ *   and is never weighed, which is why it is written after the record it renders: a page
+ *   rendered from a record that is not on disk yet is the state a hand-run leaves behind.
+ *
  *   A name two files declare is one entry in the public-API map — the first file read
  *   holds it, and the second file's declaration is not in the surface at all — so a
  *   change to that second file's key is a change the tag diff cannot see. The plan says
@@ -150,6 +156,14 @@ declare(strict_types=1);
 // weighing that reads them are in bin/weighing.php (shared with bin/blame.php). This file
 // keeps the command: the arguments, the preconditions, the plan and the tag.
 require __DIR__ . '/weighing.php';
+
+// The page the record renders is bin/api.php, required rather than shelled out to because
+// this is the script that writes the record: that file's own help has said since it was
+// written that the inventory "is written by the release script, so this page is refreshed in
+// the same commit", and until now nothing in this file knew it existed. Including it only
+// defines its functions and the reader it shares with this one — its command runs when it is
+// the file being run, which is a comparison against __FILE__ rather than against $argv[0].
+require_once __DIR__ . '/api.php';
 
 $root = str_replace('\\', '/', dirname(__DIR__));
 
@@ -700,6 +714,20 @@ printf(
         : sprintf('## Unreleased -> ## %s - %s, new Unreleased section above', $version, gmdate('Y-m-d')),
     PHP_EOL,
 );
+
+// What the page will say, read from the tree rather than from the record on disk: the
+// record the plan is describing may be the stale or absent one the weighing just reported,
+// and the page is rendered from the record this release writes. The tree it names is the
+// tag being created — the page is stamped like the record is, so it is the tag and not a
+// count that says which release a consumer is reading.
+$pageRecords = inventoryRecords($root);
+$pageLine = sprintf(
+    '%d class(es), %d public method(s), described as %s',
+    count(apiClasses($pageRecords['files'], $pageRecords['methods'])),
+    count($pageRecords['methods']),
+    $tag,
+);
+
 $inventoryLine = $weighing['inventory']['blocks_release']
     ? 'incomplete, and a real run refuses to release until it is repaired'
     : ($weighing['inventory']['stamp'] === '(missing)'
@@ -717,6 +745,7 @@ printf(
     $inventoryLine,
     PHP_EOL,
 );
+printf("  api page      %s%s", $pageLine, PHP_EOL);
 printf(
     "  branch-alias  %s%s",
     $aliased['branches'] === []
@@ -831,6 +860,22 @@ note(sprintf(
     $tag,
 ));
 
+// The page goes in with the record it renders, and after it: the record is on disk by now,
+// so the render reads the bytes this release is publishing rather than the ones it replaced.
+// A refusal here leaves the tree with a promoted CHANGELOG and a fresh record and no tag,
+// which is the same shape as every other step that fails — no version is left behind.
+try {
+    $page = apiReport($root);
+} catch (RuntimeException $error) {
+    fail('Could not render API.md: ' . $error->getMessage() . '.');
+}
+
+if (@file_put_contents(apiReportPath($root), $page) === false) {
+    fail('Could not write API.md');
+}
+
+note('API.md re-rendered — ' . $pageLine);
+
 if ($aliased['changed'] && !write($composerPath, $aliased['content'])) {
     fail('Could not write composer.json');
 }
@@ -850,6 +895,8 @@ $staged = ['CHANGELOG.md'];
 foreach ($inventoryFiles as $inventoryFile) {
     $staged[] = relativeTo($root, $inventoryFile);
 }
+
+$staged[] = relativeTo($root, apiReportPath($root));
 
 if ($aliased['changed']) {
     $staged[] = 'composer.json';
@@ -1726,7 +1773,8 @@ function usage(): void
       spellings would be one version published twice, and the dotted one blocks
       the other once it exists. The suffix also decides the branch: a prerelease
       is cut from dev, a release from main. The CHANGELOG and the inventory are
-      promoted exactly as for a release.
+      promoted, and the page the inventory renders is rewritten, exactly as for a
+      release.
 
     CI:
       A tag is a version, so it is not cut on a commit nothing verified. The commit
