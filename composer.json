@@ -76,12 +76,6 @@
         }
     },
     "scripts": {
-        "post-install-cmd": [
-            "@publish-config"
-        ],
-        "post-update-cmd": [
-            "@publish-config"
-        ],
         "checks": "@php bin/checks.php",
         "release": "@php bin/release.php",
         "publish-config": "@php bin/publish-config.php",

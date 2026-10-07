@@ -18,13 +18,22 @@ declare(strict_types=1);
  *
  * WHY THIS IS A SCRIPT AND NOT JUST A COMPOSER EVENT
  * --------------------------------------------------
- * Composer only executes the scripts of the *root* package: a script declared
- * in this file's composer.json does not run when an application requires this
- * package as a dependency. The `post-install-cmd` / `post-update-cmd` entries
- * here therefore cover a checkout of this package, and consuming applications
- * declare the call themselves, from their own composer.json:
+ * Composer only executes the scripts of the *root* package, so nothing declared
+ * in this file's composer.json could ever publish into the application that
+ * requires this package. A consuming application declares the call itself, in
+ * its own composer.json — as the tag the provider registers, not as a path into
+ * this package, because a distributed copy of it holds `bin/` back whole:
  *
- *   "@php vendor/uak35/laravel-weighted-dbmanager/bin/publish-config.php"
+ *   "@php artisan vendor:publish --tag=db-manager-config --ansi"
+ *
+ * This package declares no `post-install-cmd` or `post-update-cmd` of its own.
+ * Those events fire in a copy taken out of the dist tarball as well as in a
+ * checkout, and this file is in the one and not in the other: a line pointing at
+ * it could only ever have done nothing in a checkout, where there is no
+ * application to publish into, and failed the install of a distributed copy.
+ * A checkout asks for it the way a human asks for anything — by name:
+ *
+ *   composer publish-config
  *
  * CREATE-IF-MISSING, NEVER OVERWRITE
  * ----------------------------------
@@ -79,8 +88,8 @@ if ($resolved === false) {
 $app = rtrim(str_replace('\\', '/', $resolved), '/');
 
 if (!is_file($app . '/artisan')) {
-    // Not an application: a checkout of this package, most likely, where the
-    // events that call this script fire but there is nothing to publish into.
+    // Not an application: a checkout of this package, or a stray call. Either way
+    // there is nothing to publish into, and that is not a failure.
     echo "publish-config: {$app} is not a Laravel application (no artisan file) — nothing to publish." . PHP_EOL;
 
     exit(0);

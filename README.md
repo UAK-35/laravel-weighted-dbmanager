@@ -110,9 +110,8 @@ an application that has the package installed but not yet wired up. Deploys that
 run `composer install --no-scripts` skip it; run the artisan command from the
 release step instead.
 
-A checkout of this package carries the same call as a script of its own — the one
-its `post-install-cmd` and `post-update-cmd` events run — and you can point it at
-an application by hand:
+A checkout of this package carries the same call as a script of its own, which you
+can point at an application by hand:
 
 ```bash
 composer publish-config                   # from a checkout of this package
@@ -123,6 +122,14 @@ That script is one of the developer tools under `bin/`, and a distributed copy o
 this package holds all of them back: `bin/` is `export-ignore`d whole, so an
 application receives none of them. The artisan call above is an application's way;
 these two lines are a checkout's.
+
+Which is also why this package declares no install event of its own that runs it.
+A `post-install-cmd` fires in a checkout and in a copy taken out of the tarball
+alike, and this script is in the first and not in the second — so the line could
+only ever have done nothing in a checkout, where there is no application to publish
+into, and failed the install of a distributed copy. `composer publish-config` is
+how a checkout asks for it; an application's own `post-install-cmd` is how the
+application does.
 
 Given a directory that is not an application, it says so and exits `0`, so a stray
 call is never an error. Given an application it runs `vendor:publish` for the tag,
