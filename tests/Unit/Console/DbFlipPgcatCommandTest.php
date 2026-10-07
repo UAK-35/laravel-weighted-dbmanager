@@ -766,6 +766,101 @@ final class DbFlipPgcatCommandTest extends TestCase
     }
 
     /**
+     * The pooler's own file against the reader windows, in the direction the *state file* cannot
+     * show: `last_applied_mode` is what a flip applied, and a flip that never got that far left a
+     * file anyway — so the row reads pgcat's configuration, and says which way round it is.
+     *
+     * This is the direction the 2026-10-02 container met: a reader window is open, the resolver is
+     * asking for the replica pool, and the writer-only config is still in place, so every read the
+     * resolver meant for the pool reaches the writer while the payload says `ok`.
+     */
+    public function test_the_status_table_calls_out_a_writer_only_config_inside_a_reader_window(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+
+        // A boot an hour ago: the container's own window has closed, so the comparison is judged
+        // rather than suppressed as a deployment still converging.
+        $stamp = dirname($installation->path('state_file')).'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 3600));
+
+        $installation->install([
+            'boot_file' => $stamp,
+            'flip_window_seconds' => 480,
+        ]);
+
+        // The swap a boundary flip makes, not made — while `PgcatInstallation` leaves a reader
+        // window covering the whole day, which is what "inside the window" means here.
+        copy($installation->path('no_readers_path'), $installation->path('config_path'));
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('reader_window', $output);
+        $this->assertStringContainsString('open — reads should use the replica pool', $output);
+        $this->assertStringContainsString('pooler_config', $output);
+        $this->assertStringContainsString('writer-only config', $output);
+        $this->assertStringContainsString('STALE (inside the window)', $output);
+        $this->assertStringNotContainsString('STALE (outside the window)', $output);
+
+        // And as data, which is what a pipeline branches on rather than on the sentence: the
+        // distinction travels as a value, in the same block `/health/db` publishes.
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--json' => true]));
+
+        $verdict = $this->report(Artisan::output())['status']['reader_window'];
+
+        $this->assertSame('readers', $verdict['expected']);
+        $this->assertSame('writer', $verdict['applied']);
+        $this->assertTrue($verdict['failed']);
+        $this->assertSame('inside_window', $verdict['direction']);
+    }
+
+    /**
+     * The other direction, and the one the boot window cannot be blamed for: no reader window is
+     * open — a day list that does not hold today, whichever hour the suite runs at — and the pooler
+     * is still on the readers config, so reads keep reaching a replica through the hours the
+     * fallback holds them on the writer. The boundary flip at the window's *end* is the one that did
+     * not land, and the row says so rather than leaving it to the sentence below it.
+     */
+    public function test_the_status_table_calls_out_the_readers_config_left_outside_a_reader_window(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+
+        $stamp = dirname($installation->path('state_file')).'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 3600));
+
+        $installation->install([
+            'boot_file' => $stamp,
+            'flip_window_seconds' => 480,
+        ]);
+
+        // Today excluded from the day list, so the resolver asks for the writer at every hour the
+        // suite can run at — the state is a window that has closed, not one that has not opened yet.
+        config()->set('db-manager.swrr.reader_days', [((int) date('N') % 7) + 1]);
+        app()->forgetInstance(TimeWindowResolver::class);
+
+        copy($installation->path('readers_path'), $installation->path('config_path'));
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('closed — reads should use the writer', $output);
+        $this->assertStringContainsString('readers config', $output);
+        $this->assertStringContainsString('STALE (outside the window)', $output);
+        $this->assertStringNotContainsString('STALE (inside the window)', $output);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--json' => true]));
+
+        $verdict = $this->report(Artisan::output())['status']['reader_window'];
+
+        $this->assertSame('writer', $verdict['expected']);
+        $this->assertSame('readers', $verdict['applied']);
+        $this->assertTrue($verdict['failed']);
+        $this->assertSame('outside_window', $verdict['direction']);
+    }
+
+    /**
      * Build the installation a row starts from, and answer the one question its kind depends
      * on: what supervisor says, or whether the lock is free.
      */

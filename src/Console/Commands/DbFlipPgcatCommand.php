@@ -310,10 +310,75 @@ class DbFlipPgcatCommand extends Command
                 ['state_file',        $s['state_file']],
                 ['lock_file',         $s['lock_file']],
                 ...$this->windowRows($s['window']),
+                ...$this->readerWindowRows($s['reader_window']),
             ],
         );
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The pooler's own configuration against the reader windows as table rows — the check the boot
+     * window above cannot make, and the one the 2026-10-02 container needed.
+     *
+     * `last_applied_mode` is what a flip *applied*, and only a flip that got that far writes it
+     * down: a task that booted outside a reader window converges to the writer-only config and
+     * records nothing to correct, so the state report looks perfect right up to 10:00 — when the
+     * windows move the resolver, and nothing moves pgcat with it. These rows read pgcat's file
+     * instead, through the same verdict `/health/db` acts on, so a run that never recorded a mode
+     * still shows here.
+     *
+     * The two disagreements are told apart at the front of the state row, because they send an
+     * operator to opposite ends of the last window: a writer-only file inside an open window is the
+     * boundary flip at the window's *start* that did not land, and the readers config outside every
+     * window is the one at its *end* that never moved it back.
+     *
+     * @param array<mixed> $verdict the `reader_window` block of the status array, as it arrives
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function readerWindowRows(array $verdict): array
+    {
+        if ($verdict === []) {
+            return [['reader_window', '(unavailable — no reader_window block in the status array)']];
+        }
+
+        // Same defensive cast as `windowRows()`: this is somebody else's array — the flipper's
+        // `readerWindowVerdict()` — so a key that arrived with an unexpected type has to print a
+        // placeholder rather than `Array` in the middle of a sentence.
+        $text = static fn (mixed $value, string $fallback): string => is_scalar($value)
+            ? (string) $value
+            : $fallback;
+
+        $expected = $text($verdict['expected'] ?? null, '?');
+        $applied = $verdict['applied'] ?? null;
+        $failed = ($verdict['failed'] ?? false) === true;
+        $direction = is_string($verdict['direction'] ?? null) ? $verdict['direction'] : null;
+        $reason = is_string($verdict['reason'] ?? null) && $verdict['reason'] !== ''
+            ? $verdict['reason']
+            : 'pgcat is on a configuration the reader windows are not asking for';
+
+        $rows = [[
+            'reader_window',
+            $expected === 'readers'
+                ? 'open — reads should use the replica pool'
+                : 'closed — reads should use the writer',
+        ]];
+
+        $rows[] = ['pooler_config', match (true) {
+            $applied === 'readers' => 'readers config — the variant a reader window asks for',
+            $applied === 'writer' => 'writer-only config — the variant the fallback asks for',
+            default => '(not judged — pgcat\'s file was not read, or it holds neither variant)',
+        }];
+
+        $rows[] = ['reader_window_state', match (true) {
+            $failed && $direction === 'outside_window' => sprintf('STALE (outside the window) — %s', $reason),
+            $failed => sprintf('STALE (inside the window) — %s', $reason),
+            $applied === null => 'not judged',
+            default => 'in step with the windows',
+        }];
+
+        return $rows;
     }
 
     /**

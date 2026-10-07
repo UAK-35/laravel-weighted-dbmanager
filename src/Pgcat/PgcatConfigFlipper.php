@@ -732,7 +732,7 @@ final class PgcatConfigFlipper
      * reader of this shape (or `db:pgcat-flip --status`, which renders it) would not otherwise
      * know the window is in there.
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, config_path: string, readers_path: string, no_readers_path: string, restart_command: string, reload_command: string, use_reload: bool, start_command: string, start_attempts: int, start_retry_delay_ms: int, state_file: string, lock_file: string}
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}, config_path: string, readers_path: string, no_readers_path: string, restart_command: string, reload_command: string, use_reload: bool, start_command: string, start_attempts: int, start_retry_delay_ms: int, state_file: string, lock_file: string}
      */
     public function status(): array
     {
@@ -1121,7 +1121,7 @@ final class PgcatConfigFlipper
      * `db:replica-status` and `db:pgcat-flip --status` must not be able to read two different
      * answers to one question.
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, reason: string|null}}
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}}
      */
     public function healthSummary(): array
     {
@@ -1178,6 +1178,13 @@ final class PgcatConfigFlipper
      * same line `FlipWindow::closed()` already draws, reused rather than re-argued: a starting
      * container gets its eight minutes, and the check begins where the boot window ends.
      *
+     * `direction` names which way round a failure is, for the surfaces that print it: a writer-only
+     * file while a reader window is open (`inside_window`) and the readers config left in place
+     * outside every window (`outside_window`) are one fault seen from opposite ends of the last
+     * window, and a report that leads with which one it found sends the operator to the right end of
+     * it. It is null whenever `failed` is false, so a surface never prints a direction for a
+     * disagreement that does not exist.
+     *
      * The consequence is worth naming: with no boot stamp at all (`window.source: no_stamp` — a
      * local run, or an image whose entrypoint predates the stamp) `closed()` is false, so this
      * check stays quiet for the same reason the boot verdict does. That silence is inherited
@@ -1189,7 +1196,7 @@ final class PgcatConfigFlipper
      * `windowStatus()`'s consumers — surfaces that already read the state file — and never by
      * `disabledReason()` or a flip's own hot path.
      *
-     * @return array{expected: string, applied: string|null, in_step: bool|null, failed: bool, reason: string|null}
+     * @return array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}
      */
     public function readerWindowVerdict(): array
     {
@@ -1201,6 +1208,7 @@ final class PgcatConfigFlipper
                 'applied' => null,
                 'in_step' => null,
                 'failed' => false,
+                'direction' => null,
                 'reason' => null,
             ];
         }
@@ -1213,6 +1221,7 @@ final class PgcatConfigFlipper
             'applied' => $applied,
             'in_step' => $applied === null ? null : $applied === $expected,
             'failed' => $failed,
+            'direction' => $failed ? ($expected === 'readers' ? 'inside_window' : 'outside_window') : null,
             'reason' => $failed ? $this->readerWindowReason($expected, $applied) : null,
         ];
     }

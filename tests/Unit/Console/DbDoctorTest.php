@@ -1565,7 +1565,79 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('12 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString('13 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The pooler's own configuration against the reader windows, at the moment of the run: the one
+     * question the boot window cannot answer, because a task that boots outside a reader window
+     * converges to the writer-only config and looks perfect until a window opens and nothing moves
+     * pgcat with it.
+     *
+     * The row leads with which end of the last window was missed, and this is the end an operator
+     * meets late in the day: the readers config still in place after the last window closed, so
+     * reads keep reaching a replica through the hours the fallback holds them on the writer. Today
+     * is excluded from the day list, so no window is open at whichever hour the suite runs at.
+     */
+    public function test_the_pgcat_mode_row_names_the_readers_config_left_outside_a_reader_window(): void
+    {
+        $stamp = $this->tempDir().'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 3600));
+
+        $paths = $this->armPgcat(['boot_file' => $stamp, 'flip_window_seconds' => 480]);
+
+        $this->useReaderFallback(
+            [['start' => '00:00:00', 'end' => '23:59:59']],
+            [((int) date('N') % 7) + 1],
+        );
+
+        // The swap at the window's end that never happened.
+        copy($paths['readers_path'], $paths['config_path']);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat mode');
+
+        $this->assertStringStartsWith('FAIL  pgcat mode', $row);
+        $this->assertStringContainsString('outside the reader window', $output);
+        $this->assertStringNotContainsString('inside the reader window', $output);
+
+        // The flipper's own sentence travels rather than a second copy of it: the same words
+        // `/health/db` reports and logs, so the endpoint, the log line and the preflight cannot
+        // drift apart — and it names the file in place and the command that moves it.
+        $this->assertStringContainsString('no reader window is open', $output);
+        $this->assertStringContainsString('db:pgcat-flip', $output);
+
+        $this->assertSame(1, $exit, 'a pooler on the wrong configuration is a failure, and `--strict` is not what decides it');
+    }
+
+    /**
+     * The other direction, and the one a boot stamp cannot excuse: a reader window is open, so the
+     * resolver is asking for the replica pool, and the writer-only config is still in place — every
+     * read meant for the pool reaches the writer while `/health/db` answers `ok` to a monitor that
+     * only reads the payload's verdict. Same row, different words, and that is the whole point of
+     * naming the direction rather than leaving it to the sentence under it.
+     */
+    public function test_the_pgcat_mode_row_names_a_writer_only_config_inside_a_reader_window(): void
+    {
+        $stamp = $this->tempDir().'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 3600));
+
+        $paths = $this->armPgcat(['boot_file' => $stamp, 'flip_window_seconds' => 480]);
+
+        // A window covering the whole day, on every day of the week: open at whatever hour the
+        // suite runs at.
+        $this->useReaderFallback([['start' => '00:00:00', 'end' => '23:59:59']], [1, 2, 3, 4, 5, 6, 7]);
+
+        copy($paths['no_readers_path'], $paths['config_path']);
+
+        [$output, $exit] = $this->doctor();
+
+        $this->assertStringStartsWith('FAIL  pgcat mode', $this->rowContaining($output, 'pgcat mode'));
+        $this->assertStringContainsString('inside the reader window', $output);
+        $this->assertStringNotContainsString('outside the reader window', $output);
+        $this->assertStringContainsString('a reader window is open', $output);
+
         $this->assertSame(1, $exit);
     }
 
@@ -2794,13 +2866,13 @@ class DbDoctorTest extends TestCase
     private static function exitCodeProfile(string $profile): array
     {
         return match ($profile) {
-            'healthy' => [12, 0, 0],
-            'warned' => [11, 1, 0],
-            'warned-twice' => [10, 2, 0],
-            'failed' => [11, 0, 1],
-            'failed-twice' => [10, 0, 2],
-            'mixed' => [10, 1, 1],
-            'mixed-twice' => [8, 2, 2],
+            'healthy' => [13, 0, 0],
+            'warned' => [12, 1, 0],
+            'warned-twice' => [11, 2, 0],
+            'failed' => [12, 0, 1],
+            'failed-twice' => [11, 0, 2],
+            'mixed' => [11, 1, 1],
+            'mixed-twice' => [9, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }

@@ -4,6 +4,23 @@
 
 ### Added
 
+- **`db:doctor` and `db:pgcat-flip --status` now say which way round a stale pooler is, and the
+outside-window case is called out by name.** The verdict behind `/health/db`'s `reader_window`
+block — pgcat's own file against the mode the reader windows ask for — carries a `direction`
+(`inside_window` or `outside_window`, null whenever there is nothing to be out of step with), and
+the two surfaces that report it lead with it. `db:pgcat-flip --status` prints `reader_window`,
+`pooler_config` and a `reader_window_state` row, whose two failures read `STALE (inside the window)`
+and `STALE (outside the window)`, over the same words the flipper already uses; `db:doctor` gains a
+thirteenth row, `pgcat mode`, in the `pgcat …` family, printing the flipper's own sentence under
+that distinction — the sentence `/health/db` reports and logs, so the endpoint, the log line and the
+preflight cannot drift apart. Both directions are one fault seen from opposite ends of the last
+window, and which end it is decides what the operator looks at next: a writer-only file inside an
+open window is the boundary flip at the window's *start* that did not land, while the readers config
+outside every window is the one at its *end* that never moved it back. An armed flipper whose file
+cannot be read is reported as *nothing compared* rather than as a pass — judging the file is
+`pgcat files`' row — and an inert one has no file to disagree about. No key moves and no suggestion
+line is added; a doctor run on an installation where `db` resolves has one more check in `counts`.
+
 - **Nothing read the half of the scope rule that is about *place on a machine* — a file that names the
 drive, the account or the share it was written on — and now a guard does.**
 `tests/Unit/Support/RepoEscapesTest.php` walks every path the repository would carry and refuses the

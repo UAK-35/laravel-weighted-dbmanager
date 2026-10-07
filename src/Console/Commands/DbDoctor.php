@@ -31,7 +31,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * php artisan db:doctor [connection] [--strict] [--json] [--config-file=path]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Twelve things can be wrong while the application
+ * do", before traffic arrives. Thirteen things can be wrong while the application
  * still boots and answers requests:
  *
  *   provider swap     the framework's DatabaseServiceProvider is still the one
@@ -56,6 +56,14 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     supervisor does not know is the one fault repaired by a name, so
  *                     the row asks what supervisord is running and names the programs
  *                     nearest the configured one
+ *   pgcat mode        the pooler is on the configuration the reader windows are not
+ *                     asking for: the writer-only config while a window is open, so
+ *                     every read meant for the replica pool reaches the writer, or the
+ *                     readers config outside every window, so reads keep reaching a
+ *                     replica through the hours the fallback holds them on the writer.
+ *                     An armed flipper whose file cannot be read at all is not judged
+ *                     — `pgcat files` judges the file itself. The row leads with which
+ *                     end of the last window the flip missed
  *   replica metadata  replicas carry no weight metadata, so the resolver picks at
  *                     random while the table looks weighted — or a replica's weight,
  *                     cores or memory is a value the resolver cannot read, which
@@ -280,6 +288,7 @@ class DbDoctor extends Command
             $rows[] = $this->replicaMetadata($manager, $connection);
             $rows[] = $this->switchValues();
             $rows[] = $this->readerWindows();
+            $rows[] = $this->pgcatMode();
             $rows[] = $this->flipSchedule();
             $rows[] = $this->storeProbe();
             $rows[] = $this->storeReachability($manager, $connection);
@@ -1904,6 +1913,82 @@ class DbDoctor extends Command
     }
 
     /**
+     * Where the pooler is against the windows, at the moment of the run — the one question the boot
+     * window cannot answer, because a task that boots outside a reader window converges to the
+     * writer-only config and looks perfect until a window opens and nothing moves pgcat with it.
+     *
+     * Read through the flipper rather than from a second parse of the block: `appliedMode()` reads
+     * pgcat's *file*, so a run that never got as far as recording a mode still shows here — that
+     * shape, a `last_mode`-based check answering "unknown" while the pooler is provably writer-only,
+     * is the incident this row exists for.
+     *
+     * Both directions fail, and the sentence leads with which one the run found, because the
+     * operator's next question — did the flip at the window's start not land, or the one at its
+     * end? — is answered by the words rather than by reading the flipper's sentence for its
+     * opening clause. An armed flipper whose file cannot be read is *not judged* rather than
+     * passed, and `pgcat files` judges the file itself; an inert one has no file to be wrong about,
+     * which is the conclusion `flip schedule` reaches for its own subject.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function pgcatMode(): array
+    {
+        $name = 'pgcat mode';
+
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row($name, self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row(
+                $name,
+                self::FAIL,
+                'the flipper could not be built, so pgcat\'s configuration cannot be compared with the reader windows: '.$e->getMessage(),
+            );
+        }
+
+        // An inert flipper has no file of its own to be on the wrong variant of, so there is
+        // nothing to compare and nothing to disagree about — the same line `pgcat files` and
+        // `flip schedule` draw for themselves.
+        if (!$flipper->isEnabled()) {
+            return $this->row($name, self::PASS, 'flipper is not armed — nothing compares pgcat\'s configuration with the reader windows, so the two cannot disagree');
+        }
+
+        $verdict = $flipper->readerWindowVerdict();
+        $expected = $verdict['expected'];
+        $applied = $verdict['applied'];
+
+        // Not judged rather than passed: permissive mode has no window to be inside of, and a file
+        // that could not be read (or holds neither variant) is `pgcat files`' question. The reading
+        // itself is still reported by `--status`, which is where a reader goes to see it.
+        if (!is_string($applied)) {
+            return $this->row($name, self::PASS, 'nothing was compared: no reader window is configured, or pgcat\'s configuration could not be read');
+        }
+
+        if ($verdict['failed'] !== true) {
+            return $this->row($name, self::PASS, $expected === 'readers'
+                ? 'in step — a reader window is open and pgcat is on the readers config'
+                : 'in step — no reader window is open and pgcat is on the writer-only config');
+        }
+
+        // The flipper's own sentence is printed rather than a second copy of it: it carries the file
+        // in place, why the reads are going the wrong way, and the command that moves the file — and
+        // it is the same sentence `/health/db` reports and logs, so the row, the endpoint and the log
+        // cannot drift apart.
+        return $this->row($name, self::FAIL, sprintf(
+            '%s — %s',
+            $verdict['direction'] === 'outside_window'
+                ? 'outside the reader window'
+                : 'inside the reader window',
+            is_string($verdict['reason']) && $verdict['reason'] !== ''
+                ? $verdict['reason']
+                : 'pgcat is on a configuration the reader windows are not asking for',
+        ));
+    }
+
+    /**
      * Which mechanism moves the pooler, and what it is written to move it at.
      *
      * WHY THIS ROW EXISTS
@@ -1952,6 +2037,7 @@ class DbDoctor extends Command
      *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
+
     private function flipSchedule(): array
     {
         if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
