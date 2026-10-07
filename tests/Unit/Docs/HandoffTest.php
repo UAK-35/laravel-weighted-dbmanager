@@ -565,6 +565,17 @@ final class HandoffTest extends TestCase
             }
         }
 
+        // A heading the section does not carry counts zero rather than being absent from the
+        // comparison: `bin/release.php` promotes the notes and writes a bare `## Unreleased`,
+        // leaving the headings to the first change, so the section a release leaves behind has
+        // none of them and a note taken in that state has to be able to say so. The teeth are
+        // untouched — a heading that *is* there is reported with its count, so a note that calls
+        // it empty fails, and a heading the note does not name (say `### Security`) is a key it
+        // does not have.
+        foreach (['added', 'fixed', 'changed'] as $heading) {
+            $counts[$heading] ??= 0;
+        }
+
         $claimed = ['added' => $claim['added'], 'fixed' => $claim['fixed'], 'changed' => $claim['changed']];
         ksort($counts);
         ksort($claimed);
@@ -626,10 +637,14 @@ final class HandoffTest extends TestCase
         $machine = self::machineRecord();
         $php = Handoff::php();
 
+        // The row names the record's key rather than a path, and `Handoff::php()` resolves the
+        // path through that record — so what is compared here is the row's pointer against the
+        // record, whose own `php.exe` is on both sides by construction. What is still the row's own
+        // claim is below: the version, and whether `php` answers on PATH.
         self::assertSame($machine['php']['exe'], $php['exe'], sprintf(
-            'HANDOFF.md line %d points PHP at [%s], and the machine record says [%s].',
+            'HANDOFF.md line %d resolves PHP to [%s], and the record the row names says [%s].',
             $php['source'],
-            $php['exe'],
+            $php['exe'] ?? 'nothing',
             $machine['php']['exe'],
         ));
 
@@ -838,6 +853,90 @@ final class HandoffTest extends TestCase
             implode(', ', $recordedPaths),
             implode(', ', $paths),
         ));
+    }
+
+    /**
+     * The one thing a row *added* to section 5 can break, which every test above reads past.
+     *
+     * WHY THIS IS NOT ONE OF THE COMPARISONS ABOVE
+     * --------------------------------------------
+     *   Each test above takes a row by the label it knows — `Handoff::php()`, `Handoff::composer()`,
+     *   `Handoff::search()`, `Handoff::ships()` — so a row nobody asks for is a row nothing
+     *   compares. The table can grow a field for the machine (`PowerShell`, the container the suite
+     *   runs in, the editor) and stay green while describing one machine more than
+     *   `.agents/machine.local.json` — the record the table is *held to* — does. The gap is an
+     *   absence, so it is invisible in a diff of either file.
+     *
+     *   This therefore asks the other question: the rows the table *has*, rather than the rows a
+     *   reader asks for. `Handoff::working()` is that list read against the contract in the reader
+     *   (`WORKING_LEAVES`), which says which of the record's leaves holds each row, and which rows
+     *   (one, so far) the record does not hold at all. Two answers fail it: a row the contract does
+     *   not name, which is a row nobody has decided about; and a row held by a path that is not a
+     *   leaf of `Handoff::machineLeaves()` — coverage in name only, because those leaves are the
+     *   ones `machine()` refuses a record without, and a path nothing asks the record for would
+     *   cover the row with nothing.
+     *
+     * WHY IT DOES NOT SKIP WHERE THE OTHERS DO
+     * ---------------------------------------
+     *   The comparisons above need the record, so they skip in a checkout without one — a fresh
+     *   clone, CI's runner. This one does not: the answer is the contract, which is in the reader,
+     *   and a checkout with no record is exactly where a row nobody has decided about would
+     *   otherwise arrive unremarked, in the checkout and on the runner both.
+     */
+    public function test_section_5_has_no_row_the_machine_record_does_not_cover(): void
+    {
+        $leaves = Handoff::machineLeaves();
+        $rows = Handoff::working();
+        $undecided = [];
+        $unheld = [];
+
+        foreach ($rows as $row) {
+            if (!$row['known']) {
+                $undecided[] = sprintf('%s (line %d)', $row['label'], $row['source']);
+
+                continue;
+            }
+
+            foreach ($row['leaves'] ?? [] as $path) {
+                if (!in_array($path, $leaves, true)) {
+                    $unheld[] = sprintf('%s (line %d) is held by %s', $row['label'], $row['source'], $path);
+                }
+            }
+        }
+
+        self::assertGreaterThanOrEqual(
+            10,
+            count($rows),
+            sprintf(
+                'HANDOFF.md section 5 has %d rows. This guard reads the table it finds rather than a count kept '
+                .'beside it, so a table cut back to a handful of rows would be read as the whole of section 5.',
+                count($rows),
+            ),
+        );
+
+        self::assertSame(
+            [],
+            $undecided,
+            sprintf(
+                "HANDOFF.md section 5 has rows nothing says which machine-record leaves hold:\n  - %s\n".
+                "A row is how a reader learns a fact about the machine, and `.agents/machine.local.json` is where those\n".
+                "facts live — so a row names the record's leaves for it in the reader's contract, or is written there as\n".
+                "one the record does not hold. A row in neither is one nothing compares: the record would not notice it\n".
+                'missing, and the table would describe a machine the record does not.',
+                implode("\n  - ", $undecided),
+            ),
+        );
+
+        self::assertSame(
+            [],
+            $unheld,
+            sprintf(
+                "HANDOFF.md section 5 has rows held by leaves the machine record is not required to carry:\n  - %s\n".
+                "A row is covered only by a leaf of `Handoff::machineLeaves()` — the list `machine()` proves the record\n".
+                'has, and refuses a record without — because a path nothing asks the record for covers the row with nothing.',
+                implode("\n  - ", $unheld),
+            ),
+        );
     }
 
     public function test_the_machine_record_describes_this_checkout(): void

@@ -44,7 +44,7 @@ use Symfony\Component\Process\Process;
  *   beside it, so a path added to the prose next month is held without anybody remembering to
  *   register it. A span is read as a path when its first segment is an entry in the package root,
  *   which is what keeps `origin/dev`, `db:pgcat-window-flip`, `site/composer.json` and
- *   `E:\_F_DRV\…` out of it: none of them starts with something this repository has.
+ *   `C:\…` out of it: none of them starts with something this repository has.
  *
  * THE MACHINE RECORD
  * ------------------
@@ -53,6 +53,14 @@ use Symfony\Component\Process\Process;
  *   package. It is read as data: JSON, strict about the leaves the table compares against, and
  *   absent in a fresh clone or CI's runner, where there is no machine to record — those
  *   checkouts get null and the comparison skips rather than runs against nothing.
+ *
+ *   The table is read both ways round. `machine()` is the record's own leaves, which it refuses
+ *   to answer without; `machineLeaves()` is the list of them; and `working()` is section 5 read
+ *   against `WORKING_LEAVES` — the contract saying which of those leaves holds each row, and
+ *   which rows (one, so far) the record does not hold at all. A row in neither is a row nothing
+ *   compares: every other reader here goes looking for the label it knows, so a row added to the
+ *   table is invisible to them, and the table can describe one machine more than the record
+ *   beside it does while the suite stays green.
  */
 final class Handoff
 {
@@ -105,6 +113,47 @@ final class Handoff
         'tarball.carries',
         'tarball.leavesOut',
         'envVars.read',
+    ];
+
+    /**
+     * Section 5's table as the contract it is: the label the note writes each row under, against
+     * the machine-record dot paths that hold that row's facts — and null for a row that is *about*
+     * the record rather than a fact inside it.
+     *
+     * This is the half of the guard that catches a row added to the table. The readers in this
+     * file ask for the labels they know (`PHP`, `Composer`, `Text search`), so a row nobody asks
+     * for is a row nothing compares; `tests/Unit/Docs/HandoffTest.php` therefore takes the rows
+     * the table *has* from `working()` and fails on a label this map does not name. Being written
+     * here is the decision: the leaves that hold the row, or an explicit null with the reason.
+     *
+     * The paths have to be leaves of `MACHINE_LEAVES`, which is the list `machine()` refuses a
+     * record without — a row naming a path nothing asks the record for would be covered in name
+     * only, which is the failure this contract exists to make visible.
+     *
+     * @var array<string, list<string>|null>
+     */
+    private const WORKING_LEAVES = [
+        'PHP' => ['php.exe', 'php.dir', 'php.version', 'php.onPath'],
+        'Composer' => ['composer.phar', 'composer.version', 'composer.gitignored'],
+        'Git identities' => ['git.origin', 'git.commitGpgSign', 'git.userSigningKey', 'git.hooksPath'],
+        'Skills' => ['skills.index', 'skills.dirs'],
+        'Checks' => ['checks.list', 'checks.count', 'checks.names'],
+        'Style gate' => ['style.command', 'style.preset'],
+        'Static analysis' => [
+            'staticAnalysis.config',
+            'staticAnalysis.level',
+            'staticAnalysis.paths',
+            'staticAnalysis.phpVersion',
+        ],
+        'In a consumer\'s tarball' => ['tarball.carries'],
+        'Left out of it' => ['tarball.leavesOut'],
+        'Text search' => ['search.rgExe', 'search.rgVersion', 'search.rgOnPath'],
+        // The row is about the record rather than in it: a file cannot hold a leaf naming itself,
+        // and what the row does say of it is held elsewhere — that it is gitignored by
+        // `.gitignore`, that one machine wrote it by `machine()`, that this suite compares it
+        // by the tests under `tests/Unit/Docs/`. Null rather than an omission, so that a row like
+        // this one is a decision on the page rather than a gap no reader can tell from a mistake.
+        'Machine record' => null,
     ];
 
     /**
@@ -553,29 +602,36 @@ final class Handoff
     }
 
     /**
-     * The PHP row as it states it: the executable it names, the version in parentheses beside
-     * it, and whether the row says that executable answers as a bare `php`.
+     * The PHP row as it states it: the executable the machine record names for `php.exe`, the
+     * version in parentheses beside it, and whether the row says that executable answers as a bare
+     * `php`.
      *
-     * @return array{exe: string, version: string, onPath: bool, source: int}
+     * The row names the record's key rather than a path, and the path is resolved here through
+     * `machine()`: a path written into the note is one that resolves for whoever wrote it — the
+     * shape `tests/Unit/Support/MachinePathsTest.php` refuses — while the record that holds it is
+     * gitignored and describes one machine. The row still has to point at the key, which is what
+     * keeps it a claim rather than a sentence: rename either and this raises.
      *
-     * @throws RuntimeException when the row stops saying one of the three
+     * @return array{exe: string|null, version: string, onPath: bool, source: int}
+     *
+     * @throws RuntimeException when the row stops naming the key, the version, or the PATH claim
      */
     public static function php(): array
     {
         $row = self::claim(self::WORKING, 'PHP');
-        $exe = null;
+        $key = null;
 
         foreach ($row['spans'] as $span) {
-            if (preg_match('/php\.exe$/i', trim($span)) === 1) {
-                $exe = trim($span);
+            if (preg_match('/^php\.exe$/i', trim($span)) === 1) {
+                $key = trim($span);
 
                 break;
             }
         }
 
-        if ($exe === null || preg_match('/\((\d+\.\d+\.\d+)\)/', $row['value'], $version) !== 1) {
+        if ($key === null || preg_match('/\((\d+\.\d+\.\d+)\)/', $row['value'], $version) !== 1) {
             throw new RuntimeException(sprintf(
-                'HANDOFF.md line %d no longer points at a php.exe with a version beside it: [%s]',
+                'HANDOFF.md line %d no longer names the key php.exe beside the version: [%s]',
                 $row['source'],
                 trim($row['value']),
             ));
@@ -595,7 +651,20 @@ final class Handoff
             ));
         }
 
-        return ['exe' => $exe, 'version' => $version[1], 'onPath' => $onPath, 'source' => $row['source']];
+        // The path comes from the record the row names, and only from it: the row is read in every
+        // commit and the record is gitignored, so a path written into the row resolves for one
+        // person. Null when there is no record, which is the state of a fresh clone and of CI — and
+        // a caller that cannot run the binary there has nothing to run rather than a wrong thing.
+        $machine = self::machine();
+        $php = is_array($machine) ? ($machine['php'] ?? null) : null;
+        $candidate = is_array($php) ? ($php['exe'] ?? null) : null;
+
+        return [
+            'exe' => is_string($candidate) ? $candidate : null,
+            'version' => $version[1],
+            'onPath' => $onPath,
+            'source' => $row['source'],
+        ];
     }
 
     /**
@@ -799,6 +868,45 @@ final class Handoff
     }
 
     /**
+     * The maintenance clause of the Skills row: the three things the note says this package has
+     * none of — `.skills/` sources, a generator, and a `verify.py`.
+     *
+     * Read from the prose rather than assumed, and all three at once: a re-take that drops one of
+     * them, or rewrites the sentence into something this cannot read, raises here rather than
+     * leaving a clause no guard holds. Each key is the note's claim that the package has none of
+     * it, which is the fact a test can then go and check against the disk.
+     *
+     * @return array{sources: bool, generator: bool, verify: bool, source: int}
+     *
+     * @throws RuntimeException when the row stops saying it
+     */
+    public static function handMaintained(): array
+    {
+        $row = self::claim(self::WORKING, 'Skills');
+        $plain = self::plain($row['value']);
+        $claims = [];
+        $named = ['sources' => '\.skills/\s+sources', 'generator' => 'generator', 'verify' => 'verify\.py'];
+
+        foreach ($named as $what => $needle) {
+            // `#` delimits rather than `/`, which the first needle has in it.
+            if (preg_match('#\bno\s+'.$needle.'#i', $plain) !== 1) {
+                throw new RuntimeException(sprintf(
+                    'HANDOFF.md line %d no longer says the skills are hand-maintained with no %s: [%s]',
+                    $row['source'],
+                    $what,
+                    trim($row['value']),
+                ));
+            }
+
+            $claims[$what] = true;
+        }
+
+        $claims['source'] = $row['source'];
+
+        return $claims;
+    }
+
+    /**
      * The machine record `.agents/machine.local.json` holds — the environment facts section 5's
      * table is compared against.
      *
@@ -852,6 +960,58 @@ final class Handoff
         }
 
         return $record;
+    }
+
+    /**
+     * The leaves of the machine record this package is held to carry, as dot paths — what
+     * `machine()` refuses a record without, and so the only paths a section 5 row can be covered
+     * by.
+     *
+     * @return list<string>
+     */
+    public static function machineLeaves(): array
+    {
+        return self::MACHINE_LEAVES;
+    }
+
+    /**
+     * Section 5's table, row by row, each read against the record's contract: the label as the
+     * note writes it, the line it is on, whether that contract names the row at all, and the
+     * record's leaves when it does — null for a row the contract writes as one the record does
+     * not hold.
+     *
+     * `known` is therefore the whole question a row added to the table without a decision looks
+     * like from here: false, with no leaves, which is what `HandoffTest` fails on rather than
+     * reading past. Labels are looked up folded the way `claim()` folds them, so the map can write
+     * a label the way a reader would.
+     *
+     * @return list<array{label: string, source: int, known: bool, leaves: list<string>|null}>
+     *
+     * @throws RuntimeException when the note has no such table, or no row in it
+     */
+    public static function working(): array
+    {
+        $contract = [];
+
+        foreach (self::WORKING_LEAVES as $label => $leaves) {
+            $contract[self::plain($label)] = $leaves;
+        }
+
+        $rows = [];
+
+        foreach (self::table(self::WORKING) as $row) {
+            $label = trim($row['cells'][0] ?? '');
+            $folded = self::plain($label);
+
+            $rows[] = [
+                'label' => $label,
+                'source' => $row['source'],
+                'known' => array_key_exists($folded, $contract),
+                'leaves' => $contract[$folded] ?? null,
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -1050,7 +1210,7 @@ final class Handoff
      *
      * A placeholder is not a path: `bin/…` and `db:…` name a shape, and the ellipsis is why they
      * are written. Everything else is decided by the first segment, which has to be an entry in
-     * the package root — so `origin/dev`, `site/composer.json` and `E:\_F_DRV\…\php.exe` are not
+     * the package root — so `origin/dev`, `site/composer.json` and `C:\…\php.exe` are not
      * paths of this package and are left to the reader rather than guessed at.
      *
      * @return list<string>
