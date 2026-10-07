@@ -18,8 +18,7 @@ tag is cut, because section 3's table is a claim about now.
 Re-read the three commands it was built from before acting on it:
 
 ```bash
-cd E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
-
+# from the package root
 git status --short                                  # what is uncommitted, and how it is staged
 git log --oneline origin/dev..HEAD                  # what is unpushed
 php bin/release.php --weigh --branch=dev --dry-run  # what a release would do right now
@@ -39,12 +38,16 @@ not carry it.
 |---|---|
 | `tests/Unit/Docs/HandoffEnvironmentTest.php` | the tests that hold section 5's environment rows to `.agents/machine.local.json`, the machine's own copy of those facts |
 
-Three tracked files are edited rather than added: `tests/Support/Handoff.php` gained the reader
-that finds section 5's hand-maintained sentence, `tests/Unit/Docs/HandoffTest.php` learned that a
-heading the Unreleased section does not carry counts zero — `bin/release.php` promotes the notes
-and writes a bare `## Unreleased` in their place, so the section a release leaves behind has no
-headings at all, and this note had no way to state the counts its own guard demanded — and this
-file is the re-take itself. None of the three edits is committed.
+Three tracked files are edited rather than added, and the edits to the two test files are
+committed nowhere. `tests/Support/Handoff.php` gained the reader that finds section 5's
+hand-maintained sentence, and the contract that holds the table's rows to the record;
+`tests/Unit/Docs/HandoffTest.php` learned that a heading the Unreleased section does not carry
+counts zero — `bin/release.php` promotes the notes and writes a bare `## Unreleased` in their
+place, so the section a release leaves behind has no headings at all, and this note had no way to
+state the counts its own guard demanded — and that a row added to section 5 is a row nothing
+compares. This file was re-taken in the commit that landed it and edited twice since: its
+interpreter row now resolves through the machine record rather than spelling a path out, and the
+register in section 2 moved to that commit, with sections 2 and 3 re-read against the branch.
 
 **Not committed, on purpose: the four commits in section 2 are the rule and its guard, and this
 batch is what has been written since.** The package has no `core.hooksPath` (so stock
@@ -132,18 +135,20 @@ fourth weighing signal reads.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `7cbd43d` — *docs: the rule that the work is this folder, and nothing outside it* |
+| HEAD | `bcc64ea` — *docs: the handoff note is re-taken at the rule and its guard* |
 | `origin/dev` | `0907fce8fb351c62863320cd78a0ec6e1cbf84dd` — *fix: the published API page is re-rendered for the tag the release cut* |
-| Unpushed | 4 commits — the ones from the table's `HEAD` back to the commit above it |
-| Since the last tag | chore 1, docs 1, feat 1, fix 1 |
+| Unpushed | 5 commits — the ones from the table's `HEAD` back to the commit above it |
+| Since the last tag | chore 1, docs 2, feat 1, fix 1 |
 
 The `HEAD` row is the basis every number in this file is read against. The tip of `origin/dev`
-was asked of the remote directly (`git ls-remote`, not the local ref) on the day; the commits
-between the two are what is unpushed.
+was asked of the remote directly (`git ls-remote`, not the local ref) on the day — and again when
+this section was re-taken, which named the same commit; the commits between the two are what is
+unpushed.
 
-The four most recent are the ones a reader is most likely to be standing in the middle of:
+The five most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+bcc64ea  docs: the handoff note is re-taken at the rule and its guard
 7cbd43d  docs: the rule that the work is this folder, and nothing outside it
 b4c7dcf  feat: a walk refuses a record's path that climbs out of the package
 b8f3b5e  fix: the README and the config publisher stop pointing above the package
@@ -163,8 +168,7 @@ The push itself goes through PowerShell 7 and nothing else; `PUSHING.md` is the 
 `@pkg-push` wraps it:
 
 ```powershell
-cd E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
-
+# from the package root
 git push origin dev --follow-tags
 ```
 
@@ -187,10 +191,12 @@ severity is the one the weighing gives an empty section. The marker is the one a
 rather than the word alone, which is why the last release could be declared breaking from a
 section that carries four headings and no `Removed` one.
 
-### The release the weighing would ask for, and the two lines that refuse it
+### The release the weighing would ask for, and the line that refuses it
 
-`v0.2.0-alpha2` was cut and pushed on 2026-10-06, and nothing has been written under
-`## Unreleased` since. Asked on 2026-10-07 what a release would do, `exit 0`:
+`v0.2.0-alpha2` was cut and pushed on 2026-10-06. Since then one entry has been written under
+`## Unreleased` — in the working tree rather than at the register, so the section the table above
+holds is still empty and the one the weighing reads is not. Asked on 2026-10-07 what a release
+would do, `exit 0`:
 
 ```bash
 php bin/release.php --weigh --branch=dev --dry-run
@@ -202,8 +208,8 @@ php bin/release.php --weigh --branch=dev --dry-run
   latest tag    v0.2.0-alpha2
   bump          minor  (weighed: a minor change)
   next version  0.2.0  (tag v0.2.0)
-  CHANGELOG     nothing to promote — ## Unreleased is empty, so a real run refuses here; this plan weighs the changes in it instead
-  release notes 0 bullet(s) in the promoted section
+  CHANGELOG     ## Unreleased -> ## 0.2.0 - 2026-10-07, new Unreleased section above
+  release notes 1 bullet(s) in the promoted section
   inventory     39 file(s), 198 method(s), 224 key(s)/member(s)  (fresh, weighed against v0.2.0-alpha2)
   branch-alias  dev-dev, dev-main -> 0.2.x-dev  (unchanged)
   commit        Release v0.2.0
@@ -211,26 +217,37 @@ php bin/release.php --weigh --branch=dev --dry-run
   push          git push origin dev --follow-tags
 ```
 
-Two lines are unsatisfied, and both are the check working rather than an obstacle: `ci` (section
-2 is unpushed, so the commit being released is not one a consumer can fetch) and the CHANGELOG
-line (an empty section is nothing to publish, so a real run refuses instead of tagging an empty
-release). The `minor` comes from the commits rather than from the notes: the weighing reads the
-subjects since the last tag — `feat:`/`fix:`/`docs:`/`test:` and their neighbours — and the
-`feat:` in section 2 is a new capability, so the rung it asks for is `0.2.0`.
+One line is unsatisfied, and it is the check working rather than an obstacle: `ci` (section 2 is
+unpushed, so the commit being released is not one a consumer can fetch). The CHANGELOG line was
+the second of the two until the working tree's section gained its entry: at the register the
+section is empty, and an empty section is nothing to publish, which is why a release declared
+against that commit refuses there. The `minor` comes from both signals: the notes, whose
+`### Added` is the loudest heading they carry (the weighing reports `### Added — 1 entry, the
+loudest heading the notes use`), and the six commits since the last tag — `docs 2, feat 1, fix 2,
+chore 1` — in which the `feat:` of section 2 is a new capability. The public API, the config and
+the inventory all weigh `patch`: *nothing removed, renamed or added since the last tag*.
 
-That plan is a transcript of a run against this working tree, and nothing re-runs it. The two
-numbers in it that *are* checkable are held: the entries the Unreleased notes carry (the table at
-the top of this section), and the state of the three records (section 1).
+That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers
+in it that *are* checkable are held, though they are two different readings now: the entries the
+notes carry **at the register** (the table at the top of this section — none) and the state of the
+three records (section 1). Its own `1 bullet(s)` is the weighing's answer about the working tree,
+which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Nothing, which is the honest answer rather than a short one. The four commits in section 2 are
-the rule at the root, the walk that reads it, the two records whose path pointed outside the
-package, and the ignore rule for the machine record: `AGENTS.md`, `tests/`, `.gitattributes` and
-`.gitignore` are all `export-ignore`d, and the two files a consumer would receive out of them —
-`README.md` and `bin/publish-config.php` — changed prose and a usage block rather than behaviour.
-The weighing agrees with that reading rather than with a summary of it: `public API` and `config`
-are *nothing removed, renamed or added since the last tag*, and the inventory is current.
+One entry, and it is not this batch's: the machine-path guard — a reading that refuses a path
+naming the drive, the account or the share it was written on, held beside the walk that refuses
+one climbing above the root, with every path it reported rewritten to name nobody. At the register
+the section is empty; in the working tree it carries that `### Added` entry, uncommitted like the
+files it describes.
+
+The five commits in section 2 are the rule at the root, the walk that reads it, the two records
+whose path pointed outside the package, the ignore rule for the machine record, and this note's own
+re-take: `AGENTS.md`, `tests/`, `.gitattributes` and `.gitignore` are all `export-ignore`d, and the
+two files a consumer would receive out of them — `README.md` and `bin/publish-config.php` — changed
+prose and a usage block rather than behaviour. The weighing agrees with that reading rather than
+with a summary of it: `public API` and `config` are *nothing removed, renamed or added since the
+last tag*, and the inventory is current.
 
 The thing to know about is the **boundary flip**, which is released and not installed:
 `db:pgcat-window-flip` (`src/Console/Commands/DbWindowFlipCommand.php`) and the reader windows as
@@ -262,10 +279,9 @@ thread can otherwise spend a long time establishing.
 What a release of this cycle would still need, none of which is done:
 
 1. commit the pending test (section 1);
-2. push the four commits of the rule and its guard (section 2), or declare the run with
-   `--skip-ci`;
-3. write the `## Unreleased` notes for a change worth releasing — the section is empty, so a
-   release cut today would have nothing to publish;
+2. push the five commits on `dev` (section 2), or declare the run with `--skip-ci`;
+3. commit the `## Unreleased` entry the working tree carries — at the register the section is
+   empty, so a release declared against that commit would have nothing to publish;
 4. raise the consumer's pin, in the application repository, to the new tag;
 5. the application-side switches and schedule entries that a flip needs, which live in that
    repository and are not part of this package.
@@ -279,25 +295,29 @@ repository is not an installation change until each of them happens.
 
 | Field | Working here |
 |---|---|
-| PHP | `E:\_F_DRV\_PHP\PHP8426x64\php.exe` (8.4.26). It is **not on `PATH`** in the shell, so a command that just says `php` fails; set a variable and use it. |
+| PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.26). It is **not on `PATH`** in the shell, so a command that just says `php` fails; set a variable and use it. |
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
 | Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
 | Checks | `php bin/checks.php --list` names twelve; use `--only=` subsets. The full run and the whole `tests/` tree both exceed what a single agent command is allowed to take, so run one file or one directory at a time. |
 | Style gate | `php bin/tool.php pint --test` (PSR-12). |
 | Static analysis | `phpstan.neon.dist`: level `max`, over `src/` only — a file under `tests/` is style-checked but not analysed. |
-| In a consumer's tarball | `docs/`, `bin/api.php`, `bin/counts.php`, `bin/publish-config.php` |
-| Left out of it | `tests/`, `.agents/`, `bin/checks.php`, `bin/release.php`, `bin/surface.php`, `bin/weighing.php`, `bin/inventory.php`, `bin/blame.php`, `bin/tools.php`, `bin/tool.php`, `bin/composer-link.cmd`, `bin/composer-ca.ps1`, `CHANGELOG.md`, `RELEASING.md`, `PUSHING.md`, `STATIC-ANALYSIS.md`, `HANDOFF.md`, `AGENTS.md`, `phpstan.neon.dist`, `phpunit.xml.dist`, `pint.json`, `.gitattributes`, `.gitignore`, `.editorconfig`, `.idea`, `files.tsv`, `methods.tsv`, `surface.tsv` |
+| In a consumer's tarball | `docs/` |
+| Left out of it | `tests/`, `.agents/`, `bin/api.php`, `bin/checks.php`, `bin/counts.php`, `bin/publish-config.php`, `bin/release.php`, `bin/surface.php`, `bin/weighing.php`, `bin/inventory.php`, `bin/blame.php`, `bin/tools.php`, `bin/tool.php`, `bin/composer-link.cmd`, `bin/composer-ca.ps1`, `CHANGELOG.md`, `RELEASING.md`, `PUSHING.md`, `STATIC-ANALYSIS.md`, `HANDOFF.md`, `AGENTS.md`, `phpstan.neon.dist`, `phpunit.xml.dist`, `pint.json`, `.gitattributes`, `.gitignore`, `.editorconfig`, `.idea`, `files.tsv`, `methods.tsv`, `surface.tsv` |
 | Text search | `rg` (ripgrep 15.2.0) is on `PATH`; `grep` works too. |
 | Machine record | `.agents/machine.local.json` — the facts above as the machine running the suite holds them, compared by `tests/Unit/Docs/HandoffTest.php`; gitignored, so a clone without the file skips that comparison. |
 
-The two tarball rows are read out of `.gitattributes` as it stands, and the split is a decision
-now rather than an observation: the development skills under `.agents/`, the agent rules at the
-root and the two Composer wrappers in `bin/` are export-ignored, so a consumer receives none of
-them. What still ships from
-`bin/` is the three scripts that were never listed — `bin/api.php`, `bin/counts.php`,
-`bin/publish-config.php`, all three of them developer tools — recorded here as observed;
-changing it is a one-line edit to `.gitattributes`.
+The two tarball rows are read out of `.gitattributes` as it stands, and this is the one row in
+this table that is a **decision** rather than an observation: every script under `bin/` is
+export-ignored, so a consumer's copy carries none of them, and the row above names `docs/` as what
+this tree contributes to one.
+
+The three that were the exception are the tools that write what a release reads —
+`bin/api.php` renders `API.md` from the inventory, `bin/counts.php` renders the counts the records
+state, `bin/publish-config.php` copies the sample config — and they were left shipping as observed
+rather than decided. Holding them back is the decision, and it moves the published README with it:
+the section that describes the `bin/` group is now a checkout's tools, and the commands that run
+one are marked as a checkout's rather than an installation's.
 
 `tests/Unit/Docs/DocCitationsTest.php` treats a `test_…` name in a record as a citation, and
 refuses one no class declares. Its corpus is `README.md`, `RELEASING.md` and `docs/*.md` — this

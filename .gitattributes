@@ -27,7 +27,10 @@
 /PUSHING.md         export-ignore
 /HANDOFF.md         export-ignore
 /AGENTS.md          export-ignore
+/bin/api.php          export-ignore
 /bin/checks.php       export-ignore
+/bin/counts.php       export-ignore
+/bin/publish-config.php export-ignore
 /bin/release.php      export-ignore
 /bin/surface.php      export-ignore
 /bin/weighing.php     export-ignore

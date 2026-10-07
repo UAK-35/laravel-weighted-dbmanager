@@ -110,14 +110,19 @@ an application that has the package installed but not yet wired up. Deploys that
 run `composer install --no-scripts` skip it; run the artisan command from the
 release step instead.
 
-The package ships the same call as a script of its own — the one its
-`post-install-cmd` and `post-update-cmd` events run — and you can point it at an
-application by hand:
+A checkout of this package carries the same call as a script of its own — the one
+its `post-install-cmd` and `post-update-cmd` events run — and you can point it at
+an application by hand:
 
 ```bash
 composer publish-config                   # from a checkout of this package
-php bin/publish-config.php path/to/app     # or at an application, from anywhere
+php bin/publish-config.php path/to/app     # or at an application, from a checkout
 ```
+
+That script is one of the developer tools under `bin/`, and a distributed copy of
+this package holds all of them back: `bin/` is `export-ignore`d whole, so an
+application receives none of them. The artisan call above is an application's way;
+these two lines are a checkout's.
 
 Given a directory that is not an application, it says so and exits `0`, so a stray
 call is never an error. Given an application it runs `vendor:publish` for the tag,
@@ -2191,6 +2196,11 @@ API.md                   the same rows as a page a person reads — every class 
                          guarded by PublicApiReportTest, so the page cannot describe a
                          different tree from the one the release weighed
 ```
+
+The scripts under `bin/` are this repository's tools rather than the package's:
+`.gitattributes` holds `bin/` back whole, so a copy a consumer installs carries none
+of them, and a command below that runs one — `composer checks`, `php bin/counts.php`,
+`php bin/api.php` — is an instruction for a checkout.
 
 ## Testing
 
