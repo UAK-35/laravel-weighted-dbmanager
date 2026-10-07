@@ -83,7 +83,12 @@ and `publish-config.php`. The published config is `config/db-manager.php` with `
 1. this file — the scope rule above, and what follows;
 2. `README.md` — what the package is and how to work on it;
 3. `.agents/README.md` — the skills, and the two runbooks they wrap;
-4. `HANDOFF.md` — the state of the work, as of the day it was taken, before you trust it as "now".
+4. `HANDOFF.md` — the state of the work, as of the day it was taken, before you trust it as "now";
+5. `.agents/machine.local.json` — this machine's own facts, and the interpreter every command here
+   starts with. Read it before the first command that shells out and use the `php` it names: `php` is
+   not on `PATH` in this shell, so a bare one fails rather than resolving, and searching the disk for
+   an interpreter is what this rule replaces. The record is gitignored, so the path lives there and
+   never in a rule; `HANDOFF.md` section 5 holds its rows to it.
 
 ---
 
