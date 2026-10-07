@@ -233,6 +233,206 @@ final class Handoff
     }
 
     /**
+     * What `git status` says this checkout has and no commit does, read once as entries: the path,
+     * and the two status columns the tool writes before it.
+     *
+     * `-uall` rather than the default, so a directory that is new in its entirety is read as the
+     * files inside it rather than as one collapsed entry, and a rename is read by the name it has
+     * now, which is the name no commit has.
+     *
+     * @return list<array{status: string, path: string}>
+     *
+     * @throws RuntimeException when git cannot be asked — a reading of nothing agrees with a
+     *                          section that names nothing, so the failure has to be loud
+     */
+    private static function porcelain(): array
+    {
+        $run = self::git('status', '--porcelain', '-uall');
+
+        if ($run['exit'] !== 0) {
+            throw new RuntimeException(sprintf(
+                'git could not be asked what this checkout carries and no commit does: %s',
+                trim($run['error']) ?: 'git said nothing',
+            ));
+        }
+
+        $entries = [];
+
+        foreach (self::outputLines($run['output']) as $line) {
+            $path = substr($line, 3);
+
+            // A rename is reported as `R  old -> new`, and the name no commit carries is the one on
+            // the right.
+            if (str_contains($path, ' -> ')) {
+                $path = substr($path, (int) strpos($path, ' -> ') + 4);
+            }
+
+            $entries[] = ['status' => substr($line, 0, 2), 'path' => $path];
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Whether one entry is a path no commit carries at all: untracked, or added, renamed or copied
+     * in the index. `??` is the former, and the first column is where the latter are written.
+     */
+    private static function isNew(string $status): bool
+    {
+        return $status === '??' || in_array(substr($status, 0, 1), ['A', 'R', 'C'], true);
+    }
+
+    /**
+     * The paths this checkout has that no commit carries at all — what a commit would add.
+     *
+     * A checkout with nothing pending reads nothing here, which is the state a clone and CI's
+     * runner are in — so what this answers is only ever compared in one direction: every path it
+     * returns has to be named in section 1, while a path section 1 names is a claim about the
+     * machine that wrote it, and is left to the test above.
+     *
+     * @return list<string>
+     *
+     * @throws RuntimeException when git cannot be asked
+     */
+    public static function uncarried(): array
+    {
+        $paths = [];
+
+        foreach (self::porcelain() as $entry) {
+            if (self::isNew($entry['status'])) {
+                $paths[] = $entry['path'];
+            }
+        }
+
+        sort($paths);
+
+        return $paths;
+    }
+
+    /**
+     * The size of what is uncommitted as git reports it: how many paths differ from the last commit,
+     * how many of them are files no commit carries, and how many are tracked paths that changed.
+     *
+     * A deleted path is one of the changed rather than of the new, which is why the note writes the
+     * second count as *tracked paths changed* rather than as files edited.
+     *
+     * @return array{total: int, changed: int, new: int}
+     *
+     * @throws RuntimeException when git cannot be asked
+     */
+    public static function uncommitted(): array
+    {
+        $entries = self::porcelain();
+        $new = count(array_filter(
+            $entries,
+            static fn (array $entry): bool => self::isNew($entry['status']),
+        ));
+
+        return ['total' => count($entries), 'changed' => count($entries) - $new, 'new' => $new];
+    }
+
+    /**
+     * The size of the pending set as section 1 states it: how many paths differ from the register,
+     * how many of those are tracked paths that changed, and how many are files the register does not
+     * carry at all.
+     *
+     * Read out of the sentence rather than a table, because that is where the note states it — and
+     * read at all because a size is a claim like the list under it: a table can be complete while
+     * the sentence above it describes a set of a different size, and that is drift a reader is
+     * misled by rather than warned of. The shape is the claim: three words, each the number the
+     * phrase after it is about.
+     *
+     * @return array{total: int, changed: int, new: int, source: int}
+     *
+     * @throws RuntimeException when the sentence stops stating the three numbers in that shape, or
+     *                          states one this vocabulary does not spell
+     */
+    public static function pendingCounts(): array
+    {
+        $opening = null;
+
+        // A paragraph rather than a line, because the sentence is wrapped: the count of files is one
+        // physical line and the noun it counts is the next, so a reader that stopped at the line
+        // would report a claim it had only half read.
+        foreach (self::paragraphs(self::PENDING) as $paragraph) {
+            if (str_contains($paragraph['text'], 'paths differ')) {
+                $opening = $paragraph;
+
+                break;
+            }
+        }
+
+        if ($opening === null) {
+            throw new RuntimeException(
+                'HANDOFF.md section 1 no longer says how many paths differ from the register, so the size of '.
+                'the pending set is a claim this cannot read.',
+            );
+        }
+
+        $plain = self::plain($opening['text']);
+        $number = '([a-z]+(?:-[a-z]+)?)';
+
+        if (preg_match('/\b'.$number.' paths differ\b/', $plain, $total) !== 1
+            || preg_match('/\b'.$number.' tracked paths changed\b/', $plain, $changed) !== 1
+            || preg_match('/\b'.$number.' new files\b/', $plain, $new) !== 1
+        ) {
+            throw new RuntimeException(sprintf(
+                'HANDOFF.md line %d no longer states the pending set as [N paths differ … N tracked paths '.
+                'changed, and N new files]: [%s]',
+                $opening['source'],
+                trim($opening['text']),
+            ));
+        }
+
+        return [
+            'total' => NumberWords::toInt($total[1]),
+            'changed' => NumberWords::toInt($changed[1]),
+            'new' => NumberWords::toInt($new[1]),
+            'source' => $opening['source'],
+        ];
+    }
+
+    /**
+     * The paragraphs of a section: its lines run together until a blank one, each with the line it
+     * starts on.
+     *
+     * A claim is written as a paragraph and wrapped wherever the line runs out, so the unit a
+     * sentence is read in is the paragraph and not the line — a reader that asks a line for three
+     * numbers is asking the wrong thing, and would answer "no such claim" for a sentence that is
+     * simply long.
+     *
+     * @return list<array{text: string, source: int}>
+     */
+    private static function paragraphs(string $heading): array
+    {
+        $paragraphs = [];
+        $current = ['text' => '', 'source' => 0];
+
+        foreach (self::section($heading) as $line) {
+            if (trim($line['text']) === '') {
+                if ($current['text'] !== '') {
+                    $paragraphs[] = $current;
+                    $current = ['text' => '', 'source' => 0];
+                }
+
+                continue;
+            }
+
+            if ($current['text'] === '') {
+                $current['source'] = $line['source'];
+            }
+
+            $current['text'] .= ' '.$line['text'];
+        }
+
+        if ($current['text'] !== '') {
+            $paragraphs[] = $current;
+        }
+
+        return $paragraphs;
+    }
+
+    /**
      * The commit the note describes itself as being taken at, and the tip of `origin/dev` it was
      * measured against — the pair every number in section 2 is a claim about.
      *

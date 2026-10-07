@@ -150,6 +150,84 @@ final class HandoffTest extends TestCase
         );
     }
 
+    /**
+     * The other direction, and the one that rots: every file this checkout has that the register
+     * does not carry at all has to be named in section 1.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     *   The test above asks whether what section 1 names is pending — that a path is there, and
+     *   that the commit it describes does not carry it. Nothing asked the converse, so a section
+     *   that named one pending file and forgot the other three was green: the list was *sound* and
+     *   not *complete*, which is the direction that harms a reader. A file nobody names is work the
+     *   next thread cannot see, and it is not red anywhere else either — an untracked test file
+     *   still runs, and an untracked source file is still analysed if a path glob reaches it.
+     *
+     *   The comparison is against the register, not against whatever is uncommitted now: the paths
+     *   read are the ones a commit would *add* — untracked, plus anything staged as new — and those
+     *   are absent from the register whatever the branch has done since.
+     *
+     *   On a checkout with nothing pending this reads nothing and passes, which is the state a
+     *   clone and CI's runner are in. That is the shape of the claim rather than a hole in it:
+     *   section 1 is a snapshot of one machine's working tree, so a clean checkout has nothing to
+     *   disagree with — and nothing for this to excuse either, because the machine that wrote the
+     *   note is the machine it fails on.
+     */
+    public function test_every_file_the_register_does_not_carry_is_named_in_section_1(): void
+    {
+        $uncarried = Handoff::uncarried();
+        $listed = array_column(Handoff::pending(), 'path');
+        $missing = array_values(array_diff($uncarried, $listed));
+
+        self::assertSame([], $missing, sprintf(
+            "This checkout holds %d file(s) that the commit section 2 names as `HEAD` does not carry, and section 1\n".
+            "names %d of them. A file nothing names is work the next thread cannot see:\n  - %s\n\n".
+            'Either name it in the table, or take it out of the tree — a file that is not work is one .gitignore should carry.',
+            count($uncarried),
+            count($listed),
+            implode("\n  - ", $missing),
+        ));
+    }
+
+    /**
+     * The size of that pending set, which the list itself cannot hold: a table can be complete while
+     * the sentence over it describes a different size, and the size is what a reader takes away
+     * first — how much is uncommitted, and whether it is work they are standing in the middle of.
+     *
+     * The comparison is made only where there is something to compare, and the skip is the point
+     * rather than a hole: the counts are about a working tree, a clean one has nothing for them to
+     * disagree with, and that is the state a clone and CI's runner are in — the same shape as the
+     * machine record, where an absent file is a skip and a present one that disagrees is a failure.
+     */
+    public function test_the_pending_counts_are_the_size_of_this_working_tree(): void
+    {
+        $tree = Handoff::uncommitted();
+
+        if ($tree['total'] === 0) {
+            $this->markTestSkipped('This checkout has nothing uncommitted, and the counts section 1 states are about the working tree the note was taken on.');
+        }
+
+        $claim = Handoff::pendingCounts();
+
+        self::assertSame(
+            ['total' => $claim['total'], 'changed' => $claim['changed'], 'new' => $claim['new']],
+            $tree,
+            sprintf(
+                'HANDOFF.md line %d says %d path(s) differ from the register, %d of them tracked paths that '
+                ."changed and %d files it does not carry; this checkout has %d, %d and %d.\n".
+                'The sentence and the tree are both claims, and this is the one that moves every time a file is '
+                .'touched after the note is taken.',
+                $claim['source'],
+                $claim['total'],
+                $claim['changed'],
+                $claim['new'],
+                $tree['total'],
+                $tree['changed'],
+                $tree['new'],
+            ),
+        );
+    }
+
     public function test_the_commits_it_describes_are_the_ones_it_names(): void
     {
         foreach (['HEAD' => Handoff::basis()['head'], 'origin/dev' => Handoff::basis()['origin']] as $label => $commit) {
