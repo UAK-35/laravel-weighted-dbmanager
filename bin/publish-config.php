@@ -14,7 +14,7 @@ declare(strict_types=1);
  * From an application root the path may be omitted. From anywhere else — which
  * is what a linked checkout looks like — pass the application directory:
  *
- *   php bin/publish-config.php ../../site
+ *   php bin/publish-config.php path/to/app
  *
  * WHY THIS IS A SCRIPT AND NOT JUST A COMPOSER EVENT
  * --------------------------------------------------

@@ -133,7 +133,7 @@ its dev version. `bin\composer-link.cmd` does both, from the application root:
 
 ```bat
 rem run this from the root of the Laravel application, not from the package
-bin\composer-link.cmd ..\path\to\laravel-weighted-dbmanager
+bin\composer-link.cmd path\to\laravel-weighted-dbmanager
 ```
 
 It reads `name` out of the package's `composer.json`, writes a
@@ -146,7 +146,7 @@ Anything after the directory is forwarded to `composer require`, so flags pass
 straight through:
 
 ```bat
-bin\composer-link.cmd ..\path\to\laravel-weighted-dbmanager --dry-run
+bin\composer-link.cmd path\to\laravel-weighted-dbmanager --dry-run
 ```
 
 `--help` prints the full description. `COMPOSER_LINK_COMPOSER`,
