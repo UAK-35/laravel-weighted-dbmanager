@@ -5,9 +5,7 @@ description: Get commits and release tags from this package onto GitHub, and pro
 
 # `pkg-push` — getting this package onto its remote
 
-Run everything from the package root:
-
-    E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
+Run everything from the package root.
 
 `origin` is **HTTPS** — `https://github.com/UAK-35/laravel-weighted-dbmanager.git` — for fetch
 and for push. [PUSHING.md](../../PUSHING.md) is the long form: what was checked on this
@@ -22,8 +20,6 @@ a credential helper is consulted instead of ssh — but the rule is the same eit
 from PowerShell 7:
 
 ```powershell
-cd E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
-
 git push origin main --follow-tags
 ```
 

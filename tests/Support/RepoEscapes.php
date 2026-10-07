@@ -17,8 +17,9 @@ use Symfony\Component\Process\Process;
  * That is the half of AGENTS.md's first rule nothing here read. An absolute path at least says
  * whose disk it is; a climb above the root says only "somewhere up there", and it survives every
  * guard this package has: it is not a link, so a docs guard has nothing to resolve, and it names no
- * machine, so a reading of machine paths would have nothing to fire at. A path like that is found
- * by moving the checkout and fixed by hand, which is the kind of fix that comes back.
+ * machine, so `MachinePaths` — the reading of the other half of this rule — has nothing to fire at
+ * either. A path like that is found by moving the checkout and fixed by hand, which is the kind of
+ * fix that comes back.
  *
  * The difference matters because it is invisible in the reading — a climb reads as a path wherever
  * it is read, and nothing about it says the directory above this one is somebody else's repository
@@ -51,9 +52,10 @@ use Symfony\Component\Process\Process;
  *
  * WHAT IS DELIBERATELY NOT READ
  * -----------------------------
- * An absolute path, and a path that is not a path at all — a namespace, an escaped namespace in
- * JSON, an ellipsis standing for a directory. None of those is this question, and a reading that
- * reported one would be turned off rather than fixed.
+ * An absolute path — that is `MachinePaths`, the reading of the other half of section 0 — and a path
+ * that is not a path at all: a namespace, an escaped namespace in JSON, an ellipsis standing for a
+ * directory. None of those is this question, and a reading that reported one would be turned off
+ * rather than fixed.
  *
  * @see RepoEscapes::files() for what "the files a commit would carry" means here.
  */
@@ -203,10 +205,14 @@ final class RepoEscapes
         return $found;
     }
 
-    /** Whether a file is text this can read: the same test git makes before it diffs one. */
+    /**
+     * Whether a file is text this can read: the same test git makes before it diffs one, asked of
+     * `MachinePaths` rather than kept here. What a commit would carry and what a text is are one
+     * decision each, and a file is text whichever of the two readings is asking.
+     */
     private static function binary(string $contents): bool
     {
-        return str_contains($contents, "\0");
+        return MachinePaths::binary($contents);
     }
 
     /**

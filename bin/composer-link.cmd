@@ -50,7 +50,7 @@ rem
 rem  USAGE  (run it FROM the Laravel application, never from the package)
 rem  -------------------------------------------------------------------
 rem      bin\composer-link.cmd ..\laravel-weighted-dbmanager
-rem      bin\composer-link.cmd C:\path\to\pkg --dry-run
+rem      bin\composer-link.cmd ..\other-package --dry-run
 rem
 rem  The first argument is the package directory. Anything after it is forwarded
 rem  verbatim to `composer require`, so --dry-run, -W, --no-scripts and

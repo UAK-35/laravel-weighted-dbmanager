@@ -10,9 +10,7 @@ For a Composer library, "deploy" is two things and only the first is inside this
 then **install it where it is used** (a consumer raises its constraint and updates). The
 second half happens in a different repository — name it, do not do it from here.
 
-Everything in this skill that runs here runs from the package root:
-
-    E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
+Everything in this skill that runs here runs from the package root.
 
 [RELEASING.md](../../RELEASING.md) is the authority on what a release is and what the script
 does at each step. The version of this package is the **git tag** and nothing else — there is

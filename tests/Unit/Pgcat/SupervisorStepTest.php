@@ -118,9 +118,9 @@ final class SupervisorStepTest extends TestCase
             $this->markTestSkipped('cmd.exe paths are only spelled this way on Windows.');
         }
 
-        $tokens = SupervisorStep::tokens('C:\\bin\\supervisorctl.exe restart "pgcat:*"');
+        $tokens = SupervisorStep::tokens('C:\\ProgramData\\supervisor\\supervisorctl.exe restart "pgcat:*"');
 
-        $this->assertSame('C:\\bin\\supervisorctl.exe', $tokens[0]['value']);
+        $this->assertSame('C:\\ProgramData\\supervisor\\supervisorctl.exe', $tokens[0]['value']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

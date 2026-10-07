@@ -196,7 +196,8 @@ cannot disagree about what will run next.
 `SupervisorStep::tokens()` splits the command line the way a shell would, and marks each
 token with `quoted` and `glob_exposed`. It handles single and double quotes, and — on
 POSIX only — backslash escapes, because the same command line on Windows goes through
-`cmd.exe`, where `C:\bin\supervisorctl.exe` carries real path separators. It does not
+`cmd.exe`, where `C:\ProgramData\supervisor\supervisorctl.exe` carries real
+path separators. It does not
 attempt expansion, substitution or command lines with more than one command; when it
 cannot tell what supervisorctl will receive, the row declines to guess and says so.
 

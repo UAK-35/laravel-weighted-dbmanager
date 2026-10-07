@@ -1,8 +1,8 @@
 # `.agents/` — the skills for developing this package
 
-These are for working **in this repository**
-(`E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager`). They are hand-maintained: unlike
-the application repository (`E:\_WORKS\lpr\work\LPR\site`), this package has no
+These are for working **in this repository** — the directory that holds this package's
+`composer.json`. They are hand-maintained: unlike
+the application repository that installs the package, this one has no
 `.skills/` sources, no `_sync.py` generator and no `verify.py` guard, so a file here is the
 only copy and is edited in place. Every tool that reads `.agents/skills/<name>/SKILL.md` finds
 them; the frontmatter `description` is what decides when one is invoked.

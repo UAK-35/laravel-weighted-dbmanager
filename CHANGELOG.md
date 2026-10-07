@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- **Nothing read the half of the scope rule that is about *place on a machine* — a file that names the
+drive, the account or the share it was written on — and now a guard does.**
+`tests/Unit/Support/RepoEscapesTest.php` walks every path the repository would carry and refuses the
+ones that climb above the root; that is a different question from this one, and the two fail
+differently — a climb stops resolving when the checkout moves, an absolute path resolves for ever,
+for one person — which is why neither the climb reading nor its record ever described this one.
+Neither shows up in a diff either, because both read as paths. `tests/Support/MachinePaths.php`
+reads the files a commit would carry through the listing `RepoEscapes` already produces, over exactly
+the patterns that make a path a *machine* path, while `tests/Unit/Support/MachinePathsTest.php` holds
+it to the shapes it must leave alone: the Windows directory, a program's install root, a CI runner's
+home, a tilde, the IDE's marker, and an ellipsis standing for the rest of a path. Every path the
+reading reports in this tree named this machine, so each was rewritten to name nobody — in
+`HANDOFF.md`, `PUSHING.md`, `.agents/README.md`, the three `pkg-*` skills under `.agents/skills/`,
+`bin/composer-link.cmd`, `docs/pgcat-supervisor-preflight.md`, and the samples in
+`src/Pgcat/SupervisorStep.php` and `tests/Unit/Pgcat/SupervisorStepTest.php`. `AGENTS.md` section 0
+now names the reading beside the climb one, and `HANDOFF.md`'s environment table resolves the
+interpreter through the machine file rather than spelling its path out.
+
 ## 0.2.0-alpha2 - 2026-10-06
 
 BREAKING: parts of this release change what an installation reads at run time rather than only how

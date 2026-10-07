@@ -5,12 +5,8 @@ description: Commit a change inside the laravel-weighted-dbmanager package - the
 
 # `pkg-commit` — committing inside `laravel-weighted-dbmanager`
 
-This skill is scoped to the package repository:
-
-    E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
-
-Everything below runs from that directory. The consuming application
-(`E:\_WORKS\lpr\work\LPR\site`) is a **different repository** with its own commit rules; a
+This skill is scoped to the package repository — the directory that holds this package's
+`composer.json`. Everything below runs from there. The consuming application is a **different repository** with its own commit rules; a
 change that belongs there does not belong in a commit made here.
 
 ## The message is read by the release tool

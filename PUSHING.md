@@ -39,11 +39,10 @@ because `origin` is HTTPS and no ssh process is ever started.
 
 ## The push
 
-Never from MSYS / Git Bash. Run it from PowerShell 7, whose console can answer a prompt:
+Never from MSYS / Git Bash. Run it from the package root, in PowerShell 7, whose console can
+answer a prompt:
 
 ```powershell
-cd E:\_WORKS\lpr\work\packages\laravel-weighted-dbmanager
-
 git push origin main --follow-tags
 ```
 

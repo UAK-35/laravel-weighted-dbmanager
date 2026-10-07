@@ -43,6 +43,16 @@ be walked around by writing the same location in the other language is a guard t
 reading itself is `tests/Support/RepoEscapes.php`, and it is the only listing of "the files a commit
 would carry" this package has.
 
+The other half of that rule — the clause about a home directory, another drive or a network share — is
+`tests/Unit/Support/MachinePathsTest.php`, over the same listing of files `RepoEscapes` produces. A
+path is a finding there when it names a drive, an account or a share rather than a directory every
+machine of its kind has; it is excused when it names nobody, and the excused shapes are written down
+in `tests/Support/MachinePaths.php` beside the patterns: the Windows directory, a program's install
+root, a CI runner's home, a tilde, the IDE's marker, and an ellipsis standing for the rest of a path.
+The two failures are different questions — a climb leaks a *layout* and stops resolving when the
+checkout moves, an absolute path leaks a *machine* and resolves for ever, for one person — which is
+why the two readings are two files rather than two rules in one.
+
 ---
 
 ## 1. Where the authority is
@@ -59,7 +69,7 @@ file that owns it, and is not restated here — a copy would drift and a guard w
 | static analysis: what is read and why | `STATIC-ANALYSIS.md` |
 | the design records, one decision each | `docs/` |
 | the state of the work when it was last taken | `HANDOFF.md`, held to the tree by `tests/Unit/Docs/HandoffTest.php` |
-| the rule above, and the paths that would break it | `tests/Support/RepoEscapes.php`, `tests/Unit/Support/RepoEscapesTest.php` |
+| the rule above, and the paths that would break it — a climb, and a machine | `tests/Support/RepoEscapes.php`, `tests/Unit/Support/RepoEscapesTest.php`, `tests/Support/MachinePaths.php`, `tests/Unit/Support/MachinePathsTest.php` |
 | the skills for working here, and what each one wraps | `.agents/README.md`, `.agents/skills/` |
 
 The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` (how a tool is run),

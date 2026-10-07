@@ -154,8 +154,9 @@ final class SupervisorStep
     /**
      * Whether a backslash escapes the character after it. It does in a POSIX shell, which
      * is what `sh -c` runs — but the same command line on Windows goes through cmd.exe,
-     * where a backslash is a path separator, and `C:\bin\supervisorctl.exe` has to come
-     * back with both characters so it can be resolved.
+     * where a backslash is a path separator, and
+     * `C:\ProgramData\supervisor\supervisorctl.exe` has to come back with
+     * both characters so it can be resolved.
      */
     private const BACKSLASH_ESCAPES = PHP_OS_FAMILY !== 'Windows';
 
