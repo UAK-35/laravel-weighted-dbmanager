@@ -29,18 +29,19 @@ Every number below was read off this machine on 2026-10-07, with the remote aske
 
 ---
 
-## 1. Pending — written, green, uncommitted
-
-Four batches that were pending when this note was last taken — and the reading that lets it be
-taken at all — are commits now, and this re-take is the fifth. They are the pgcat *direction*, the
+## 1. Pending — written, green, uncommittedFive batches that were pending when this note was last taken — and the reading that lets it be
+taken at all — are commits now, and this re-take is the sixth. They are the pgcat *direction*, the
 end of the last reader window a stale pooler is at, with the records and the changelog entry that
 describe it; the release script, which renders the published API page from the record it writes;
 `AGENTS.md`, which now sends a session to `.agents/machine.local.json` for the interpreter every
-command here starts with; and the plan's dirty-tree note, which no longer leaves a reader to go and
-ask git *which* files are standing in the way — the porcelain a real run refuses with is the
-porcelain printed under the note, columns and all, so the plan and the refusal it rehearses name one
-set rather than two. Two paths differ from the commit section 2 names as `HEAD`: two tracked paths changed, and zero
-new files.
+command here starts with; the plan's dirty-tree note, which no longer leaves a reader to go and ask
+git *which* files are standing in the way — the porcelain a real run refuses with is the porcelain
+printed under the note, columns and all, so the plan and the refusal it rehearses name one set
+rather than two; and the gate's `interpreter` check, which answers the PHP row below against the
+file the machine record names, so an interpreter that has moved, that reports another version, or
+that is below the requirement the record carries is red in the gate rather than a hunt in the next
+session's first command. Two paths differ from the commit section 2 names as `HEAD`: two tracked
+paths changed, and zero new files.
 
 What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, and both of them are in `f10c318`:
 
@@ -60,13 +61,14 @@ and a release is blocked by them twice over: the plan refuses on a dirty tree wh
 the CI rail would read the red `phpstan` and `pint` if they were committed as they stand. Neither is
 this thread's to finish.
 
-The four commits this section used to describe:
+The five commits this section used to describe:
 
 ```
 feat: the reader-window verdict names which end of the window disagreed   3f05cff
 fix: the release script renders the page its record publishes             f10c318
 docs: a session starts by reading the machine record for its interpreter  4f4967d
 docs: the handoff note is re-taken at the four batches it described       e90cc6f
+fix: the plan names the files it is ignoring on a dirty tree              22de815
 ```
 
 **The five batches were five commits rather than one**, because they are unrelated work that happens
@@ -287,7 +289,7 @@ repository is not an installation change until each of them happens.
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
 | Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
-| Checks | `php bin/checks.php --list` names twelve; use `--only=` subsets. The full run and the whole `tests/` tree both exceed what a single agent command is allowed to take, so run one file or one directory at a time. |
+| Checks | `php bin/checks.php --list` names thirteen; use `--only=` subsets. The full run and the whole `tests/` tree both exceed what a single agent command is allowed to take, so run one file or one directory at a time. `interpreter` is the one that reads the machine record — it fails on a `php.exe` that is gone, one that reports another version, or one below the requirement the record carries. |
 | Style gate | `php bin/tool.php pint --test` (PSR-12). |
 | Static analysis | `phpstan.neon.dist`: level `max`, over `src/` only — a file under `tests/` is style-checked but not analysed. |
 | In a consumer's tarball | `docs/` |

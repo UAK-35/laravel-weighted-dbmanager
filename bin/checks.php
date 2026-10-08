@@ -205,6 +205,10 @@ $yamlFiles = yamlFiles($root);
 // has and the repository does not — see composerValidateCommand().
 $lockIsShipped = commitsLockFile($root);
 
+// The machine record, read once: the interpreter check answers a claim made in it, and its
+// skip is about whether the file is there at all rather than about what it says.
+$machine = machineRecord($root);
+
 // The installed tools, from the one manifest that says where each of them lives: `bin/tool.php`
 // runs them for the composer scripts, this file runs them for the gate, and neither spells a
 // vendor path. The manifest holds them relative to the package root — nothing in it is about the
@@ -278,6 +282,25 @@ $checks = [
                 ? lastLine($result['output'])
                 : "{$satisfied} platform requirements satisfied";
         },
+    ],
+    'interpreter' => [
+        'title' => "Interpreter (the php.exe the machine record names, and its recorded requirement)",
+        // Two absences, and they are different questions. A checkout with no record describes no
+        // machine — the file is gitignored and written on one disk — so there is no claim to answer
+        // rather than a wrong one. A record that *is* there and cannot be read is the opposite: it
+        // is the state this check is for, because every row of the note's environment table is read
+        // out of it, and the check fails on it rather than skipping. The requirement needs
+        // composer/semver the way the tools check does, so its absence is the third skip — and a
+        // checkout with no installation has skipped most of this gate already.
+        'skip' => match (true) {
+            !$machine['exists'] => 'this checkout has no .agents/machine.local.json',
+            !class_exists(Semver::class) => 'composer/semver is not installed, so the recorded requirement cannot be evaluated',
+            default => null,
+        },
+        'run' => static fn (): array => checkInterpreter($root, $machine),
+        // The summary this check writes first, rather than the last line of its prose: the run
+        // prints the rows under it when it fails, and the sentence is what a reader takes away.
+        'note' => static fn (array $result): string => trim(strtok($result['output'], PHP_EOL) ?: $result['output']),
     ],
     'tools' => [
         'title' => 'Installed tools (the version each pin asks for)',
@@ -696,6 +719,52 @@ function phpstanLevel(string $root): string
     return 'unknown';
 }
 
+/**
+ * The interpreter the machine record names, as the record states it.
+ *
+ * `.agents/machine.local.json` is the one file in this tree that says which `php` a session here
+ * starts with — the note's section 2 sends a reader to it before the first command that shells
+ * out, because `php` is not on `PATH` in this shell and a bare one fails. It is gitignored and
+ * written on one disk, so a clone and CI's runner have none: that is the first skip below, and
+ * an absent file is the one shape this cannot answer. Everything else it *can* answer, which is
+ * why an unreadable record is a failure rather than a skip — a record nobody can read leaves the
+ * reader hunting for an interpreter, which is the hunt this check exists to end.
+ *
+ * @return array{path: string, exists: bool, php: array<string, mixed>|null, error: string|null}
+ */
+function machineRecord(string $root): array
+{
+    $path = $root . '/.agents/machine.local.json';
+
+    if (!is_file($path)) {
+        return ['path' => $path, 'exists' => false, 'php' => null, 'error' => null];
+    }
+
+    $decoded = json_decode((string) @file_get_contents($path), true);
+
+    if (!is_array($decoded)) {
+        return [
+            'path' => $path,
+            'exists' => true,
+            'php' => null,
+            'error' => 'the file does not read as a JSON object',
+        ];
+    }
+
+    $php = $decoded['php'] ?? null;
+
+    if (!is_array($php)) {
+        return [
+            'path' => $path,
+            'exists' => true,
+            'php' => null,
+            'error' => 'the record carries no `php` block, which is where the interpreter is written down',
+        ];
+    }
+
+    return ['path' => $path, 'exists' => true, 'php' => $php, 'error' => null];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — output
 // ─────────────────────────────────────────────────────────────────────────────
@@ -839,6 +908,180 @@ function checkAst(string $root, array $files): array
  * @param array<string, array{package: string, pin: string|null, entry: string, purpose: string}> $tools
  * @return array{exit: int, output: string}
  */
+/**
+ * The interpreter the record names: there, reporting the version the record writes, and inside the
+ * requirement the record carries.
+ *
+ * Three claims, one question. The first catches the shape a disk takes under a note that was
+ * written on it — an interpreter moved, deleted, or replaced by an upgrade at a new path — and it
+ * is asked of the file the record names rather than of `PHP_BINARY`, because the record is what a
+ * session acts on and a gate running under some other interpreter answers a different question.
+ * The second catches a record copied from another disk or edited by hand. The third catches the one
+ * state neither of the others can see: a machine running exactly what the record says, below what
+ * the package now requires — `composer.json` asks for `^8.4`, so a record still claiming `8.3.9` is
+ * a session that will read an out-of-date number and believe it.
+ *
+ * `onPath` is deliberately not answered here. That row is held to this machine's `PATH` by
+ * `tests/Unit/Docs/HandoffEnvironmentTest.php`, in the environment the suite runs in, and this gate
+ * is often run from a shell whose `PATH` is not that one — a check failing on the difference would
+ * be refusing a fact about *this* shell that nothing claims about the machine.
+ *
+ * @param array{path: string, exists: bool, php: array<string, mixed>|null, error: string|null} $machine
+ * @return array{exit: int, output: string}
+ */
+function checkInterpreter(string $root, array $machine): array
+{
+    $php = $machine['php'] ?? [];
+    $exe = is_string($php['exe'] ?? null) ? $php['exe'] : '';
+    $recorded = is_string($php['version'] ?? null) ? $php['version'] : '';
+    $requirement = is_string($php['requirement'] ?? null) ? $php['requirement'] : '';
+
+    if ($machine['error'] !== null) {
+        return interpreterVerdict('the machine record cannot be read: ' . $machine['error'], [
+            sprintf('  file       %s', $machine['path']),
+        ], [
+            'The environment facts a session acts on are read out of that file — which interpreter to',
+            'run, where the phar is, how the tools are addressed — and a record nobody can read leaves',
+            'the reader hunting for one. Write the facts again from the example beside this checkout:',
+            'the file is gitignored, so putting them back commits nothing.',
+        ], 1);
+    }
+
+    $rows = [
+        sprintf('  file       %s', $machine['path']),
+        sprintf('  exe        %s', $exe === '' ? '(not written down)' : $exe),
+        sprintf(
+            '  recorded   PHP %s, requirement %s',
+            $recorded === '' ? '(none)' : $recorded,
+            $requirement === '' ? '(none)' : $requirement,
+        ),
+    ];
+
+    if ($exe === '' || !is_file($exe)) {
+        return interpreterVerdict(
+            $exe === ''
+                ? 'the record writes no php.exe, so no interpreter is written down anywhere'
+                : sprintf('the record names %s as php.exe, and no file is there', $exe),
+            $rows,
+            [
+                $exe === ''
+                    ? 'Which interpreter to run on this machine is not written down anywhere, so the'
+                        . ' next command that needs one is a hunt.'
+                    : 'That is an interpreter that moved, one upgraded beside its own path, or a record'
+                        . ' copied from another disk.',
+                'Point `php.exe` at the one this machine runs — the file is gitignored, so fixing it',
+                'commits nothing.',
+            ],
+            1,
+        );
+    }
+
+    $run = runCommand([$exe, '-r', 'echo PHP_VERSION;'], $root);
+    $reports = trim($run['output']);
+
+    $rows[] = sprintf(
+        '  reports    %s',
+        $reports !== '' ? 'PHP ' . $reports : sprintf('nothing — %s exited %d', $exe, $run['exit']),
+    );
+
+    if ($reports === '') {
+        return interpreterVerdict(
+            sprintf('%s is there and does not answer as a PHP binary, so the version it records cannot be confirmed', $exe),
+            $rows,
+            [
+                sprintf('The record names a file that exists and is not a `php` that answers: it exited %d', $run['exit']),
+                sprintf('and said %s.', trim($run['output']) === '' ? 'nothing' : trim($run['output'])),
+                'The version the record writes is the whole of what it is for, and nothing here can',
+                'confirm it.',
+            ],
+            1,
+        );
+    }
+
+    if ($recorded !== '' && $reports !== $recorded) {
+        return interpreterVerdict(
+            sprintf('the record writes PHP %s and the interpreter reports %s, so the record is stale', $recorded, $reports),
+            $rows,
+            [
+                sprintf('`%s` reports PHP %s and the record beside it writes PHP %s, so a session reading', $exe, $reports, $recorded),
+                "the record gets a version this disk no longer has. Update `version` there — the note's",
+                'environment table quotes that number and is held to the record.',
+            ],
+            1,
+        );
+    }
+
+    if ($requirement === '') {
+        return interpreterVerdict(
+            'the record carries no requirement, so nothing says which interpreter versions this machine is meant to satisfy',
+            $rows,
+            [
+                'Nothing in the record says which interpreter versions this machine has to satisfy, and',
+                '`composer.json` does: its `require.php` is the constraint the installation has to meet.',
+            ],
+            1,
+        );
+    }
+
+    try {
+        $satisfied = Semver::satisfies($reports, $requirement);
+    } catch (UnexpectedValueException $error) {
+        return interpreterVerdict(
+            sprintf('the recorded requirement %s is not a constraint anything can evaluate', $requirement),
+            $rows,
+            [
+                sprintf('The record writes %s as the requirement, and %s', $requirement, $error->getMessage()),
+                'A requirement nothing can read is a claim about this machine that cannot be answered',
+                'either way, which is worse than one that is merely unsatisfied.',
+            ],
+            1,
+        );
+    }
+
+    if (! $satisfied) {
+        return interpreterVerdict(
+            sprintf('the interpreter reports PHP %s, which does not satisfy the recorded %s', $reports, $requirement),
+            $rows,
+            [
+                sprintf('`%s` reports PHP %s, and the requirement the record carries — %s, which is', $exe, $reports, $requirement),
+                "`composer.json`'s own `require.php` — is not satisfied by it. The platform requirement",
+                'and the interpreter this machine runs are out of step, so the gate and the suite are being',
+                'run by an interpreter the package does not support.',
+            ],
+            1,
+        );
+    }
+
+    return interpreterVerdict(
+        sprintf('PHP %s at the interpreter the record names, which satisfies %s', $reports, $requirement),
+        $rows,
+        [
+            sprintf('The interpreter the record names is there, reports PHP %s, and satisfies %s — the', $reports, $requirement),
+            'requirement `composer.json` states for it — so a session here can start with it.',
+        ],
+        0,
+    );
+}
+
+/**
+ * One report: the summary line first, the rows it summarises, then the prose that says what to do.
+ *
+ * The summary leads rather than trails because the gate prints a check's last line as its note and
+ * this one has `note` set to read the first — a sentence written to be read alone is worth more in
+ * a table row than the end of a paragraph, and it is the line a reader sees in a green run too.
+ *
+ * @param list<string> $rows
+ * @param list<string> $verdict
+ * @return array{exit: int, output: string}
+ */
+function interpreterVerdict(string $summary, array $rows, array $verdict, int $exit): array
+{
+    return [
+        'exit' => $exit,
+        'output' => implode(PHP_EOL, [$summary, '', ...$rows, '', ...$verdict]),
+    ];
+}
+
 function checkTools(array $tools): array
 {
     $rows = [];

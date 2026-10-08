@@ -66,7 +66,7 @@ This repository has **no pre-commit hook of its own** (`core.hooksPath` is unset
 `.git/hooks` is stock), so nothing runs these for you:
 
 ```bash
-php bin/checks.php --only=counts,sentences,pint,phpstan   # the fast gate; the full run is all 12
+php bin/checks.php --only=counts,sentences,pint,phpstan   # the fast gate; the full run is all 13
 php bin/counts.php --check                                # the prose numbers in the records
 php bin/tool.php phpunit <file-or-dir>                    # the tests the change touches
 ```
