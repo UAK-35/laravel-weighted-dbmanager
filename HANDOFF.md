@@ -40,18 +40,26 @@ printed under the note, columns and all, so the plan and the refusal it rehearse
 rather than two; and the gate's `interpreter` check, which answers the PHP row below against the
 file the machine record names, so an interpreter that has moved, that reports another version, or
 that is below the requirement the record carries is red in the gate rather than a hunt in the next
-session's first command. Two paths differ from the commit section 2 names as `HEAD`: two tracked
-paths changed, and zero new files.
+session's first command. That check's other half is a commit of its own: `bin/interpreter.php` and
+`tests/Unit/Support/InterpreterResolverTest.php`, which make every command hand its process to the
+interpreter the record names — `bin/tool.php`'s call to it travelled with them — and which refuse the
+hand-over to a file that starts and cannot read the script it would be given, so the check's verdict
+and the commands' fallback agree about which interpreter is this machine's. Sixteen paths differ from
+the commit section 2 names as `HEAD`: fourteen tracked paths changed, and two new files.
 
-What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, and both of them are in `f10c318`:
+What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, both of them in `f10c318`, and the two files a concurrent thread has added and no commit carries at all:
 
 | File | What it is |
 |---|---|
 | `tests/Unit/Release/DryRunTest.php` | committed in `f10c318`: a `--weigh --dry-run` held to the tree, the refs and `HEAD` it left alone, read against the same command run for real |
 | `tests/Unit/Release/PublishedPageTest.php` | committed in `f10c318`: a fixture release held to the page it publishes — the bytes the record renders, the stamp both of them name, and the commit the tag points at |
+| `src/Pgcat/PoolProbe.php` | a concurrent thread's new file, in the tree and in no commit; this note did not read it, so what can be said about it is that it is there |
+| `tests/Unit/Pgcat/PoolProbeTest.php` | the test beside it, added by the same thread and equally unread here |
 
 `src/Support/BootAudit.php` and `src/Providers/WeightedDatabaseServiceProvider.php` are a concurrent
-thread's work in flight, nine lines between them, and this note did not read the change. What it can
+thread's work in flight, and so are the pgcat sources, the two records under `docs/`, `API.md`, the
+three `.tsv` inventories and `config/db-manager.php` this checkout has changed: this note did not read
+that work. What it can
 say about them is what it measured rather than what they do: they are in the tree, and the gate is
 red on them — `phpstan` on `src/Support/BootAudit.php` (a property assignment whose closure has the
 wrong signature, and a closure called with more parameters than it takes) and `pint` on
