@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Uak35\WeightedDbManager\Tests\Unit\Docs;
 
+use Composer\Semver\Semver;
 use PHPUnit\Framework\TestCase;
 use Uak35\WeightedDbManager\Tests\Support\Handoff;
 
@@ -37,7 +38,11 @@ use Uak35\WeightedDbManager\Tests\Support\Handoff;
  *   names, the number of checks — are already held by that file against the files that own them,
  *   and are not held again. What is added is the half that can only be answered by running
  *   something, plus the one clause in the table no other guard reads: that the skills are
- *   hand-maintained, with no sources to generate them and no guard of their own.
+ *   hand-maintained, with no sources to generate them and no guard of their own. And one claim in
+ *   the record that is a *copy* rather than a fact about this disk: the platform constraint written
+ *   beside the interpreter, which `composer.json` owns. A copy agrees with itself, so nothing
+ *   inside the record can tell a stale one from a current one — the file that owns the constraint
+ *   is the only thing that can, and it is held there below.
  *
  * WHY FOUR OF THEM SKIP
  * ---------------------
@@ -88,6 +93,56 @@ final class HandoffEnvironmentTest extends TestCase
                 $php['source'],
                 $php['onPath'] ? '' : ' not',
                 $answers ? 'answers' : 'does not answer',
+            ),
+        );
+    }
+
+    /**
+     * The constraint the record carries is the package's own, and the version beside it is inside
+     * that constraint.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     *   `.agents/machine.local.json` writes `php.requirement` next to the interpreter — the
+     *   constraint that interpreter has to meet — and the gate's `interpreter` check evaluates it
+     *   there. Nothing compared it with the file that *owns* it: `composer.json`'s `require.php`, the
+     *   one Composer refuses to install the package without. A record written on another package,
+     *   edited by hand, or left behind by a raised floor can state a constraint the package no longer
+     *   asks for, and every reading agrees with itself about it — the gate passes against the copy,
+     *   and section 5's PHP row is held to the same record — so the copy is the only place the
+     *   disagreement can be seen.
+     *
+     *   The second reading is the record's own consistency, which nothing else asks: the gate
+     *   compares the interpreter's *reported* version with the requirement, so a record whose
+     *   `version` and `requirement` contradict one another passes there while telling a reader two
+     *   things at once.
+     */
+    public function test_the_requirement_the_record_carries_is_the_one_the_package_asks_for(): void
+    {
+        self::onThisMachine();
+
+        $machine = Handoff::machine();
+        $php = is_array($machine) ? ($machine['php'] ?? []) : [];
+        $requirement = is_string($php['requirement'] ?? null) ? $php['requirement'] : '';
+        $recorded = is_string($php['version'] ?? null) ? $php['version'] : '';
+        $declared = self::declaredPhpRequirement();
+
+        self::assertSame(
+            $declared,
+            $requirement,
+            sprintf(
+                'composer.json asks for PHP %s, and the machine record carries [%s] as the requirement its interpreter has to meet. The record is a copy of that constraint rather than a second opinion about it.',
+                $declared,
+                $requirement === '' ? 'nothing' : $requirement,
+            ),
+        );
+
+        self::assertTrue(
+            Semver::satisfies($recorded, $requirement),
+            sprintf(
+                'The machine record writes PHP %s and asks for %s, which that version is not inside — so the record contradicts itself, and a reader takes away whichever half they read first.',
+                $recorded === '' ? 'no version' : $recorded,
+                $requirement,
             ),
         );
     }
@@ -358,6 +413,31 @@ final class HandoffEnvironmentTest extends TestCase
         }
 
         return $php;
+    }
+
+    /**
+     * `composer.json`'s own platform constraint — the file that owns it, rather than the record
+     * that copies it.
+     *
+     * It is read here rather than through a support class because it is one key of one file, and
+     * the reading is the claim: a `require.php` that stops being a string is the same finding as a
+     * record that states a different one.
+     */
+    private static function declaredPhpRequirement(): string
+    {
+        $raw = @file_get_contents(Handoff::root().'/composer.json');
+
+        self::assertIsString($raw, 'composer.json could not be read, so the requirement the machine record carries has nothing to be held to.');
+
+        $decoded = json_decode($raw, true);
+
+        self::assertIsArray($decoded, 'composer.json does not read as a JSON object, so its platform requirement cannot be asked for.');
+
+        $declared = $decoded['require']['php'] ?? null;
+
+        self::assertIsString($declared, 'composer.json declares no `require.php`, so which interpreter versions this package needs is not written down in it.');
+
+        return $declared;
     }
 
     /**
