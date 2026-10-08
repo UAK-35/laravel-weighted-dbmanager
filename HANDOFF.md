@@ -31,13 +31,16 @@ Every number below was read off this machine on 2026-10-07, with the remote aske
 
 ## 1. Pending — written, green, uncommitted
 
-Three batches that were pending when this note was last taken — and the reading that lets it be
-taken at all — are commits now, and this re-take is the fourth. They are the pgcat *direction*, the
+Four batches that were pending when this note was last taken — and the reading that lets it be
+taken at all — are commits now, and this re-take is the fifth. They are the pgcat *direction*, the
 end of the last reader window a stale pooler is at, with the records and the changelog entry that
-describe it; the release script, which renders the published API page from the record it writes; and
+describe it; the release script, which renders the published API page from the record it writes;
 `AGENTS.md`, which now sends a session to `.agents/machine.local.json` for the interpreter every
-command here starts with. Two paths differ from the commit section 2 names as `HEAD`: two tracked
-paths changed, and zero new files.
+command here starts with; and the plan's dirty-tree note, which no longer leaves a reader to go and
+ask git *which* files are standing in the way — the porcelain a real run refuses with is the
+porcelain printed under the note, columns and all, so the plan and the refusal it rehearses name one
+set rather than two. Two paths differ from the commit section 2 names as `HEAD`: two tracked paths changed, and zero
+new files.
 
 What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, and both of them are in `f10c318`:
 
@@ -57,15 +60,16 @@ and a release is blocked by them twice over: the plan refuses on a dirty tree wh
 the CI rail would read the red `phpstan` and `pint` if they were committed as they stand. Neither is
 this thread's to finish.
 
-The three commits this section used to describe:
+The four commits this section used to describe:
 
 ```
 feat: the reader-window verdict names which end of the window disagreed   3f05cff
 fix: the release script renders the page its record publishes             f10c318
 docs: a session starts by reading the machine record for its interpreter  4f4967d
+docs: the handoff note is re-taken at the four batches it described       e90cc6f
 ```
 
-**The four batches were four commits rather than one**, because they are unrelated work that happens
+**The five batches were five commits rather than one**, because they are unrelated work that happens
 to share a checkout — and the note rides with the last of them rather than the first, because its
 pending counts are a claim about this working tree and the only state they can be true in is the one
 after everything else has landed. The package has no `core.hooksPath` (so stock `.git/hooks`, and no

@@ -142,8 +142,14 @@ final class RailRefusalsTest extends TestCase
 
     /**
      * The same rail's documented exemption: a dry run warns instead of refusing, because a
-     * plan decides nothing — and it says so twice, in a note and in the plan's own branch
-     * line, so a reader who scrolled to the version sees it there too.
+     * plan decides nothing — and it says so three times, in a note, in the porcelain under
+     * that note, and in the plan's own branch line, so a reader who scrolled to the version
+     * sees it there too.
+     *
+     * The files are the third reading and the one the count cannot carry: a note that says
+     * "1 changed file" leaves the reader to go and ask git *which* one, on the very run that
+     * holds git's own answer in hand — and the refusal this plan is a rehearsal of names the
+     * same set, so the two surfaces cannot disagree about what is standing in the way.
      */
     public function test_the_dry_run_warns_about_a_dirty_tree_instead_of_refusing(): void
     {
@@ -156,6 +162,20 @@ final class RailRefusalsTest extends TestCase
             $run->said('Working tree is dirty (1 changed file(s)) — ignored for this dry run.'),
             $run->describe(),
         );
+
+        // The files themselves, on the line under the note that counts them: git's own porcelain,
+        // which is what tells the reader *which* file is uncommitted — the same line the refusal
+        // quotes, so a plan and the refusal it rehearses name one set rather than two. Written with
+        // the leading column, because that column is part of the answer: ` M` is an edit the rail is
+        // about, and a copy trimmed at the left would print `M` — a *staged* one, a different state
+        // — while still naming the same file.
+        $porcelain = ' M src/Thing.php';
+
+        $this->assertTrue(
+            $run->said('— ignored for this dry run.' . PHP_EOL . '    ' . $porcelain . PHP_EOL),
+            $run->describe(),
+        );
+
         $this->assertSame('main  (dirty)', $run->plan('branch'), $run->describe());
         $this->assertSame('0.1.1  (tag v0.1.1)', $run->plan('next version'), $run->describe());
         $this->assertTrue($run->said('Dry run: nothing was written, committed or tagged.'), $run->describe());

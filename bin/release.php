@@ -358,7 +358,10 @@ if ($branch !== $expectedBranch) {
     ));
 }
 
-$dirty = trim(git($root, ['status', '--porcelain', '--untracked-files=no', '--', '.'])['output']);
+// `rtrim`, not `trim`: porcelain's first line begins with the index column, and trimming the
+// left end of it turns an unstaged edit (` M path`) into a staged one (`M  path`) — a
+// different state from the one this rail is about, and one both surfaces below now quote.
+$dirty = rtrim(git($root, ['status', '--porcelain', '--untracked-files=no', '--', '.'])['output']);
 
 if ($dirty !== '' && !$options['allow-dirty'] && !$dryRun) {
     fail(
@@ -368,7 +371,19 @@ if ($dirty !== '' && !$options['allow-dirty'] && !$dryRun) {
 }
 
 if ($dirty !== '' && $dryRun) {
-    note(sprintf('Working tree is dirty (%d changed file(s)) — ignored for this dry run.', count(explode("\n", $dirty))));
+    $dirtyPaths = explode("\n", $dirty);
+
+    note(sprintf('Working tree is dirty (%d changed file(s)) — ignored for this dry run.', count($dirtyPaths)));
+
+    // Named rather than left to `git status`, because the count raises a question it does not
+    // answer — *which* files — and this run already holds the answer: the same porcelain a real
+    // run refuses with, printed here instead of appended to a refusal. The two surfaces are one
+    // reading of the tree, so a plan and the refusal it is a rehearsal of cannot name different
+    // sets, and a reader who sees the dirty tree in the plan does not have to leave it to find
+    // out what is standing in the way.
+    foreach ($dirtyPaths as $dirtyPath) {
+        echo '    ' . $dirtyPath . PHP_EOL;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
