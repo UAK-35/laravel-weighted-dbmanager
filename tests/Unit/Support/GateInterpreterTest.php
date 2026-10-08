@@ -225,10 +225,13 @@ final class GateInterpreterTest extends TestCase
         self::directory($root . '/.agents');
         self::directory($root . '/vendor');
 
-        // The gate and the one file it cannot run without: the tool manifest is a `require` beside
-        // it rather than an argument, so a root holding the gate alone dies before any check.
+        // The gate and the two files it cannot run without: the tool manifest and the interpreter
+        // resolver are `require`s beside it rather than arguments, so a root holding the gate alone
+        // dies before any check. The resolver is copied as the gate's own companion, and it reads
+        // the fixture's record rather than this machine's — which is why the fixture root has one.
         copy(Handoff::root() . '/bin/checks.php', $root . '/bin/checks.php');
         copy(Handoff::root() . '/bin/tools.php', $root . '/bin/tools.php');
+        copy(Handoff::root() . '/bin/interpreter.php', $root . '/bin/interpreter.php');
 
         // The library the check's requirement half needs, as the real one rather than a stand-in:
         // see the class docblock for why a bare fixture root would skip instead of running.

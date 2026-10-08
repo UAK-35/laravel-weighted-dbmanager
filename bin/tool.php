@@ -52,9 +52,27 @@ declare(strict_types=1);
  *   The command is an array, so no shell is involved: no quoting rules to get wrong on Windows,
  *   and no shell profile to depend on. The tool is invoked as `PHP_BINARY <entry file>` rather
  *   than through the `vendor/bin` shim, for the reason written down in `bin/tools.php`.
+ *
+ * WHICH INTERPRETER THAT IS
+ * --------------------------
+ *   `PHP_BINARY` here is the interpreter the machine record names rather than the one the caller
+ *   typed, because this script hands the process over to the recorded one before it reads anything
+ *   — so `composer test:unit`, `php bin/tool.php phpunit`, and a tool that itself spawns PHP all
+ *   agree about which interpreter the package runs on, whichever `php` was on the command line.
+ *   `bin/interpreter.php` has the reading and the guard that makes it terminate.
  */
 
 $root = str_replace('\\', '/', dirname(__DIR__));
+
+require __DIR__ . '/interpreter.php';
+
+// The work this file does is the tool's, and the tool has to run on the interpreter the machine
+// record names — not on whichever `php` started this script. So the hand-over happens before
+// anything is read or printed: a process that turns out to be the wrong interpreter re-runs this
+// script under the right one, arguments and streams and exit code and all. See
+// bin/interpreter.php, which is where that reading and that hand-over live, and which the gate's
+// `interpreter` check asks its own questions of.
+redispatch($root);
 
 /**
  * The manifest: tool name => [package, pin, entry file, purpose], the entry relative to the

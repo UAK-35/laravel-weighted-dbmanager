@@ -205,9 +205,21 @@ $yamlFiles = yamlFiles($root);
 // has and the repository does not — see composerValidateCommand().
 $lockIsShipped = commitsLockFile($root);
 
+// The reading of the machine record this file shares with `bin/tool.php`: the resolver, the
+// hand-over, and the record itself. Required rather than repeated, because two readings of one
+// file that decide different things is the drift the record is there to prevent.
+require __DIR__ . '/interpreter.php';
+
+// Before a single check runs: the checks below are the package's, and the package runs on the
+// interpreter the machine record names rather than on whichever `php` started this one. Everything
+// after this line — the children it spawns, the `PHP_BINARY` in them, and this process itself — is
+// the recorded interpreter, so `php bin/checks.php` is the whole command however the caller
+// reached a `php` to type it with.
+redispatch($root);
+
 // The machine record, read once: the interpreter check answers a claim made in it, and its
 // skip is about whether the file is there at all rather than about what it says.
-$machine = machineRecord($root);
+$machine = machineInterpreterRecord($root);
 
 // The installed tools, from the one manifest that says where each of them lives: `bin/tool.php`
 // runs them for the composer scripts, this file runs them for the gate, and neither spells a
@@ -719,52 +731,6 @@ function phpstanLevel(string $root): string
     return 'unknown';
 }
 
-/**
- * The interpreter the machine record names, as the record states it.
- *
- * `.agents/machine.local.json` is the one file in this tree that says which `php` a session here
- * starts with — the note's section 2 sends a reader to it before the first command that shells
- * out, because `php` is not on `PATH` in this shell and a bare one fails. It is gitignored and
- * written on one disk, so a clone and CI's runner have none: that is the first skip below, and
- * an absent file is the one shape this cannot answer. Everything else it *can* answer, which is
- * why an unreadable record is a failure rather than a skip — a record nobody can read leaves the
- * reader hunting for an interpreter, which is the hunt this check exists to end.
- *
- * @return array{path: string, exists: bool, php: array<string, mixed>|null, error: string|null}
- */
-function machineRecord(string $root): array
-{
-    $path = $root . '/.agents/machine.local.json';
-
-    if (!is_file($path)) {
-        return ['path' => $path, 'exists' => false, 'php' => null, 'error' => null];
-    }
-
-    $decoded = json_decode((string) @file_get_contents($path), true);
-
-    if (!is_array($decoded)) {
-        return [
-            'path' => $path,
-            'exists' => true,
-            'php' => null,
-            'error' => 'the file does not read as a JSON object',
-        ];
-    }
-
-    $php = $decoded['php'] ?? null;
-
-    if (!is_array($php)) {
-        return [
-            'path' => $path,
-            'exists' => true,
-            'php' => null,
-            'error' => 'the record carries no `php` block, which is where the interpreter is written down',
-        ];
-    }
-
-    return ['path' => $path, 'exists' => true, 'php' => $php, 'error' => null];
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — output
 // ─────────────────────────────────────────────────────────────────────────────
@@ -955,6 +921,11 @@ function checkInterpreter(string $root, array $machine): array
             $recorded === '' ? '(none)' : $recorded,
             $requirement === '' ? '(none)' : $requirement,
         ),
+        // Which interpreter this gate — and every check in it, and every child they spawn — is
+        // actually running on. It is the recorded one by construction: the gate hands the process
+        // over to it before the first check, so the row is the reading that says so rather than a
+        // second decision about it. See bin/interpreter.php for the hand-over and its guard.
+        sprintf('  gate       %s', PHP_BINARY),
     ];
 
     if ($exe === '' || !is_file($exe)) {
@@ -976,20 +947,32 @@ function checkInterpreter(string $root, array $machine): array
         );
     }
 
-    $run = runCommand([$exe, '-r', 'echo PHP_VERSION;'], $root);
+    // The same probe `bin/interpreter.php` gates its hand-over on, read here for the verdict: the
+    // resolver asks it *may* the process be handed to this file, this check asks what the file
+    // then says. One run, one shape, two readers — see machineInterpreterProbe().
+    $run = machineInterpreterProbe($exe, $root);
     $reports = trim($run['output']);
 
     $rows[] = sprintf(
         '  reports    %s',
-        $reports !== '' ? 'PHP ' . $reports : sprintf('nothing — %s exited %d', $exe, $run['exit']),
+        $reports === ''
+            ? sprintf('nothing — %s exited %d', $exe, $run['exit'])
+            : sprintf('PHP %s%s', $reports, $run['exit'] === 0 ? '' : sprintf(' — and exited %d without reading it', $run['exit'])),
     );
 
-    if ($reports === '') {
+    if ($reports === '' || $run['exit'] !== 0) {
+        // Exit 2 is the probe's own verdict — see machineInterpreterProbe(): a `php` that started
+        // and printed its version and could not read the script it would be given. It is the state
+        // a hand-over has to refuse, so it cannot be a pass here either: the two readers of this
+        // record have to agree about the interpreter or the gate reports a machine that works and
+        // the commands fall back to another one.
         return interpreterVerdict(
-            sprintf('%s is there and does not answer as a PHP binary, so the version it records cannot be confirmed', $exe),
+            $run['exit'] === 2
+                ? sprintf('%s runs as PHP %s and cannot read the script it would be given, so it could not run any of this', $exe, $reports)
+                : sprintf('%s is there and does not answer as a PHP binary, so the version it records cannot be confirmed', $exe),
             $rows,
             [
-                sprintf('The record names a file that exists and is not a `php` that answers: it exited %d', $run['exit']),
+                sprintf('The record names a file that exists and is not a `php` this package can run on: it exited %d', $run['exit']),
                 sprintf('and said %s.', trim($run['output']) === '' ? 'nothing' : trim($run['output'])),
                 'The version the record writes is the whole of what it is for, and nothing here can',
                 'confirm it.',
@@ -1057,7 +1040,9 @@ function checkInterpreter(string $root, array $machine): array
         $rows,
         [
             sprintf('The interpreter the record names is there, reports PHP %s, and satisfies %s — the', $reports, $requirement),
-            'requirement `composer.json` states for it — so a session here can start with it.',
+            'requirement `composer.json` states for it. This gate and every check in it are running',
+            'under it, whichever `php` started the command, because the process is handed over before',
+            'the first check — so a session here can start with any interpreter it can reach.',
         ],
         0,
     );

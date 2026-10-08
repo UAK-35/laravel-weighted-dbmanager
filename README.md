@@ -2009,6 +2009,7 @@ way:
 | what the run found                                            | exit |
 |---------------------------------------------------------------|------|
 | a flip applied, nothing to do, or skipped by another instance | `0` |
+| a running pooler that could not answer for a pool, so the config was re-applied | `0` |
 | a flip that was forced                                        | `0` |
 | the container's boot window had closed                        | `0` |
 | a rehearsal, whether it would flip, would not, or was forced  | `0` |
@@ -2096,6 +2097,7 @@ jq -e '[.steps[].outcome] | all(. == "done" or . == "would")' rehearsal.json
 | `kind`                                                                                                                    | what it means                                                                | exit |
 |---------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------|------|
 | `flipped`                                                                                                                 | a flip applied                                                               | `0`  |
+| `repaired`                                                                                                                | a running pooler was not answering for a pool, so its config was re-applied  | `0`  |
 | `no_change`                                                                                                               | the mode on record already matched, so nothing was done                      | `0`  |
 | `skipped`                                                                                                                 | another flipper instance held the lock                                       | `0`  |
 | `window_closed`                                                                                                           | the boot window had closed before the flip converged                         | `0`  |
@@ -2180,6 +2182,8 @@ docs/                    design records for decisions that are not obvious from 
                          where that is possible, checked where it is not
 bin/tools.php            where each installed tool's entry file is written down, once
 bin/tool.php             runs one of them by name: what every composer script goes through
+bin/interpreter.php      which `php.exe` the machine record names, and running a script under it —
+                         what bin/tool.php and bin/checks.php do before their first line of work
 bin/checks.php           every local check, summed up in one summary
 bin/counts.php           writes the counts a record states from the code that owns them
 bin/release.php          tag-driven releases (see RELEASING.md)
@@ -2219,6 +2223,18 @@ composer test                     # the three gates CI runs: pint --test, phpsta
 composer checks                   # everything that can be checked, in one summary
 php bin/tool.php phpunit --testdox   # any installed tool by name (see bin/tools.php)
 ```
+
+The scripts find their interpreter rather than being handed one. Every script under `bin/` reads
+`.agents/machine.local.json` — the machine record `AGENTS.md` puts before the first command that
+shells out — and re-runs itself under the `php.exe` written there, so `php bin/checks.php` does its
+work on the recorded interpreter whichever `php` the caller had, and a composer script, which
+Composer starts with `@php`, arrives at the same one. A record naming a file that is gone, or one
+that starts and does not answer as a `php`, is not a crash: the script prints why on stderr and runs
+under the interpreter that started it, and the gate's `interpreter` check is the reader that reports
+that state. `php bin/interpreter.php` prints the record, the resolution and this process's own
+interpreter without running anything, and `php bin/interpreter.php --run <script> [args …]` runs
+anything else under the resolved one — which is how a shell with no `php` on `PATH` can still run a
+script that needs one.
 
 The records under `docs/` are read by the suite as well as by people: the exit tables are compared
 cell by cell with the matrices the commands are written as, the test names they cite are checked
