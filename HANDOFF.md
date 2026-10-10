@@ -1,4 +1,4 @@
-# Handoff — the state of this package, taken 2026-10-07
+# Handoff — the state of this package, taken 2026-10-10
 
 This is a snapshot for whoever opens a thread in **this** repository next: what is written
 but uncommitted, what is committed but unpushed, what is not in any release a consumer can
@@ -24,13 +24,17 @@ git log --oneline origin/dev..HEAD                  # what is unpushed
 php bin/release.php --weigh --branch=dev --dry-run  # what a release would do right now
 ```
 
-Every number below was read off this machine on 2026-10-07, with the remote asked directly
-(`git ls-remote`) rather than trusted from the local `origin/dev` ref.
+Every number below that the register holds — sections 2 and 3 — was read off this machine on
+2026-10-07, with the remote asked directly (`git ls-remote`) rather than trusted from the local
+`origin/dev` ref. Section 1 was re-taken on 2026-10-10, the date above, and it is the one part of
+this file that describes *now* rather than the commit it is read against.
 
 ---
 
-## 1. Pending — written, green, uncommittedFive batches that were pending when this note was last taken — and the reading that lets it be
-taken at all — are commits now, and this re-take is the sixth. They are the pgcat *direction*, the
+## 1. Pending — written, green, uncommitted
+
+Five batches that were pending when this note was last taken — and the reading that lets it be
+taken at all — are commits now, and this re-take is the eighth. They are the pgcat *direction*, the
 end of the last reader window a stale pooler is at, with the records and the changelog entry that
 describe it; the release script, which renders the published API page from the record it writes;
 `AGENTS.md`, which now sends a session to `.agents/machine.local.json` for the interpreter every
@@ -44,34 +48,132 @@ session's first command. That check's other half is a commit of its own: `bin/in
 `tests/Unit/Support/InterpreterResolverTest.php`, which make every command hand its process to the
 interpreter the record names — `bin/tool.php`'s call to it travelled with them — and which refuse the
 hand-over to a file that starts and cannot read the script it would be given, so the check's verdict
-and the commands' fallback agree about which interpreter is this machine's. Sixteen paths differ from
-the commit section 2 names as `HEAD`: fourteen tracked paths changed, and two new files.
+and the commands' fallback agree about which interpreter is this machine's.
 
-What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, both of them in `f10c318`, and the two files a concurrent thread has added and no commit carries at all:
+The pgcat answerability batch this note described — the pool probe, the `repaired` kind it reports,
+the two surfaces that read it, the repair counters `db:pgcat-flip --status` prints, and the records
+and changelog entry that describe all of it — is a commit now, `0a880cb`, its own commit like the
+five before it. Three more landed with it, all of them described below: the audit record handed back
+writable to whoever boots next (`c6b5d0c`, which is the fix the other thread's half-applied change
+was reaching for, with its own `### Fixed` entry in the changelog), the release scripts' derived-file
+list (`bab7c4e`), and the `.gitignore` line another hand added after this note was taken (`aa5f695`,
+which is a rule for an editor's own project file and nothing this package installs). What is left in
+the tree and in no commit belongs to no batch here: the rule file another hand left at the root while
+this one was being re-taken, whose fate — this project's rules or the machine's — is its reader's. One
+path differs from the commit section 2 names as `HEAD`: zero tracked paths changed, and one new file.
+
+What this section's register (`f92abd2`) does not carry — which is the question its table is read as, and not the same one as what is uncommitted — is the two release-suite files the release batch wrote, both of them in `f10c318`, the three the pgcat answerability batch added, all of them in `0a880cb`, and one file no commit carries at all, left in this tree by another hand while this note was being re-taken:
 
 | File | What it is |
 |---|---|
 | `tests/Unit/Release/DryRunTest.php` | committed in `f10c318`: a `--weigh --dry-run` held to the tree, the refs and `HEAD` it left alone, read against the same command run for real |
 | `tests/Unit/Release/PublishedPageTest.php` | committed in `f10c318`: a fixture release held to the page it publishes — the bytes the record renders, the stamp both of them name, and the commit the tag points at |
-| `src/Pgcat/PoolProbe.php` | a concurrent thread's new file, in the tree and in no commit; this note did not read it, so what can be said about it is that it is there |
-| `tests/Unit/Pgcat/PoolProbeTest.php` | the test beside it, added by the same thread and equally unread here |
+| `src/Pgcat/PoolProbe.php` | the pool-answerability probe the pgcat self-heal grew: a PostgreSQL v3 startup packet and the first message back, read as `answered`, `missing` or `silent` — new in `0a880cb` |
+| `tests/Unit/Pgcat/PoolProbeTest.php` | the test beside it — the packet's shape, the three answers and the injected exchange — new in `0a880cb` |
+| `docs/pgcat-pool-probe.md` | the design record for the probe: why an unanswerable pool is a fault the flip repairs, why only `failed` folds into the endpoint's verdict, and why the reading is off by default — new in `0a880cb` |
+| `BEHAVE.mdc` | another hand's, and no batch here's: a coding-agent rule file left at the root while this note was re-taken — uncommitted, and named here because a file nothing names is work the next thread cannot see |
 
-`src/Support/BootAudit.php` and `src/Providers/WeightedDatabaseServiceProvider.php` are a concurrent
-thread's work in flight, and so are the pgcat sources, the two records under `docs/`, `API.md`, the
-three `.tsv` inventories and `config/db-manager.php` this checkout has changed: this note did not read
-that work. What it can
-say about them is what it measured rather than what they do: they are in the tree, and the gate is
-red on them — `phpstan` on `src/Support/BootAudit.php` (a property assignment whose closure has the
-wrong signature, and a closure called with more parameters than it takes) and `pint` on
-`src/Providers/WeightedDatabaseServiceProvider.php` (`method_argument_space`) — so a thread that runs
-`bin/checks.php` and sees red should look here first. They travel with the thread whose work they are,
-and a release is blocked by them twice over: the plan refuses on a dirty tree while they sit here, and
-the CI rail would read the red `phpstan` and `pint` if they were committed as they stand. Neither is
-this thread's to finish.
+The pgcat sources that batch changed — `src/Pgcat/FlipResult.php`, `src/Pgcat/PgcatConfigFlipper.php`,
+`src/Console/Commands/DbFlipPgcatCommand.php` and `config/db-manager.php` — are one piece of work with
+`PoolProbe.php` and its test above: a running pooler that cannot answer for a pool is a fault the flip
+now repairs and reports as its own `repaired` kind, and the regenerated records under `docs/`, `API.md`
+and the three `.tsv` inventories are that work's records, with its design record
+`docs/pgcat-pool-probe.md` new beside them. The same work now gives that reading a reader:
+`src/Http/Controllers/DatabaseHealthController.php` reports it as `/health/db`'s `pool_probe` block and
+`src/Console/Commands/DbDoctor.php` as a fourteenth row, `pool probe`, both asking
+`PgcatConfigFlipper::poolProbeVerdict()` by name so the two surfaces cannot disagree about it — with
+their tests (`tests/Unit/Http/DatabaseHealthControllerTest.php`, `tests/Unit/Console/DbDoctorTest.php`)
+and the prose they are held to (`README.md`, `CHANGELOG.md`, `docs/db-doctor-json.md`,
+`docs/prose-numbers.md`) travelling with them. `src/Support/BootAudit.php` and
+`src/Providers/WeightedDatabaseServiceProvider.php` began as a *different* thread's half-applied
+change — the audit record handed back able to be written by whoever boots next, carried on the second
+argument the releaser now takes — and this checkout finished it rather than leaving the tree red: that
+finish is `c6b5d0c`, the second of the three commits the fence below lists. The red it was leaving
+behind is gone, measured rather than asserted:
+`phpstan` reports no error over `src/`, because the property and its `@param` are typed
+`(mixed, string): void`, which is the argument the call site at the write already passes; `pint`
+reports no style issue over 129 files, because the `$sysTempDir` the reading hoisted is indented as an
+argument rather than a level further in; and `tests/Unit/Support/BootAuditConcurrencyTest.php` is green,
+because the child half (`tests/Support/boot-audit-child.php`) forwards the record to the shipped
+releaser instead of calling it with the one argument it used to take. The repair itself moved with the
+signature: `@chmod($filePath, 0666)` in the releaser is now `BootAudit::makeRecordWritable()`, which is
+one call on both hosts rather than a branch — on Windows `chmod()` is the read-only attribute and all
+that host has of a mode, and a read-only record is exactly what the acquirer's `fopen(…, 'c')` refuses —
+and which hands nothing back for a path the write removed. It is now covered rather than merely
+claimed: `BootAuditTest::test_the_release_hands_the_record_back_writable_to_the_next_boot` takes the
+shipped closure off a plain instance the way the concurrency child does, makes the record read-only,
+and holds the repair to a hand-back — which fails, measured, with the `chmod` disabled (the control edit
+was restored byte for byte), and which reports the mode as `0666` on a host where a mode is a permission.
+The release is no longer blocked by these files, and the sequence above is what a release still needs.
 
-The five commits this section used to describe:
+The pool probe has since been measured against the running pooler rather than argued about, and the
+measurement changed two things above. A pool's name is the *first* segment of a header path: the
+deployed `/etc/pgcat/pgcat.toml` declares its one pool with no `[pools.writer_db_1]` line at all —
+only `[pools.writer_db_1.users.0]` and `[pools.writer_db_1.shards.0]` — so
+`PoolProbe::declaredPools()` answers `writer_db_1` where it used to answer two sub-table paths that no
+client ever asks for, and `PoolProbeTest` pins that from the captured header shape. The probe's
+default port is pgcat's own rather than PostgreSQL's `5432`, because a PostgreSQL server answers
+*every* name in its own words and would be read as a pooler holding them all. What the same
+measurement could not repair is now written beside the code it constrains: that pooler answers an
+AuthenticationRequest to *every* name it is given — declared, undeclared, commented out, or invented
+— so `missing` is never observed there, and `answered` says the pooler is there rather than that the
+pool is.
+
+The flip itself gained the read the earlier half of this self-heal never made: a run that *applies* a
+mode now asks the pooler about each pool the variant it just applied declares, with the same bounded
+attempts and delay a repair's starts use (`start_attempts`, `start_retry_delay_ms`), because both
+ways of applying a config return before pgcat has re-read one — a reload is a signal, and a restart
+returns inside supervisor's `startsecs` window. A refusal that survives those attempts is a signal
+pgcat did not act on, so the repair escalates to `restart_command`, judged with the same
+`SupervisorStep::inspect()` a flip judges its own command with, and the pools are read back once more.
+The run reports `repaired` with the transition in its sentence rather than a clean `flipped`, which is
+what `FlipResult::KIND_REPAIRED` and its factory now say: a repair can follow a transition as well as
+an unchanged mode, and the state behind it is `/health/db`'s to report. An installation with
+`use_reload = false` is told its flip already restarted the pooler rather than having it restarted
+twice, a pooler that answered nothing is still never repaired, and `db:pgcat-flip --dry-run` reports
+the read as a step it cannot perform, because the pools it would ask about are the ones nothing has
+renamed in yet. Six tests in `tests/Unit/Pgcat/PgcatConfigFlipperTest.php` hold the new path — the
+answered flip, a pooler still catching up, the restart that repairs it, the refusal that survives the
+restart, the installation that has already restarted, and the silent one — and the rehearsal's step
+list moved with it in `tests/Unit/Console/DbFlipPgcatCommandTest.php`. `forceMode()` deliberately did
+not move: the window tasks apply through it, it has no boot window and records no run, so a read
+added there would be a socket on the boot path with nothing to report it to.
+
+That read now leaves a record of its own. Each pool repair is counted in the state file —
+`pool_repairs`, with `last_pool_repair_at` beside it, written where the run is so both repair paths
+move it — and `db:pgcat-flip --status` prints the pair as a `pool_repairs` row beside `flip_runs`:
+the count is what a run's kind cannot carry, since a pooler repaired twice reads the same `repaired`
+as one repaired once. It travels in the window block, so `--status --json` and `/health/db` read the
+same two facts, and a container that has never repaired anything reads zero rather than nothing.
+`tests/Unit/Pgcat/PgcatConfigFlipperTest.php` holds the recording and the arithmetic, and
+`tests/Unit/Console/DbFlipPgcatCommandTest.php` the row and the JSON.
+
+The last batch this section had no words for is the release scripts' derived-file list, `bab7c4e`.
+`bin/surface.php` now names every file the package derives — the inventory record's three, and
+`API.md` — with the command that renders each, and `bin/inventory.php`, the API renderer in
+`bin/api.php` and `bin/release.php` all read that list rather than naming paths of their own, so a
+run of `bin/inventory.php` refreshes the page beside the record and a release commits the derived
+files it wrote and no others. It is not the batch above: it changes where the paths are named, not
+what any of them says — the rows the record and the page carry are the ones that batch produced, and
+both `--check` runs still report the record and the page current.
+
+One thing the batch landed without, and it is this paragraph's to say: `docs/pgcat-flip-dry-run.md`'s
+step table still lists the steps without `pool read`, so that record is out of step with the report a
+rehearsal prints and the row is owed. The ceiling that deferred it is gone — the number vocabulary is
+back to what it was — but the row is not the whole of what that record needs: its section states a
+rule (a rehearsal performs every step whose effect can be undone, and reports the ones that cannot),
+and `pool read` is reported for a reason that rule does not cover — there is nothing for the read to
+be about until the rename it follows has happened. So the row and the rule move together, which is a
+change to that record's argument rather than an addition to its table, and it is left for whoever
+takes that record next.
+
+The batches this section describes, and the five commits it used to describe:
 
 ```
+chore: the editor's project file is ignored by the repository              aa5f695
+refactor: every derived file is named once, in the list that writes it    bab7c4e
+fix: the audit record is handed back writable, whoever boots next         c6b5d0c
+feat: a pooler that cannot answer for a pool is a fault a flip repairs    0a880cb
 feat: the reader-window verdict names which end of the window disagreed   3f05cff
 fix: the release script renders the page its record publishes             f10c318
 docs: a session starts by reading the machine record for its interpreter  4f4967d
@@ -79,7 +181,7 @@ docs: the handoff note is re-taken at the four batches it described       e90cc6
 fix: the plan names the files it is ignoring on a dirty tree              22de815
 ```
 
-**The five batches were five commits rather than one**, because they are unrelated work that happens
+**The batches were commits of their own rather than one**, because they are unrelated work that happens
 to share a checkout — and the note rides with the last of them rather than the first, because its
 pending counts are a claim about this working tree and the only state they can be true in is the one
 after everything else has landed. The package has no `core.hooksPath` (so stock `.git/hooks`, and no
@@ -100,7 +202,7 @@ php bin/inventory.php --check --at=f92abd2
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
-  --> • inventory is current — 39 files, 198 public methods, 224 key(s)/member(s),
+  --> • inventory is current — 40 files, 204 public methods, 239 key(s)/member(s),
       described as v0.2.0-alpha2
 ```
 
@@ -181,10 +283,11 @@ could be declared breaking from a section that carries four headings and no `Rem
 
 ### The release the weighing would ask for, and the line that refuses it
 
-`v0.2.0-alpha2` was cut and pushed on 2026-10-06. Since then two entries have been written under
-`## Unreleased` — one at the register and one in the working tree — so the section the table above
-holds carries the first and the one the weighing reads carries both. Asked on 2026-10-07 what a
-release would do, `exit 0`:
+`v0.2.0-alpha2` was cut and pushed on 2026-10-06. Since then the entries under `## Unreleased` have
+grown from the one the register carries to six in the working tree — five under `### Added` and one
+under `### Fixed` — so the table above is the register's single entry and the section the weighing
+reads carries them all; the severity does not move, `### Added` staying the loudest heading either
+way. Asked on 2026-10-07 what a release would do, `exit 0`:
 
 ```bash
 php bin/release.php --weigh --branch=dev --dry-run
@@ -224,11 +327,12 @@ which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Two entries, and the register carries one of them: the machine-path guard — a reading that refuses
-a path naming the drive, the account or the share it was written on, held beside the walk that
-refuses one climbing above the root, with every path it reported rewritten to name nobody. The
-working tree adds the pgcat entry the paragraph below is about, uncommitted like the files it
-describes.
+Six entries in the working tree, and the register carries one of them: the machine-path guard — a
+reading that refuses a path naming the drive, the account or the share it was written on, held
+beside the walk that refuses one climbing above the root, with every path it reported rewritten to
+name nobody. The five the cycle adds are the pgcat batch's four, the pooler-direction entry, and the
+half-applied audit change's `### Fixed` one, and they are commits now — `0a880cb`, `3f05cff` and
+`c6b5d0c` — rather than the working-tree state the paragraphs above were written in.
 
 The ten commits in section 2 are the rule at the root, the walk that reads it, the two records
 whose path pointed outside the package, the ignore rule for the machine record, this note's own
@@ -273,13 +377,17 @@ included — is in a tag and in no installation until that pin moves, which is t
 between "the flip is implemented", "the flip is released" and "the flip is deployed" that a fresh
 thread can otherwise spend a long time establishing.
 
-What a release of this cycle would still need, none of which is done:
+What a release of this cycle would still need, and what is done:
 
-1. commit the four batches in the working tree (section 1), as four commits rather than one;
-2. push the ten commits on `dev` (section 2), or declare the run with `--skip-ci`;
-3. land the `## Unreleased` entry the working tree carries and the register does not — the pgcat
-   one: the register already carries the machine-path entry, so a release declared against that
-   commit would publish that entry alone;
+1. the batches that were in the working tree are commits of their own now — `0a880cb` for the pgcat
+   answerability batch, `c6b5d0c` for the audit record, `bab7c4e` for the derived-file list,
+   `aa5f695` for the editor's ignore rule, and the commit that carries this note — so this step is
+   done;
+2. push the commits on `dev` — the ten the table in section 2 counts, and the five this cycle
+   added — or declare the run with `--skip-ci`;
+3. the `## Unreleased` entries: the register carries one and the working tree six, so a release
+   declared against the register would publish the machine-path entry alone, while the release
+   commits the section as it stands;
 4. raise the consumer's pin, in the application repository, to the new tag;
 5. the application-side switches and schedule entries that a flip needs, which live in that
    repository and are not part of this package.

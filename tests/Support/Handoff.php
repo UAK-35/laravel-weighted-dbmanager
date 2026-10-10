@@ -342,11 +342,14 @@ final class Handoff
      * misled by rather than warned of. The shape is the claim: three words, each the number the
      * phrase after it is about.
      *
-     * The third noun is read as it is written — `new file` or `new files` — because a tree can hold
-     * exactly one such file, and a note that had to write a plural for a count of one would be
-     * failing over grammar rather than over a size. The teeth are unchanged either way: the word
-     * before the noun still has to be one `NumberWords` knows, and the number it names still has to
-     * be the tree's.
+     * Every noun is read as it is written — `one path differs` beside `two paths differ`, `tracked
+     * path` beside `tracked paths`, `new file` beside `new files` — because a tree can hold exactly
+     * one of any of them, and a note that had to write a plural for a count of one would be failing
+     * over grammar rather than over a size. The first of those cases is not hypothetical: a tree can
+     * be down to a single file left by a hand that is not this cycle's, and the note has to be able
+     * to say so. The teeth are unchanged either way — the word before the noun still has to be one
+     * `NumberWords` knows, and the number it names still has to be the tree's — and a number the
+     * sentence gets wrong is still the failure, which is the shape a note is read for.
      *
      * @return array{total: int, changed: int, new: int, source: int}
      *
@@ -361,7 +364,7 @@ final class Handoff
         // physical line and the noun it counts is the next, so a reader that stopped at the line
         // would report a claim it had only half read.
         foreach (self::paragraphs(self::PENDING) as $paragraph) {
-            if (str_contains($paragraph['text'], 'paths differ')) {
+            if (preg_match('/\bpaths? differs?\b/', $paragraph['text']) === 1) {
                 $opening = $paragraph;
 
                 break;
@@ -378,13 +381,13 @@ final class Handoff
         $plain = self::plain($opening['text']);
         $number = '([a-z]+(?:-[a-z]+)?)';
 
-        if (preg_match('/\b'.$number.' paths differ\b/', $plain, $total) !== 1
-            || preg_match('/\b'.$number.' tracked paths changed\b/', $plain, $changed) !== 1
+        if (preg_match('/\b'.$number.' paths? differs?\b/', $plain, $total) !== 1
+            || preg_match('/\b'.$number.' tracked paths? changed\b/', $plain, $changed) !== 1
             || preg_match('/\b'.$number.' new file(?:s)?\b/', $plain, $new) !== 1
         ) {
             throw new RuntimeException(sprintf(
-                'HANDOFF.md line %d no longer states the pending set as [N paths differ … N tracked paths '.
-                'changed, and N new file(s)]: [%s]',
+                'HANDOFF.md line %d no longer states the pending set as [N path(s) differ … N tracked '.
+                'path(s) changed, and N new file(s)]: [%s]',
                 $opening['source'],
                 trim($opening['text']),
             ));
