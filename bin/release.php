@@ -730,19 +730,6 @@ printf(
     PHP_EOL,
 );
 
-// What the page will say, read from the tree rather than from the record on disk: the
-// record the plan is describing may be the stale or absent one the weighing just reported,
-// and the page is rendered from the record this release writes. The tree it names is the
-// tag being created — the page is stamped like the record is, so it is the tag and not a
-// count that says which release a consumer is reading.
-$pageRecords = inventoryRecords($root);
-$pageLine = sprintf(
-    '%d class(es), %d public method(s), described as %s',
-    count(apiClasses($pageRecords['files'], $pageRecords['methods'])),
-    count($pageRecords['methods']),
-    $tag,
-);
-
 $inventoryLine = $weighing['inventory']['blocks_release']
     ? 'incomplete, and a real run refuses to release until it is repaired'
     : ($weighing['inventory']['stamp'] === '(missing)'
@@ -751,16 +738,29 @@ $inventoryLine = $weighing['inventory']['blocks_release']
             ? 'fresh, weighed against ' . $weighing['inventory']['stamp']
             : 'stale, refreshed by this release and not weighed'));
 
+// One line per derived file, from the one list that names them (bin/surface.php) — so an artefact
+// added to that list appears in this plan, in the notes below and in the release commit without
+// anything here being told about it. The lines are described from the tree's rows rather than from
+// the record on disk: the record the plan is describing may be the stale or absent one the weighing
+// just reported, and every derived file is written from this tree. Each line names the tag being
+// created, because that is what stamps all of them: it is the tag, and not a count, that says which
+// release a consumer is reading.
+$derivedContext = ['root' => $root, 'tag' => $tag, 'records' => inventoryRecords($root)];
+
 printf("  release notes %d bullet(s) in the promoted section%s", $promoted['entries'], PHP_EOL);
-printf(
-    "  inventory     %d file(s), %d method(s), %d key(s)/member(s)  (%s)%s",
-    $weighing['inventory']['counts']['files'],
-    $weighing['inventory']['counts']['methods'],
-    $weighing['inventory']['counts']['surface'],
-    $inventoryLine,
-    PHP_EOL,
-);
-printf("  api page      %s%s", $pageLine, PHP_EOL);
+
+foreach (derivedFiles($root) as $derivedKey => $derivedArtefact) {
+    printf(
+        "  %-13s %s%s%s",
+        $derivedArtefact['label'],
+        $derivedArtefact['describe']($derivedContext),
+        // The record is the one row whose state is the weighing's verdict rather than a staleness
+        // check: it is what the bump was worked out from, so the plan says which release it was
+        // weighed against, and whether it counted at all.
+        $derivedKey === 'inventory' ? '  (' . $inventoryLine . ')' : '',
+        PHP_EOL,
+    );
+}
 printf(
     "  branch-alias  %s%s",
     $aliased['branches'] === []
@@ -853,43 +853,40 @@ if (!write($changelogPath, $promoted['content'])) {
     fail('Could not write CHANGELOG.md');
 }
 
-// The inventory goes into the release commit next to the CHANGELOG, stamped with
-// the tag being created: that stamp is what lets the next release weigh against it.
-$inventoryFiles = inventoryPaths($root);
-$inventory = syncInventory($root, $tag, true);
-
-if (!$inventory['written']) {
-    fail(sprintf(
-        'Could not write %s / %s / %s.',
-        relativeTo($root, $inventoryFiles['files']),
-        relativeTo($root, $inventoryFiles['methods']),
-        relativeTo($root, $inventoryFiles['surface']),
-    ));
-}
-
-note(sprintf(
-    'inventory refreshed — %d file(s), %d method(s), %d key(s)/member(s), described as %s',
-    $inventory['count']['files'],
-    $inventory['count']['methods'],
-    $inventory['count']['surface'],
-    $tag,
-));
-
-// The page goes in with the record it renders, and after it: the record is on disk by now,
-// so the render reads the bytes this release is publishing rather than the ones it replaced.
-// A refusal here leaves the tree with a promoted CHANGELOG and a fresh record and no tag,
+// Every derived file goes into the release commit next to the CHANGELOG, written from the one list
+// that names them and stamped with the tag being created: that stamp is what lets the next release
+// weigh against the record, and the page is written after the record it renders — the list's order
+// is that dependency rather than a coincidence of the order these steps used to be in. A refusal
+// here leaves the tree with a promoted CHANGELOG, no tag, and the artefacts the list had reached,
 // which is the same shape as every other step that fails — no version is left behind.
 try {
-    $page = apiReport($root);
+    $derived = syncDerived($root, $tag, true);
 } catch (RuntimeException $error) {
-    fail('Could not render API.md: ' . $error->getMessage() . '.');
+    fail('Could not render the derived files: ' . $error->getMessage() . '.');
 }
 
-if (@file_put_contents(apiReportPath($root), $page) === false) {
-    fail('Could not write API.md');
+// A renderer that refuses — the page cannot read the record it renders — is a release that cannot
+// publish that file, so it stops here rather than committing a record whose page is the one before
+// it. The message names the file and the renderer's own sentence, which is the repair as well.
+if ($derived['refused'] !== []) {
+    foreach ($derived['refused'] as $derivedKey => $refusal) {
+        fail(sprintf('Could not render %s: %s.', implode(' / ', array_map(
+            static fn (string $path): string => basename($path),
+            array_values(derivedFiles($root)[$derivedKey]['files']),
+        )), $refusal));
+    }
 }
 
-note('API.md re-rendered — ' . $pageLine);
+if (!$derived['written']) {
+    fail(sprintf('Could not write %s.', implode(' / ', array_map(
+        static fn (string $path): string => basename($path),
+        $derived['failed'],
+    ))));
+}
+
+foreach ($derived['wrote'] as $derivedKey) {
+    note(sprintf(derivedFiles($root)[$derivedKey]['note'], $derived['rows'][$derivedKey]));
+}
 
 if ($aliased['changed'] && !write($composerPath, $aliased['content'])) {
     fail('Could not write composer.json');
@@ -907,11 +904,11 @@ if ($aliased['changed']) {
 
 $staged = ['CHANGELOG.md'];
 
-foreach ($inventoryFiles as $inventoryFile) {
-    $staged[] = relativeTo($root, $inventoryFile);
+// Every file the list wrote, and no file it did not: the commit cannot carry an artefact the run did
+// not produce, and cannot leave one behind.
+foreach ($derived['files'] as $derivedPath) {
+    $staged[] = relativeTo($root, $derivedPath);
 }
-
-$staged[] = relativeTo($root, apiReportPath($root));
 
 if ($aliased['changed']) {
     $staged[] = 'composer.json';

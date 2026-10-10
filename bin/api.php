@@ -144,11 +144,16 @@ function apiReport(string $root): string
 }
 
 /**
- * Where the page lives, so the writer and the checker name one path.
+ * Where the page lives: the path `bin/surface.php`'s list of derived files gives it, so the page is
+ * one row of that list rather than a path this file knows on its own — the writer here, the check
+ * here and the release that writes it alongside the record all name the same file.
  */
 function apiReportPath(string $root): string
 {
-    return $root . '/API.md';
+    /** @var array<string, string> $files */
+    $files = derivedFiles($root)['api']['files'];
+
+    return $files['api'];
 }
 
 /**

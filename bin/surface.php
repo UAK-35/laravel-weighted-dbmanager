@@ -1055,15 +1055,18 @@ function classKind(string $description): string
  * than believed — an inventory in step with the tree cannot witness a change, and
  * that is the only thing it is for.
  *
+ * The three are named once, in `derivedFiles()`, and read out of it here: the readers that want a
+ * path and the writers that produce one are then the same list, so a file cannot be renamed for one
+ * of them and not the other.
+ *
  * @return array{files: string, methods: string, surface: string}
  */
 function inventoryPaths(string $root): array
 {
-    return [
-        'files' => $root . '/files.tsv',
-        'methods' => $root . '/methods.tsv',
-        'surface' => $root . '/surface.tsv',
-    ];
+    /** @var array{files: string, methods: string, surface: string} $paths */
+    $paths = derivedFiles($root)['inventory']['files'];
+
+    return $paths;
 }
 
 /**
@@ -1365,41 +1368,218 @@ function inventoryDocument(string $root, string $tag, ?array $records = null): a
 }
 
 /**
- * The one place the three files are compared and written, so both commands agree on
- * what "out of step" means: the bytes on disk against the bytes this tree and
- * stamp produce, carriage returns normalised away first.
+ * Every file this package derives from its own record, as one list — which is the whole of what
+ * this function is for.
  *
- * The stamp is part of the comparison on purpose. A stamp that names a different
- * release is how a file written at the wrong moment is caught, and it is the one
- * difference that must never be waved through.
+ * WHY ONE LIST
+ * ------------
+ *   Four files are derived, and the list is the only place any of them is named. That was not true:
+ *   the paths lived here and the writer beside them, but the release named the same files again in
+ *   its staging list and again in its notes, and the page rendered from the record was a function
+ *   the record's own writer had never heard of. This is not tidiness. `v0.2.0-alpha2` rewrote the
+ *   three records and left `API.md` describing the release before it, because the page was the one
+ *   artefact nothing in the record's path named: the guard on the committed page went red on the
+ *   release commit itself and a follow-up commit re-rendered it by hand. A file named once is a file
+ *   no caller can half-know about, so this writer, the check beside it, the release's notes and the
+ *   files the release commits all read this list, and a fifth derived artefact is a row here rather
+ *   than a search through the callers that used to each know one of them.
  *
- * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}|null $records the rows to compare and write, or null to read the working tree
- * @return array{current: bool, written: bool, count: array{files: int, methods: int, surface: int}}
+ * WHAT A ROW IS
+ * -------------
+ *   label     what a plan and a release note call it — one row per artefact, not per file
+ *   from      `tree` when its rows come from the tree being described, `record` when it is rendered
+ *             from the record on disk
+ *   files     the file names it writes, each mapped to the key its renderer answers with
+ *   render    the bytes for those keys, from the tag and the rows
+ *   describe  the one line it reports itself with: what it holds, and the tag it names
+ *   note      the release's note for it, with the describe line filled in
+ *
+ * The order is the writing order and it is a dependency rather than a preference: the page reads the
+ * record on disk, so a page rendered before the record it describes is the state this prevents.
+ *
+ * `from` is also what a run against a ref turns on. `--at=REF` describes another tree, and a page
+ * describes the record a checkout ships — so rows read out of git leave the page alone, which is the
+ * rule rather than a special case: the page's rows are the record on disk, and a ref's are not.
+ *
+ * @return array<string, array{label: string, from: string, files: array<string, string>, render: callable, describe: callable, note: string}>
  */
-function syncInventory(string $root, string $tag, bool $write = true, ?array $records = null): array
+function derivedFiles(string $root): array
 {
-    $document = inventoryDocument($root, $tag, $records);
-    $paths = inventoryPaths($root);
+    return [
+        // The record: the files the weighing reads and the only ones a ref's rows can describe.
+        'inventory' => [
+            'label' => 'inventory',
+            'from' => 'tree',
+            'files' => [
+                'files' => $root . '/files.tsv',
+                'methods' => $root . '/methods.tsv',
+                'surface' => $root . '/surface.tsv',
+            ],
+            'render' => static function (array $context): array {
+                $document = inventoryDocument($context['root'], $context['tag'], $context['records']);
 
+                return [
+                    'files' => $document['files'],
+                    'methods' => $document['methods'],
+                    'surface' => $document['surface'],
+                ];
+            },
+            'describe' => static function (array $context): string {
+                $counts = inventoryDocument($context['root'], $context['tag'], $context['records'])['count'];
+
+                return sprintf(
+                    '%d file(s), %d method(s), %d key(s)/member(s), described as %s',
+                    $counts['files'],
+                    $counts['methods'],
+                    $counts['surface'],
+                    $context['tag'],
+                );
+            },
+            'note' => 'inventory refreshed — %s',
+        ],
+
+        // The page, rendered from the record on disk rather than from the rows in hand: that is
+        // what makes it describe the record a checkout has, and what a ref's rows are not.
+        'api' => [
+            'label' => 'api page',
+            'from' => 'record',
+            'files' => ['api' => $root . '/API.md'],
+            'render' => static function (array $context): array {
+                apiRenderer();
+
+                return ['api' => apiReport($context['root'])];
+            },
+            'describe' => static function (array $context): string {
+                apiRenderer();
+
+                return sprintf(
+                    '%d class(es), %d public method(s), described as %s',
+                    count(apiClasses($context['records']['files'], $context['records']['methods'])),
+                    count($context['records']['methods']),
+                    $context['tag'],
+                );
+            },
+            'note' => 'API.md re-rendered — %s',
+        ],
+    ];
+}
+
+/**
+ * The page's renderer, loaded where it is needed rather than at the top of this file.
+ *
+ * `bin/api.php` requires this file, so requiring it back at load time would be a cycle; requiring it
+ * inside the one artefact that renders the page is not, and its CLI is behind its own guard
+ * (`apiInvoked()`), so loading it runs nothing.
+ */
+function apiRenderer(): void
+{
+    require_once __DIR__ . '/api.php';
+}
+
+/**
+ * The one function that renders, compares and writes every derived file, in the order the list
+ * gives: the record first, then what is rendered from it.
+ *
+ * It stops at the first artefact it cannot write. A release that cannot write the record must not
+ * publish a page rendered from the record it failed to write, and the failure has to name that
+ * artefact's files rather than every file in the list — the rest were never reached, and naming them
+ * would send a reader to a file the run had not got to.
+ *
+ * The stamp is part of the comparison on purpose: a file that names another release is the one
+ * difference that must never be waved through, and it is how a file written at the wrong moment is
+ * caught. The comparison is a read, so `--check` and a plan see the same answer the writer does.
+ *
+ * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}|null $records the rows to write, or null for the working tree's — which also decides what is in scope, because a ref's rows are another tree's and a page describes this one (see derivedFiles())
+ * @return array{current: bool, written: bool, files: array<string, string>, rows: array<string, string>, wrote: list<string>, refused: array<string, string>, failed: list<string>, differs: array<string, array{on_disk: string|null, expected: string|null, refused?: string}>}
+ */
+function syncDerived(string $root, string $tag, bool $write = true, ?array $records = null): array
+{
+    $context = [
+        'root' => $root,
+        'tag' => $tag,
+        'records' => $records ?? inventoryRecords($root),
+    ];
+
+    $files = [];
+    $rows = [];
+    $wrote = [];
+    $refused = [];
+    $differs = [];
     $current = true;
 
-    foreach (['files', 'methods', 'surface'] as $file) {
-        $onDisk = @file_get_contents($paths[$file]);
+    foreach (derivedFiles($root) as $key => $artefact) {
+        if ($records !== null && $artefact['from'] === 'record') {
+            continue;
+        }
 
-        if ($onDisk === false || str_replace(["\r\n", "\r"], "\n", $onDisk) !== $document[$file]) {
+        // A renderer that refuses is a file that cannot be written and cannot be current, and it is
+        // not an exception here: the page cannot be rendered from a record that is not there, which
+        // is one of the states `--check` exists to report, so the refusal is a verdict. The caller
+        // decides what it means — a check reports it, a writer refuses over it — and every file of
+        // the artefact is out of step, with the renderer's own sentence as the difference.
+        try {
+            $bytes = $artefact['render']($context);
+        } catch (RuntimeException $error) {
             $current = false;
+            $refused[$key] = $error->getMessage();
+
+            foreach ($artefact['files'] as $name => $path) {
+                $files[basename($path)] = $path;
+                $differs[basename($path)] = ['on_disk' => null, 'expected' => null, 'refused' => $error->getMessage()];
+            }
+
+            continue;
+        }
+
+        $rows[$key] = $artefact['describe']($context);
+
+        foreach ($artefact['files'] as $name => $path) {
+            $files[basename($path)] = $path;
+
+            $onDisk = @file_get_contents($path);
+            $normalised = $onDisk === false ? null : str_replace(["\r\n", "\r"], "\n", $onDisk);
+
+            if ($normalised === $bytes[$name]) {
+                continue;
+            }
+
+            $current = false;
+            $differs[basename($path)] = ['on_disk' => $normalised, 'expected' => $bytes[$name]];
+
+            // Written when it is out of step, and only then: a file that already holds these bytes
+            // is written by nobody, so a run that changed nothing writes nothing. The failure
+            // names the whole artefact rather than the one file, because the group is what a writer
+            // writes and what a caller refuses over — "./files.tsv / methods.tsv / surface.tsv" is
+            // one sentence, and a run that cannot write the record has not written the record.
+            if ($write && @file_put_contents($path, $bytes[$name]) === false) {
+                return [
+                    'current' => $current,
+                    'written' => false,
+                    'files' => $files,
+                    'rows' => $rows,
+                    'wrote' => $wrote,
+                    'refused' => $refused,
+                    'failed' => array_values($artefact['files']),
+                    'differs' => $differs,
+                ];
+            }
+        }
+
+        if ($write) {
+            $wrote[] = $key;
         }
     }
 
-    if (!$write) {
-        return ['current' => $current, 'written' => false, 'count' => $document['count']];
-    }
-
-    $written = file_put_contents($paths['files'], $document['files']) !== false
-        && file_put_contents($paths['methods'], $document['methods']) !== false
-        && file_put_contents($paths['surface'], $document['surface']) !== false;
-
-    return ['current' => $current, 'written' => $written, 'count' => $document['count']];
+    return [
+        'current' => $current,
+        'written' => true,
+        'files' => $files,
+        'rows' => $rows,
+        'wrote' => $wrote,
+        'refused' => $refused,
+        'failed' => [],
+        'differs' => $differs,
+    ];
 }
 
 /**

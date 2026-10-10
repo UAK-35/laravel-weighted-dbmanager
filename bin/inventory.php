@@ -164,7 +164,11 @@ if ($at !== null) {
 // The rows and the stamp are chosen together, from the same side: the checkout, or the ref.
 // That pairing is the whole property `--at` adds — every other rule about a stamp is about
 // refusing a pair that describes two different trees.
-$records = $at === null ? inventoryRecords($root) : refInventoryRecords($root, $at);
+// Null is not "nothing" here, it is "the working tree": the writers read it that way, and the rule
+// that follows from it — a ref's rows are another tree's, so they leave the page alone — falls out
+// of the same value rather than being a switch of its own. See derivedFiles().
+$records = $at === null ? null : refInventoryRecords($root, $at);
+$rows = $records ?? inventoryRecords($root);
 $tag = $at === null ? inventoryTag($root) : inventoryTagAt($root, $at);
 $paths = inventoryPaths($root);
 
@@ -222,49 +226,41 @@ if ($elsewhere !== []) {
     exit(1);
 }
 
-$result = syncInventory($root, $tag, !$check, $records);
+$result = syncDerived($root, $tag, !$check, $records);
+$counts = inventoryDocument($root, $tag, $records)['count'];
 
 if ($check) {
     if ($result['current']) {
         note(sprintf(
             'inventory is current — %d files, %d public methods, %d key(s)/member(s), described as %s',
-            $result['count']['files'],
-            $result['count']['methods'],
-            $result['count']['surface'],
+            $counts['files'],
+            $counts['methods'],
+            $counts['surface'],
             $tag,
         ));
 
         exit(0);
     }
 
-    $document = inventoryDocument($root, $tag, $records);
-
     // Named as the tree that was compared, because with `--at` it is not the tree the
     // reader is standing in: "out of step" is a claim about a pair, and the pair is the
-    // record and one of two trees.
+    // derived files and one of two trees.
     fwrite(STDERR, PHP_EOL . '✗ The inventory is out of step with '
         . ($at === null ? 'the tree:' : 'the tree at ' . $at . ':') . PHP_EOL . PHP_EOL);
 
-    foreach (['files', 'methods', 'surface'] as $file) {
-        $name = basename($paths[$file]);
-        $onDisk = @file_get_contents($paths[$file]);
-
-        if ($onDisk === false) {
-            fwrite(STDERR, '    ' . $name . ' is missing' . PHP_EOL);
+    // Whatever the list found out of step, in the order it writes them — the record first and then
+    // the page rendered from it — and only those: the verdict is about the pair, and describing a
+    // file that is already right would make a reader open it for nothing.
+    foreach ($result['differs'] as $name => $difference) {
+        if (isset($difference['refused'])) {
+            fwrite(STDERR, '    ' . $name . ': ' . $difference['refused'] . PHP_EOL);
 
             continue;
         }
 
-        // Compared the way syncInventory compares them, so only the files that actually
-        // differ are reported: the out-of-step verdict is about the pair, and describing
-        // the file that is already right would make a reader open it for nothing.
-        $normalised = str_replace(["\r\n", "\r"], "\n", $onDisk);
-
-        if ($normalised === $document[$file]) {
-            continue;
-        }
-
-        fwrite(STDERR, '    ' . $name . ': ' . describeDrift($normalised, $document[$file]) . PHP_EOL);
+        fwrite(STDERR, '    ' . $name . ($difference['on_disk'] === null
+            ? ' is missing'
+            : ': ' . describeDrift($difference['on_disk'], $difference['expected'])) . PHP_EOL);
     }
 
     fwrite(STDERR, PHP_EOL . 'Run php bin/inventory.php' . ($at === null ? '' : ' --at=' . $at)
@@ -275,21 +271,42 @@ if ($check) {
 }
 
 if (!$result['written']) {
-    fwrite(STDERR, '✗ Could not write ' . basename($paths['files']) . ' / ' . basename($paths['methods'])
-        . ' / ' . basename($paths['surface']) . '.' . PHP_EOL);
+    // The artefact that failed, named the way every other refusal names a group of files — the
+    // record's three together, because a run that cannot write the record has not written the
+    // record, and the page on its own if that is the one that could not be written.
+    fwrite(STDERR, '✗ Could not write ' . implode(' / ', array_map(
+        static fn (string $path): string => basename($path),
+        $result['failed'],
+    )) . '.' . PHP_EOL);
 
     exit(1);
 }
 
 $evidence = ($stored['files'] === null || $stored['methods'] === null || $stored['surface'] === null)
     ? []
-    : diffInventory($stored, $records)['evidence'];
+    : diffInventory($stored, $rows)['evidence'];
 
-note(sprintf('%s — %d files, described as %s', basename($paths['files']), $result['count']['files'], $tag));
-note(sprintf('%s — %d public methods', basename($paths['methods']), $result['count']['methods']));
-note(sprintf('%s — %d key(s) and member(s)', basename($paths['surface']), $result['count']['surface']));
-note('stage them with: git add -- ' . basename($paths['files']) . ' ' . basename($paths['methods'])
-    . ' ' . basename($paths['surface']));
+note(sprintf('%s — %d files, described as %s', basename($paths['files']), $counts['files'], $tag));
+note(sprintf('%s — %d public methods', basename($paths['methods']), $counts['methods']));
+note(sprintf('%s — %d key(s) and member(s)', basename($paths['surface']), $counts['surface']));
+
+// Anything the list derives beyond the record is written by this run as well, and named the same
+// way, because the reason to run this by hand is to see what moved — and a run that refreshed the
+// record and left the page describing the release before it is precisely what this used to do.
+foreach ($result['wrote'] as $derivedKey) {
+    if ($derivedKey === 'inventory') {
+        continue;
+    }
+
+    foreach (derivedFiles($root)[$derivedKey]['files'] as $derivedPath) {
+        note(sprintf('%s — %s', basename($derivedPath), $result['rows'][$derivedKey]));
+    }
+}
+
+note('stage them with: git add -- ' . implode(' ', array_map(
+    static fn (string $path): string => basename($path),
+    array_values($result['files']),
+)));
 
 if ($evidence !== []) {
     note(sprintf('this rewrite discarded the record of %d change(s):', count($evidence)));
