@@ -10,3 +10,4 @@
 /bin/*.bak
 /.freebuff/project-id
 /.agents/*.local.json
+/opencode.jsonc
