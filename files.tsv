@@ -26,6 +26,7 @@ FlipResult.php	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult
 FlipSchedule.php	src/Pgcat/FlipSchedule.php	Uak35\WeightedDbManager\Pgcat\FlipSchedule
 FlipWindow.php	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow
 PgcatConfigFlipper.php	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper
+PoolProbe.php	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe
 SupervisorStep.php	src/Pgcat/SupervisorStep.php	Uak35\WeightedDbManager\Pgcat\SupervisorStep
 WindowFlipSchedule.php	src/Pgcat/WindowFlipSchedule.php	Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule
 WeightedDatabaseServiceProvider.php	src/Providers/WeightedDatabaseServiceProvider.php	Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider

@@ -31,7 +31,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * php artisan db:doctor [connection] [--strict] [--json] [--config-file=path]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Thirteen things can be wrong while the application
+ * do", before traffic arrives. Fourteen things can be wrong while the application
  * still boots and answers requests:
  *
  *   provider swap     the framework's DatabaseServiceProvider is still the one
@@ -64,6 +64,16 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     An armed flipper whose file cannot be read at all is not judged
  *                     — `pgcat files` judges the file itself. The row leads with which
  *                     end of the last window the flip missed
+ *   pool probe        the running pooler is not answerable for a pool the configuration
+ *                     declares: it is RUNNING, supervisord says so, and it holds no pool
+ *                     for a database the application is connected to, so every read to
+ *                     that pool fails. The one row that asks the pooler itself rather
+ *                     than reading a file or a program list — a startup packet per
+ *                     declared pool, no credentials and nothing written — and it is the
+ *                     read-only half of the self-heal the per-minute flip performs.
+ *                     Warns, rather than failing, for a pooler that answered nothing at
+ *                     all, and is not judged while the boot window is still open, where
+ *                     the flip still re-applies the configuration
  *   replica metadata  replicas carry no weight metadata, so the resolver picks at
  *                     random while the table looks weighted — or a replica's weight,
  *                     cores or memory is a value the resolver cannot read, which
@@ -120,8 +130,11 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * ---------
  * Every check inspects configuration, resolved classes and the store. Nothing is
  * written, no replica is probed with a query and no flip is attempted, so the
- * command is safe in a deploy pipeline and against a live database. PING is the
- * only network call; an unreachable store costs one connect timeout. The one other
+ * command is safe in a deploy pipeline and against a live database. Two checks reach
+ * over the network and neither writes anything: the store check's PING, where an
+ * unreachable store costs one connect timeout, and `pool probe`, which is one bounded
+ * startup packet per pool when — and only when — the probe is armed. A probe that is not
+ * armed opens no socket at all. The one other
  * processes this command starts are the read-only `supervisorctl status` commands that
  * `pgcat supervisor` derives from the flip's own command — the same binary, the same
  * program name, `status` in the verb position, plus the bare `supervisorctl status` that
@@ -289,6 +302,7 @@ class DbDoctor extends Command
             $rows[] = $this->switchValues();
             $rows[] = $this->readerWindows();
             $rows[] = $this->pgcatMode();
+            $rows[] = $this->poolProbe();
             $rows[] = $this->flipSchedule();
             $rows[] = $this->storeProbe();
             $rows[] = $this->storeReachability($manager, $connection);
@@ -1986,6 +2000,109 @@ class DbDoctor extends Command
                 ? $verdict['reason']
                 : 'pgcat is on a configuration the reader windows are not asking for',
         ));
+    }
+
+    /**
+     * Whether the running pooler is answerable for the pools the configuration declares.
+     *
+     * WHY THIS ROW EXISTS
+     *   `pgcat supervisor` asks whether the program is RUNNING, and a program can be RUNNING and
+     *   still be the wrong thing: a pooler holding a configuration with no pool for a database the
+     *   application is connected to answers every read to it with `FATAL: No pool configured for
+     *   database: …` while `supervisorctl status` reports a healthy program. supervisord cannot see
+     *   the difference — a program that is up is up, whatever it is serving — and this row is the
+     *   only preflight that asks the pooler itself. It is the read-only half of the self-heal the
+     *   per-minute flip performs, over the same probe and the same vocabulary, so the row and the
+     *   repair cannot disagree about what the pooler holds.
+     *
+     *   It is a real exchange: one PostgreSQL v3 startup packet per declared pool and the first
+     *   message back, on the pooler's own address, bounded by `pool_probe.timeout_ms`. No
+     *   credential, no `psql` and no connection through the pool is needed — a pooler that resolves
+     *   a pool before it authenticates refuses a name it holds no pool for, in its own sentence —
+     *   and nothing is written, swapped or restarted, so the row is safe in a deploy pipeline. A
+     *   pooler that authenticates *first* answers every name, which is the one thing this row
+     *   cannot tell from a pool that is really there; `PoolProbe` writes that measurement down. An installation that has not armed the probe pays nothing:
+     *   the row reports that the pooler is taken at supervisord's word and returns without opening a
+     *   socket.
+     *
+     *   Three answers are told apart, and they are the pooler's rather than this package's. A pool
+     *   that exists answers — and a pool that exists behind a database that is down still answers,
+     *   because the question is what the pooler *has*, not what it can reach. A pool the pooler
+     *   refuses with its own "No pool configured for database" sentence is the fault the flip
+     *   repairs, and this row **fails** on it. A pooler that answered nothing at all — refused, timed
+     *   out, or said nothing — is **warned** about rather than failed: a probe pointed at the wrong
+     *   address must not be able to fail a healthy installation, and the same line is what keeps a
+     *   misconfigured probe from restarting a healthy pooler every minute.
+     *
+     * WHY IT IS NOT JUDGED WHILE THE BOOT WINDOW IS OPEN
+     *   A container is allowed to converge, and the repair that re-applies the configuration runs
+     *   inside that window: `applyCurrentState()` re-applies the variant and restarts the pooler for
+     *   a pool that is missing, and it stops at the end of the window. So the answers are always
+     *   reported and the verdict waits — the same line `pgcat mode` draws for a file that a flip has
+     *   not landed yet, and for the same reason. Past the window the verdict stands and nothing will
+     *   re-apply the file again, which is why a failure here is worth blocking a deploy on.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function poolProbe(): array
+    {
+        $name = 'pool probe';
+
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row($name, self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row(
+                $name,
+                self::FAIL,
+                'the flipper could not be built, so nothing can say whether the running pooler is answerable for a pool: '.$e->getMessage(),
+            );
+        }
+
+        // An inert flipper has no pooler to ask about: nothing swaps the file and nothing restarts
+        // the program, so the two cannot disagree — the line `pgcat mode` and `flip schedule` draw.
+        if (!$flipper->isEnabled()) {
+            return $this->row($name, self::PASS, 'flipper is not armed — nothing asks the running pooler about its pools');
+        }
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        if ($verdict['enabled'] !== true) {
+            return $this->row($name, self::PASS, 'the probe is not armed (swrr.pgcat.pool_probe.enabled) — the running pooler is taken at supervisord\'s word, which cannot tell a pool it is not serving from one it is');
+        }
+
+        // Not judged rather than passed: nothing was asked, which is a different statement from a
+        // pooler that answered.
+        if ($verdict['applicable'] !== true) {
+            return $this->row($name, self::PASS, 'no pool is declared in the configuration, so there is nothing to ask the running pooler about');
+        }
+
+        // The flipper's own sentence rather than a second copy of it — the same words `/health/db`
+        // reports and logs — and it carries what the pooler said and what it means either side of
+        // the boot window, which is why the row adds nothing to it. It is non-null whenever a pool
+        // did not answer, which is every branch below the answered one; the fallback is the
+        // answered sentence, so a `null` can only reach a row that would not print it.
+        $reason = $verdict['reason'] ?? 'the running pooler answered for every pool the configuration declares';
+
+        if ($verdict['failed'] === true) {
+            return $this->row($name, self::FAIL, $reason);
+        }
+
+        if ($verdict['warned'] === true) {
+            return $this->row($name, self::WARN, $reason);
+        }
+
+        if ($verdict['answered'] === true) {
+            return $this->row($name, self::PASS, sprintf(
+                'the running pooler answered for every pool the configuration declares (%s)',
+                implode(', ', array_column($verdict['pools'], 'database')),
+            ));
+        }
+
+        return $this->row($name, self::PASS, $reason);
     }
 
     /**

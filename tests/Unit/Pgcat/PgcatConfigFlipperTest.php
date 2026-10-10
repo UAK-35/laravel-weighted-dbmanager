@@ -161,6 +161,9 @@ class PgcatConfigFlipperTest extends TestCase
      *        answers for every command, keyed by nothing — a flip runs two now (the check,
      *        then the command), so a test that needs them to differ branches on the command
      *        line. The default answers both with success.
+     * @param \Closure(int): void|null $sleeper
+     *        how a wait between two attempts is spent — microseconds, the unit the flipper
+     *        sleeps in — so a test that counts attempts does not spend the delay.
      */
     private function build(
         string $mode,
@@ -171,6 +174,8 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $connectionSource = null,
         ?string $stateFile = null,
         ?string $lockFile = null,
+        ?\Closure $poolProbe = null,
+        ?\Closure $sleeper = null,
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -221,6 +226,8 @@ class PgcatConfigFlipperTest extends TestCase
             connectionName: $connectionName,
             driver: $driver,
             connectionSource: $connectionSource ?? ActiveConnection::DEFAULT_SOURCE,
+            poolProbe: $poolProbe,
+            sleeper: $sleeper,
         );
 
         return $flipper;
@@ -800,6 +807,476 @@ class PgcatConfigFlipperTest extends TestCase
 
         // pgcat.toml should now be the writer-only content.
         $this->assertSame("pool = 'writer-only'\n", file_get_contents($this->tmp . '/pgcat.toml'));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The pool-answerability self-heal
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A mode that is already applied is not the same fact as a pooler that is answering for it.
+     *
+     * The reader variant declares a pool the pooler does not have, the mode on record already
+     * matches, and an ordinary flip would have found nothing to do — which is exactly the state
+     * supervisord calls healthy. The run reports `repaired`, re-applies the variant (so the file
+     * a flip would write is written), and leaves the mode where it was: the repair is a
+     * re-application, not a transition.
+     */
+    public function test_a_running_pooler_that_has_no_pool_is_repaired(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'readers']));
+        file_put_contents($this->tmp . '/pgcat.toml', "pool = 'unknown'\n");
+
+        $probed = [];
+
+        $flipper = $this->build('readers', poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)];
+        });
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $result->kind());
+        $this->assertSame('readers', $result->mode);
+        $this->assertSame(0, $result->exitCode());
+        $this->assertSame(['reader_db_2'], $probed, 'every pool the applied variant declares is asked about');
+        $this->assertSame(
+            "[pools.reader_db_2]\npool_mode = 'transaction'\n",
+            file_get_contents($this->tmp . '/pgcat.toml'),
+            'the repair re-applies the variant, so the pool a client would reach is in the file',
+        );
+        $this->assertSame('readers', json_decode((string) file_get_contents($this->stateFile), true)['last_mode']);
+    }
+
+    /**
+     * A pooler that answered nothing is not repaired, and this is the line that keeps a probe
+     * pointed at the wrong address from restarting a healthy pooler every minute.
+     */
+    public function test_a_pooler_that_answered_nothing_is_not_repaired(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'readers']));
+        file_put_contents($this->tmp . '/pgcat.toml', "pool = 'unknown'\n");
+
+        $flipper = $this->build('readers', poolProbe: static fn (string $database): array
+            => ['status' => 'silent', 'evidence' => 'the pooler did not answer']);
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_NO_CHANGE, $result->kind());
+        $this->assertSame("pool = 'unknown'\n", file_get_contents($this->tmp . '/pgcat.toml'), 'nothing was re-applied');
+    }
+
+    /**
+     * What a repair leaves behind: the count and the time, in the state file and in the window
+     * block `db:pgcat-flip --status` reads. The count is the fact `last_kind` cannot carry — two
+     * repairs a minute apart and two repairs a week apart both leave it reading `repaired` — so a
+     * pooler that keeps needing repair is only visible here.
+     */
+    public function test_a_pool_repair_is_counted_in_the_state_file_and_the_status(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'readers']));
+        file_put_contents($this->tmp . '/pgcat.toml', "pool = 'unknown'\n");
+
+        $flipper = $this->build('readers', poolProbe: static fn (string $database): array
+            => ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)]);
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $flipper->applyCurrentState()->kind());
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertSame(1, $state['pool_repairs'], 'the repair is counted');
+        $this->assertIsString($state['last_pool_repair_at'], 'and stamped');
+
+        $window = $flipper->status()['window'];
+
+        $this->assertSame(1, $window['pool_repairs'], '--status reads the same two facts');
+        $this->assertSame($state['last_pool_repair_at'], $window['last_pool_repair_at']);
+    }
+
+    /**
+     * The count adds up, and a run that did *not* repair leaves it alone: it is about repairs, not
+     * about runs. A fresh state file that has never seen one reads zero rather than being absent,
+     * because a report that had to tell "none" from "unreadable" would be reading the file twice.
+     */
+    public function test_the_pool_repair_count_adds_up_and_a_flip_leaves_it_alone(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'readers']));
+        file_put_contents($this->tmp . '/pgcat.toml', "pool = 'unknown'\n");
+
+        $repairing = $this->build('readers', poolProbe: static fn (string $database): array
+            => ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)]);
+
+        $repairing->applyCurrentState();
+        $repairing->applyCurrentState();
+
+        $this->assertSame(2, json_decode((string) file_get_contents($this->stateFile), true)['pool_repairs']);
+
+        // A run the pooler answers for is a flip, not a repair, and it must not move the counter.
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+        $state['last_mode'] = 'writer';
+        file_put_contents($this->stateFile, (string) json_encode($state));
+
+        $answering = $this->build('readers', poolProbe: static fn (string $database): array
+            => ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)]);
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $answering->applyCurrentState()->kind());
+        $this->assertSame(2, json_decode((string) file_get_contents($this->stateFile), true)['pool_repairs']);
+
+        // A state file that has never seen a repair reads zero rather than being absent.
+        @unlink($this->stateFile);
+
+        $this->assertSame(0, $this->build('readers')->status()['window']['pool_repairs']);
+        $this->assertNull($this->build('readers')->status()['window']['last_pool_repair_at']);
+    }
+
+    /**
+     * A flip that *applies* a mode asks the same question the run above asks about a mode that
+     * was already in place, because the two states are silent in exactly the same way: the file is
+     * the variant the mode asks for, `pgcat mode` compares two files and finds them in step, and
+     * a pool the app is connected to is not in the pooler.
+     *
+     * The pool list is the variant's own, read off the file the flip just wrote, so the reading is
+     * about the mode that was applied rather than the one that was there before it.
+     */
+    public function test_a_flip_verifies_the_pooler_picked_the_mode_up(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $probed = [];
+
+        $flipper = $this->build('readers', ['use_reload' => true], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)];
+        });
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame('readers', $result->mode);
+        $this->assertSame('writer', $result->previousMode);
+        $this->assertSame(['reader_db_2'], $probed, 'the run that applied the mode asks the pooler about it');
+        $this->assertCount(1, $this->flipCommands(), 'and a pooler that answered everything is not restarted');
+    }
+
+    /**
+     * A pooler that has not caught up yet is not a pooler that refused: both ways of applying a
+     * config return before pgcat has re-read anything, so the refusal is re-read, with a wait
+     * between the attempts, and the run reports the transition it made rather than a repair it
+     * did not perform.
+     */
+    public function test_a_flip_waits_for_a_pooler_that_is_still_catching_up(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $probed = [];
+        $slept = [];
+
+        $flipper = $this->build(
+            'readers',
+            ['use_reload' => true, 'start_retry_delay_ms' => 250],
+            poolProbe: function (string $database) use (&$probed): array {
+                $probed[] = $database;
+
+                return count($probed) === 1
+                    ? ['status' => 'missing', 'evidence' => 'pgcat is running but has no pool "reader_db_2"']
+                    : ['status' => 'answered', 'evidence' => 'the pooler answered for pool "reader_db_2"'];
+            },
+            sleeper: function (int $micros) use (&$slept): void {
+                $slept[] = $micros;
+            },
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame(2, count($probed), 'the refusal is re-read before it is believed');
+        $this->assertSame([250_000], $slept, 'the wait is the configured one, in the unit the flipper sleeps in');
+        $this->assertCount(1, $this->flipCommands(), 'nothing was restarted: the answer was simply not in yet');
+    }
+
+    /**
+     * The fault a flip has never been able to see. The file is the variant the mode asks for and
+     * the mode is recorded, and the pooler is still answering for the mode it held a moment ago —
+     * a reload is a signal, and this one was not acted on. The run restarts the pooler on the file
+     * it just wrote and reports the repair rather than a clean transition, because what a reader
+     * has to act on is the pooler.
+     */
+    public function test_a_flip_whose_pooler_did_not_pick_the_config_up_is_repaired_by_a_restart(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $restarted = false;
+        $answers = [];
+
+        $flipper = $this->build(
+            'readers',
+            ['use_reload' => true, 'start_retry_delay_ms' => 0],
+            runner: function (string $cmd) use (&$restarted): array {
+                if (str_contains($cmd, 'restart')) {
+                    $restarted = true;
+                }
+
+                return [0, 'pgcat: started', ''];
+            },
+            poolProbe: function (string $database) use (&$restarted, &$answers): array {
+                $answers[] = $restarted ? 'answered' : 'missing';
+
+                return $restarted
+                    ? ['status' => 'answered', 'evidence' => 'the pooler answered for pool "reader_db_2"']
+                    : ['status' => 'missing', 'evidence' => 'pgcat is running but has no pool "reader_db_2"'];
+            },
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $result->kind());
+        $this->assertSame(0, $result->exitCode());
+        $this->assertSame('readers', $result->mode);
+        $this->assertTrue($restarted, 'the file was written and the pooler was restarted on it');
+        $this->assertSame(
+            ['missing', 'missing', 'missing', 'answered'],
+            $answers,
+            'the refusal is read three times — the retry bound — and the restart is followed by one read that answers',
+        );
+        $this->assertStringContainsString('writer → readers', $result->reason, 'the sentence names the transition that was applied');
+        $this->assertStringContainsString('reader_db_2', $result->reason);
+        $this->assertStringContainsString('restarted on the file the flip wrote', $result->reason);
+        $this->assertStringContainsString('then answered for every pool', $result->reason);
+        $this->assertSame("[pools.reader_db_2]\n", file_get_contents($this->tmp . '/pgcat.toml'));
+        $this->assertSame('readers', json_decode((string) file_get_contents($this->stateFile), true)['last_mode']);
+    }
+
+    /**
+     * A refusal that survives the restart is on record in the run that found it rather than left
+     * for the next poll to rediscover — and the run still reports a repair rather than a failure,
+     * which is the same line the mode-unchanged repair draws: the file and the mode are the flip's
+     * job and both are in place, and the standing fault is `/health/db`'s to report.
+     */
+    public function test_a_flip_reports_a_refusal_that_survives_the_restart(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $flipper = $this->build(
+            'readers',
+            ['use_reload' => true, 'start_retry_delay_ms' => 0],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'missing',
+                'evidence' => 'pgcat is running but has no pool "reader_db_2": No pool configured for database: "reader_db_2"',
+            ],
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $result->kind());
+        $this->assertSame(0, $result->exitCode());
+        $this->assertStringContainsString('restarted on the file the flip wrote', $result->reason);
+        $this->assertStringContainsString('still had no pool "reader_db_2"', $result->reason);
+        $this->assertStringContainsString('No pool configured for database', $result->reason, "the pooler's own words, in both halves");
+    }
+
+    /**
+     * An installation that applies its configs with `use_reload = false` has already restarted
+     * pgcat on this file — its flip ran the restart command — so the verification has nothing
+     * stronger left to run, and says so instead of running the same command twice.
+     */
+    public function test_a_flip_that_already_restarted_the_pooler_does_not_restart_it_again(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $flipper = $this->build(
+            'readers',
+            ['use_reload' => false],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'missing',
+                'evidence' => 'pgcat is running but has no pool "reader_db_2"',
+            ],
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $result->kind());
+        $this->assertStringContainsString('had already restarted the pooler on that file', $result->reason);
+        $this->assertCount(1, $this->flipCommands(), 'the flip restarted it once and nothing restarted it again');
+        $this->assertStringContainsString('restart', $this->flipCommands()[0][0]);
+    }
+
+    /**
+     * The line that keeps a probe pointed at the wrong address from restarting a healthy pooler,
+     * kept for the flip that applied a mode as well: a pooler that answered nothing has said
+     * nothing about its pools, so the run reports the transition and repairs nothing — and does not
+     * even wait, because there is no refusal to wait out.
+     */
+    public function test_a_pooler_that_answered_nothing_after_a_flip_is_not_repaired(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $probed = [];
+
+        $flipper = $this->build('readers', ['use_reload' => true], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'silent', 'evidence' => 'tcp://127.0.0.1:6432 did not answer for pool "reader_db_2"'];
+        });
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame(['reader_db_2'], $probed, 'silence is not a refusal, so there is nothing to retry');
+        $this->assertCount(1, $this->flipCommands());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // What the running pooler answers — the reading a status surface asks for
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The reading `/health/db`'s `pool_probe` block and `db:doctor`'s `pool probe` row both ask
+     * for: every pool the mode's variant declares, in the pooler's own three-answer vocabulary.
+     */
+    public function test_the_pool_probe_verdict_reports_what_the_pooler_answered(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.writer_db_1]\n[pools.reader_db_2]\n");
+
+        $probed = [];
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)];
+        });
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertTrue($verdict['enabled']);
+        $this->assertTrue($verdict['applicable']);
+        $this->assertTrue($verdict['answered']);
+        $this->assertFalse($verdict['failed']);
+        $this->assertFalse($verdict['warned']);
+        $this->assertNull($verdict['reason']);
+        $this->assertSame(['writer_db_1', 'reader_db_2'], $probed, 'every pool the variant declares is asked about, in file order');
+        $this->assertSame(['writer_db_1', 'reader_db_2'], array_column($verdict['pools'], 'database'));
+        $this->assertSame(['answered', 'answered'], array_column($verdict['pools'], 'status'));
+    }
+
+    /**
+     * The fault the repair exists for, and why it is not merely a flip waiting to happen: past the
+     * boot window nothing re-applies the file, so the sentence says so rather than leaving an
+     * operator to wait for a repair that will not come.
+     */
+    public function test_a_pool_the_pooler_does_not_hold_fails_the_pool_probe_verdict(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: static fn (string $database): array => [
+            'status' => 'missing',
+            'evidence' => 'pgcat is running but has no pool "reader_db_2": No pool configured for database: "reader_db_2"',
+        ]);
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertFalse($verdict['answered']);
+        $this->assertTrue($verdict['failed']);
+        $this->assertFalse($verdict['warned']);
+        $this->assertStringContainsString('holds no pool "reader_db_2"', (string) $verdict['reason']);
+        $this->assertStringContainsString('No pool configured for database', (string) $verdict['reason'], "the pooler's own words, not a paraphrase");
+        $this->assertStringContainsString('Nothing re-applies that configuration past the boot window', (string) $verdict['reason']);
+    }
+
+    /**
+     * The same answer while the container is still starting is not judged: the per-minute flip
+     * still has the window to re-apply the file in, and the answers are on record either way.
+     */
+    public function test_a_missing_pool_is_not_judged_while_the_boot_window_is_open(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $verdict = $this->build('readers', poolProbe: static fn (string $database): array => [
+            'status' => 'missing',
+            'evidence' => 'pgcat is running but has no pool "reader_db_2"',
+        ])->poolProbeVerdict();
+
+        $this->assertFalse($verdict['answered'], 'the pooler still did not answer, and that is on record');
+        $this->assertFalse($verdict['failed'], 'a starting container gets its window to be repaired in');
+        $this->assertFalse($verdict['warned']);
+        $this->assertStringContainsString('boot window is still open', (string) $verdict['reason']);
+    }
+
+    /**
+     * A pooler that answered nothing is reported and never repaired, which is the line that keeps a
+     * probe pointed at the wrong address from restarting — or failing — a pooler that is fine.
+     */
+    public function test_a_pooler_that_answered_nothing_is_warned_about_and_not_failed(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: static fn (string $database): array => [
+            'status' => 'silent',
+            'evidence' => 'tcp://127.0.0.1:5432 did not answer for pool "reader_db_2": Connection refused',
+        ]);
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertFalse($verdict['answered']);
+        $this->assertFalse($verdict['failed'], 'a probe on the wrong address must not fail a healthy installation');
+        $this->assertTrue($verdict['warned']);
+        $this->assertStringContainsString('did not answer for pool "reader_db_2"', (string) $verdict['reason']);
+    }
+
+    /**
+     * The default, and the reason the reading costs nothing on an installation that has not opted
+     * in: no closure means no socket, and the shape says nothing was asked rather than that
+     * everything was fine.
+     */
+    public function test_nothing_is_asked_of_the_pooler_without_a_probe(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $verdict = $this->build('readers')->poolProbeVerdict();
+
+        $this->assertFalse($verdict['enabled']);
+        $this->assertFalse($verdict['applicable']);
+        $this->assertNull($verdict['answered']);
+        $this->assertSame([], $verdict['pools']);
+        $this->assertNull($verdict['reason']);
+    }
+
+    /**
+     * An armed probe and a variant that declares no pool is not a pooler that failed: there is
+     * nothing the configuration claims the pooler should hold, so nothing can be missing.
+     */
+    public function test_a_variant_that_declares_no_pool_asks_nothing(): void
+    {
+        $verdict = $this->build('readers', poolProbe: static fn (string $database): array => [
+            'status' => 'missing',
+            'evidence' => 'pgcat is running but has no pool',
+        ])->poolProbeVerdict();
+
+        $this->assertTrue($verdict['enabled']);
+        $this->assertFalse($verdict['applicable']);
+        $this->assertNull($verdict['answered']);
+        $this->assertSame([], $verdict['pools']);
+        $this->assertNull($verdict['reason']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

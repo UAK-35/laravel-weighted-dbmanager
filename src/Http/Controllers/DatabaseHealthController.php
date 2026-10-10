@@ -54,6 +54,15 @@ use Throwable;
  *     left on the readers config outside a window sends every read through it to
  *     a replica — no passing query says so about either. It makes the payload
  *     `degraded` too — see readerWindowVerdict()
+ *   • whether the pooler supervisord calls RUNNING is answerable for the pools the
+ *     configuration declares — `pool_probe`, the one field that asks the pooler
+ *     itself rather than reading a file: one startup packet per declared pool, no
+ *     credentials, and only when `swrr.pgcat.pool_probe.enabled` has armed it. A
+ *     pooler that holds no pool for a database the application is connected to
+ *     fails every read to it while `supervisorctl status` reports the program
+ *     healthy, and no other field here can see the difference. A pool the pooler
+ *     refuses makes the payload `degraded`; a pooler that answered nothing at all
+ *     is reported (`warned`) and never failed — see poolProbeVerdict()
  *
  * EVERY FAILURE IS ALSO LOGGED
  *   A payload nobody is looking at is not a signal. Each response that is not
@@ -171,6 +180,12 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         // is the failure that outlives a successful boot.
         $readerWindow = $this->readerWindowVerdict($pgcat);
 
+        // The third reading, and the only one that asks the pooler anything: a program can be
+        // RUNNING, hold the right file, and still have no pool for a database the application is
+        // connected to — every read to it fails while supervisord calls the pooler healthy. Off by
+        // default, so an installation that has not armed the probe pays nothing for this field.
+        $poolProbe = $this->poolProbeVerdict($this->pgcat);
+
         // pgcat being off is not ill health — on a MySQL connection there is
         // simply nothing to flip — so it does not feed $allHealthy. Neither does the
         // audit: a configuration that cannot act is not a database that cannot answer.
@@ -185,14 +200,21 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         // writer-only config inside an open reader window is answering every read itself, so the
         // database can answer and still not be the one the configuration asked for. Neither
         // verdict is ever set while the container is starting, so a healthy deploy is unaffected.
+        // ...and so does the pool-probe verdict, for the reason the repair exists: a pool the
+        // pooler does not hold cannot be served, so the database can answer `select 1` and still
+        // not be the one the configuration asked for. Only `failed` is folded — a pooler that
+        // answered nothing is a warning, never a degraded status, so a probe on the wrong address
+        // cannot take a healthy installation down. Neither verdict is ever set while the container
+        // is starting (both wait for the boot window to close), so a healthy deploy is unaffected.
         $allHealthy = empty($errors)
             && $this->allReplicasHealthy($replicas)
             && $probe['ok'] !== false
             && !$flip['failed']
-            && !$readerWindow['failed'];
+            && !$readerWindow['failed']
+            && !$poolProbe['failed'];
 
         if (!$allHealthy) {
-            $this->logDegraded($probe, $replicas, $errors, $flip, $readerWindow, $pgcat);
+            $this->logDegraded($probe, $replicas, $errors, $flip, $readerWindow, $poolProbe, $pgcat);
         }
 
         return response()->json([
@@ -202,6 +224,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'pgcat' => $pgcat,
             'flip' => $flip,
             'reader_window' => $readerWindow,
+            'pool_probe' => $poolProbe,
             'audit' => $this->audit(),
             'errors' => $errors,
         ], $allHealthy ? 200 : 503);
@@ -315,6 +338,51 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
     }
 
     /**
+     * Whether the running pooler is answerable for the pools the configuration declares.
+     *
+     * The reading itself is the flipper's — `PgcatConfigFlipper::poolProbeVerdict()` — so this
+     * endpoint and `db:doctor`'s `pool probe` row cannot disagree about what the pooler holds, and
+     * the sentence `reason` carries is the same one the row prints. What this helper adds is the
+     * one case the flipper does not have to know about: an installation with no pgcat at all, where
+     * `enabled` is false and nothing was asked. That is the same line `flipVerdict()` draws for a
+     * connection pgcat cannot front — on a MySQL connection there is no pooler to probe, and an
+     * endpoint that reported a fault for that would be broken for everyone not using the feature.
+     *
+     * The block is published whole rather than reduced to a boolean, because the three answers are
+     * the pooler's own and they call for different work: `pools` carries one entry per pool the
+     * configuration declares, with `answered`/`missing`/`silent` and the sentence the probe
+     * produced; `answered` is true when every one of them answered and false when one did not;
+     * `failed` marks the pool the pooler refused to serve, which is the one the flip repairs; and
+     * `warned` marks a pooler that said nothing at all, which is reported and never repaired. Both
+     * judgements wait for the container's boot window to close, so a starting container is not
+     * failed by this block, and `reason` names what the pooler said either way.
+     *
+     * This is the one field of the payload that opens a socket — one startup packet per declared
+     * pool, bounded by `swrr.pgcat.pool_probe.timeout_ms` — and it does so only when the probe has
+     * been armed, so the cost of the endpoint is unchanged for every installation that has not.
+     *
+     * @param PgcatConfigFlipper|null $pgcat the flipper this endpoint was built with
+     *
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     */
+    private function poolProbeVerdict(?PgcatConfigFlipper $pgcat): array
+    {
+        if ($pgcat === null) {
+            return [
+                'enabled' => false,
+                'applicable' => false,
+                'answered' => null,
+                'failed' => false,
+                'warned' => false,
+                'pools' => [],
+                'reason' => null,
+            ];
+        }
+
+        return $pgcat->poolProbeVerdict();
+    }
+
+    /**
      * One error line per unhealthy response, carrying the same facts as the payload.
      *
      * Logged here rather than in the caller: `index()` is the only place that knows the whole
@@ -333,9 +401,10 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * @param array<string, string>           $errors   the `errors` block of the payload
      * @param array<string, mixed>            $flip     the `flip` block of the payload
      * @param array<string, mixed>            $readerWindow the `reader_window` block of the payload
+     * @param array<string, mixed>            $poolProbe the `pool_probe` block of the payload
      * @param array<string, mixed>|null       $pgcat    the `pgcat` block of the payload
      */
-    private function logDegraded(array $probe, array $replicas, array $errors, array $flip, array $readerWindow, ?array $pgcat): void
+    private function logDegraded(array $probe, array $replicas, array $errors, array $flip, array $readerWindow, array $poolProbe, ?array $pgcat): void
     {
         $reasons = [];
 
@@ -359,6 +428,10 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             $reasons[] = 'pgcat is out of step with the reader windows';
         }
 
+        if (($poolProbe['failed'] ?? false) === true) {
+            $reasons[] = 'the pooler is not answerable for a pool the configuration declares';
+        }
+
         Log::error('health/db degraded: '.implode('; ', $reasons ?: ['no reason recorded']), [
             'status' => 'degraded',
             'reasons' => $reasons,
@@ -373,6 +446,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'flip_failed' => $flip['failed'] ?? false,
             'flip_reason' => $flip['reason'] ?? null,
             'reader_window' => $readerWindow,
+            'pool_probe' => $poolProbe,
         ]);
     }
 

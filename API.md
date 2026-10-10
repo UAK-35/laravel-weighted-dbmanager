@@ -8,11 +8,11 @@ release: a name that is not on this page is not part of the published API.
 
 | the record | rows |
 | --- | ---: |
-| files shipped | 39 |
-| public methods | 198 |
-| config keys | 56 |
-| public constants | 114 |
-| environment variables read | 40 |
+| files shipped | 40 |
+| public methods | 204 |
+| config keys | 61 |
+| public constants | 119 |
+| environment variables read | 45 |
 | public properties | 14 |
 | enum cases | 0 |
 
@@ -45,6 +45,7 @@ from here is a key a deployed config stops receiving.
 | `flip_window_seconds` | `config/db-manager.php` |
 | `grace_seconds` | `config/db-manager.php` |
 | `health` | `config/db-manager.php` |
+| `host` | `config/db-manager.php` |
 | `interval_minutes` | `config/db-manager.php` |
 | `key` | `config/app.php` |
 | `key_prefix` | `config/db-manager.php` |
@@ -59,6 +60,8 @@ from here is a key a deployed config stops receiving.
 | `no_readers_path` | `config/db-manager.php` |
 | `pgcat` | `config/db-manager.php` |
 | `pinned_query` | `config/db-manager.php` |
+| `pool_probe` | `config/db-manager.php` |
+| `port` | `config/db-manager.php` |
 | `previous_keys` | `config/app.php` |
 | `primary_store` | `config/db-manager.php` |
 | `providers` | `config/app.php` |
@@ -77,10 +80,12 @@ from here is a key a deployed config stops receiving.
 | `store` | `config/app.php` |
 | `store_probe_seconds` | `config/db-manager.php` |
 | `swrr` | `config/db-manager.php` |
+| `timeout_ms` | `config/db-manager.php` |
 | `timezone` | `config/app.php` |
 | `timezone` | `config/db-manager.php` |
 | `url` | `config/app.php` |
 | `use_reload` | `config/db-manager.php` |
+| `user` | `config/db-manager.php` |
 | `windows` | `config/db-manager.php` |
 
 ### Environment variables
@@ -113,6 +118,11 @@ from here is a key a deployed config stops receiving.
 | `SWRR_PGCAT_ENABLED` | `config/db-manager.php` |
 | `SWRR_PGCAT_FLIP_WINDOW_SECONDS` | `config/db-manager.php` |
 | `SWRR_PGCAT_NO_READERS` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_PROBE_ENABLED` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_PROBE_HOST` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_PROBE_PORT` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_PROBE_USER` | `config/db-manager.php` |
 | `SWRR_PGCAT_READERS` | `config/db-manager.php` |
 | `SWRR_PGCAT_SCHEDULE_ENABLED` | `config/db-manager.php` |
 | `SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES` | `config/db-manager.php` |
@@ -130,7 +140,7 @@ from here is a key a deployed config stops receiving.
 
 ## PHP API
 
-37 classes, interfaces, traits and enums.
+38 classes, interfaces, traits and enums.
 
 | class | methods | file |
 | --- | ---: | --- |
@@ -154,10 +164,11 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Exceptions\RedisUnavailable` | 0 | `src/Exceptions/RedisUnavailable.php` |
 | `Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController` | 2 | `src/Http/Controllers/DatabaseHealthController.php` |
 | `Uak35\WeightedDbManager\Pgcat\DryRunResult` | 10 | `src/Pgcat/DryRunResult.php` |
-| `Uak35\WeightedDbManager\Pgcat\FlipResult` | 9 | `src/Pgcat/FlipResult.php` |
+| `Uak35\WeightedDbManager\Pgcat\FlipResult` | 10 | `src/Pgcat/FlipResult.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipSchedule` | 7 | `src/Pgcat/FlipSchedule.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipWindow` | 11 | `src/Pgcat/FlipWindow.php` |
-| `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 22 | `src/Pgcat/PgcatConfigFlipper.php` |
+| `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 23 | `src/Pgcat/PgcatConfigFlipper.php` |
+| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 4 | `src/Pgcat/PoolProbe.php` |
 | `Uak35\WeightedDbManager\Pgcat\SupervisorStep` | 13 | `src/Pgcat/SupervisorStep.php` |
 | `Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule` | 10 | `src/Pgcat/WindowFlipSchedule.php` |
 | `Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider` | 4 | `src/Providers/WeightedDatabaseServiceProvider.php` |
@@ -439,12 +450,13 @@ Members: `KIND_FAILED`, `KIND_SKIPPED`, `KIND_WOULD_FLIP`, `KIND_WOULD_NOT_FLIP`
 | `flipped()` | 2 of 2 | `string $newMode, ?string $previousMode` |
 | `kind()` | 0 of 0 | — |
 | `noChange()` | 1 of 2 | `string $mode, string $reason=` |
+| `repaired()` | 2 of 2 | `string $mode, string $reason` |
 | `skipped()` | 2 of 2 | `string $currentMode, string $reason` |
 | `summary()` | 0 of 0 | — |
 | `toArray()` | 0 of 0 | — |
 | `windowClosed()` | 2 of 2 | `string $currentMode, string $reason` |
 
-Members: `KIND_FAILED`, `KIND_FLIPPED`, `KIND_NO_CHANGE`, `KIND_SKIPPED`, `KIND_WINDOW_CLOSED`, `$error`, `$mode`, `$previousMode`, `$reason`.
+Members: `KIND_FAILED`, `KIND_FLIPPED`, `KIND_NO_CHANGE`, `KIND_REPAIRED`, `KIND_SKIPPED`, `KIND_WINDOW_CLOSED`, `$error`, `$mode`, `$previousMode`, `$reason`.
 
 #### `Uak35\WeightedDbManager\Pgcat\FlipSchedule`
 
@@ -488,7 +500,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 
 | method | requires | arguments |
 | --- | ---: | --- |
-| `__construct()` | 4 of 15 | `private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=` |
+| `__construct()` | 4 of 16 | `private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=` |
 | `appliedMode()` | 0 of 0 | — |
 | `applyCurrentState()` | 0 of 0 | — |
 | `armedReason()` | 0 of 0 | — |
@@ -501,6 +513,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 | `healthSummary()` | 0 of 0 | — |
 | `isEnabled()` | 0 of 0 | — |
 | `isMismatched()` | 0 of 0 | — |
+| `poolProbeVerdict()` | 0 of 0 | — |
 | `readerWindowVerdict()` | 0 of 0 | — |
 | `refusedSwitches()` | 0 of 0 | — |
 | `status()` | 0 of 0 | — |
@@ -512,6 +525,19 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 | `windowStatus()` | 0 of 0 | — |
 
 Members: `FILE_DIRECTORY_UNWRITABLE`, `FILE_MISSING`, `FILE_UNREADABLE`, `FILE_UNSET`, `FILE_UNWRITABLE`, `SUPPORTED_DRIVERS`.
+
+#### `Uak35\WeightedDbManager\Pgcat\PoolProbe`
+
+`src/Pgcat/PoolProbe.php`
+
+| method | requires | arguments |
+| --- | ---: | --- |
+| `ask()` | 4 of 6 | `string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=` |
+| `classify()` | 2 of 2 | `string $answer, string $database` |
+| `declaredPools()` | 1 of 1 | `string $toml` |
+| `startupPacket()` | 2 of 2 | `string $user, string $database` |
+
+Members: `DEFAULT_TIMEOUT_MS`, `STATUS_ANSWERED`, `STATUS_MISSING`, `STATUS_SILENT`.
 
 #### `Uak35\WeightedDbManager\Pgcat\SupervisorStep`
 

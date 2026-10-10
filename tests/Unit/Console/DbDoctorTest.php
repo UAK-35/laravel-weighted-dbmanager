@@ -21,6 +21,7 @@ use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
 use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
@@ -1565,7 +1566,7 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('13 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString('14 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
         $this->assertSame(1, $exit);
     }
 
@@ -1639,6 +1640,93 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('a reader window is open', $output);
 
         $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The running pooler, asked directly: the one row that does not read a file, a program list or
+     * a state store for its answer, and the read-only half of the self-heal the flip performs.
+     */
+    public function test_the_pool_probe_row_passes_when_the_pooler_answers_for_every_pool(): void
+    {
+        $this->armPgcatWithPoolProbe(['writer_db_1', 'reader_db_2']);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringContainsString('answered for every pool the configuration declares (writer_db_1, reader_db_2)', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The fault this row exists for, in the pooler's own words: pgcat is RUNNING, supervisord says
+     * so, and it holds no pool for a database the application is connected to — so every read to
+     * that pool fails while every other row of this run passes.
+     */
+    public function test_the_pool_probe_row_fails_when_the_pooler_holds_no_pool(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], ['reader_db_2' => 'missing']);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('FAIL  pool probe', $row);
+        $this->assertStringContainsString('holds no pool "reader_db_2"', $row);
+        $this->assertStringContainsString('No pool configured for database', $row, 'the pooler\'s admission rather than a paraphrase of it');
+        $this->assertStringStartsWith('PASS  pgcat supervisor', $this->rowContaining($output, 'pgcat supervisor'), 'the program supervisord can see is up, which is exactly why this row exists');
+        $this->assertSame(1, $exit, 'a pool the pooler cannot serve is a failure, and `--strict` is not what decides it');
+        $this->assertNull($this->suggestion($output), 'the repair is a restart of the pooler, not a value a line can name');
+    }
+
+    /**
+     * A pooler that answered nothing at all is warned about rather than failed: the address may be
+     * the wrong one, and a probe that could fail an installation for that would be worse than the
+     * silence it replaced.
+     */
+    public function test_the_pool_probe_row_warns_for_a_pooler_that_answered_nothing(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], ['reader_db_2' => 'silent']);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('WARN  pool probe', $row);
+        $this->assertStringContainsString('did not answer for pool "reader_db_2"', $row);
+        $this->assertSame(0, $exit, 'a pooler that answered nothing is not a failure');
+    }
+
+    /**
+     * The same answer while the container is still starting is not judged — the flip still has the
+     * boot window to re-apply the configuration in — and the row says so rather than passing
+     * silently, because "nothing was judged" and "the pooler answered" are different statements.
+     */
+    public function test_the_pool_probe_row_is_not_judged_while_the_boot_window_is_open(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], ['reader_db_2' => 'missing'], windowClosed: false);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringContainsString('boot window is still open', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The documented default, and the reason the row costs nothing on an installation that has not
+     * opted in: the pooler is taken at supervisord's word, which cannot tell a pool it is not
+     * serving from one it is.
+     */
+    public function test_the_pool_probe_row_says_when_the_probe_is_not_armed(): void
+    {
+        $this->armPgcat();
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringContainsString('the probe is not armed (swrr.pgcat.pool_probe.enabled)', $row);
+        $this->assertSame(0, $exit);
     }
 
     /**
@@ -2866,13 +2954,13 @@ class DbDoctorTest extends TestCase
     private static function exitCodeProfile(string $profile): array
     {
         return match ($profile) {
-            'healthy' => [13, 0, 0],
-            'warned' => [12, 1, 0],
-            'warned-twice' => [11, 2, 0],
-            'failed' => [12, 0, 1],
-            'failed-twice' => [11, 0, 2],
-            'mixed' => [11, 1, 1],
-            'mixed-twice' => [9, 2, 2],
+            'healthy' => [14, 0, 0],
+            'warned' => [13, 1, 0],
+            'warned-twice' => [12, 2, 0],
+            'failed' => [13, 0, 1],
+            'failed-twice' => [12, 0, 2],
+            'mixed' => [12, 1, 1],
+            'mixed-twice' => [10, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -3972,6 +4060,70 @@ class DbDoctorTest extends TestCase
         $this->bindSupervisor();
 
         return $paths + ['supervisorctl' => $binary];
+    }
+
+    /**
+     * Arm the flipper with a probe that answers in the test's place, and declare the pools the
+     * readers variant holds — the file the probe reads the names off.
+     *
+     * The file set underneath is `armPgcat()`'s, so every other row of the run still judges a
+     * working installation, and the flipper is bound as an instance rather than left to the
+     * provider's singleton because the probe is a closure: a real one opens a socket, and what is
+     * under test is the row's reading of the answers rather than the socket underneath it.
+     *
+     * `$answers` names the status per database and defaults to every pool answering; the three
+     * statuses are `PoolProbe`'s vocabulary. `$windowClosed` writes a boot stamp an hour old — the
+     * state the verdict is judged in — and with it false nothing records a boot at all, which is the
+     * container still starting up.
+     *
+     * @param list<string>          $pools   the pools the readers variant declares
+     * @param array<string, string> $answers database => status
+     * @return array<string, string> the paths `armPgcat()` returned
+     */
+    private function armPgcatWithPoolProbe(array $pools, array $answers = [], bool $windowClosed = true): array
+    {
+        $overrides = [];
+
+        if ($windowClosed) {
+            $stamp = $this->tempDir().'/container-booted-at';
+            file_put_contents($stamp, (string) (time() - 3600));
+
+            $overrides = ['boot_file' => $stamp, 'flip_window_seconds' => 480];
+        }
+
+        $paths = $this->armPgcat($overrides);
+
+        file_put_contents(
+            $paths['readers_path'],
+            implode('', array_map(static fn (string $pool): string => "[pools.{$pool}]\n", $pools)),
+        );
+
+        $probe = static function (string $database) use ($answers): array {
+            $status = $answers[$database] ?? 'answered';
+
+            return [
+                'status' => $status,
+                'evidence' => match ($status) {
+                    'missing' => sprintf('pgcat is running but has no pool "%s": No pool configured for database: "%s"', $database, $database),
+                    'silent' => sprintf('tcp://127.0.0.1:5432 did not answer for pool "%s": Connection refused', $database),
+                    default => sprintf('the pooler answered for pool "%s"', $database),
+                },
+            ];
+        };
+
+        $this->app->instance(PgcatConfigFlipper::class, new PgcatConfigFlipper(
+            resolver: $this->app->make(TimeWindowResolver::class),
+            config: ConfigValue::assoc(config('db-manager.swrr.pgcat')),
+            stateFile: $paths['state_file'],
+            lockFile: $paths['lock_file'],
+            timezone: 'UTC',
+            connectionName: self::CONNECTION,
+            driver: 'pgsql',
+            supervisorStep: new SupervisorStep(static fn (string $command): array => [0, 'pgcat:pgcat_00 RUNNING pid 1', '']),
+            poolProbe: $probe,
+        ));
+
+        return $paths;
     }
 
     /**

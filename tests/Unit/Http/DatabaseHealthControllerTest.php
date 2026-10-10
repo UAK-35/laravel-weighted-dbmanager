@@ -580,6 +580,182 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
+     * The pooler behind the pool, asked rather than inferred: the one field of this payload whose
+     * answer comes from the pooler itself, and the half of the self-heal a query cannot see. An
+     * endpoint that reported `ok` while the pooler holds no pool for a database the application is
+     * connected to would be reporting on a connection it cannot read through.
+     */
+    public function test_the_pool_probe_reports_what_the_pooler_answered(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['writer_db_1', 'reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.enabled', true)
+            ->assertJsonPath('pool_probe.applicable', true)
+            ->assertJsonPath('pool_probe.answered', true)
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.warned', false)
+            ->assertJsonPath('pool_probe.reason', null)
+            ->assertJsonPath('pool_probe.pools.0.database', 'writer_db_1')
+            ->assertJsonPath('pool_probe.pools.1.database', 'reader_db_2')
+            ->assertJsonPath('pool_probe.pools.1.status', 'answered');
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The fault this block exists for: the pooler is RUNNING, supervisord says so, the file is the
+     * one the windows ask for, the database answers — and one pool every read is routed to does not
+     * exist. The payload is degraded and the log names it, in the pooler's own words.
+     */
+    public function test_a_pool_the_pooler_holds_no_pool_for_degrades_the_payload_and_is_logged(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'missing',
+                'evidence' => sprintf('pgcat is running but has no pool "%s": No pool configured for database: "%s"', $database, $database),
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            ->assertJsonPath('pinned.ok', true)
+            ->assertJsonPath('flip.failed', false)
+            ->assertJsonPath('reader_window.failed', false)
+            ->assertJsonPath('pool_probe.applicable', true)
+            ->assertJsonPath('pool_probe.answered', false)
+            ->assertJsonPath('pool_probe.failed', true);
+
+        $this->assertStringContainsString('holds no pool "reader_db_2"', (string) $response->json('pool_probe.reason'));
+
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(function (string $message, array $context = []): bool {
+                return str_contains($message, 'health/db degraded')
+                    && str_contains($message, 'not answerable for a pool the configuration declares')
+                    && ($context['pool_probe']['failed'] ?? null) === true
+                    && ($context['pool_probe']['pools'][0]['status'] ?? null) === 'missing';
+            });
+    }
+
+    /**
+     * A pooler that answered nothing is reported and never failed, which is the line that keeps a
+     * probe pointed at the wrong address from taking a healthy installation down.
+     */
+    public function test_a_pooler_that_answered_nothing_is_reported_without_degrading_the_payload(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'silent',
+                'evidence' => 'tcp://127.0.0.1:5432 did not answer for pool "reader_db_2": Connection refused',
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.answered', false)
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.warned', true);
+
+        $this->assertStringContainsString('did not answer for pool "reader_db_2"', (string) $response->json('pool_probe.reason'));
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The same answer while the container is still inside its boot window does not degrade the
+     * payload: the flip still re-applies the configuration there, so a starting container is not
+     * failed by a reading that is about to be repaired — the same line the reader-window verdict
+     * draws. The answer itself is still published, so a reader can see it.
+     */
+    public function test_a_missing_pool_inside_the_boot_window_does_not_degrade_the_payload(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 60,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'missing',
+                'evidence' => 'pgcat is running but has no pool "reader_db_2"',
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.answered', false)
+            ->assertJsonPath('pool_probe.failed', false);
+
+        $this->assertStringContainsString('boot window is still open', (string) $response->json('pool_probe.reason'));
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The default, and the reason this field costs nothing on an installation that has not opted
+     * in: nothing is asked, and the block says so rather than reporting every pool as fine.
+     */
+    public function test_the_pool_probe_says_nothing_was_asked_when_it_is_not_armed(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'readers', pools: ['reader_db_2']);
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('pool_probe.enabled', false)
+            ->assertJsonPath('pool_probe.applicable', false)
+            ->assertJsonPath('pool_probe.answered', null)
+            ->assertJsonPath('pool_probe.pools', [])
+            ->assertJsonPath('pool_probe.reason', null);
+    }
+
+    /**
      * Point the connection the package follows at SQLite.
      *
      * `$database` is a file, `:memory:` or a path under a directory that does not exist — the
@@ -618,9 +794,21 @@ class DatabaseHealthControllerTest extends TestCase
      * `$readerWindows` overrides the day's window. The default covers the whole day, so the mode
      * is `readers` at any moment; a window whose hour is still ahead of "now" puts the test
      * outside one, which is the direction where a stale readers config is the fault.
+     *
+     * `$pools` declares pool sections in the readers variant — the file the pool probe reads the
+     * names off — and they are written *before* the target is copied from it, so a pooler in step
+     * with the window stays in step. `$poolProbe` is the closure the flipper would open a socket
+     * with, injected so the endpoint can be driven without a pooler: a real probe is what
+     * `PgcatConfigFlipperTest` and `PoolProbeTest` cover, and what this file is about is the
+     * endpoint's reading of the answers.
      */
-    private function bindWindowFlipper(?int $bootedSecondsAgo, ?string $appliedMode = null, ?array $readerWindows = null): PgcatConfigFlipper
-    {
+    private function bindWindowFlipper(
+        ?int $bootedSecondsAgo,
+        ?string $appliedMode = null,
+        ?array $readerWindows = null,
+        array $pools = [],
+        ?\Closure $poolProbe = null,
+    ): PgcatConfigFlipper {
         $dir = sys_get_temp_dir().'/swrr-health-window-'.bin2hex(random_bytes(4));
 
         if (!mkdir($dir, 0o777, true) && !is_dir($dir)) {
@@ -657,7 +845,9 @@ class DatabaseHealthControllerTest extends TestCase
         // apart: a run converged *inside* the boot window, so the boot verdict is healthy and the
         // only thing left to fail on is the file the pooler is still sitting on.
         if ($appliedMode !== null) {
-            file_put_contents($config['readers_path'], "pool = 'readers'\n");
+            $sections = implode('', array_map(static fn (string $pool): string => "[pools.{$pool}]\n", $pools));
+
+            file_put_contents($config['readers_path'], "pool = 'readers'\n".$sections);
             file_put_contents($config['no_readers_path'], "pool = 'writer-only'\n");
             file_put_contents(
                 $config['config_path'],
@@ -687,6 +877,7 @@ class DatabaseHealthControllerTest extends TestCase
             stateFile: $config['state_file'],
             lockFile: $config['lock_file'],
             driver: 'pgsql',
+            poolProbe: $poolProbe,
         );
 
         $this->app->instance(PgcatConfigFlipper::class, $flipper);

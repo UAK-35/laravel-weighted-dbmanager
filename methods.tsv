@@ -87,6 +87,7 @@ failed	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	2/2 str
 flipped	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	2/2 string $newMode, ?string $previousMode
 kind	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	0/0 
 noChange	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	1/2 string $mode, string $reason=
+repaired	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	2/2 string $mode, string $reason
 skipped	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	2/2 string $currentMode, string $reason
 summary	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	0/0 
 toArray	src/Pgcat/FlipResult.php	Uak35\WeightedDbManager\Pgcat\FlipResult	0/0 
@@ -109,7 +110,7 @@ now	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0
 remaining	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0 
 seconds	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0 
 toArray	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0 
-__construct	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	4/15 private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=
+__construct	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	4/16 private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=
 appliedMode	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 applyCurrentState	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 armedReason	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
@@ -122,6 +123,7 @@ forceMode	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatCo
 healthSummary	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 isEnabled	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 isMismatched	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
+poolProbeVerdict	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 readerWindowVerdict	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 refusedSwitches	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 status	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
@@ -131,6 +133,10 @@ supervisorCommand	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat
 switchReadingsIn	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	1/1 array $pgcat
 window	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 windowStatus	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
+ask	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	4/6 string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=
+classify	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $answer, string $database
+declaredPools	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/1 string $toml
+startupPacket	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $user, string $database
 __construct	src/Pgcat/SupervisorStep.php	Uak35\WeightedDbManager\Pgcat\SupervisorStep	0/2 ?\Closure $runner=, private readonly int $timeout=
 aggregateState	src/Pgcat/SupervisorStep.php	Uak35\WeightedDbManager\Pgcat\SupervisorStep	1/1 array $states
 discoveryCommand	src/Pgcat/SupervisorStep.php	Uak35\WeightedDbManager\Pgcat\SupervisorStep	1/1 string $bin

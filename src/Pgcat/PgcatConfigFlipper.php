@@ -105,7 +105,8 @@ use DateTimeZone;
  * STATE FILE
  * ----------
  *   Path: configured via `state_file` (default sys_get_temp_dir())
- *   Format: JSON { "last_mode": "readers"|"writer", "last_flipped_at": ISO, ... }
+ *   Format: JSON { "last_mode": "readers"|"writer", "last_flipped_at": ISO,
+ *                  "pool_repairs": N, "last_pool_repair_at": ISO, ... }
  *   Missing file → treated as "never applied"; first call applies current mode.
  */
 final class PgcatConfigFlipper
@@ -206,6 +207,14 @@ final class PgcatConfigFlipper
      */
     private readonly FlipWindow $window;
 
+    /**
+     * How one configured pool is asked of the running pooler, or null when nothing probes: the
+     * answerability half of the self-heal. `\Closure(string $database): array` — the verdict
+     * `PoolProbe::ask()` returns. Defaulted from the `pool_probe` config slice, and injectable so
+     * a test can answer without a socket.
+     */
+    private readonly ?\Closure $poolProbe;
+
     /** @var \Closure(int): void */
     private \Closure $sleeper;
 
@@ -237,8 +246,17 @@ final class PgcatConfigFlipper
         // minutes; defaulted from the same config slice a host passes in, so `boot_file` and
         // `flip_window_seconds` are read in exactly one place.
         ?FlipWindow $window = null,
+        // How a running pooler is asked whether it is answerable for a pool, or null to leave
+        // the pooler's answer unexamined. Defaulted from `swrr.pgcat.pool_probe` below, and
+        // injected so a test can answer without opening a socket.
+        ?\Closure $poolProbe = null,
     ) {
         $this->window = $window ?? FlipWindow::fromConfig($config);
+
+        // Null is a decision, not a fallback: an installation that has not switched the probe
+        // on gets no closure, so nothing opens a socket on the poll path. The default is only
+        // built from a config that asks for it.
+        $this->poolProbe = $poolProbe ?? self::defaultPoolProbe($config);
 
         $this->fileCopier = $fileCopier ?? static function (string $from, string $to): bool {
             $tmp = $to . '.tmp.' . getmypid();
@@ -335,6 +353,27 @@ final class PgcatConfigFlipper
             // "unchanged" from, so a first run is reported as a flip whose
             // previousMode is null.
             if ($lastMode === $currentMode) {
+                // Nothing to change — but a mode that is already applied is not the same
+                // fact as a pooler that is answering for it. supervisord says the program is
+                // up; only the pooler can say whether it holds the pool, and a pooler that
+                // does not is re-applied rather than reported healthy. This is the fault the
+                // ordinary flip cannot see, because the mode never moved.
+                $fault = $this->poolFault($currentMode);
+
+                if ($fault !== null) {
+                    // The same file, applied again: the pooler's own configuration is what is
+                    // out of step, so the repair is a re-application and a restart, not a
+                    // transition. A swap that fails is the catch below — a failed repair is a
+                    // failed run, and the mode stays unrecorded so the next poll retries.
+                    $this->swap($currentMode);
+                    $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode);
+
+                    return FlipResult::repaired(
+                        mode: $currentMode,
+                        reason: $fault,
+                    );
+                }
+
                 // A run that changes nothing is still a run: it is the ordinary outcome of a
                 // per-minute schedule, and it is exactly the evidence `/health/db` needs to
                 // say this container converged rather than merely that it booted.
@@ -348,7 +387,41 @@ final class PgcatConfigFlipper
 
             $this->swap($currentMode);
 
+            // The file is in place and supervisord has been told to make pgcat pick it up —
+            // which is not the same fact as pgcat having picked it up. A flip has never asked
+            // that second question, and the state it cannot see is this one: the mode moved,
+            // the file is the variant the new mode asks for, and the pooler is still answering
+            // for the pools it held a moment ago, so every read to a pool the new variant adds
+            // fails while `pgcat mode` compares two files and finds them in step. So the run
+            // that applies a mode now reads the pooler back, the same way the run that found the
+            // mode *already* applied does — see `poolFault()` above.
+            $refusal = $this->refusalAfterApply($currentMode);
+            $clause = '';
+            $after = $refusal;
+
+            if ($refusal !== null) {
+                $repair = $this->restartOnAppliedFile();
+                $clause = $repair['clause'];
+                $after = $repair['attempted'] ? $this->refusalAfterApply($currentMode) : $refusal;
+            }
+
             $this->writeLastMode($currentMode, $lastMode);
+
+            // Applied, and the pooler did not answer for a pool the file declares. The run
+            // reports the repair rather than the transition: the file and the mode are the
+            // flip's job and both are in place, while what a reader has to act on is the
+            // pooler. It exits 0 for the reason `FlipResult::KIND_REPAIRED` gives — the run did
+            // what it was asked to — and the standing fault is `/health/db`'s `pool_probe`
+            // block, which is where a state is reported rather than a run's outcome.
+            if ($refusal !== null) {
+                $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode);
+
+                return FlipResult::repaired(
+                    mode: $currentMode,
+                    reason: $this->appliedPoolReason($currentMode, $lastMode, $refusal, $clause, $after),
+                );
+            }
+
             $this->recordRun(FlipResult::KIND_FLIPPED, $currentMode);
 
             return FlipResult::flipped(
@@ -659,6 +732,23 @@ final class PgcatConfigFlipper
             'step' => 'supervisor',
             'outcome' => DryRunResult::STEP_WOULD,
             'detail' => $repair ? $this->startCommand() : $this->supervisorCommand(),
+        ];
+
+        // The read that makes a transition verified rather than assumed, and the one step of a
+        // flip a rehearsal cannot perform — not because it changes anything, but because there is
+        // nothing yet for it to be about. The pools it would ask after are the ones the *new*
+        // variant declares, and the rename above has not happened: probing the pooler now would
+        // put the pools of a variant that is not applied to it and collect a refusal the flip is
+        // about to make untrue. So it is reported like the rename and the signal.
+        $steps[] = [
+            'step' => 'pool read',
+            'outcome' => DryRunResult::STEP_WOULD,
+            'detail' => $this->poolProbe === null
+                ? 'nothing would be asked: the probe is not armed (swrr.pgcat.pool_probe.enabled), so the flip would report the transition on supervisord\'s word'
+                : sprintf(
+                    'the pools %s declares would be read back from the pooler, and a pool it refused would be repaired by a restart on that file',
+                    $source,
+                ),
         ];
 
         if (!$this->stateFileWritable()) {
@@ -1227,6 +1317,172 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * Whether anything asks the running pooler about its pools, and what it answered for each.
+     *
+     * WHY THIS EXISTS
+     *   `poolFault()` is the *repair* half of the pool-answerability self-heal, and it only ever runs
+     *   inside a flip: `applyCurrentState()` reads it when the mode is already applied, and only
+     *   while the container's boot window is open — the window tasks apply through `forceMode()`,
+     *   which has no window and no pool check at all. So the state this reading exists for is the one
+     *   nothing else can report: a container past its boot window whose pgcat is RUNNING and holds no
+     *   pool for a database the applied variant declares. Every read to that pool fails, supervisord
+     *   calls the program healthy, `pgcat mode` compares two files and finds them in step, and the
+     *   repair path will not run again. `/health/db`'s `pool_probe` block and `db:doctor`'s `pool
+     *   probe` row are the two surfaces that say so, and both read this — so they cannot disagree.
+     *
+     * WHAT IT REPORTS
+     *   `enabled` is the switch (`swrr.pgcat.pool_probe.enabled`); `applicable` is true when a probe
+     *   is armed, the flipper applies, and the mode's variant declares at least one pool — that is,
+     *   when there was something to ask. `pools` is one entry per pool the variant declares, in file
+     *   order, each carrying the pooler's own three-answer vocabulary (`answered`, `missing`,
+     *   `silent`) and the sentence `PoolProbe` produced for it. `answered` is true when every pool
+     *   answered, false when one did not, and null when nothing was asked.
+     *
+     *   It deliberately repairs, restarts and records nothing: the throw, the swap and the record
+     *   belong to a flip, and a status reading that restarted a pooler would not be one an endpoint
+     *   could be polled with. `failed` is the judgement, and it is the repair's own — `missing`, the
+     *   pooler's refusal, and never `silent`, so a probe pointed at the wrong address cannot fail a
+     *   healthy installation.
+     *
+     * WHY A POOL IS ONLY JUDGED AFTER THE BOOT WINDOW
+     *   While the window is open the repair still has somewhere to run: the per-minute flip
+     *   re-applies the variant and restarts the pooler, which is exactly the state a container is in
+     *   for its first minutes. `failed` and `warned` therefore wait for `window->closed()`, the same
+     *   line {@see readerWindowVerdict()} draws and for the same reason — a starting container is
+     *   not a broken one. The answers themselves are reported either way, so a reader can see what
+     *   the pooler said without a verdict being invented about it, and `reason` carries the sentence
+     *   from the moment one pool did not answer.
+     *
+     * WHY IT IS NOT IN healthSummary()
+     *   It is the one reading here that opens a socket. `healthSummary()` is what `db:replica-status`
+     *   and `db:pgcat-flip --status` print, and both are diagnostics an operator runs on a host that
+     *   may be the wrong side of the pooler: adding a connect timeout to them would change their
+     *   contract rather than add a field to this one. The surfaces that want the answer ask for it
+     *   by name, and neither of the two is on the flip's own hot path.
+     *
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     */
+    public function poolProbeVerdict(): array
+    {
+        // The shape a caller gets whenever nothing was asked, so a surface never has to test for a
+        // key's absence to tell "the probe is off" from "the probe is on".
+        $unasked = [
+            'enabled' => $this->poolProbe !== null,
+            'applicable' => false,
+            'answered' => null,
+            'failed' => false,
+            'warned' => false,
+            'pools' => [],
+            'reason' => null,
+        ];
+
+        // An inert flipper has no pooler to be answerable for: nothing swaps the file and nothing
+        // restarts the program, so nothing asks it anything. `enabled` still reports the switch, so
+        // a reader can tell an installation that never armed the probe from one that armed it and
+        // has no pgcat at all.
+        if ($this->poolProbe === null || !$this->isEnabled()) {
+            return $unasked;
+        }
+
+        $mode = $this->resolver->currentModeName();
+        $pools = [];
+
+        foreach ($this->configuredPools($mode) as $database) {
+            /** @var array{status?: string, evidence?: string} $verdict */
+            $verdict = ($this->poolProbe)($database);
+
+            $status = is_string($verdict['status'] ?? null) && $verdict['status'] !== ''
+                ? $verdict['status']
+                : PoolProbe::STATUS_SILENT;
+
+            $pools[] = [
+                'database' => $database,
+                'status' => $status,
+                'evidence' => is_string($verdict['evidence'] ?? null) && $verdict['evidence'] !== ''
+                    ? $verdict['evidence']
+                    : sprintf('the pooler gave no answer for pool "%s"', $database),
+            ];
+        }
+
+        // No pool declared is not a pooler that failed: there is nothing the variant claims the
+        // pooler should hold, so there is nothing to be missing.
+        if ($pools === []) {
+            return $unasked;
+        }
+
+        $missing = array_values(array_filter($pools, static fn (array $pool): bool => $pool['status'] === PoolProbe::STATUS_MISSING));
+        $silent = array_values(array_filter($pools, static fn (array $pool): bool => $pool['status'] === PoolProbe::STATUS_SILENT));
+
+        $judged = $this->window->closed();
+
+        return [
+            'enabled' => true,
+            'applicable' => true,
+            'answered' => $missing === [] && $silent === [],
+            'failed' => $judged && $missing !== [],
+            'warned' => $judged && $missing === [] && $silent !== [],
+            'pools' => $pools,
+            'reason' => $missing === [] && $silent === []
+                ? null
+                : $this->poolProbeReason($missing, $silent, $judged),
+        ];
+    }
+
+    /**
+     * The sentence for a pooler that did not answer for something, in the pooler's own words.
+     *
+     * One sentence for the whole reading rather than one per pool, because the fault is one: what
+     * the operator has to decide is what to do about this pooler, and the first refusal's evidence is
+     * the pooler's own admission rather than a paraphrase of it. The names are quoted and listed in
+     * file order, so a reader can find them in the variant a flip would apply.
+     *
+     * The sentence ends on the same distinction the verdict is judged by, because the two readings of
+     * one answer call for different work. Past the boot window a missing pool is the whole reason
+     * this reading exists — the repair path is `applyCurrentState()`, which stops at the end of the
+     * window, and the window tasks apply through `forceMode()`, which never asks the pooler anything,
+     * so nothing re-applies the file again — and inside it the same answer is a container that is
+     * still coming up. A pooler that answered nothing is neither: it is reported and never repaired,
+     * which is the line that keeps a probe pointed at the wrong address from failing a pooler that is
+     * fine.
+     *
+     * @param list<array{database: string, status: string, evidence: string}> $missing
+     * @param list<array{database: string, status: string, evidence: string}> $silent
+     */
+    private function poolProbeReason(array $missing, array $silent, bool $judged): string
+    {
+        $names = static function (array $pools): string {
+            /** @var list<array{database: string, status: string, evidence: string}> $pools */
+            return implode(', ', array_map(
+                static fn (array $pool): string => '"'.$pool['database'].'"',
+                $pools,
+            ));
+        };
+
+        if ($missing !== []) {
+            return sprintf(
+                'the pooler is running but holds no pool %s — %s. %s',
+                $names($missing),
+                $missing[0]['evidence'],
+                $judged
+                    ? sprintf(
+                        'Nothing re-applies that configuration past the boot window, so every read to %s fails until the container is replaced',
+                        count($missing) === 1 ? 'it' : 'them',
+                    )
+                    : 'The boot window is still open, where the per-minute flip re-applies the configuration, so this is not judged yet',
+            );
+        }
+
+        return sprintf(
+            'the pooler did not answer for pool %s — %s. %s',
+            $names($silent),
+            $silent[0]['evidence'],
+            $judged
+                ? 'That is reported rather than repaired: a probe pointed at the wrong address must not be able to fail a pooler that is fine'
+                : 'The boot window is still open, and a pooler that has not finished starting is what that looks like',
+        );
+    }
+
+    /**
      * The mode pgcat's own configuration is in, read off the file rather than remembered.
      *
      * The comparison is bytes, in the direction the flip copies them: the target holds the
@@ -1327,6 +1583,13 @@ final class PgcatConfigFlipper
      * container that did come up. `runs` counts every recorded run, which is what makes "the
      * flip is scheduled" observable at all.
      *
+     * `pool_repairs` is the sibling of `runs` that answers a different question: a running
+     * pooler that was not answering for a pool was re-applied (or restarted on the file that was
+     * written), and the count says whether that was a one-off or a pooler that keeps needing
+     * repair — which `last_kind` alone cannot, because two repairs a minute apart and two repairs
+     * a week apart both leave it reading `repaired`. `last_pool_repair_at` is when the last one
+     * happened, read the same way `last_run_at` is.
+     *
      * @return array<string, mixed>
      */
     public function windowStatus(): array
@@ -1354,6 +1617,8 @@ final class PgcatConfigFlipper
             'runs' => $runs,
             'last_run_at' => $state['last_run_at'] ?? null,
             'last_kind' => $state['last_kind'] ?? null,
+            'pool_repairs' => ConfigValue::int($state['pool_repairs'] ?? null, 0),
+            'last_pool_repair_at' => $state['last_pool_repair_at'] ?? null,
             'converged' => $converged,
             'converged_at' => $state['converged_at'] ?? null,
             'converged_mode' => $state['converged_mode'] ?? null,
@@ -1609,6 +1874,316 @@ final class PgcatConfigFlipper
         }
 
         return $missing;
+    }
+
+    /**
+     * The probe a config asks for, or null when it does not switch one on.
+     *
+     * The switch is read the way every other switch in this block is — `SwitchValue`, so
+     * `'yes'`/`'no'` work and a value that is neither is refused rather than cast — and it
+     * defaults to off: a probe that opened a socket on every poll is a thing an installation
+     * opts into, not one it inherits by upgrading. An absent or refused value therefore leaves
+     * the pooler's answer unexamined, which is the state every installation was in before this
+     * existed.
+     *
+     * The address is the pooler's own, which is why it is configured rather than derived. A
+     * variant file does name it — `[general].port` is where the pooler says what it listens on,
+     * measured at `5433` on the installation this was written against — but the address belongs to
+     * the *process* that is listening while a variant is one of the files a flip may put in front
+     * of it, so an address read out of the variant would move with the flip instead of staying with
+     * the pooler. The port defaults to pgcat's own convention rather than PostgreSQL's, because a
+     * PostgreSQL server answers every name in its own words and would be read as a pooler holding
+     * them all.
+     *
+     * @param array<string, mixed> $config the `swrr.pgcat` block
+     */
+    private static function defaultPoolProbe(array $config): ?\Closure
+    {
+        $probe = ConfigValue::assoc($config['pool_probe'] ?? null);
+
+        if (! SwitchValue::read($probe['enabled'] ?? null, false)['on']) {
+            return null;
+        }
+
+        $host = ConfigValue::string($probe['host'] ?? null, '127.0.0.1');
+        $port = ConfigValue::int($probe['port'] ?? null, 6432);
+        $user = ConfigValue::string($probe['user'] ?? null, 'postgres');
+        $timeout = ConfigValue::int($probe['timeout_ms'] ?? null, PoolProbe::DEFAULT_TIMEOUT_MS);
+
+        return static fn (string $database): array => PoolProbe::ask($host, $port, $database, $user, $timeout);
+    }
+
+    /**
+     * Why the running pooler is a fault for the mode that is already applied, or null when it
+     * answers for every pool the applied variant declares.
+     *
+     * One pool is enough to call it a fault, and the sentence names which: the pooler is
+     * running, so supervisord has nothing to report, and a single missing pool is the whole
+     * reason every read to it fails. The comparison is against the *variant the mode asks for*
+     * rather than against a list configured twice — the pool names are the section headers of
+     * the file a flip would write, so the probe and the flip read one source.
+     *
+     * Only `missing` is a fault. A pooler that answered nothing (`silent`) is the supervisor's
+     * question or a wrong address, and treating either as a reason to restart would let a probe
+     * pointed at the wrong port restart a healthy pooler every minute — the line `PoolProbe`
+     * draws, kept here.
+     *
+     * The reading itself is `refusedPool()`; this is the reading a mode that *has* been applied
+     * gets, and `refusalAfterApply()` is the one a mode that has just been applied gets, because
+     * only the second has to allow for a pooler that was signalled a moment ago.
+     */
+    private function poolFault(string $mode): ?string
+    {
+        $refusal = $this->refusedPool($this->configuredPools($mode));
+
+        if ($refusal === null) {
+            return null;
+        }
+
+        return sprintf(
+            'the pooler was running but had no pool "%s" — %s, so the %s config was applied again',
+            $refusal['database'],
+            $refusal['evidence'],
+            $this->modeNoun($mode),
+        );
+    }
+
+    /**
+     * Whether the pooler is answering for the mode a flip has just applied, asked the way a
+     * pooler that has just been signalled has to be asked: more than once, with a wait between
+     * the attempts.
+     *
+     * The retry is the whole difference between this read and `poolFault()`. There the pooler has
+     * been up and answering for a while — the mode never moved, so nothing was just restarted —
+     * and one read is the entire question. Here the file was replaced and supervisord was
+     * signalled a moment ago, and both ways of applying a config are asynchronous: a reload
+     * returns before pgcat has re-read anything, and a restart returns while the program is still
+     * inside supervisor's `startsecs` window, where it may not be listening yet. One read would
+     * call that second state a refusal and restart a pooler that was doing exactly what it was
+     * told.
+     *
+     * The attempts and the delay are the pair a repair already uses to bring pgcat up
+     * (`start_attempts`, `start_retry_delay_ms`) rather than a third and a fourth setting: it is
+     * the same question — is the program on this file yet — and an installation that raised one
+     * bound has raised it for both. And a pooler that answers nothing is never a refusal, so no
+     * number of attempts can turn a probe pointed at the wrong address into one.
+     *
+     * @return array{database: string, evidence: string}|null the refusal that stood after the
+     *         last attempt, or null when the pooler answered for every pool the variant declares
+     */
+    private function refusalAfterApply(string $mode): ?array
+    {
+        $pools = $this->configuredPools($mode);
+
+        if ($pools === []) {
+            return null;
+        }
+
+        $attempts = max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT));
+        $delayMs = max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT));
+        $refusal = null;
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $refusal = $this->refusedPool($pools);
+
+            if ($refusal === null) {
+                return null;
+            }
+
+            // No sleep after the last attempt: the caller is about to report the refusal, and a
+            // run that has given up has nothing left to wait for.
+            if ($attempt < $attempts && $delayMs > 0) {
+                ($this->sleeper)($delayMs * 1000);
+            }
+        }
+
+        return $refusal;
+    }
+
+    /**
+     * The first pool in `$pools` the running pooler refuses, in its own words, or null when it
+     * answered for every one of them.
+     *
+     * One pool at a time and `missing` only, which is the fault a flip can repair: a pooler that
+     * answered nothing (`silent`) is the supervisor's question or an address this probe was never
+     * pointed at, and treating either as a refusal is how a probe on the wrong port restarts a
+     * healthy pooler every minute — the line `PoolProbe` draws, kept here.
+     *
+     * @param list<string> $pools
+     * @return array{database: string, evidence: string}|null
+     */
+    private function refusedPool(array $pools): ?array
+    {
+        if ($this->poolProbe === null) {
+            return null;
+        }
+
+        foreach ($pools as $database) {
+            /** @var array{status?: string, evidence?: string} $verdict */
+            $verdict = ($this->poolProbe)($database);
+
+            if (($verdict['status'] ?? null) !== PoolProbe::STATUS_MISSING) {
+                continue;
+            }
+
+            return [
+                'database' => $database,
+                'evidence' => is_string($verdict['evidence'] ?? null) ? $verdict['evidence'] : 'no pool configured for that database',
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * Make a fresh process read the file a flip has just written, and say what was done about it.
+     *
+     * WHY A RESTART RATHER THAN THE SAME COMMAND AGAIN
+     *   A flip's own command is a reload when `use_reload` is on, because a pooler that is up
+     *   should not lose every connection to pick up a file. A reload is a *signal*: it returns
+     *   before pgcat has re-read anything, and a pooler that is still answering for the mode it
+     *   held a moment ago after `refusalAfterApply()` has waited is not a pooler about to catch
+     *   up — it is one that did not act on the signal. What makes a process read a file is a
+     *   process that reads it, so the repair escalates to `restart_command`. The flip's own
+     *   command is deliberately not run again: the same signal twice is the same signal.
+     *
+     *   An installation with `use_reload = false` never reaches the command: its flip already
+     *   restarted pgcat on this very file, and a second restart of one program on one set of
+     *   bytes is the same command twice. That is said rather than run.
+     *
+     * WHY IT IS JUDGED BEFORE IT RUNS
+     *   `swap()` refuses to leave a file in place behind a command that cannot reach supervisord,
+     *   and this is that kind of command, so `SupervisorStep::inspect()` asks the same two
+     *   questions first — does its executable resolve, does supervisord know the program — and a
+     *   refusal is *reported* rather than thrown: the file and the mode are in place and the fault
+     *   is the pooler's, so a run that says why it could not be repaired is worth more than one
+     *   that failed. A command that *runs* and exits non-zero is the other case and is thrown:
+     *   supervisord was reached and answered no.
+     *
+     * @return array{attempted: bool, clause: string} `attempted` is true when the pooler was
+     *         restarted — the caller reads the pools back for that reason and no other — and
+     *         `clause` is never empty, reading as the middle of the reason sentence
+     */
+    private function restartOnAppliedFile(): array
+    {
+        if (!$this->useReload()) {
+            return [
+                'attempted' => false,
+                'clause' => 'the flip had already restarted the pooler on that file, so it was not restarted again',
+            ];
+        }
+
+        $command = ConfigValue::string($this->config['restart_command'] ?? null, self::DEFAULT_RESTART_COMMAND);
+        $verdict = $this->supervisorStep->inspect($command);
+
+        if (!$verdict['usable']) {
+            return [
+                'attempted' => false,
+                'clause' => 'the restart command that would have made a fresh process read it was refused before it ran: '.$verdict['detail'],
+            ];
+        }
+
+        [$exitCode, $stdout, $stderr] = ($this->commandRunner)($command);
+
+        if ($exitCode !== 0) {
+            throw new \RuntimeException(sprintf(
+                'the pooler did not pick the applied config up and %s exited %d: stdout=%s stderr=%s',
+                $command,
+                $exitCode,
+                trim($stdout),
+                trim($stderr),
+            ));
+        }
+
+        return [
+            'attempted' => true,
+            'clause' => 'the pooler was restarted on the file the flip wrote',
+        ];
+    }
+
+    /**
+     * The sentence a flip that applied a mode reports when the pooler did not answer for a pool
+     * of it: what was applied, what the pooler said, what the run did about it, and what was seen
+     * afterwards.
+     *
+     * The last two are the ones only this run knows. `$clause` is the repair's own words and is
+     * empty when nothing was attempted; `$after` is the read taken once the repair had run, and a
+     * null there is the outcome worth having — the pooler answered for everything, one restart
+     * later. A refusal that survives to `$after` is on record here rather than left to the next
+     * poll to rediscover, which is what the sentence is for.
+     *
+     * @param array{database: string, evidence: string}      $refusal the refusal that triggered it
+     * @param array{database: string, evidence: string}|null $after   the refusal that stood after
+     *        the repair, or null when it cleared
+     */
+    private function appliedPoolReason(string $mode, ?string $previousMode, array $refusal, string $clause, ?array $after): string
+    {
+        $sentence = sprintf(
+            'the %s config was applied (%s → %s) and the running pooler did not answer for pool "%s" — %s',
+            $this->modeNoun($mode),
+            $previousMode ?? 'never',
+            $mode,
+            $refusal['database'],
+            $refusal['evidence'],
+        );
+
+        if ($clause !== '') {
+            $sentence .= '; '.$clause;
+        }
+
+        return $after === null
+            ? $sentence.', and it then answered for every pool the variant declares'
+            : sprintf('%s, and it still had no pool "%s" — %s', $sentence, $after['database'], $after['evidence']);
+    }
+
+    /**
+     * A mode as the sentences here name it: what the config *is* rather than the resolver's own
+     * spelling of it, because an operator looking at pgcat is looking at one of the two files.
+     */
+    private function modeNoun(string $mode): string
+    {
+        return $mode === 'readers' ? 'readers' : 'writer-only';
+    }
+
+    /**
+     * The pool names the variant for `$mode` declares, read off the file a flip would apply.
+     *
+     * The source is read first because it is the variant the mode is *asking for*, and the
+     * target only as a fallback for a source that cannot be read — the same ordering a swap
+     * uses, so a pool named here is one the repair would actually put in place. An unreadable
+     * file yields no pools rather than a guess, and no pools is not a fault.
+     *
+     * @return list<string>
+     */
+    private function configuredPools(string $mode): array
+    {
+        $toml = $this->readToml(ConfigValue::string(
+            $mode === 'readers'
+                ? ($this->config['readers_path'] ?? null)
+                : ($this->config['no_readers_path'] ?? null),
+        ));
+
+        if ($toml === null) {
+            $toml = $this->readToml(ConfigValue::string($this->config['config_path'] ?? null));
+        }
+
+        return $toml === null ? [] : PoolProbe::declaredPools($toml);
+    }
+
+    /**
+     * A pgcat TOML file's bytes, or null when the path is empty, is not a readable file, or
+     * cannot be read. Null rather than an empty string so "no pools" and "no file" stay
+     * distinguishable at the one place that has to fall back.
+     */
+    private function readToml(string $path): ?string
+    {
+        if ($path === '' || ! is_readable($path)) {
+            return null;
+        }
+
+        $contents = @file_get_contents($path);
+
+        return is_string($contents) ? $contents : null;
     }
 
     /**
@@ -1915,16 +2490,26 @@ final class PgcatConfigFlipper
      * and only one of them is healthy. `converged_at` is written once and never moved: the first
      * run that reached a usable mode is what this container's window is judged on, and a later
      * failure must not be able to un-work a container that did come up.
+     *
+     * A repair is counted as well as run: `pool_repairs` and `last_pool_repair_at` are the two
+     * facts `db:pgcat-flip --status` reports, and they are written where the run is rather than
+     * at either of the two call sites — a pool repair happens on both, and a counter that only
+     * one path moved would be a pooler that keeps needing repair read as one that never did.
      */
     private function recordRun(string $kind, string $mode): void
     {
         $state = $this->readState();
-        $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE], true);
+        $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE, FlipResult::KIND_REPAIRED], true);
 
         $state['runs'] = ConfigValue::int($state['runs'] ?? null, 0) + 1;
         $state['last_run_at'] = $this->nowIso();
         $state['last_kind'] = $kind;
         $state['last_mode_active'] = $mode;
+
+        if ($kind === FlipResult::KIND_REPAIRED) {
+            $state['pool_repairs'] = ConfigValue::int($state['pool_repairs'] ?? null, 0) + 1;
+            $state['last_pool_repair_at'] = $this->nowIso();
+        }
 
         if ($usable && !isset($state['converged_at'])) {
             $state['converged_at'] = $this->nowIso();

@@ -29,6 +29,23 @@ final class FlipResult
      */
     public const KIND_WINDOW_CLOSED = 'window_closed';
 
+    /**
+     * A running pooler was not answering for a pool it is supposed to serve, so its
+     * configuration was re-applied.
+     *
+     * This is the second self-heal, and the one supervisord cannot see: a program can be
+     * RUNNING and still hold a configuration with no pool for a database the application is
+     * connected to. It exits 0 for the same reason a flip does: the run did what it was asked
+     * to, and the state it leaves behind is `/health/db`'s to report rather than a run's.
+     *
+     * There are two runs that reach it. One found the mode already applied, where the repair
+     * is a re-application rather than a transition — the mode never changed. The other has just
+     * *applied* a mode and read the pooler back, and the pooler did not pick it up: there the
+     * mode did move, and the repair is a restart on the file that was written, because a signal
+     * pgcat did not act on needs a process that reads the file to happen at all.
+     */
+    public const KIND_REPAIRED = 'repaired';
+
     private function __construct(
         private readonly string $kind,
         public readonly ?string $mode,
@@ -70,6 +87,17 @@ final class FlipResult
         return new self(self::KIND_WINDOW_CLOSED, $currentMode, null, $reason, null);
     }
 
+    /**
+     * The pooler was running but not answering for a pool, so its configuration was applied
+     * again. The mode is the one in place when the run ends — the mode that was already applied,
+     * or the one a flip has just applied and the pooler did not pick up — and `$reason` names the
+     * pool the pooler could not answer for and what the run did about it.
+     */
+    public static function repaired(string $mode, string $reason): self
+    {
+        return new self(self::KIND_REPAIRED, $mode, null, $reason, null);
+    }
+
     public function kind(): string
     {
         return $this->kind;
@@ -82,6 +110,7 @@ final class FlipResult
             self::KIND_FLIPPED,
             self::KIND_NO_CHANGE,
             self::KIND_SKIPPED,
+            self::KIND_REPAIRED,
             self::KIND_WINDOW_CLOSED => 0,
             default => 1,
         };
@@ -97,6 +126,7 @@ final class FlipResult
                 $this->mode ?? '?',
             ),
             self::KIND_SKIPPED   => sprintf('skipped (mode=%s): %s', $this->mode, $this->reason),
+            self::KIND_REPAIRED  => sprintf('repaired (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_WINDOW_CLOSED => sprintf('window closed (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_FAILED    => sprintf(
                 'failed (mode=%s): %s — error: %s',

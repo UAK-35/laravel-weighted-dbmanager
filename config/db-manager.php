@@ -106,6 +106,37 @@ return [
             'state_file' => sys_get_temp_dir() . '/pgcat-flip-state.json',
             'lock_file' => sys_get_temp_dir() . '/pgcat-flip.lock',
 
+            // ── The pool probe (optional) ───────────────────────────────────────────
+            //
+            // The second self-heal, and the one supervisord cannot see: a program can be
+            // RUNNING and still hold a configuration with no pool for a database the
+            // application is connected to, so every read to that pool fails while
+            // `supervisorctl status` calls pgcat healthy. When this is on, a poll that finds
+            // the mode already applied asks the pooler about each pool the variant declares —
+            // a PostgreSQL v3 startup packet and the first message back, with no credentials —
+            // and re-applies the config when one is missing. The pooler's own refusal is the
+            // evidence; see Uak35\WeightedDbManager\Pgcat\PoolProbe.
+            //
+            // Off by default, and read as a switch: an installation opts into a socket on the
+            // poll path. `host`/`port` are where pgcat itself listens — the config paths above
+            // name files, not an address — so the port here is the one the pooler's own
+            // `[general]` section names, and the shipped value is pgcat's convention rather than
+            // PostgreSQL's: a probe aimed at a PostgreSQL server is *answered* for every name, in
+            // PostgreSQL's words rather than pgcat's, where the whole point is to hear the
+            // pooler's own. `user` is the client name the startup packet carries, and no
+            // password is ever sent. A `timeout_ms` that runs out is reported as silence, never
+            // as a missing pool, so a probe pointed at the wrong address cannot restart a
+            // healthy pooler — and a pooler that authenticates *before* it resolves a pool
+            // answers every name, which is the limitation
+            // Uak35\WeightedDbManager\Pgcat\PoolProbe writes down beside its measurement.
+            'pool_probe' => [
+                'enabled' => env('SWRR_PGCAT_POOL_PROBE_ENABLED', false),
+                'host' => env('SWRR_PGCAT_POOL_PROBE_HOST', '127.0.0.1'),
+                'port' => (int) env('SWRR_PGCAT_POOL_PROBE_PORT', 6432),
+                'user' => env('SWRR_PGCAT_POOL_PROBE_USER', 'postgres'),
+                'timeout_ms' => (int) env('SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS', 2000),
+            ],
+
             // ── The boot window ─────────────────────────────────────────────────────
             //
             // How long this container may spend getting pgcat into a working shape before the
@@ -148,7 +179,7 @@ return [
             // nothing for a schedule to keep in step, and a typo must not be what stops the
             // flip.
             'schedule' => [
-                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED'),
+                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED', false),
                 // How often the flip runs, in whole minutes: 1 is the shipped cadence and 5 is
                 // `SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES=5`, which is a step of five in the minute
                 // field. Raising it is a trade rather than a saving — what bounds the attempts is

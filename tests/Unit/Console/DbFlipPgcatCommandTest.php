@@ -13,6 +13,8 @@ use Uak35\WeightedDbManager\Tests\Support\Readme;
 use Uak35\WeightedDbManager\Pgcat\DryRunResult;
 use Uak35\WeightedDbManager\Pgcat\FlipResult;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\PoolProbe;
+use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
 use Uak35\WeightedDbManager\Tests\Support\PgcatInstallation;
 use Uak35\WeightedDbManager\Tests\TestCase;
@@ -74,6 +76,9 @@ final class DbFlipPgcatCommandTest extends TestCase
         $untouched = "# live file pgcat reads\npool = 'unknown'\n";
         $readers = "# readers variant\npool = 'readers'\n";
         $writer = "# writer-only variant\npool = 'writer-only'\n";
+        // A readers variant that declares a pool — the fixture the repair row needs, because
+        // the pools a probe asks about are the section headers of the file a flip would apply.
+        $poolReaders = "[pools.reader_db_2]\npool_mode = 'transaction'\n";
 
         return [
             // ── the four kinds a flip can have ────────────────────────────────────────
@@ -84,6 +89,10 @@ final class DbFlipPgcatCommandTest extends TestCase
             'the mode is unchanged, so nothing happens' => [
                 'preset' => 'unchanged', 'options' => [], 'exit' => 0,
                 'kind' => 'no_change', 'line' => 'no change (mode=readers): mode unchanged since last flip', 'target' => $untouched, 'recorded' => false,
+            ],
+            'the pooler is running but has no pool, so it is repaired' => [
+                'preset' => 'pool-missing', 'options' => [], 'exit' => 0,
+                'kind' => FlipResult::KIND_REPAIRED, 'line' => 'repaired (mode=readers)', 'target' => $poolReaders, 'recorded' => false,
             ],
             'another instance holds the lock, so the flip is skipped' => [
                 'preset' => 'locked', 'options' => [], 'exit' => 0,
@@ -326,7 +335,7 @@ final class DbFlipPgcatCommandTest extends TestCase
 
         $this->assertIsArray($steps);
         $this->assertSame(
-            ['lock', 'read source', 'supervisor check', 'write temp', 'remove temp', 'rename', 'supervisor', 'state file'],
+            ['lock', 'read source', 'supervisor check', 'write temp', 'remove temp', 'rename', 'supervisor', 'pool read', 'state file'],
             array_column($steps, 'step'),
             'the pipeline is a flip\'s order, so a step that stopped the run is readable next to the ones that did not',
         );
@@ -474,13 +483,15 @@ final class DbFlipPgcatCommandTest extends TestCase
      */
     public function test_only_a_failed_flip_or_rehearsal_is_non_zero(): void
     {
-        $this->assertSame([0, 0, 0, 0, 1], [
+        $this->assertSame([0, 0, 0, 0, 0, 1], [
             FlipResult::flipped('readers', null)->exitCode(),
             FlipResult::noChange('readers', 'unchanged')->exitCode(),
             FlipResult::skipped('readers', 'locked')->exitCode(),
             // A closed window is the flipper deciding not to try again, which is the run doing
             // exactly what it was asked to — the container's failure is `/health/db`'s to report.
             FlipResult::windowClosed('readers', 'the window closed')->exitCode(),
+            // A repair is the self-heal doing its job, so it exits zero like the three above.
+            FlipResult::repaired('readers', 'the pooler had no pool')->exitCode(),
             FlipResult::failed('readers', 'broken')->exitCode(),
         ]);
 
@@ -509,6 +520,7 @@ final class DbFlipPgcatCommandTest extends TestCase
         return [
             'the mode changed, so the flip applies' => 'a flip applied, nothing to do, or skipped by another instance',
             'the mode is unchanged, so nothing happens' => 'a flip applied, nothing to do, or skipped by another instance',
+            'the pooler is running but has no pool, so it is repaired' => 'a running pooler that could not answer for a pool, so the config was re-applied',
             'another instance holds the lock, so the flip is skipped' => 'a flip applied, nothing to do, or skipped by another instance',
             'a forced flip applies the mode it was given' => 'a flip that was forced',
             'a rehearsal that would flip exits zero' => 'a rehearsal, whether it would flip, would not, or was forced',
@@ -739,6 +751,8 @@ final class DbFlipPgcatCommandTest extends TestCase
         $this->assertFalse($window['converged']);
         $this->assertSame(480, $window['window_seconds']);
         $this->assertSame(0, $window['runs']);
+        $this->assertSame(0, $window['pool_repairs'], 'a container that never repaired reports none');
+        $this->assertNull($window['last_pool_repair_at']);
     }
 
     /**
@@ -763,6 +777,60 @@ final class DbFlipPgcatCommandTest extends TestCase
         $this->assertStringContainsString('no boot stamp was read', $output);
         $this->assertStringContainsString('unknown (no boot stamp)', $output);
         $this->assertStringNotContainsString('closed at', $output);
+    }
+
+    /**
+     * The pool repairs as `--status` prints them: the count and the time of the last one, read off
+     * the same state file a repair writes. A row of its own rather than a phrase inside
+     * `flip_runs`, because the count is the difference `last_kind` cannot carry — a pooler repaired
+     * twice reads the same `repaired` as one repaired once, and telling those apart is the whole
+     * point of counting.
+     */
+    public function test_the_status_table_reports_the_pool_repairs(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+
+        $installation->install();
+
+        file_put_contents($installation->path('state_file'), (string) json_encode([
+            'last_mode' => 'readers',
+            'runs' => 3,
+            'last_kind' => 'repaired',
+            'pool_repairs' => 2,
+            'last_pool_repair_at' => '2026-10-10T12:00:00+00:00',
+        ]));
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('pool_repairs', $output);
+        $this->assertStringContainsString('2 recorded (last 2026-10-10T12:00:00+00:00)', $output);
+
+        // And the same two facts in the report a machine reads.
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--json' => true]));
+
+        $window = $this->report(Artisan::output())['status']['window'];
+
+        $this->assertSame(2, $window['pool_repairs']);
+        $this->assertSame('2026-10-10T12:00:00+00:00', $window['last_pool_repair_at']);
+    }
+
+    /**
+     * A state file that has never seen a repair reads as none, and says so rather than printing an
+     * empty cell: the row is about a counter, and zero is the count. The same shape the
+     * `flip_runs` row uses for a container whose flip has not run yet.
+     */
+    public function test_the_status_table_reads_no_repairs_as_none(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+
+        $installation->install();
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+
+        $this->assertStringContainsString('0 recorded (last never)', Artisan::output());
     }
 
     /**
@@ -906,12 +974,19 @@ final class DbFlipPgcatCommandTest extends TestCase
         }
 
         // As a previous successful flip would have left them.
-        if ($preset === 'unchanged' || $preset === 'forced') {
+        if ($preset === 'unchanged' || $preset === 'forced' || $preset === 'pool-missing') {
             $installation->recordMode('readers');
         }
 
         if ($preset === 'locked') {
             $this->withTheLockHeldElsewhere($installation);
+        }
+
+        if ($preset === 'pool-missing') {
+            // The readers variant declares a pool, and the pooler is answered as having none:
+            // the one state supervisord cannot see, and the one a poll repairs.
+            file_put_contents($installation->path('readers_path'), "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+            $this->withThePoolerMissingAPool($installation);
         }
 
         return $installation;
@@ -936,6 +1011,35 @@ final class DbFlipPgcatCommandTest extends TestCase
             lockFile: $installation->path('lock_file'),
             lockAcquirer: static fn (string $file): array => [false, null],
             lockReleaser: static fn ($fp): null => null,
+        ));
+    }
+
+    /**
+     * A pooler supervisord calls healthy and the probe answers as having no pool — the fault
+     * this self-heal exists for.
+     *
+     * The probe seam is injected rather than a port opened, so the answer is the test's: the
+     * evidence a repair reports is the pooler's own, and a fixture that had to reach a socket
+     * would be testing a pooler this suite does not have. Everything else is the provider's
+     * own wiring — the resolved supervisor step and the config slice — so the only thing that
+     * differs from a real installation is where the answer comes from.
+     */
+    private function withThePoolerMissingAPool(PgcatInstallation $installation): void
+    {
+        app()->instance(PgcatConfigFlipper::class, new PgcatConfigFlipper(
+            resolver: app()->make(TimeWindowResolver::class),
+            config: $installation->config(),
+            stateFile: $installation->path('state_file'),
+            lockFile: $installation->path('lock_file'),
+            supervisorStep: app()->make(SupervisorStep::class),
+            poolProbe: static fn (string $database): array => [
+                'status' => PoolProbe::STATUS_MISSING,
+                'database' => $database,
+                'answered' => false,
+                'missing' => true,
+                'answer' => sprintf('No pool configured for database: "%s"', $database),
+                'evidence' => sprintf('pgcat is running but has no pool "%s"', $database),
+            ],
         ));
     }
 

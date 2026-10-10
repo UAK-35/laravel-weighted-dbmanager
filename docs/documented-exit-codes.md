@@ -42,7 +42,7 @@ so its single `1` is two returns to keep in step rather than one.
 |---|---|---|
 | `db:doctor` | anything failed, anything warned, `--strict` — three inputs into `gateFailed()` | a fourteen-cell matrix (`test_the_exit_code_is_a_function_of_the_rows_and_the_strict_flag`), the closing sentence from the same rule, and this guard |
 | `db:probe-replicas` | whether the read list held a replica at all, versus whether any of them answered — two ways to reach `1` | a nine-cell matrix, and this guard |
-| `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a seventeen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
+| `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a eighteen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
 | `db:pgcat-window-flip` | which route a firing takes: refused, switched off, unbound, before its window, inside it at the boundary, past its grace, on another day, the mode already applied, the lock held elsewhere, and whether the target answered | the window flip's twelve documented kinds, their numbers, and that every cell of it is an instance of one |
 | `db:replica-status` | one input: is the weighted manager bound — and one return *per channel*, which is where the hole was | its six-cell matrix, and this guard: the three routes its table documents, each of them run on the terminal and again as an object. This row used to say "not a matrix", and borrowed the probe's `unbound` cell for its single `1` — a claim about another command's guard, while the terminal half of this command's own return was driven by nothing |
 
@@ -76,7 +76,7 @@ column, a row with a different number of cells — throws, because a guard that 
 nothing reports agreement with a table it never found.
 
 The heading parameter matters for `db:doctor` in particular: that section's first table is
-the thirteen-row description of what each check judges, not the exit-code table, so "first table
+the fourteen-row description of what each check judges, not the exit-code table, so "first table
 under the heading" would bind the wrong thing. Selecting by column is what makes the guard
 say what it is about.
 
@@ -98,7 +98,7 @@ did anything warn), and every cell of the matrix is a point in it, so no map is 
 `documentedRow()` derives the documented case from the counts the matrix test already asserts,
 and the same comparison runs — the cell's number in the column its `$strict` selects.
 
-**The flip's seventeen cells.** The flip's table is nine documented cases against seventeen
+**The flip's eighteen cells.** The flip's table is ten documented cases against eighteen
 cells: the three ways a flip can politely do nothing are one case, the three ways a command can
 be refused are another, and the rehearsals are one case however they end. Its map lives in
 `DbFlipPgcatCommandTest::documentedSituations()`, and the same two directional checks run.
@@ -179,7 +179,7 @@ the drift rather than the repair.
 |---|---|
 | `DbProbeReplicasCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the sweep's five documented cases, their numbers, and that every one of its nine cells is an instance of one |
 | `DbDoctorTest::test_the_matrix_agrees_with_the_readme_exit_table` | the doctor's three documented cases, both `--strict` columns, and that the two sets of cases are the same |
-| `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's nine documented cases, their numbers, and that every one of its seventeen cells is an instance of one |
+| `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's ten documented cases, their numbers, and that every one of its eighteen cells is an instance of one |
 | `DbReplicaStatusTest::test_the_matrix_agrees_with_the_readme_exit_table` | the three routes its table documents, their numbers, and that every cell of the matrix is an instance of one |
 | `DbWindowFlipCommandTest::test_the_documented_kinds_are_the_kinds_the_matrix_reaches` | the window flip's sixteen-cell matrix, and that each cell's verdict is documented with the code it exits |
 | `DbFlipPgcatCommandTest::test_the_prose_that_restates_the_table_states_the_same_codes` | the sentences in three other sections that restate one of the flip's rows, the code each one writes, and the row it is a paraphrase of |

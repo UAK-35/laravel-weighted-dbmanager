@@ -453,6 +453,20 @@ class DbFlipPgcatCommand extends Command
             ),
         ];
 
+        // The pool repairs, as a row of their own rather than folded into `flip_runs`: a run can
+        // be a repair (`last_kind` says so) and the count is what tells a one-off from a pooler
+        // that keeps being repaired. A window block that does not carry the keys — an older
+        // flipper — reads as one that has never repaired anything, which is the same rule the
+        // row above follows for `runs`.
+        $rows[] = [
+            'pool_repairs',
+            sprintf(
+                '%s recorded (last %s)',
+                $text($window['pool_repairs'] ?? null, '0'),
+                $text($window['last_pool_repair_at'] ?? null, 'never'),
+            ),
+        ];
+
         return $rows;
     }
 
@@ -464,7 +478,12 @@ class DbFlipPgcatCommand extends Command
             // A closed window is the flipper declining to act, not a run that went wrong: it did
             // exactly what it was built to do at that point. Printed as a warning rather than as
             // an error for that reason, and the container's failure is `/health/db`'s to report.
+            //
+            // A repair is printed the same way and for a different reason: the run exited 0
+            // because it did its job, but it did it because a running pooler was not answering
+            // for a pool — a fault worth a line an operator notices, not one that failed the run.
             FlipResult::KIND_SKIPPED,
+            FlipResult::KIND_REPAIRED,
             FlipResult::KIND_WINDOW_CLOSED => $skipped(),
             // KIND_FAILED, plus anything a newer version might write.
             default => $failed(),

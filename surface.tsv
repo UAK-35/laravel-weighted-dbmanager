@@ -19,6 +19,7 @@ config	file	config/db-manager.php
 config	flip_window_seconds	config/db-manager.php
 config	grace_seconds	config/db-manager.php
 config	health	config/db-manager.php
+config	host	config/db-manager.php
 config	interval_minutes	config/db-manager.php
 config	key	config/app.php
 config	key_prefix	config/db-manager.php
@@ -33,6 +34,8 @@ config	name	config/db-manager.php
 config	no_readers_path	config/db-manager.php
 config	pgcat	config/db-manager.php
 config	pinned_query	config/db-manager.php
+config	pool_probe	config/db-manager.php
+config	port	config/db-manager.php
 config	previous_keys	config/app.php
 config	primary_store	config/db-manager.php
 config	providers	config/app.php
@@ -51,10 +54,12 @@ config	state_ttl	config/db-manager.php
 config	store	config/app.php
 config	store_probe_seconds	config/db-manager.php
 config	swrr	config/db-manager.php
+config	timeout_ms	config/db-manager.php
 config	timezone	config/app.php
 config	timezone	config/db-manager.php
 config	url	config/app.php
 config	use_reload	config/db-manager.php
+config	user	config/db-manager.php
 config	windows	config/db-manager.php
 const	Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand::KIND_DISABLED	src/Console/Commands/DbFlipPgcatCommand.php
 const	Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand::KIND_REFUSED	src/Console/Commands/DbFlipPgcatCommand.php
@@ -99,6 +104,7 @@ const	Uak35\WeightedDbManager\Pgcat\DryRunResult::STEP_WOULD	src/Pgcat/DryRunRes
 const	Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_FAILED	src/Pgcat/FlipResult.php
 const	Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_FLIPPED	src/Pgcat/FlipResult.php
 const	Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_NO_CHANGE	src/Pgcat/FlipResult.php
+const	Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_REPAIRED	src/Pgcat/FlipResult.php
 const	Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_SKIPPED	src/Pgcat/FlipResult.php
 const	Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_WINDOW_CLOSED	src/Pgcat/FlipResult.php
 const	Uak35\WeightedDbManager\Pgcat\FlipSchedule::COMMAND	src/Pgcat/FlipSchedule.php
@@ -118,6 +124,10 @@ const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNREADABLE	src/Pgca
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNSET	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNWRITABLE	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::SUPPORTED_DRIVERS	src/Pgcat/PgcatConfigFlipper.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::DEFAULT_TIMEOUT_MS	src/Pgcat/PoolProbe.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_ANSWERED	src/Pgcat/PoolProbe.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_MISSING	src/Pgcat/PoolProbe.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_SILENT	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\SupervisorStep::FAULT_EMPTY	src/Pgcat/SupervisorStep.php
 const	Uak35\WeightedDbManager\Pgcat\SupervisorStep::FAULT_ERRORED	src/Pgcat/SupervisorStep.php
 const	Uak35\WeightedDbManager\Pgcat\SupervisorStep::FAULT_NOT_RUNNING	src/Pgcat/SupervisorStep.php
@@ -196,6 +206,11 @@ env	SWRR_PGCAT_CONFIG	config/db-manager.php
 env	SWRR_PGCAT_ENABLED	config/db-manager.php
 env	SWRR_PGCAT_FLIP_WINDOW_SECONDS	config/db-manager.php
 env	SWRR_PGCAT_NO_READERS	config/db-manager.php
+env	SWRR_PGCAT_POOL_PROBE_ENABLED	config/db-manager.php
+env	SWRR_PGCAT_POOL_PROBE_HOST	config/db-manager.php
+env	SWRR_PGCAT_POOL_PROBE_PORT	config/db-manager.php
+env	SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS	config/db-manager.php
+env	SWRR_PGCAT_POOL_PROBE_USER	config/db-manager.php
 env	SWRR_PGCAT_READERS	config/db-manager.php
 env	SWRR_PGCAT_SCHEDULE_ENABLED	config/db-manager.php
 env	SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES	config/db-manager.php

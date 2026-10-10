@@ -4,6 +4,77 @@
 
 ### Added
 
+- **A flip that applies a mode now reads the pooler back, instead of reporting the transition and
+  assuming the pooler followed it.** The answerability read used to happen only where the mode was
+  *already* applied, so the state a flip could not see was its own: the file was the variant the new
+  mode asks for, the mode was recorded, and pgcat was still serving the pools it held a moment ago —
+  every read to a pool the new variant adds failing while `pgcat mode` compared two files and found
+  them in step. The run that swaps the file now asks the pooler about each pool the variant it
+  applied declares, with the same bounded attempts and delay a repair's starts use (`start_attempts`,
+  `start_retry_delay_ms`), because both ways of applying a config return before pgcat has re-read
+  one: a reload is a signal and a restart returns inside supervisor's `startsecs` window. A refusal
+  that survives those attempts is a signal that was not acted on, so the repair escalates to
+  `restart_command` — judged with the same `SupervisorStep::inspect()` a flip judges its own command
+  with — and the pools are read back once more. The run reports `repaired`, not `flipped`, with the
+  transition in its sentence (`… was applied (writer → readers) and the running pooler did not answer
+  for pool "reader_db_2" …`), and exits `0` for the reason a repair does: the file and the mode are
+  the flip's job and both are in place, while the standing fault is `/health/db`'s to report. An
+  installation with `use_reload = false` says so rather than restarting the pooler twice, a pooler
+  that answered nothing is never repaired — the line that keeps a probe on the wrong address from
+  restarting a healthy pooler — and `db:pgcat-flip --dry-run` reports the read as a step it cannot
+  perform, because the pools it would ask about are the ones nothing has renamed in yet. No setting
+  is added: the probe's own switch and the repair's own bounds are the whole of it, and an
+  installation that has not armed `swrr.pgcat.pool_probe.enabled` still swaps a file and reports the
+  transition exactly as before.
+
+- **Every pool repair is now counted, and `db:pgcat-flip --status` reports how many there have been
+  and when the last one happened.** The repair was visible only as a run's kind, and a kind cannot
+  tell a one-off from a pooler that keeps needing repair: two repairs a minute apart and two a week
+  apart both leave it reading `repaired`. The state file gains `pool_repairs` and
+  `last_pool_repair_at`, written wherever a repair is recorded — both the run that found the mode
+  already applied, and the run that applied a mode and read the pooler back — so a counter only one
+  path moved would read a pooler repaired by the other as never repaired. `--status` prints them as
+  a `pool_repairs` row beside `flip_runs` (`2 recorded (last 2026-10-10T12:00:00+00:00)`), and
+  `--status --json` carries the same two facts under `status.window`. Nothing else changes: the same
+  state file and the same window block, with a container that has never repaired anything reading
+  `0 recorded (last never)` rather than a row that is absent.
+
+- **`/health/db` and `db:doctor` now say whether the running pgcat is answerable for its pools, not
+  only whether the flip repaired one.** The pool-answerability probe was a *repair* and had no
+  reader: it runs inside a flip, and only inside the container's boot window, so the state it exists
+  for — a container past that window whose pgcat is RUNNING and holds no pool for a database the
+  applied variant declares — was invisible to every surface. `PgcatConfigFlipper::poolProbeVerdict()`
+  publishes that reading, and two surfaces ask for it by name, so they cannot disagree: `/health/db`
+  gains a `pool_probe` block (`enabled`, `applicable`, `answered`, `failed`, `warned`, `pools` — one
+  entry per declared pool with the pooler's own `answered`/`missing`/`silent` and its sentence — and
+  `reason`), and `db:doctor` gains a fourteenth row, `pool probe`, printing the same verdict and the
+  same sentence. A pool the pooler refuses makes the payload `degraded` and the row `FAIL`, with the
+  log line beside them; a pooler that answered nothing at all is `warned` and never failed, so a
+  probe pointed at the wrong address cannot take a healthy installation down or restart it; and
+  neither is judged while the boot window is still open, where the per-minute flip re-applies the
+  configuration. Off by default: an installation that has not armed `swrr.pgcat.pool_probe.enabled`
+  opens no socket, and both surfaces report that the pooler is taken at supervisord's word. The
+  reading is deliberately not part of `healthSummary()`, so `db:replica-status` and
+  `db:pgcat-flip --status` stay offline.
+
+- **A running pgcat that cannot answer for a pool is now a fault the flip repairs, not one
+  supervisord can hide.** The flipper's self-heal used to cover only the state supervisord can see
+  — a program that is not RUNNING — and a pooler can be RUNNING and hold a configuration with no
+  pool for a database the application is connected to, so every read to that pool fails while
+  `supervisorctl status` calls pgcat healthy. A run that finds the mode already applied now asks
+  the pooler about each pool the applied variant declares, over a PostgreSQL v3 startup packet and
+  the first message back — a pooler that resolves a pool before it authenticates refuses one it
+  holds no pool for, so the probe needs no credentials, no `psql` and no connection through the
+  pool it is measuring — and re-applies the config when a pool is missing. A pooler that
+  authenticates *first* answers every name, which is the limitation `PoolProbe` writes down beside
+  its measurement, because a probe that cannot tell those apart must not read as a proof that every
+  pool is there. `swrr.pgcat.pool_probe.enabled` arms it (off by
+  default; `host`, `port` — pgcat's own convention rather than PostgreSQL's, whose server would
+  answer every name in its own words — `user` and `timeout_ms` are its address and its bound), the answer is
+  the pooler's own admission rather than this package's guess, and a pooler that answered nothing
+  is reported rather than repaired, so a probe pointed at the wrong address cannot restart a
+  healthy pooler. The run reports the new `repaired` kind, which exits `0` like a flip.
+
 - **`db:doctor` and `db:pgcat-flip --status` now say which way round a stale pooler is, and the
 outside-window case is called out by name.** The verdict behind `/health/db`'s `reader_window`
 block — pgcat's own file against the mode the reader windows ask for — carries a `direction`
