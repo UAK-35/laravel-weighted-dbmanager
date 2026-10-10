@@ -127,10 +127,10 @@ $audit = new BootAudit(
     },
     // Runs in `finally`, so this is the moment the write is done with the record — the rename
     // having landed, and the lock on its way back for the next boot.
-    lockReleaser: static function (mixed $handle) use ($releaser, &$times): void {
+    lockReleaser: static function (mixed $handle, string $filePath) use ($releaser, &$times): void {
         $times['rename'] = microtime(true);
 
-        $releaser($handle);
+        $releaser($handle, $filePath);
     },
 );
 

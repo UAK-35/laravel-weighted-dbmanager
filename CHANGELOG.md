@@ -110,6 +110,26 @@ reading reports in this tree named this machine, so each was rewritten to name n
 now names the reading beside the climb one, and `HANDOFF.md`'s environment table resolves the
 interpreter through the machine file rather than spelling its path out.
 
+### Fixed
+
+- **The audit record is handed back writable, so a second account can write it — on any host.** The
+  record is shared between boots that are routinely not the same account: the web worker that boots
+  the application and the scheduled command that writes the same file are the ordinary pair. The swap
+  that writes it lands it with the mode the temp file was created under — 0644 under the usual umask
+  — so the second of them could not open it for writing at all, every boot after the first then
+  refused the whole read-merge-write, and the probe the record is the throttle for was reported as
+  one that cannot be remembered, on every boot, from the boot that found the file. The release now
+  clears that: `BootAudit::makeRecordWritable()` runs as the lock goes back, and it is one call on
+  both hosts rather than a branch — on Windows `chmod()` is the read-only attribute and all that host
+  has of a mode, and a record left read-only is exactly what the acquirer's `fopen(…, 'c')` refuses.
+  A filesystem that refuses the mode cannot turn a record that *was* written into a boot that failed,
+  and a path the write removed — `write()` removes the record when the merged one has nothing left to
+  remember — is left alone rather than created by a repair it did not ask for. Held by
+  `BootAuditTest::test_the_release_hands_the_record_back_writable_to_the_next_boot`, which takes the
+  shipped closure off a plain instance the way the concurrency child does, makes the record
+  read-only, and holds the hand-back to that: the mode on a host where a mode is a permission, and
+  the attribute on the host where it is not.
+
 ## 0.2.0-alpha2 - 2026-10-06
 
 BREAKING: parts of this release change what an installation reads at run time rather than only how

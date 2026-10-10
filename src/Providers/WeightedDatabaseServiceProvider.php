@@ -387,6 +387,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
     {
         // Let the parent wire up the connection factory, Eloquent, etc.
         parent::register();
+        $sysTempDir = sys_get_temp_dir();
 
         // The sample config, merged as the base. The app's own config/db-manager.php
         // replaces this file's `swrr` block wholesale — a shallow merge means an
@@ -452,7 +453,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         // uses, because pgcat only fronts PostgreSQL: an installation on MySQL,
         // MariaDB, SQLite or SQL Server has no pgcat pool to flip, so the flipper
         // reports itself disabled and every flip becomes a no-op.
-        $this->app->singleton(PgcatConfigFlipper::class, function (Application $app) {
+        $this->app->singleton(PgcatConfigFlipper::class, function (Application $app) use ($sysTempDir) {
             $config = $app->make(Repository::class);
             $swrr = ConfigValue::assoc($config->get('db-manager.swrr'));
             $pgcat = ConfigValue::assoc($swrr['pgcat'] ?? null);
@@ -464,11 +465,11 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 config: $pgcat,
                 stateFile: ConfigValue::string(
                     $pgcat['state_file'] ?? null,
-                    sys_get_temp_dir() . '/pgcat-flip-state.json',
+                    $sysTempDir . '/pgcat-flip-state.json',
                 ),
                 lockFile: ConfigValue::string(
                     $pgcat['lock_file'] ?? null,
-                    sys_get_temp_dir() . '/pgcat-flip.lock',
+                    $sysTempDir . '/pgcat-flip.lock',
                 ),
                 timezone: ConfigValue::string($swrr['timezone'] ?? null, 'UTC'),
                 connectionName: $current['connection'],
@@ -494,7 +495,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         // knob that costs anything: it is the interval at which the primary store is
         // probed, and it is what keeps the probe off the request path under FPM — see
         // BootAudit's docblock.
-        $this->app->singleton(BootAudit::class, function (Application $app) {
+        $this->app->singleton(BootAudit::class, function (Application $app) use ($sysTempDir) {
             $swrr = ConfigValue::assoc($app->make(Repository::class)->get('db-manager.swrr'));
             $audit = ConfigValue::assoc($swrr['audit'] ?? null);
 
@@ -509,7 +510,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             return new BootAudit(
                 file: ConfigValue::string(
                     $audit['file'] ?? null,
-                    sys_get_temp_dir() . '/swrr-audit.json',
+                    $sysTempDir . '/swrr-audit.json',
                 ),
                 storeProbeSeconds: ConfigValue::int($audit['store_probe_seconds'] ?? null, 60),
                 currentFindings: static fn (): array => $provider->liveFindings(),

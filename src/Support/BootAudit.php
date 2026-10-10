@@ -149,7 +149,7 @@ final class BootAudit
     /** @var \Closure(string): array{0: bool, 1: resource|null} */
     private \Closure $lockAcquirer;
 
-    /** @var \Closure(mixed): void */
+    /** @var \Closure(mixed, string): void */
     private \Closure $lockReleaser;
 
     /**
@@ -158,8 +158,9 @@ final class BootAudit
      * @param \Closure(string): array{0: bool, 1: resource|null}|null $lockAcquirer how one
      *        attempt at the record's lock is made — injected so a test can hold it, refuse it,
      *        or watch it being released without a second process
-     * @param \Closure(mixed): void|null $lockReleaser what lets the lock go again, called with
-     *        whatever the acquirer returned
+     * @param \Closure(mixed, string): void|null $lockReleaser what lets the lock go again, called
+     *        with whatever the acquirer returned and the path of the record it was held over,
+     *        which is also the file a release hands back writable
      * @param \Closure(): array{scope?: array<string, mixed>, evaluated?: list<string>, findings?: list<BootAuditFinding>}|null $currentFindings
      *        how the audited settings read *now*, evaluated by the process answering the
      *        request — the live half of the block. Injected by the provider, which is the
@@ -184,7 +185,9 @@ final class BootAudit
             return [@flock($handle, LOCK_EX | LOCK_NB), $handle];
         };
 
-        $this->lockReleaser = $lockReleaser ?? static function (mixed $handle): void {
+        $this->lockReleaser = $lockReleaser ?? static function (mixed $handle, string $filePath): void {
+            self::makeRecordWritable($filePath);
+
             if (is_resource($handle)) {
                 @flock($handle, LOCK_UN);
                 @fclose($handle);
@@ -1058,7 +1061,7 @@ final class BootAudit
 
             $this->write($record);
         } finally {
-            ($this->lockReleaser)($handle);
+            ($this->lockReleaser)($handle, $this->file);
         }
 
         return $kept;
@@ -1281,6 +1284,42 @@ final class BootAudit
         }
 
         return is_dir($directory) && is_writable($directory);
+    }
+
+    /**
+     * The record handed back able to be written by the next boot, whichever account that is.
+     *
+     * The swap writes the record under this process's umask, so what lands is routinely 0644,
+     * and the boots that share a record are routinely not the same account: the web worker that
+     * boots the application and the scheduled command that writes the same file are the ordinary
+     * pair, and the second of them cannot open a 0644 record for writing at all. This class then
+     * refuses the whole read-merge-write, and — the file being what throttles the store probe —
+     * every boot after the first skips the PING and reports the record it could not remember it in.
+     * So a write ends by saying that anyone who can reach the record may rewrite it.
+     *
+     * Windows has no mode to speak of — `chmod()` there is the read-only attribute and nothing
+     * else — but the one call is the right one on both hosts rather than one per host: a record
+     * another process left read-only is a record `fopen(…, 'c')` refuses, and clearing that
+     * attribute is the same repair in the only spelling that host has. A branch here would be two
+     * spellings of one intention, and the branch that has to be remembered is the one that rots.
+     *
+     * The result is not read, and the mode is not treated as a contract. A filesystem that refuses
+     * it — a FAT mount, a share, an ACL where the mode is not the permission — must not turn a
+     * record that *was* written into a boot that failed, and the state it leaves behind is already
+     * reported by the boot that meets it: `recordIsWritable()` false is the row and the line an
+     * operator reads, with the file named.
+     *
+     * A path with nothing at it is the ordinary case rather than a fault: `write()` removes the
+     * record when the merged one has nothing left to remember, so the release runs over a path that
+     * no longer exists — and `chmod()` fails on one, on both hosts.
+     */
+    private static function makeRecordWritable(string $filePath): void
+    {
+        if (!is_file($filePath)) {
+            return;
+        }
+
+        @chmod($filePath, 0o666);
     }
 
     /**

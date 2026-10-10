@@ -10,6 +10,7 @@ use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionClass;
+use ReflectionProperty;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\BootAuditFinding;
 use Uak35\WeightedDbManager\Support\UnreadableRecord;
@@ -536,6 +537,49 @@ class BootAuditTest extends TestCase
 
         flock($handle, LOCK_UN);
         fclose($handle);
+    }
+
+    /**
+     * The record is left open to the *next* boot, which is a different question from the lock
+     * being free: the swap writes the record under this process's umask, so what lands is 0644,
+     * and the boots that share a record are routinely not the same account — the web worker and
+     * the scheduled command are the ordinary pair. A record the next account cannot write is one
+     * this class then refuses to merge at all — and the file is also the probe's throttle, so every
+     * boot after the first skips the PING and says the record cannot be remembered in — which is why
+     * the release is where that is repaired.
+     *
+     * Taken through the *shipped* closure rather than a copy of it, the way the concurrency child
+     * takes its clamps: a test that reimplemented the release would pass against a class that had
+     * stopped repairing anything. What the repair *is* depends on the host, so the host says which
+     * claim is made — on Windows `chmod()` is the read-only attribute and all it has of a mode,
+     * and on any other host the mode is a permission and 0666 is the claim.
+     */
+    public function test_the_release_hands_the_record_back_writable_to_the_next_boot(): void
+    {
+        $file = $this->record([]);
+
+        // The state the repair exists for, asserted rather than assumed: a host that cannot make
+        // a file read-only cannot show this claim, and a test whose setup silently did nothing
+        // would pass against a release that did nothing either.
+        $this->assertTrue(chmod($file, 0o444));
+        clearstatcache(true, $file);
+        $this->assertFalse(is_writable($file), 'the record is the one thing here this account may not write');
+
+        $releaser = (new ReflectionProperty(BootAudit::class, 'lockReleaser'))->getValue(new BootAudit($file, 0));
+
+        $this->assertInstanceOf(\Closure::class, $releaser);
+
+        // The handle the acquirer would have returned — null here, because the record's lock was
+        // never taken and the release still has a record to hand back.
+        $releaser(null, $file);
+
+        clearstatcache(true, $file);
+
+        $this->assertTrue(is_writable($file), 'the next boot can open the record for writing, whoever it runs as');
+
+        if (PHP_OS_FAMILY !== 'Windows') {
+            $this->assertSame(0o666, fileperms($file) & 0o777, 'and on a host where a mode is a permission, that is the mode it is left in');
+        }
     }
 
     /**
