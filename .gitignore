@@ -8,6 +8,7 @@
 *.txt
 *-diagnose*.log
 /bin/*.bak
+/git/__pycache__/
 /.freebuff/project-id
 /.agents/*.local.json
 /opencode.jsonc

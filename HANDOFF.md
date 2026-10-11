@@ -323,7 +323,7 @@ repository is not an installation change until each of them happens.
 | Style gate | `php bin/tool.php pint --test` (PSR-12). |
 | Static analysis | `phpstan.neon.dist`: level `max`, over `src/` only — a file under `tests/` is style-checked but not analysed. |
 | In a consumer's tarball | `docs/` |
-| Left out of it | `tests/`, `.agents/`, `bin/api.php`, `bin/checks.php`, `bin/counts.php`, `bin/publish-config.php`, `bin/release.php`, `bin/surface.php`, `bin/weighing.php`, `bin/inventory.php`, `bin/blame.php`, `bin/tools.php`, `bin/tool.php`, `bin/interpreter.php`, `bin/handoff.php`, `bin/composer-link.cmd`, `bin/composer-ca.ps1`, `CHANGELOG.md`, `RELEASING.md`, `PUSHING.md`, `STATIC-ANALYSIS.md`, `HANDOFF.md`, `AGENTS.md`, `BEHAVE.mdc`, `phpstan.neon.dist`, `phpunit.xml.dist`, `pint.json`, `.gitattributes`, `.gitignore`, `.editorconfig`, `.idea`, `files.tsv`, `methods.tsv`, `surface.tsv` |
+| Left out of it | `tests/`, `.agents/`, `git/commit_paths.py`, `bin/api.php`, `bin/checks.php`, `bin/counts.php`, `bin/publish-config.php`, `bin/release.php`, `bin/surface.php`, `bin/weighing.php`, `bin/inventory.php`, `bin/blame.php`, `bin/tools.php`, `bin/tool.php`, `bin/interpreter.php`, `bin/handoff.php`, `bin/composer-link.cmd`, `bin/composer-ca.ps1`, `CHANGELOG.md`, `RELEASING.md`, `PUSHING.md`, `STATIC-ANALYSIS.md`, `HANDOFF.md`, `AGENTS.md`, `BEHAVE.mdc`, `phpstan.neon.dist`, `phpunit.xml.dist`, `pint.json`, `.gitattributes`, `.gitignore`, `.editorconfig`, `.idea`, `files.tsv`, `methods.tsv`, `surface.tsv` |
 | Text search | `rg` (ripgrep 15.2.0) is on `PATH`; `grep` works too. |
 | Machine record | `.agents/machine.local.json` — the facts above as the machine running the suite holds them, compared by `tests/Unit/Docs/HandoffTest.php`; gitignored, so a clone without the file skips that comparison. |
 
@@ -350,8 +350,9 @@ machine this suite is running on: the named `php.exe` run for its own `PHP_VERSI
 attempted so that the row's claim about `PATH` is measured rather than assumed, `php composer.phar
 --version`, `rg --version`, `git remote get-url origin` and the three git settings — where `git
 config` exiting 1 is the "unset" the row claims — `pint.json`'s preset through `bin/tool.php`, and
-the maintenance sentence: no `.skills/` sources, no generator, no Python among the files a commit
-would carry. Where a row describes a machine that is not this one the comparison skips rather than
+the maintenance sentence: no `.skills/` sources, no generator, and no Python among the files a commit
+would carry except the commit path under `git/`, which is a tool rather than a generator. Where a row
+describes a machine that is not this one the comparison skips rather than
 fails, which is what a fresh clone and CI's runner see — the same shape as the record itself:
 absent is a skip, present and different is a failure.
 

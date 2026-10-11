@@ -28,6 +28,7 @@
 /HANDOFF.md         export-ignore
 /AGENTS.md          export-ignore
 /BEHAVE.mdc         export-ignore
+/git/commit_paths.py export-ignore
 /bin/api.php          export-ignore
 /bin/checks.php       export-ignore
 /bin/counts.php       export-ignore

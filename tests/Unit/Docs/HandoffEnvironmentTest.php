@@ -366,8 +366,14 @@ final class HandoffEnvironmentTest extends TestCase
 
         // A generator is a program in the package, so it is asked of the files a commit would
         // carry rather than of the disk: a stray script in a working tree is not this package's.
+        // One Python file is the exception, and it is named: the guarded commit path under
+        // `git/` is a checkout's tool rather than a generator, so the rule the sentence states
+        // is that no *other* Python is carried.
         $python = Handoff::git('ls-files', '*.py');
-        $files = Handoff::outputLines($python['output']);
+        $files = array_values(array_diff(
+            Handoff::outputLines($python['output']),
+            ['git/commit_paths.py'],
+        ));
 
         self::assertSame(
             [],

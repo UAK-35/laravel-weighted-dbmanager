@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **The guarded commit path is a file of this repository, and the skill that names it points
+  there.** The rule that a commit carries only the paths it names lived in the LPR application's
+  `git/commit_paths.py`, reached across a sibling checkout — a fact this package's own rules
+  forbid it to read. The tool is copied in beside the package it commits, under `git/`, with the
+  application's own references removed: the header no longer points at a `site/AGENTS.md` or a
+  `.agents/stale_index.py` that are not here, and the history it narrates about an earlier commit
+  is stated as the rule it exists to hold. `pkg-commit` now points at that local path, and
+  `HandoffEnvironmentTest` names the one `.py` file a commit carries and exempts it, so the
+  hand-maintained rule the note states is that no *other* Python is carried rather than that none
+  is. `.gitattributes` holds the tool out of a consumer's tarball beside `AGENTS.md`, so
+  installation reads nothing new.
+
 - **The handoff note's records reading holds the commands its transcript quotes rather than a fixed
   exit code, so a note can be taken at the commit a release leaves.** The guard required
   `php bin/inventory.php --check --at=<register>` to exit 1 — the three `.tsv` records out of step with

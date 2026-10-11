@@ -104,10 +104,18 @@ package has no ref hook that refuses an unsigned one — so check it yourself:
 git log --format='%h %G? %s' -3          # every row should read `G`, never `N`
 ```
 
-If you are working from the LPR checkout, where this package is a sibling directory, the
-guarded path is `python git/commit_paths.py --repo ../../packages/laravel-weighted-dbmanager
--F <message-file> -- <package-relative paths>`: it commits the working tree rather than
-whatever was staged, and it repairs the index afterwards.
+This package carries its own guarded commit path, `git/commit_paths.py` (Python 3), run from
+the package root:
+
+```bash
+python git/commit_paths.py -F <message-file> -- <package-relative paths>
+```
+
+It commits the working-tree content of exactly the paths you name rather than whatever is
+staged, so another hand's staged work is left untouched, and it sets the index to the commit
+afterwards so a later plain `git commit` cannot publish the old bytes back over it.
+`--dry-run` builds and checks the commit without making it. It is a checkout's tool —
+`.gitattributes` holds it — and it is exported out of a consumer's tarball.
 
 ## Two files that are never committed
 
