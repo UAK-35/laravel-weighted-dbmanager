@@ -189,6 +189,19 @@ interpreter through the machine file rather than spelling its path out.
   the guard's own source is scanned for a form — or a pair — spelled out by hand instead. The
   renderer is `export-ignore`d, so no consumer tarball carries it.
 
+- **The handoff note may now say that nothing is pending, which is what a re-take after the last
+  batch says.** `Handoff::pending()` refused a section 1 whose table had no rows — *the half of the
+  note that says what has not been committed yet has nothing in it* — which made the note un-takeable
+  in the state a cycle ends in: every batch committed, nothing untracked, and a section whose honest
+  answer is that there is nothing to name. The complaint was already made in the other direction, by
+  the test that compares `uncarried()` — every path this checkout has that no commit carries — with
+  the paths the section names: a file nobody names fails it whether the table has rows or not, so an
+  empty table cannot hide one, and the refusal protected nothing while forbidding a state the note has
+  to be able to describe. The prose column for the six files the batches had been carrying
+  (`PENDING_DESCRIPTIONS`) went with them — a declaration is words about a *pending* file, and prose
+  kept beside a table that cannot hold those rows is the stale copy the mechanism exists to refuse —
+  and a path the register does not carry with no line for it is still refused by name.
+
 ### Fixed
 
 - **The audit record is handed back writable, so a second account can write it — on any host.** The

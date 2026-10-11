@@ -286,11 +286,22 @@ final class Handoff
     }
 
     /**
-     * The files section 1 calls written and uncommitted, each with the line it is named on.
+     * The files section 1 names as what the register does not carry, each with the line it is on.
+     *
+     * WHY AN EMPTY TABLE IS A READING AND NOT AN ERROR
+     * -----------------------------------------------
+     *   This used to refuse a table with no rows — *the half of the note that says what has not been
+     *   committed yet has nothing in it* — and that refusal made the note un-takeable in the state a
+     *   cycle ends in: every batch committed, nothing untracked, and a section 1 whose honest answer
+     *   is that there is nothing to name. The complaint was already made in the other direction, by
+     *   the test that compares `uncarried()` — every path this checkout has that no commit carries —
+     *   with the paths the section names: a file nobody names fails it whether the table has rows or
+     *   not, so an empty table cannot hide one, and refusing it protected nothing while forbidding a
+     *   state the note has to be able to describe.
      *
      * @return list<array{path: string, source: int}>
      *
-     * @throws RuntimeException when the section, its table, or a path in it is not there
+     * @throws RuntimeException when the section or its table is not there
      */
     public static function pending(): array
     {
@@ -300,13 +311,6 @@ final class Handoff
             foreach (self::pathsIn($row['cells'][0] ?? '') as $path) {
                 $pending[] = ['path' => $path, 'source' => $row['source']];
             }
-        }
-
-        if ($pending === []) {
-            throw new RuntimeException(
-                'HANDOFF.md section 1 names no file as pending, so the half of the note that says what has '.
-                'not been committed yet has nothing in it.',
-            );
         }
 
         return $pending;
@@ -480,32 +484,18 @@ final class Handoff
      *   a renderer whose input is the file it is about to rewrite cannot answer for the file it was
      *   handed instead.
      *
+     * WHY IT IS EMPTY HERE
+     * --------------------
+     *   The six lines that used to be below this described the files this cycle's batches were still
+     *   carrying when the note before this one was taken, and those batches have landed: a declaration
+     *   is words about a *pending* file, so with the pending set empty they would have been prose kept
+     *   beside a table that cannot hold those rows — the stale copy this mechanism exists to refuse.
+     *   The next file the register does not carry asks for its line again, by name, which is the
+     *   refusal doing its work rather than an accident of an empty map.
+     *
      * @var array<string, string>
      */
-    private const PENDING_DESCRIPTIONS = [
-        'BEHAVE.mdc' => "another hand's, and no batch here's: a coding-agent rule file left at the root while "
-            .'this note was re-taken — uncommitted, and named here because a file nothing names is work the '
-            .'next thread cannot see',
-        'tests/Support/RepositorySnapshot.php' => 'a repository read as one comparable value, for the two release '
-            .'guards that hold a run to writing nothing: every file under the fixture by the hash of its bytes and '
-            .'by size and mtime, and where there is a `.git`, HEAD, the branch, the refs, the index, the porcelain '
-            .'and the reflog — the reading moved out of `tests/Unit/Release/DryRunTest.php` so both files take '
-            .'one reading of one promise',
-        'bin/handoff.php' => "this note's renderer: it writes the `pending`, `unpushed` and `log` blocks from "
-            .'git through `tests/Support/Handoff.php` — the derivations the note\'s own guard reads — and refuses a file '
-            .'it has no words for rather than rendering it blank',
-        'tests/Unit/Console/DbFlipPgcatDryRunTest.php' => 'a rehearsal held to the installation rather than to its '
-            .'own report: every file under the fixture hashed on both sides of a `--dry-run`, with a real flip '
-            .'and a mutated rehearsal as the two controls',
-        'tests/Unit/Release/DerivedWritersTest.php' => 'the writers declaration held to the commands, so a derived '
-            .'file cannot be written by nobody: it forges a row into each of the three records and a marker into '
-            .'the page, runs each command over the marked tree, and asks every file whether it was the one that '
-            .'command repaired',
-        'tests/Unit/Release/ExitPathsTest.php' => 'every exit of `bin/release.php` that is not the apply — the '
-            .'refusals, the usage errors, the argument checks, the unanswered question and the dry runs, '
-            .'`--skip-ci` and declared versions among them — read on both sides of the run, with the script\'s own '
-            .'exit sites read out of the script and compared with the table',
-    ];
+    private const PENDING_DESCRIPTIONS = [];
 
     /**
      * The blocks the note carries, so a test can ask for each of them by name.
