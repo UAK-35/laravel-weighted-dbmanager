@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha3 - 2026-10-11
+
 ### Added
 
 - **A flip that applies a mode now reads the pooler back, instead of reporting the transition and
