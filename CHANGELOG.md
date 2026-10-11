@@ -121,6 +121,19 @@ interpreter through the machine file rather than spelling its path out.
   the file out of the tarball beside `AGENTS.md`, the other rule file a consumer has no use for. No
   file under `src/` or `config/` moves, so nothing an installation reads changes.
 
+- **Every file this package derives from its own record now names the commands that write it.**
+  `bin/surface.php`'s one list (`derivedFiles()`) gains a `written_by` row per artefact, with
+  `derivedWriters()` as the key-to-command vocabulary and `derivedBy()` as the other direction — so
+  "what is derived?" and "with which command do I refresh it?" are answered by the same table rather
+  than by reading three programs. `bin/release.php` writes every row that names it,
+  `bin/inventory.php` the record and the page rendered from it, `bin/api.php` the page alone and it
+  refuses a page whose row does not name it: the page's path is now something the page's own row
+  says rather than one the renderer happens to know. A command missing from a row stops writing that
+  file instead of half-writing the set, and `tests/Unit/Release/DerivedWritersTest.php` holds the
+  declaration to the commands by measurement — a forged row in each of the three records, a marker in
+  the page, and each command asked whether it was the one that repaired the file. No row the record
+  or the page carries moves, which the same two `--check` runs report.
+
 ### Fixed
 
 - **The audit record is handed back writable, so a second account can write it — on any host.** The

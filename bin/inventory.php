@@ -4,8 +4,8 @@
 declare(strict_types=1);
 
 /**
- * bin/inventory.php — write the inventory — files.tsv, methods.tsv, surface.tsv —
- * from the working tree, or from the tree a ref holds.
+ * bin/inventory.php — write the inventory — files.tsv, methods.tsv, surface.tsv — and the
+ * page rendered from it, API.md, from the working tree, or from the tree a ref holds.
  *
  * WHAT THE THREE FILES ARE FOR
  * ----------------------------
@@ -23,9 +23,12 @@ declare(strict_types=1);
  *
  * IT IS NOT A SECOND TREE TO KEEP IN STEP BY HAND
  * ----------------------------------------------
- *   `bin/release.php` writes all three files itself, in the same commit as the
- *   CHANGELOG promotion, stamped with the tag it is creating. The stamp is the
- *   whole safety property: a file that describes the release being cut is
+ *   `bin/release.php` writes every file derived from the record in the same commit as the
+ *   CHANGELOG promotion, stamped with the tag it is creating — the three below and
+ *   `API.md`, the page rendered from them. Neither it nor this script names those files:
+ *   they are the rows of `derivedFiles()` in `bin/surface.php`, each naming the commands
+ *   that write it, so this command reaches its own rows (`derivedBy('inventory', …)`) and
+ *   cannot know about one of them and not the others. The stamp is the whole safety property: a file that describes the release being cut is
  *   evidence, and a file regenerated at some other moment is not — so the release
  *   script reads them only when the stamp matches the tag it is releasing from,
  *   and says so when it does not. Run this command by hand only when you mean to
@@ -63,8 +66,10 @@ declare(strict_types=1);
  *
  * USAGE
  * -----
- *   php bin/inventory.php                 write all three files, stamped with the latest tag
- *   php bin/inventory.php --at=REF        ...for the tree at REF instead of the checkout
+ *   php bin/inventory.php                 write the record, and the page it renders, stamped
+ *                                         with the latest tag
+ *   php bin/inventory.php --at=REF        write the record for the tree at REF instead — the
+ *                                         page is left alone
  *   php bin/inventory.php --check         compare, write nothing, exit 1 when out of step
  *   php bin/inventory.php --root=PATH     run against another checkout
  *   php bin/inventory.php --help
@@ -226,7 +231,11 @@ if ($elsewhere !== []) {
     exit(1);
 }
 
-$result = syncDerived($root, $tag, !$check, $records);
+// The rows this command writes are the ones that name it, and the page is one of them: a plain run
+// refreshes the record and the page rendered from it, a `--at` run's rows are another tree's and
+// the page describes this one, which the list turns into the rows a run reaches (see derivedBy()).
+$writable = derivedBy('inventory', $root);
+$result = syncDerived($root, $tag, !$check, $records, 'inventory');
 $counts = inventoryDocument($root, $tag, $records)['count'];
 
 if ($check) {
@@ -298,7 +307,7 @@ foreach ($result['wrote'] as $derivedKey) {
         continue;
     }
 
-    foreach (derivedFiles($root)[$derivedKey]['files'] as $derivedPath) {
+    foreach ($writable[$derivedKey]['files'] as $derivedPath) {
         note(sprintf('%s — %s', basename($derivedPath), $result['rows'][$derivedKey]));
     }
 }
@@ -389,8 +398,8 @@ function usage(): void
           --root=PATH      Package root to inventory (default: the parent of bin/).
       -h, --help           Show this help.
 
-    The release script refreshes all three files in the release commit, so running this
-    by hand is for seeing what changed — not for keeping them current.
+    The release script refreshes the record and the page in the release commit, so running
+    this by hand is for seeing what changed — not for keeping them current.
 
     TXT;
 }

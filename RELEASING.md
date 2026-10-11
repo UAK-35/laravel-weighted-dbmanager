@@ -134,6 +134,25 @@ page that cannot be written stops the release before the tag like every other st
 writes. `PublicApiReportTest` runs the generator backwards against the committed pair, and
 `php bin/api.php --check` is the read-only half a pipeline calls.
 
+The page is not written by a rule of its own. Every file derived from the record is a row of
+one list, `derivedFiles()` in `bin/surface.php` — the three records and this page today — and
+each row also names the commands that write it, which is the second question a reader of the
+list has and the one that used to be answerable only by reading three programs:
+
+| Artefact | Files | Written by |
+|---|---|---|
+| the record | `files.tsv`, `methods.tsv`, `surface.tsv` | `bin/release.php`; `bin/inventory.php`, on any run |
+| the page | `API.md` | `bin/release.php`; `bin/api.php`; `bin/inventory.php` on a run against the checkout — `--at=REF` describes another tree's rows, so it leaves the page alone |
+
+That table is the readable form of the declaration and changes no meaning of its own: each
+command reaches its files through `derivedBy()` — the rows that name it — rather than through
+the whole list, and `bin/api.php` refuses to write a page whose row does not name it, so an
+artefact added to the list is written by exactly the commands its row names and a command
+dropped from a row stops writing that file. That is what makes the failure above unrepeatable
+rather than merely fixed: `v0.2.0-alpha2` left the page describing the release before it
+because nothing in the record's path named the page at all. The list's order is the dependency
+— the record, then the page rendered from the record on disk.
+
 ### A record that is partly there stops the release
 
 An incomplete inventory is not only a reading problem. An inventory that is *entirely*
@@ -165,10 +184,11 @@ writes them either way, and refusing would make the record a precondition of eve
 creating it.
 
 Regenerating by hand is for looking — `php bin/inventory.php` rewrites all three
-files with the latest tag and prints the evidence that rewrite discarded:
+files and the page rendered from them with the latest tag, and prints the evidence
+that rewrite discarded:
 
 ```bash
-php bin/inventory.php            # write all three files, stamp them with the latest tag
+php bin/inventory.php            # write the record and the page, stamped with the latest tag
 php bin/inventory.php --check    # compare, write nothing, exit 1 when out of step
 ```
 
@@ -200,6 +220,12 @@ invisible, for the same reason it is there: it is not something a release shippe
 ref is any ref — a tag, a branch, a commit, `HEAD~3` — and it is stamped with its own
 tag, with the release tag on the commit it names, or with `(no tag)` when no release
 names it, which is the same word the working-tree reader uses.
+
+The page is not part of a run against a ref. `API.md` is rendered from the record on
+disk, so a run describing another tree's rows has no page of its own to write and
+leaves the checkout's alone — which is the list's `from` column doing the work rather
+than an exception made for `--at`, and it is why that flag moves the record and nothing
+else.
 
 Reading a ref is also the one case where the record already on disk can belong to a
 different release, and one slot cannot hold two. That run is refused, naming the stamp

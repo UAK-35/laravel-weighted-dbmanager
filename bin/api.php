@@ -38,8 +38,12 @@ declare(strict_types=1);
  *   php bin/api.php --root=PATH     run against another checkout
  *   php bin/api.php --help
  *
- *   The inventory is written by the release script, so this page is refreshed in the
- *   same commit: run it by hand only when you mean to commit the page it writes.
+ *   The page is refreshed wherever the record is: `bin/release.php` writes both into the
+ *   release commit, and `bin/inventory.php` refreshes both when it runs against the
+ *   checkout. Run this by hand only when you mean to commit the page it writes — and note
+ *   that this command is named as a writer of the page by the one list in `bin/surface.php`,
+ *   so a page whose row does not name it is one it refuses to write rather than a path it
+ *   happens to know.
  *
  * EXIT CODES
  * ----------
@@ -147,11 +151,25 @@ function apiReport(string $root): string
  * Where the page lives: the path `bin/surface.php`'s list of derived files gives it, so the page is
  * one row of that list rather than a path this file knows on its own — the writer here, the check
  * here and the release that writes it alongside the record all name the same file.
+ *
+ * The row also has to name *this* command among its writers, and that is checked rather than assumed:
+ * a page whose row does not name `bin/api.php` is one this file may not write, and a command that
+ * wrote it anyway would be the half-knowledge the one list exists to end. Removing this command from
+ * the row is therefore how a release takes over the page, and it is a refusal here rather than a
+ * silent bare path.
  */
 function apiReportPath(string $root): string
 {
+    $artefact = derivedBy('api', $root)['api'] ?? null;
+
+    if ($artefact === null) {
+        throw new RuntimeException(
+            'bin/api.php is not named among the writers of the api artefact in bin/surface.php, so this command may not write it',
+        );
+    }
+
     /** @var array<string, string> $files */
-    $files = derivedFiles($root)['api']['files'];
+    $files = $artefact['files'];
 
     return $files['api'];
 }
@@ -521,6 +539,7 @@ function apiMain(string $root, bool $check): int
 {
     try {
         $record = apiRecord($root);
+        $path = apiReportPath($root);
     } catch (RuntimeException $error) {
         fwrite(STDERR, PHP_EOL . '✗ Nothing to publish: ' . $error->getMessage() . '.' . PHP_EOL . PHP_EOL);
 
@@ -528,7 +547,6 @@ function apiMain(string $root, bool $check): int
     }
 
     $page = apiMarkdown($record);
-    $path = apiReportPath($root);
     $described = sprintf(
         '%d classes, %d public methods, described as %s',
         count(apiClasses($record['files'], $record['methods'])),

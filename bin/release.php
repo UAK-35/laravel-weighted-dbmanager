@@ -50,6 +50,12 @@ declare(strict_types=1);
  *   and is never weighed, which is why it is written after the record it renders: a page
  *   rendered from a record that is not on disk yet is the state a hand-run leaves behind.
  *
+ *   The record and the page are rows of one list in `bin/surface.php` (`derivedFiles()`), and
+ *   each row names the commands that write it — this script among them, which is the whole of
+ *   why the files this release writes and commits are `derivedBy('release', …)` rather than a
+ *   list kept here: a fifth derived artefact is a row, and a command missing from a row stops
+ *   writing that file instead of half-writing the set.
+ *
  *   A name two files declare is one entry in the public-API map — the first file read
  *   holds it, and the second file's declaration is not in the surface at all — so a
  *   change to that second file's key is a change the tag diff cannot see. The plan says
@@ -738,18 +744,20 @@ $inventoryLine = $weighing['inventory']['blocks_release']
             ? 'fresh, weighed against ' . $weighing['inventory']['stamp']
             : 'stale, refreshed by this release and not weighed'));
 
-// One line per derived file, from the one list that names them (bin/surface.php) — so an artefact
-// added to that list appears in this plan, in the notes below and in the release commit without
-// anything here being told about it. The lines are described from the tree's rows rather than from
-// the record on disk: the record the plan is describing may be the stale or absent one the weighing
-// just reported, and every derived file is written from this tree. Each line names the tag being
-// created, because that is what stamps all of them: it is the tag, and not a count, that says which
-// release a consumer is reading.
+// One line per derived file, from the rows that name this command (bin/surface.php) — so an
+// artefact whose row adds `release` appears in this plan, in the notes below and in the release
+// commit without anything here being told about it, and an artefact this command does not write is
+// one the plan does not claim and the commit does not carry. The lines are described from the
+// tree's rows rather than from the record on disk: the record the plan is describing may be the
+// stale or absent one the weighing just reported, and every derived file is written from this tree.
+// Each line names the tag being created, because that is what stamps all of them: it is the tag,
+// and not a count, that says which release a consumer is reading.
 $derivedContext = ['root' => $root, 'tag' => $tag, 'records' => inventoryRecords($root)];
+$derivedList = derivedBy('release', $root);
 
 printf("  release notes %d bullet(s) in the promoted section%s", $promoted['entries'], PHP_EOL);
 
-foreach (derivedFiles($root) as $derivedKey => $derivedArtefact) {
+foreach ($derivedList as $derivedKey => $derivedArtefact) {
     printf(
         "  %-13s %s%s%s",
         $derivedArtefact['label'],
@@ -860,7 +868,7 @@ if (!write($changelogPath, $promoted['content'])) {
 // here leaves the tree with a promoted CHANGELOG, no tag, and the artefacts the list had reached,
 // which is the same shape as every other step that fails — no version is left behind.
 try {
-    $derived = syncDerived($root, $tag, true);
+    $derived = syncDerived($root, $tag, true, null, 'release');
 } catch (RuntimeException $error) {
     fail('Could not render the derived files: ' . $error->getMessage() . '.');
 }
@@ -872,7 +880,7 @@ if ($derived['refused'] !== []) {
     foreach ($derived['refused'] as $derivedKey => $refusal) {
         fail(sprintf('Could not render %s: %s.', implode(' / ', array_map(
             static fn (string $path): string => basename($path),
-            array_values(derivedFiles($root)[$derivedKey]['files']),
+            array_values($derivedList[$derivedKey]['files']),
         )), $refusal));
     }
 }
@@ -885,7 +893,7 @@ if (!$derived['written']) {
 }
 
 foreach ($derived['wrote'] as $derivedKey) {
-    note(sprintf(derivedFiles($root)[$derivedKey]['note'], $derived['rows'][$derivedKey]));
+    note(sprintf($derivedList[$derivedKey]['note'], $derived['rows'][$derivedKey]));
 }
 
 if ($aliased['changed'] && !write($composerPath, $aliased['content'])) {

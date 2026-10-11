@@ -2213,11 +2213,13 @@ bin/interpreter.php      which `php.exe` the machine record names, and running a
 bin/checks.php           every local check, summed up in one summary
 bin/counts.php           writes the counts a record states from the code that owns them
 bin/release.php          tag-driven releases (see RELEASING.md)
-bin/surface.php          the symbol reader, the surface differ and the inventory format
-                         the release commands share
+bin/surface.php          the symbol reader, the surface differ, the inventory format the
+                         release commands share, and the one list of the files derived from
+                         the record with the commands that write each
 bin/weighing.php         the four signals and the weighing release.php and blame.php share
-bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv from the working tree,
-                         or from any ref with --at= (see RELEASING.md)
+bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv, and the API.md page
+                         rendered from them, from the working tree — or the record alone
+                         from any ref with --at= (see RELEASING.md)
 bin/api.php              renders API.md — the public API page — from that record, so the
                          rows a release weighs are also the page a consumer reads
 bin/blame.php            which signal names one symbol, and what it contributed to the bump

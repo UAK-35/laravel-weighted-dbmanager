@@ -1386,13 +1386,30 @@ function inventoryDocument(string $root, string $tag, ?array $records = null): a
  *
  * WHAT A ROW IS
  * -------------
- *   label     what a plan and a release note call it — one row per artefact, not per file
- *   from      `tree` when its rows come from the tree being described, `record` when it is rendered
- *             from the record on disk
- *   files     the file names it writes, each mapped to the key its renderer answers with
- *   render    the bytes for those keys, from the tag and the rows
- *   describe  the one line it reports itself with: what it holds, and the tag it names
- *   note      the release's note for it, with the describe line filled in
+ *   label      what a plan and a release note call it — one row per artefact, not per file
+ *   from       `tree` when its rows come from the tree being described, `record` when it is
+ *              rendered from the record on disk
+ *   files      the file names it writes, each mapped to the key its renderer answers with
+ *   render     the bytes for those keys, from the tag and the rows
+ *   describe   the one line it reports itself with: what it holds, and the tag it names
+ *   note       the release's note for it, with the describe line filled in
+ *   written_by the commands that write it, named as `derivedWriters()` names them
+ *
+ * WHO WRITES EACH
+ * ---------------
+ *   The second question a reader of this list has — after "what is derived?" — is "with which
+ *   command do I refresh it?", and it used to be answerable only by reading three programs:
+ *   `bin/release.php` wrote all four, `bin/inventory.php` wrote the record and (since the page
+ *   joined the list) the page, and `bin/api.php` wrote the page alone. That split is real and worth
+ *   keeping — a hand run of `bin/api.php` must not touch the record it reads, and a run against a
+ *   ref must not touch a page it has no rows for — but it was declared nowhere, so a fifth artefact
+ *   could be added to this list and never be written by the command a reader would reach for, with
+ *   nothing saying which that was. So each row names its writers, and each writer reads its rows:
+ *   `syncDerived()` takes the command it is writing for and refuses a name that is not in
+ *   `derivedWriters()`, `bin/api.php` refuses to write a page whose row does not name it, and the
+ *   declaration is what the plan, the notes and the staging list are computed from rather than
+ *   something they restate. Dropping a command from a row stops that command writing the file, which
+ *   is the one way this declaration can be wrong loudly rather than quietly.
  *
  * The order is the writing order and it is a dependency rather than a preference: the page reads the
  * record on disk, so a page rendered before the record it describes is the state this prevents.
@@ -1401,7 +1418,7 @@ function inventoryDocument(string $root, string $tag, ?array $records = null): a
  * describes the record a checkout ships — so rows read out of git leave the page alone, which is the
  * rule rather than a special case: the page's rows are the record on disk, and a ref's are not.
  *
- * @return array<string, array{label: string, from: string, files: array<string, string>, render: callable, describe: callable, note: string}>
+ * @return array<string, array{label: string, from: string, files: array<string, string>, render: callable, describe: callable, note: string, written_by: list<string>}>
  */
 function derivedFiles(string $root): array
 {
@@ -1410,6 +1427,7 @@ function derivedFiles(string $root): array
         'inventory' => [
             'label' => 'inventory',
             'from' => 'tree',
+            'written_by' => ['release', 'inventory'],
             'files' => [
                 'files' => $root . '/files.tsv',
                 'methods' => $root . '/methods.tsv',
@@ -1443,6 +1461,7 @@ function derivedFiles(string $root): array
         'api' => [
             'label' => 'api page',
             'from' => 'record',
+            'written_by' => ['release', 'inventory', 'api'],
             'files' => ['api' => $root . '/API.md'],
             'render' => static function (array $context): array {
                 apiRenderer();
@@ -1465,6 +1484,53 @@ function derivedFiles(string $root): array
 }
 
 /**
+ * The commands that write derived files, and what each is called — the other half of the
+ * declaration above, in the same place as it.
+ *
+ * A row names its writers with these keys and nothing else, so the names are one vocabulary rather
+ * than three spellings: a writer is looked up here before it is trusted, and `derivedBy()` answers
+ * with the rows that name it. The label is what a refusal says, because a reader who has just been
+ * told a command may not write a file needs the command's name rather than its key.
+ *
+ * @return array<string, string> key as a row writes it → the command, as a path a reader can run
+ */
+function derivedWriters(): array
+{
+    return [
+        'release' => 'bin/release.php',
+        'inventory' => 'bin/inventory.php',
+        'api' => 'bin/api.php',
+    ];
+}
+
+/**
+ * The rows one command writes, in the list's order — the whole of what that command may write.
+ *
+ * Every writer reaches its artefacts through this rather than through `derivedFiles()`: a writer
+ * that asked for the whole list would write files its row does not name it for, which is the fault
+ * the declaration exists to make visible, and a writer that asked for its rows by name would be
+ * restating the table it is supposed to read. The command is validated, so a misspelling is a
+ * refusal rather than an empty list that writes nothing and reports success.
+ *
+ * @return array<string, array{label: string, from: string, files: array<string, string>, render: callable, describe: callable, note: string, written_by: list<string>}>
+ */
+function derivedBy(string $writer, string $root): array
+{
+    if (!array_key_exists($writer, derivedWriters())) {
+        throw new RuntimeException(sprintf(
+            '%s is not a writer of derived files — %s are, in bin/surface.php',
+            $writer,
+            implode(', ', array_keys(derivedWriters())),
+        ));
+    }
+
+    return array_filter(
+        derivedFiles($root),
+        static fn (array $artefact): bool => in_array($writer, $artefact['written_by'], true),
+    );
+}
+
+/**
  * The page's renderer, loaded where it is needed rather than at the top of this file.
  *
  * `bin/api.php` requires this file, so requiring it back at load time would be a cycle; requiring it
@@ -1477,8 +1543,14 @@ function apiRenderer(): void
 }
 
 /**
- * The one function that renders, compares and writes every derived file, in the order the list
- * gives: the record first, then what is rendered from it.
+ * The one function that renders, compares and writes the derived files one command writes, in the
+ * order the list gives: the record first, then what is rendered from it.
+ *
+ * The command is an argument rather than an assumption, and it is what selects the files: the rows
+ * are `derivedBy($writer, …)`, so a file whose row does not name this command is one this run
+ * cannot write and cannot be asked about. That is the declaration being read rather than restated —
+ * the release writes all four because all four name it, and a run of `bin/inventory.php` that could
+ * not write the page it refreshes would be a row edited, not a branch here.
  *
  * It stops at the first artefact it cannot write. A release that cannot write the record must not
  * publish a page rendered from the record it failed to write, and the failure has to name that
@@ -1490,9 +1562,10 @@ function apiRenderer(): void
  * caught. The comparison is a read, so `--check` and a plan see the same answer the writer does.
  *
  * @param array{files: list<array{name: string, path: string, symbol: string}>, methods: list<array{method: string, file: string, class: string, signature: string}>, surface: list<array{kind: string, symbol: string, file: string}>}|null $records the rows to write, or null for the working tree's — which also decides what is in scope, because a ref's rows are another tree's and a page describes this one (see derivedFiles())
+ * @param string $writer the command writing — a key of derivedWriters() — which decides the rows, and is how a file it does not write is one it cannot report on
  * @return array{current: bool, written: bool, files: array<string, string>, rows: array<string, string>, wrote: list<string>, refused: array<string, string>, failed: list<string>, differs: array<string, array{on_disk: string|null, expected: string|null, refused?: string}>}
  */
-function syncDerived(string $root, string $tag, bool $write = true, ?array $records = null): array
+function syncDerived(string $root, string $tag, bool $write, ?array $records, string $writer): array
 {
     $context = [
         'root' => $root,
@@ -1507,7 +1580,7 @@ function syncDerived(string $root, string $tag, bool $write = true, ?array $reco
     $differs = [];
     $current = true;
 
-    foreach (derivedFiles($root) as $key => $artefact) {
+    foreach (derivedBy($writer, $root) as $key => $artefact) {
         if ($records !== null && $artefact['from'] === 'record') {
             continue;
         }

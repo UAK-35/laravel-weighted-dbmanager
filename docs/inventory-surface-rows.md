@@ -279,11 +279,11 @@ record.
 
 | file | role |
 |---|---|
-| `bin/surface.php` | the rows (`inventoryRecords()`), the comparison (`surfaceRowDiff()`, `diffInventory()`), and the reader they exposed (`fileSurface()`, `visibilityBefore()`) |
-| `bin/inventory.php` | writes all three files, reports drift, warns about a discarded record, and builds them for any ref (`--at`) |
+| `bin/surface.php` | the rows (`inventoryRecords()`), the comparison (`surfaceRowDiff()`, `diffInventory()`), the reader they exposed (`fileSurface()`, `visibilityBefore()`), the one list of the files derived from the record (`derivedFiles()`) and the commands that write each (`derivedWriters()`, `derivedBy()`) |
+| `bin/inventory.php` | writes all three files and the page they render, reports drift, warns about a discarded record, and builds the record for any ref (`--at`) — a ref's rows are another tree's, so that run leaves the page alone |
 | `bin/api.php` | renders `API.md` from the three files, and refuses to render one that is not there or that describes two trees (`--check`) |
 | `API.md` | the page itself: the rows as a consumer reads them, generated and therefore never a second tree to keep in step |
-| `bin/release.php` | writes them in the release commit, weighs them as the fourth signal, reports an incomplete one, and renders `API.md` from them in the same commit |
+| `bin/release.php` | writes every file the one list names into the release commit, weighs the record as the fourth signal, reports an incomplete one, and stages exactly what the list wrote |
 | `tests/Unit/Release/InventoryTest.php` | the generator: the rows, the drift, the exit codes |
 | `tests/Unit/Release/SurfaceReaderTest.php` | the shared reader's method shape: one part per argument, and what does not split one |
 | `tests/Unit/Docs/PublicApiReportTest.php` | the page against the record: the bytes, every row, the counts, and the refusal when there is no record |
