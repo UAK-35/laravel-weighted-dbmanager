@@ -543,21 +543,29 @@ final class Handoff
     }
 
     /**
-     * What one block should say — from git, at the register the note names unless another is given.
+     * What one block should say — from git, about the snapshot it is given.
      *
-     * THE REGISTER IS THE NOTE'S OWN, NOT HEAD
-     * ----------------------------------------
+     * THE SNAPSHOT IS THE NOTE'S OWN, NOT THE CHECKOUT'S
+     * --------------------------------------------------
      *   A block rendered at `HEAD` would be out of step the moment anything was committed: the note
      *   describes a register older than the commit that lands it, which is the design rather than
-     *   drift. So checking renders at the register the note names, and the count of unpushed commits,
-     *   the breakdown and the listing are all answers about *that* pair of commits. Writing is the
-     *   other half and it is `bin/handoff.php`'s: a re-take renders at the commit the checkout is
-     *   standing on, which is what makes the register row a new one.
+     *   drift. So a check renders the snapshot the note *records* — the register and the remote tip
+     *   its own table names — and the count of unpushed commits, the breakdown and the listing are
+     *   all answers about *that* pair. A take is the other half and it is `take()`: a re-take reads
+     *   the same three facts off the checkout, which is what makes the rows new ones.
      *
-     * @throws RuntimeException when the register or a git question it needs cannot be answered, or
+     *   The remote tip is on the recorded side rather than read off `origin/dev`, because a push
+     *   moves that ref and a committed note cannot follow it. That is the same sentence the note's
+     *   own `What the test above cannot ask` writes — the guard holds the commit the remote named
+     *   and the commits between it and the basis, not the ref it sits on — and reading the live ref
+     *   here made a note red for a push that had nothing to do with it.
+     *
+     * @param array{register: string, origin: string, branch: string}|null $snapshot
+     *
+     * @throws RuntimeException when the snapshot or a git question it needs cannot be answered, or
      *                          when a pending file has no words declared for it
      */
-    public static function rendered(string $name, ?string $register = null): string
+    public static function rendered(string $name, ?array $snapshot = null): string
     {
         if (!in_array($name, self::BLOCKS, true)) {
             throw new RuntimeException(sprintf(
@@ -567,12 +575,12 @@ final class Handoff
             ));
         }
 
-        $register ??= self::basis()['head']['sha'];
+        $snapshot ??= self::recorded();
 
         return match ($name) {
-            'pending' => self::renderedPending($register),
-            'unpushed' => self::renderedUnpushed($register),
-            'log' => self::renderedLog($register),
+            'pending' => self::renderedPending($snapshot['register']),
+            'unpushed' => self::renderedUnpushed($snapshot),
+            'log' => self::renderedLog($snapshot),
         };
     }
 
@@ -580,6 +588,59 @@ final class Handoff
     public static function head(): string
     {
         return self::asked('rev-parse', 'HEAD')[0] ?? '';
+    }
+
+    /**
+     * The snapshot a take records: the commit this checkout is standing on, the tip of `origin/dev`
+     * as it is at that moment, and the branch it is on.
+     *
+     * @return array{register: string, origin: string, branch: string}
+     *
+     * @throws RuntimeException when `origin/dev` or the register does not resolve
+     */
+    public static function take(?string $register = null): array
+    {
+        return [
+            'register' => $register === null ? self::head() : self::full($register),
+            'origin' => self::full('origin/dev'),
+            'branch' => self::branch(),
+        ];
+    }
+
+    /**
+     * The snapshot the note records: the two commits section 2's table names, and the branch it
+     * writes. Every other row of the block is derived from those.
+     *
+     * @return array{register: string, origin: string, branch: string}
+     *
+     * @throws RuntimeException when either commit row stops naming one
+     */
+    private static function recorded(): array
+    {
+        $basis = self::basis();
+        $branch = self::claim(self::UNPUSHED, 'Branch');
+
+        return [
+            'register' => $basis['head']['sha'],
+            'origin' => $basis['origin']['sha'],
+            'branch' => trim(str_replace('`', '', $branch['value'])),
+        ];
+    }
+
+    /**
+     * The branch this checkout is on, or the words the note writes where a checkout is on none.
+     *
+     * `symbolic-ref` exits 1 on a detached HEAD rather than answering, so the refusal is read as the
+     * answer it is: a re-take from a worktree or a CI checkout is an ordinary take, and the row says
+     * which state it was taken in rather than the take refusing.
+     */
+    private static function branch(): string
+    {
+        $run = self::git('symbolic-ref', '--short', 'HEAD');
+
+        return $run['exit'] === 0
+            ? (self::outputLines($run['output'])[0] ?? '(unnamed branch)')
+            : '(detached HEAD)';
     }
 
     /**
@@ -614,36 +675,64 @@ final class Handoff
     /**
      * Section 2's table: the register, the remote tip, and the commits between them.
      *
-     * The remote tip is the local `origin/dev`, which is the ref a fetch moves: the note's prose says
-     * the tip was asked of the remote itself when the section was taken, and which of the two a row
-     * came from is not something a committed file can be asked to keep.
+     * THE TWO COMMITS ARE THE SNAPSHOT'S, NOT THE REFS'
+     * ------------------------------------------------
+     *   Both rows are read out of the note, so a check renders the pair the note names and a push —
+     *   which moves `origin/dev` past a register that is already committed — cannot make it red. The
+     *   count, the breakdown and the listing underneath are derived from that pair, which is the
+     *   question section 2 exists to answer: what is on the branch that the remote it names did not
+     *   have. `take()` is the other half, and it reads the live ref, which is what makes the row a
+     *   new one.
      */
-    private static function renderedUnpushed(string $register): string
+    private static function renderedUnpushed(array $snapshot): string
     {
-        $head = self::full($register);
-        $origin = self::full('origin/dev');
+        $head = $snapshot['register'];
+        $origin = $snapshot['origin'];
+        $pushed = (int) (self::asked('rev-list', '--count', $origin.'..'.$head)[0] ?? 0);
 
         return implode("\n", [
             '| Field | At the snapshot |',
             '|---|---|',
-            sprintf('| Branch | `%s` |', self::asked('symbolic-ref', '--short', 'HEAD')[0] ?? ''),
+            sprintf('| Branch | `%s` |', $snapshot['branch']),
             sprintf('| HEAD | `%s` — *%s* |', self::short($head), self::subject($head)),
             sprintf('| `origin/dev` | `%s` — *%s* |', self::short($origin), self::subject($origin)),
-            sprintf(
-                '| Unpushed | %d commits — the ones `git log --oneline origin/dev..HEAD` prints |',
-                (int) (self::asked('rev-list', '--count', $origin.'..'.$head)[0] ?? 0),
-            ),
+            sprintf('| Unpushed | %s |', self::unpushedRow($pushed)),
             sprintf('| Since the last tag | %s |', self::written(self::unpushedMix($origin, $head))),
         ]);
     }
 
     /**
-     * The listing under section 2: the most recent unpushed commits, with the sentence that counts
-     * them.
+     * The `Unpushed` row's sentence: the count, and what the command a reader would run says about
+     * it. Nothing being unpushed is a state a note is taken in — the branch a push has just
+     * finished, and the one a release leaves — so it is written rather than refused, and the count
+     * is still a number in every state because that is what the guard reads.
      */
-    private static function renderedLog(string $register): string
+    private static function unpushedRow(int $count): string
     {
-        $commits = self::unpushedCommits(self::full('origin/dev'), self::full($register));
+        return match ($count) {
+            0 => '0 commits — `git log --oneline origin/dev..HEAD` prints nothing',
+            1 => '1 commit — the one `git log --oneline origin/dev..HEAD` prints',
+            default => sprintf('%d commits — the ones `git log --oneline origin/dev..HEAD` prints', $count),
+        };
+    }
+
+    /**
+     * The listing under section 2: the most recent unpushed commits, with the sentence that counts
+     * them — or, where the range the table names holds nothing, the sentence that says so.
+     */
+    private static function renderedLog(array $snapshot): string
+    {
+        $commits = self::unpushedCommits($snapshot['origin'], $snapshot['register']);
+
+        // Nothing between the two the table names is a state a take is written in rather than one
+        // it refuses, and the sentence says which fact the empty listing is a reading of: the range
+        // is empty either because the register is the remote tip or because a later push carried it
+        // there, and both are "there is no unpushed commit to list".
+        if ($commits === []) {
+            return 'Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints '
+                .'nothing, so there is no listing to print.';
+        }
+
         $listed = array_slice($commits, 0, self::LISTED);
         $width = max(array_map(static fn (array $commit): int => strlen($commit['sha']), $listed)) + 2;
 
@@ -679,13 +768,6 @@ final class Handoff
             $commits[] = ['sha' => $sha, 'subject' => $subject];
         }
 
-        if ($commits === []) {
-            throw new RuntimeException(
-                'The register is not ahead of `origin/dev`, so there is no commit listing to render and the '
-                .'section would be written empty.',
-            );
-        }
-
         return $commits;
     }
 
@@ -715,10 +797,17 @@ final class Handoff
      * A tally as the note writes it: `chore 2, docs 4`, in the alphabetical order the types are
      * keyed in, which is the order the guard compares against rather than the order of the log.
      *
+     * Nothing to tally is written as `none` rather than as an empty column: the row is read back by
+     * `mix()`, and a row a reader cannot tell from a truncated one is a breakdown nobody can hold.
+     *
      * @param array<string, int> $mix
      */
     private static function written(array $mix): string
     {
+        if ($mix === []) {
+            return 'none';
+        }
+
         return implode(', ', array_map(
             static fn (string $type, int $count): string => $type.' '.$count,
             array_keys($mix),
@@ -880,7 +969,14 @@ final class Handoff
     {
         $row = self::claim(self::UNPUSHED, 'Since the last tag');
 
+        // The empty breakdown: the row is what `written([])` writes, and it is read back as an empty
+        // tally rather than as a row this cannot read. The commit counts are what decide it — a
+        // section with nothing unpushed has no mix — and the words are the ones the renderer writes.
         if (preg_match_all('/([a-z]+)\s+(\d+)/', self::plain($row['value']), $matches, PREG_SET_ORDER) === 0) {
+            if (self::plain($row['value']) === 'none') {
+                return [];
+            }
+
             throw new RuntimeException(sprintf(
                 'HANDOFF.md line %d no longer breaks the commits down by type ([%s]).',
                 $row['source'],
@@ -911,12 +1007,20 @@ final class Handoff
         $claimed = null;
 
         foreach (self::section(self::UNPUSHED) as $line) {
-            if (!str_contains($line['text'], 'most recent')) {
-                continue;
+            $plain = self::plain($line['text']);
+
+            if (preg_match('/\b([a-z]+)\s+most recent\b/', $plain, $matches) === 1) {
+                $claimed = NumberWords::toInt($matches[1]);
+
+                break;
             }
 
-            if (preg_match('/\b([a-z]+)\s+most recent\b/', self::plain($line['text']), $matches) === 1) {
-                $claimed = NumberWords::toInt($matches[1]);
+            // The other sentence a listing is written under: the one that says there is none. It is
+            // read as a claim of nothing rather than as the absence of a claim, because "the note
+            // lists none" and "the note stopped saying what it lists" are different states and only
+            // the second is a section that evidences nothing.
+            if (str_contains($plain, 'no listing to print')) {
+                $claimed = 0;
 
                 break;
             }
@@ -930,8 +1034,9 @@ final class Handoff
         }
 
         $commits = [];
+        $fence = $claimed === 0 ? (self::fenced(self::UNPUSHED) ?? []) : self::fence(self::UNPUSHED);
 
-        foreach (self::fence(self::UNPUSHED) as $line) {
+        foreach ($fence as $line) {
             if (trim($line['text']) === '') {
                 continue;
             }
@@ -947,7 +1052,14 @@ final class Handoff
             $commits[] = ['sha' => $matches[1], 'subject' => $matches[2], 'source' => $line['source']];
         }
 
-        if ($commits === []) {
+        if ($claimed === 0 && $commits !== []) {
+            throw new RuntimeException(
+                'HANDOFF.md says there is no listing to print and the block under its table lists a commit: a '.
+                'section that lists what it says it has not got is a claim and its evidence disagreeing.',
+            );
+        }
+
+        if ($claimed > 0 && $commits === []) {
             throw new RuntimeException('HANDOFF.md lists no unpushed commit at all, so section 2 evidences nothing.');
         }
 
@@ -1986,6 +2098,25 @@ final class Handoff
      */
     private static function fence(string $heading): array
     {
+        return self::fenced($heading) ?? throw new RuntimeException(sprintf(
+            'HANDOFF.md has no block of plain output under [%s], so the listing read from it is gone.',
+            $heading,
+        ));
+    }
+
+    /**
+     * The same fence, or null where the section holds none.
+     *
+     * A section that prints no listing is a state the note is written in rather than one it is
+     * refused in, so the reader that has to tell the two apart asks the tolerant question. A fence
+     * that is opened and never closed is still a refusal: that file is malformed rather than empty.
+     *
+     * @return list<array{text: string, source: int}>|null
+     *
+     * @throws RuntimeException when a fence is opened and never closed
+     */
+    private static function fenced(string $heading): ?array
+    {
         $fence = [];
         $inside = false;
         $openedAt = 0;
@@ -2017,10 +2148,7 @@ final class Handoff
             throw new RuntimeException(sprintf('HANDOFF.md line %d opens a fence that is never closed.', $openedAt));
         }
 
-        throw new RuntimeException(sprintf(
-            'HANDOFF.md has no block of plain output under [%s], so the listing read from it is gone.',
-            $heading,
-        ));
+        return null;
     }
 
     /**

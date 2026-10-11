@@ -222,6 +222,33 @@ interpreter through the machine file rather than spelling its path out.
   read-only, and holds the hand-back to that: the mode on a host where a mode is a permission, and
   the attribute on the host where it is not.
 
+- **The handoff note's section 2 is rendered from the two commits its own table names rather than
+  from the live `origin/dev`, so a push can no longer make a committed note stale.** The renderer
+  read the remote tip off the ref, and a push moves that ref: the register's commits are then
+  behind `origin/dev` instead of ahead of it, the count, the breakdown and the listing all render
+  against a range that is empty, and `php bin/handoff.php --check` and the guard beside it fail on a
+  tree where nothing about the note has changed. It was green on the machine that wrote the note and
+  red on CI's runner, which is where it was found: the run for the push that carried the note, with
+  `The register is not ahead of \`origin/dev\`, so there is no commit listing to render and the
+  section would be written empty.` The register, the tip and the branch are now the snapshot the
+  note *records* — the same pair the three comparisons beside it already read (`Handoff::basis()`) —
+  so the derived rows are answers about the commit the note is describing rather than about whatever
+  the ref has become, and a take reads the three facts off the checkout (`Handoff::take()`). The
+  note's own `What the test above cannot ask` says what that costs, and said it before the reading
+  matched it: the guard holds the commit the remote named and the commits between it and the basis,
+  not the ref it sits on — a fetch that moved `origin/dev` does not fail it.
+
+- **A branch with nothing unpushed is a state the handoff note is written in rather than one its
+  renderer refuses.** `Handoff::unpushedCommits()` threw when the range was empty, so the note could
+  not be re-taken on the tree a push leaves — `HEAD` and `origin/dev` the same commit — which is the
+  state every take now starts in and the one the release that publishes the tag ends in. The section
+  answers it instead: the `Unpushed` row keeps its number (`0 commits — \`git log --oneline
+  origin/dev..HEAD\` prints nothing`), the breakdown row is `none` and is read back as an empty tally
+  (`mix()`), and the listing is the sentence that says there is no listing to print rather than an
+  empty fence (`listing()` reads it as a claim of nothing, and still refuses a section that says it
+  lists none and lists one). The branch row is recorded with the rest of the snapshot, so a re-take
+  from a detached checkout writes which state it was taken in instead of failing.
+
 ## 0.2.0-alpha2 - 2026-10-06
 
 BREAKING: parts of this release change what an installation reads at run time rather than only how

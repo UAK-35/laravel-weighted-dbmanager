@@ -102,16 +102,17 @@ if (!is_file($root . '/HANDOFF.md')) {
 // Deriving: every block, before a byte is written
 // ─────────────────────────────────────────────────────────────────────────────
 
-// A write re-takes the note, so its register is the commit this checkout is standing on — the row
-// being written is one of the things that moves. A check compares the note with itself, so it
-// renders at the register the note already names, and a note committed at one commit is not
-// reported stale by every commit made after it.
+// A write re-takes the note, so it renders the snapshot this checkout is in — the register is the
+// commit it is standing on, because the row being written is one of the things that moves. A check
+// compares the note with itself, so it renders the snapshot the note already records, and a note
+// committed at one commit is not reported stale by every commit made after it — nor by a push,
+// which moves `origin/dev` and leaves the pair the note names where it was.
 try {
     $blocks = Handoff::blocks();
     $rendered = [];
 
     foreach ($blocks as $name) {
-        $rendered[$name] = Handoff::rendered($name, $register ?? ($check ? null : Handoff::head()));
+        $rendered[$name] = Handoff::rendered($name, $check ? null : Handoff::take($register));
     }
 } catch (Throwable $e) {
     fwrite(STDERR, 'The blocks could not be rendered: ' . $e->getMessage() . PHP_EOL);
