@@ -249,6 +249,17 @@ interpreter through the machine file rather than spelling its path out.
   lists none and lists one). The branch row is recorded with the rest of the snapshot, so a re-take
   from a detached checkout writes which state it was taken in instead of failing.
 
+- **The pool probe's five tests bind the store they judge, so a machine running Redis is no longer
+  what makes them pass.** The four of them that read the run's exit code never asserted on the
+  `store reachability` row, and never bound a store: that row PINGs it, so on a workstation with a
+  Redis listening on 127.0.0.1:6379 the row passed by accident and the tests were green, while on
+  CI's runner — where nothing answers — the row failed and all four reported exit 1 with every row
+  they do assert on reading correctly. `armPgcatWithPoolProbe()` now binds the store reachable, which
+  is what its own promise that every other row judges a working installation costs, and the unarmed
+  probe's test gets the same binding. Measured both ways: with the two bindings flipped to an
+  unreachable store the four fail exactly as the runner reported them — the same test names, the
+  same `Failed asserting that 1 is identical to 0` — and with them in place the five pass.
+
 ## 0.2.0-alpha2 - 2026-10-06
 
 BREAKING: parts of this release change what an installation reads at run time rather than only how

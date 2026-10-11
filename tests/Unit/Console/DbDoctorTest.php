@@ -1719,6 +1719,9 @@ class DbDoctorTest extends TestCase
      */
     public function test_the_pool_probe_row_says_when_the_probe_is_not_armed(): void
     {
+        // The installation the note describes as working, store included: this test reads the exit
+        // code, so every other row has to be a pass rather than whatever the machine answers.
+        $this->bindRedis(reachable: true);
         $this->armPgcat();
 
         [$output, $exit] = $this->doctor();
@@ -4076,12 +4079,20 @@ class DbDoctorTest extends TestCase
      * state the verdict is judged in — and with it false nothing records a boot at all, which is the
      * container still starting up.
      *
+     * The store is bound reachable here rather than left to the machine, which is what "every other
+     * row of the run still judges a working installation" costs: the reachability row PINGs the
+     * store, so an unbound one makes these tests green on a machine that happens to run Redis
+     * (127.0.0.1:6379, which is what CI's runner does not have) and red on the runner — four tests
+     * reading exit 1 while every row they assert on is right.
+     *
      * @param list<string>          $pools   the pools the readers variant declares
      * @param array<string, string> $answers database => status
      * @return array<string, string> the paths `armPgcat()` returned
      */
     private function armPgcatWithPoolProbe(array $pools, array $answers = [], bool $windowClosed = true): array
     {
+        $this->bindRedis(reachable: true);
+
         $overrides = [];
 
         if ($windowClosed) {
