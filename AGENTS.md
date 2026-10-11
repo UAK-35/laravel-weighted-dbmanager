@@ -62,6 +62,7 @@ file that owns it, and is not restated here — a copy would drift and a guard w
 
 | What | Where |
 | --- | --- |
+| the behavioral guidelines a session follows while writing here | `BEHAVE.mdc` |
 | what this package is, how the wiring works, the layout, the testing | `README.md` (also the consumer-facing record) |
 | the public API surface | `API.md` |
 | cutting a version: the bump, the changelog, the tag | `RELEASING.md`, and `bin/release.php` + `bin/weighing.php` |
@@ -81,10 +82,11 @@ and `publish-config.php`. The published config is `config/db-manager.php` with `
 ## 2. Load order
 
 1. this file — the scope rule above, and what follows;
-2. `README.md` — what the package is and how to work on it;
-3. `.agents/README.md` — the skills, and the two runbooks they wrap;
-4. `HANDOFF.md` — the state of the work, as of the day it was taken, before you trust it as "now";
-5. `.agents/machine.local.json` — this machine's own facts, and the interpreter every command here
+2. `BEHAVE.mdc` — the behavioral guidelines a session follows while writing here;
+3. `README.md` — what the package is and how to work on it;
+4. `.agents/README.md` — the skills, and the two runbooks they wrap;
+5. `HANDOFF.md` — the state of the work, as of the day it was taken, before you trust it as "now";
+6. `.agents/machine.local.json` — this machine's own facts, and the interpreter every command here
    starts with. Read it before the first command that shells out and use the `php` it names: `php` is
    not on `PATH` in this shell, so a bare one fails rather than resolving, and searching the disk for
    an interpreter is what this rule replaces. The record is gitignored, so the path lives there and

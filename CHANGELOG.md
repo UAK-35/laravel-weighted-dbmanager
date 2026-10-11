@@ -110,6 +110,17 @@ reading reports in this tree named this machine, so each was rewritten to name n
 now names the reading beside the climb one, and `HANDOFF.md`'s environment table resolves the
 interpreter through the machine file rather than spelling its path out.
 
+### Changed
+
+- **The behavioral guidelines a session writes by are a file of this repository, and the load order
+  sends a reader to it before `README.md`.** `AGENTS.md` — the canonical rule set — gains the row in
+  its authority table and the step in its numbered order that name `BEHAVE.mdc`: state the
+  assumptions before implementing, prefer the simplest thing that solves the problem, touch only
+  what the request needs, and define the check that says the change worked. The guidelines a change
+  is written against therefore live in the tree rather than in a prompt, and `.gitattributes` holds
+  the file out of the tarball beside `AGENTS.md`, the other rule file a consumer has no use for. No
+  file under `src/` or `config/` moves, so nothing an installation reads changes.
+
 ### Fixed
 
 - **The audit record is handed back writable, so a second account can write it — on any host.** The

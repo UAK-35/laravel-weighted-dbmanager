@@ -27,6 +27,7 @@
 /PUSHING.md         export-ignore
 /HANDOFF.md         export-ignore
 /AGENTS.md          export-ignore
+/BEHAVE.mdc         export-ignore
 /bin/api.php          export-ignore
 /bin/checks.php       export-ignore
 /bin/counts.php       export-ignore
@@ -39,6 +40,7 @@
 /bin/tools.php        export-ignore
 /bin/tool.php         export-ignore
 /bin/interpreter.php  export-ignore
+/bin/handoff.php      export-ignore
 /bin/composer-link.cmd export-ignore
 /bin/composer-ca.ps1 export-ignore
 /files.tsv            export-ignore
