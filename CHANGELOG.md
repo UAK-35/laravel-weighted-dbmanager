@@ -134,6 +134,22 @@ interpreter through the machine file rather than spelling its path out.
   the page, and each command asked whether it was the one that repaired the file. No row the record
   or the page carries moves, which the same two `--check` runs report.
 
+- **`db:pgcat-flip --dry-run`'s no-write promise is now read off the installation rather than off
+  its own report.** The rehearsal is the one route in this package that writes while promising it
+  changes nothing — the swap's temp file is created in the target's own directory and removed again,
+  and the lock is taken and released — and the suite read that promise only the way the report makes
+  it: the steps and their outcomes, and the flipper's own tests asserting each step's side of the
+  line from a fresh fixture. Neither looked at the installation on both sides of one run, so neither
+  could fail when a rehearsal rewrote the target, recorded the mode it did not apply, or left its
+  probe behind and reported `remove temp done` anyway. `tests/Unit/Console/DbFlipPgcatDryRunTest.php`
+  snapshots every file under the installation by the hash of its bytes — the two variants, the
+  target, the state file, the stand-in supervisor — and the lock beside them, which is the one trace
+  this design leaves on purpose: unchanged where the installation already had one, created empty
+  where it did not. Its control is a real flip in a fixture built the same way, whose snapshot has to
+  move, so a listing that read nothing cannot pass — and the rehearsal mutated to rename its probe
+  over the target instead of removing it fails both promise tests with the target's hash in the diff,
+  which is the report saying *nothing was renamed* while the file says otherwise.
+
 ### Fixed
 
 - **The audit record is handed back writable, so a second account can write it — on any host.** The

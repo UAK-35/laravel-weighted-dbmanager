@@ -252,6 +252,7 @@ file every real flip leaves behind, never deleted, so nothing new accumulates.
 | `test_a_dry_run_fails_where_a_flip_could_not_write_its_temp_file`       | a directory that refuses the write is found — with the read already done   |
 | `test_a_dry_run_fails_when_the_state_file_cannot_be_written`            | the silent state write is a failure, and the rename below it still reported |
 | `test_a_dry_run_says_what_the_rename_would_do_to_the_target`            | all three target comparisons, including "replace it with itself" not failing |
+| `tests/Unit/Console/DbFlipPgcatDryRunTest.php`                          | the promise read off the installation itself, on both sides of one rehearsal: every file under it by hash — the variants, the target, the state file — the record it must not write, and the lock it may only create empty |
 | `tests/Unit/Pgcat/DryRunResultTest.php`                                 | kinds, exit codes, summaries, step lookup and the array form               |
 | `WeightedDatabaseServiceProviderTest`                                   | the command: the rendered report, `--force-mode` combined, `--status` precedence, `--watch` refused, and a rehearsal on a non-PostgreSQL connection |
 
@@ -260,6 +261,23 @@ The load-bearing assertions are the negative ones. `$copyLog === []` is stronger
 target was never replaced, whatever the report says. The mutation test used while building
 this — replacing the rehearsal's write with a call to the copier — fails six of these
 tests, including the exit-code ones.
+
+The other half of that reading is the installation itself, and it is a different claim: the
+injections above are the seams a fixture provides, while the files are what an operator would
+find. `tests/Unit/Console/DbFlipPgcatDryRunTest.php` snapshots every file under the installation
+— by path and by the hash of its bytes, because a rename inside one clock tick looks untouched
+to a stat — on both sides of one `--dry-run`, and asserts only the lock may differ: unchanged
+where the installation already had one, created empty where it did not, because the lock is the
+one trace this design leaves on purpose. The state file is read the same way, on the state a
+flip exists to correct (`writer` recorded, `readers` resolved), so a rehearsal that recorded the
+mode it did not apply is a change to the file rather than a sentence to trust.
+
+That reading carries its own control in both directions, which is why it can be believed. The
+same snapshot sees a real flip replace `pgcat.toml` with the variant's bytes, record the mode
+and create the lock — so a listing that read nothing cannot pass. And the rehearsal, mutated to
+rename its probe over the target instead of removing it, fails both promise tests with
+`pgcat.toml`'s hash in the diff: the report says *nothing was renamed* while the file says
+otherwise, which is precisely the state these tests exist to catch.
 
 ---
 
@@ -316,6 +334,7 @@ tests, including the exit-code ones.
 | `src/Pgcat/PgcatConfigFlipper.php`                | `dryRun()` (gates + lock) and `rehearse()` (the swap, short of the rename); the flip's preflight and rollback, which the rehearsal mirrors |
 | `src/Pgcat/SupervisorStep.php`                    | `inspect()` — the one verdict the rehearsal prints, the row reports and the flip refuses on |
 | `src/Console/Commands/DbFlipPgcatCommand.php`     | `--dry-run`, the rendered report, the `--json` object ([pgcat-flip-json.md](pgcat-flip-json.md)), the `--watch` refusals |
+| `tests/Unit/Console/DbFlipPgcatDryRunTest.php`    | the promise read off the installation — every file hashed, the lock beside them — with a real flip as the control                       |
 | `tests/Unit/Pgcat/DryRunResultTest.php`           | the value object                                                    |
 | `tests/Unit/Pgcat/PgcatConfigFlipperTest.php`     | every step's side of the line                                       |
 | `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | the command as the operator sees it                   |
