@@ -150,6 +150,25 @@ interpreter through the machine file rather than spelling its path out.
   over the target instead of removing it fails both promise tests with the target's hash in the diff,
   which is the report saying *nothing was renamed* while the file says otherwise.
 
+- **Every exit `bin/release.php` can take without applying is now held to writing nothing, on the
+  whole repository rather than on three of its files.** `RailRefusalsTest` drives the rails the rest
+  of the suite was silent about and asserts part of the cost of a refusal — no tag, no promoted
+  notes, no inventory — which is a reading taken from the outside: a refusal that rewrote
+  `composer.json`, staged something, moved a ref or left a file behind would pass every one of them.
+  The script is a precondition machine, so *a refusal costs nothing* is a claim about the whole
+  repository, and that reading is now `tests/Support/RepositorySnapshot.php`: every file under the
+  fixture's root except `.git`, by the hash of its bytes and by size and mtime — a directory walk, so
+  a file a run leaves behind is in the reading by construction — and, where there is a `.git`, HEAD,
+  the branch under it, every ref, the index, the porcelain and the reflog. It moved out of
+  `tests/Unit/Release/DryRunTest.php`, where it was first taken, because two guards holding one
+  promise have to take one reading: two readings would be two promises. `tests/Unit/Release/ExitPathsTest.php`
+  applies it to the twenty-seven exits that are not the apply — the refusals, the three usage errors,
+  the argument checks, the question a non-interactive shell cannot answer, and the seven dry runs,
+  `--skip-ci` and declared versions among them — and each row asserts the exit code and a sentence the
+  path is known by, so a mistyped fixture cannot keep the tree still for the wrong reason. The exits
+  are read out of the script by the shape of the call and compared with the table, because the way a
+  table like this rots is an exit nothing drives rather than a row that stops matching.
+
 ### Fixed
 
 - **The audit record is handed back writable, so a second account can write it — on any host.** The
