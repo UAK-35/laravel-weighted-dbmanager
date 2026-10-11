@@ -1141,33 +1141,94 @@ final class HandoffTest extends TestCase
         );
     }
 
-    public function test_the_records_are_out_of_step_with_the_tree_it_describes(): void
+    /**
+     * What section 1 quotes about the three `.tsv` records, held to the commands it quotes.
+     *
+     * WHY THE STATE IS NOT WHAT IS HELD
+     * ---------------------------------
+     *   This test used to require exit 1 — the records out of step with the commit the note names —
+     *   and that is not always the truth: the release that writes the records leaves them current at
+     *   its own commit, so a note taken there, which is the note a release cycle ends with, would
+     *   have to claim a disagreement that is not there or be refused. What the note can be held to is
+     *   what it *quotes*: the commands are taken out of the transcript and run, and the exit code
+     *   beside each one has to be the one it returned. So a note that writes `exit 1` beside a
+     *   command that exits 0 fails, and so does a command that failed with nothing written beside it —
+     *   the state is a fact about the tree, and the quote is the note's claim about it.
+     */
+    public function test_the_records_are_what_the_commands_section_1_quotes_say(): void
     {
-        $head = Handoff::basis()['head']['sha'];
-        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/inventory.php', '--check', '--at='.$head]);
+        foreach (Handoff::records() as $quoted) {
+            $arguments = array_slice($quoted['command'], 1);
+            $run = Handoff::run(array_merge([PHP_BINARY], $arguments));
+            $said = trim((string) preg_replace('/\s+/', ' ', $run['output'].' '.$run['error']));
 
-        self::assertSame(
-            1,
-            $run['exit'],
-            sprintf(
-                "HANDOFF.md section 1 says the three records are out of step with the commit it describes (%s), and\n".
-                "php bin/inventory.php --check --at=%s exited %d — so either the records describe a tree the note\n".
-                "does not, or the state the note was written in is gone and it has to be re-taken.\n%s%s",
-                $head,
-                $head,
+            self::assertSame(
+                $quoted['exit'],
                 $run['exit'],
-                $run['output'],
-                $run['error'],
-            ),
-        );
-
-        foreach (['files.tsv', 'methods.tsv', 'surface.tsv'] as $record) {
-            self::assertStringContainsString(
-                $record,
-                $run['error'],
-                sprintf('The records are out of step at %s without naming %s, which is the record the note lists.', $head, $record),
+                sprintf(
+                    "HANDOFF.md line %d quotes `%s` and writes exit %d beside it, and the command exits %d.\n".
+                    'The records are a state rather than a claim, so the transcript has to be what the command '.
+                    "answers: run it, write what it says, or take the note again.\n%s%s",
+                    $quoted['source'],
+                    implode(' ', $quoted['command']),
+                    $quoted['exit'],
+                    $run['exit'],
+                    $run['output'],
+                    $run['error'],
+                ),
             );
+
+            foreach (self::numbersIn($quoted['summary']) as $number) {
+                self::assertStringContainsString(
+                    $number,
+                    $said,
+                    sprintf(
+                        'HANDOFF.md line %d quotes %s beside `%s` and the command does not report it, so the '.
+                        'summary is not the reading it is presented as.',
+                        $quoted['source'],
+                        $number,
+                        implode(' ', $quoted['command']),
+                    ),
+                );
+            }
+
+            // A quoted failure has to be *this* failure. `bin/inventory.php` exits 1 for a record of
+            // another release and for a ref it does not have as well, and a note that quoted one of
+            // those while describing the records would be reading the wrong sentence.
+            if ($quoted['exit'] === 1) {
+                self::assertStringContainsString(
+                    'out of step',
+                    $said,
+                    sprintf(
+                        'HANDOFF.md line %d quotes `%s` failing, and the command did not fail with the records '
+                        .'out of step — which is the reading the section is about.',
+                        $quoted['source'],
+                        implode(' ', $quoted['command']),
+                    ),
+                );
+
+                foreach (['files.tsv', 'methods.tsv', 'surface.tsv'] as $record) {
+                    self::assertStringContainsString(
+                        $record,
+                        $said,
+                        sprintf('The records are out of step without naming %s, which is a record the note lists.', $record),
+                    );
+                }
+            }
         }
+    }
+
+    /**
+     * Every number a quoted summary states, as the string it is written as — so the comparison is
+     * against the command's own line and not against a re-formatted one.
+     *
+     * @return list<string>
+     */
+    private static function numbersIn(string $summary): array
+    {
+        preg_match_all('/\d+/', $summary, $matches);
+
+        return array_values(array_unique($matches[0]));
     }
 
     public function test_the_toolchain_rows_are_the_facts_the_machine_record_holds(): void

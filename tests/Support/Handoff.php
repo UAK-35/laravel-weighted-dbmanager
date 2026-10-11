@@ -180,6 +180,17 @@ final class Handoff
     private const WORKING = '## 5. Working here';
 
     /**
+     * How section 1's transcript writes the command that reads the three `.tsv` records — the one
+     * command the note quotes that a guard runs.
+     *
+     * Written once and read twice: `transcript()` looks for the block under section 1 that holds it,
+     * and `records()` takes the arguments off every line that starts with it. A command read out of a
+     * line by a pattern of its own would be a command the note could rename into a tool nobody runs
+     * while the reading beside it went on reporting whatever the old name resolved to.
+     */
+    private const RECORDS = 'php bin/inventory.php';
+
+    /**
      * The nouns the guard's count readings count, each as the two forms a note may write it in.
      *
      * WHY A PAIR AND NOT THE PATTERN THAT READS IT
@@ -450,6 +461,120 @@ final class Handoff
         }
 
         return $named[0];
+    }
+
+    /**
+     * The commands section 1's transcript quotes about the three `.tsv` records, each with the exit
+     * code the note writes beside it and the summary it reads off the run.
+     *
+     * WHY THE TRANSCRIPT IS READ RATHER THAN THE STATE REQUIRED
+     * -------------------------------------------------------
+     *   Whether the records are in step with the commit the note names is a *state*, and a state is not
+     *   something a committed note can be required to be in. The release writes the three files, so at
+     *   the commit a release leaves — which is the commit the note a release cycle ends with is taken
+     *   at — they are current: their header names the tag just cut and `--check` exits 0. A guard that
+     *   required the disagreement would refuse the one note a release cycle most needs taken, and a
+     *   guard that read a fixed exit could only ever catch the direction it was written for. What the
+     *   note can be held to is what it *quotes*: the commands come out of the transcript and are run,
+     *   and the exit code written beside each one has to be the one it returned — a note that writes
+     *   `exit 1` beside a command that exits 0 fails, and so does a command that failed while the
+     *   summary beside it says it did not.
+     *
+     *   A `--> exit N: …` line carries the code; a bare `--> …` claims the one a check that found
+     *   nothing to say exits with, which is 0. A summary is joined across the lines it is wrapped
+     *   over, because the note wraps at a hundred columns and the tool's own line is longer than that.
+     *
+     * @return list<array{command: list<string>, exit: int, summary: string, source: int}>
+     *
+     * @throws RuntimeException when the section quotes no command
+     */
+    public static function records(): array
+    {
+        $quoted = [];
+        $written = null;
+
+        foreach (self::transcript() as $line) {
+            $text = trim($line['text']);
+
+            if (str_starts_with($text, self::RECORDS)) {
+                $quoted[] = [
+                    'command' => self::commandIn($text),
+                    'exit' => 0,
+                    'summary' => '',
+                    'source' => $line['source'],
+                ];
+                $written = count($quoted) - 1;
+
+                continue;
+            }
+
+            if ($written === null) {
+                continue;
+            }
+
+            $said = str_starts_with($text, '-->') ? ltrim(substr($text, 3)) : $text;
+
+            if (preg_match('/^exit\s+(\d+)\s*:\s*(.*)$/', $said, $matches) === 1) {
+                $quoted[$written]['exit'] = (int) $matches[1];
+                $quoted[$written]['summary'] .= ' '.$matches[2];
+
+                continue;
+            }
+
+            $quoted[$written]['summary'] .= ' '.$said;
+        }
+
+        if ($quoted === []) {
+            throw new RuntimeException(
+                'HANDOFF.md section 1 quotes no `php bin/inventory.php` command, so the state it describes the '.
+                'three records in is a claim with no evidence beside it.',
+            );
+        }
+
+        return array_map(static fn (array $quotedCommand): array => [
+            'command' => $quotedCommand['command'],
+            'exit' => $quotedCommand['exit'],
+            'summary' => trim((string) preg_replace('/\s+/', ' ', $quotedCommand['summary'])),
+            'source' => $quotedCommand['source'],
+        ], $quoted);
+    }
+
+    /**
+     * One quoted command as the words it runs: the program and the tool's own path are written here,
+     * and the line contributes the arguments.
+     *
+     * @return list<string>
+     */
+    private static function commandIn(string $line): array
+    {
+        return array_merge(
+            ['php', 'bin/inventory.php'],
+            preg_split('/\s+/', substr($line, strlen(self::RECORDS)), -1, PREG_SPLIT_NO_EMPTY) ?: [],
+        );
+    }
+
+    /**
+     * The lines of the block of plain output under section 1 that quotes the inventory check — the
+     * note's transcript, as opposed to the listing of commits that is fenced under the same section.
+     *
+     * @return list<array{text: string, source: int}>
+     *
+     * @throws RuntimeException when no block under the section quotes the tool
+     */
+    private static function transcript(): array
+    {
+        foreach (self::fences(self::PENDING) as $fence) {
+            foreach ($fence as $line) {
+                if (str_starts_with(trim($line['text']), self::RECORDS)) {
+                    return $fence;
+                }
+            }
+        }
+
+        throw new RuntimeException(
+            'HANDOFF.md section 1 quotes no `php bin/inventory.php` command, so the state it describes the '.
+            'three records in is a claim with no evidence beside it.',
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2117,15 +2242,35 @@ final class Handoff
      */
     private static function fenced(string $heading): ?array
     {
+        return self::fences($heading)[0] ?? null;
+    }
+
+    /**
+     * Every fence under a heading whose info string is empty, in the order the note writes them.
+     *
+     * A section holds more than one of them: section 1 writes both the commits its batches became
+     * and the transcript of the check that reads the records. So the fences are read here and the
+     * readers that want one of them ask which — `fenced()` takes the first, and `transcript()` the one
+     * that quotes the tool it is about — rather than each reader walking the section for itself and
+     * disagreeing about where a block starts.
+     *
+     * @return list<list<array{text: string, source: int}>>
+     *
+     * @throws RuntimeException when a fence is opened and never closed
+     */
+    private static function fences(string $heading): array
+    {
+        $fences = [];
         $fence = [];
         $inside = false;
+        $wanted = false;
         $openedAt = 0;
 
         foreach (self::section($heading) as $line) {
             $trimmed = trim($line['text']);
 
             if (!str_starts_with($trimmed, '```')) {
-                if ($inside) {
+                if ($inside && $wanted) {
                     $fence[] = $line;
                 }
 
@@ -2133,22 +2278,31 @@ final class Handoff
             }
 
             if ($inside) {
-                return $fence;
-            }
+                if ($wanted) {
+                    $fences[] = $fence;
+                }
 
-            if (trim(substr($trimmed, 3)) === '') {
-                $inside = true;
-                $openedAt = $line['source'];
+                $fence = [];
+                $inside = false;
+                $wanted = false;
 
                 continue;
             }
+
+            // A fence carries its language in the info string, and the note uses one for a command a
+            // reader runs (```powershell, ```bash). Both are read the same way here — a fence is
+            // opened and the next ``` line closes it — while only the bare ``` is kept: the note's
+            // output and listings are written in those, and a block a reader runs is prose.
+            $inside = true;
+            $wanted = trim(substr($trimmed, 3)) === '';
+            $openedAt = $line['source'];
         }
 
         if ($inside) {
             throw new RuntimeException(sprintf('HANDOFF.md line %d opens a fence that is never closed.', $openedAt));
         }
 
-        return null;
+        return $fences;
     }
 
     /**

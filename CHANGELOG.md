@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The handoff note's records reading holds the commands its transcript quotes rather than a fixed
+  exit code, so a note can be taken at the commit a release leaves.** The guard required
+  `php bin/inventory.php --check --at=<register>` to exit 1 — the three `.tsv` records out of step with
+  the commit the note names — and that is a state a note at the end of a release cycle is not in: the
+  release writes the records, so at the commit it leaves they are current, their header naming the tag
+  just cut, and the check exits 0. The reading therefore refused exactly the note a release needs most
+  taken, and a fixed code could only ever catch the direction it was written for. What is read now is
+  what the note *quotes*: `Handoff::records()` takes the commands out of section 1's transcript and the
+  test runs each one, holding the exit code written beside it to the one it returned — so a note that
+  writes `exit 1` beside a command that exits 0 fails, and so does a command that failed under a
+  summary saying it did not. The block that holds the transcript is found by the command it quotes
+  (`Handoff::RECORDS`, the one command under `bin/` this guard runs) and the program and its path are
+  written in the reader rather than read off the line, so a line cannot rename the tool into something
+  nobody runs. Reading it needed the fence reader to stop at the first block of output no longer: the
+  section holds both the commits its batches became and the transcript, so `fences()` reads them all
+  and `fenced()` is its first, while a fence carrying a language — the `powershell` block a reader runs
+  — is stepped over rather than mistaken for a block of output. Measured in both directions, and the
+  note's section 5 records it.
+
 ## 0.2.0-alpha3 - 2026-10-11
 
 ### Added
