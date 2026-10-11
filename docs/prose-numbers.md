@@ -177,6 +177,16 @@ records rather than trusting them.
 
 ## What is deliberately not bound, and why
 
+- **A count of a working tree.** `HANDOFF.md` section 1 is the one record that describes a *moment*
+  rather than a rule, and the size of what it calls pending — how many paths differ from the register,
+  how many of those are tracked paths that changed, and how many are files the register does not carry
+  — is a fact about one checkout: the comparison is green on the machine that wrote the note and on no
+  other, and the renderer cannot hold it either, because a count rendered from `git status` would be
+  wrong on the first clean clone. So the sentence names the derivation instead — `git status --short`,
+  the command the note's own opening block runs — and `HandoffTest` holds it to that: the sentence has
+  to name the command, and a count written back into it (*Nine paths differ*) fails, because a number
+  nothing can derive is not a claim a committed file can carry. The half of section 1 that *is* bound
+  is the list, in the other direction: every file the register does not carry has to be named there.
 - **Numbers about a shape rather than a list.** "One accessor, two renderings", "the two halves",
   "three surfaces", "the two names are two readers, not two opinions" — these describe a design.
   There is no list in the code to compare with, and inventing one would be writing the answer down
@@ -251,6 +261,7 @@ a switch to one table only each fail with a message naming the record and the se
 | `tests/Unit/Console/DbDoctorTest.php` | the two claims that need the command to run, and `numberClaim()` |
 | `tests/Support/Readme.php` | the README read as data — the tables the claims count |
 | `tests/Unit/Docs/DocCitationsTest.php` | the name half: the records' test citations against the classes that declare them |
+| `tests/Unit/Docs/HandoffTest.php` | the working-tree half: that section 1 of the handoff note names the derivation for the size of the pending set rather than stating a count |
 | `tests/Support/DocumentedExitCounts.php` | the rendered counts: what `docs/documented-exit-codes.md` states, and the derivation of each |
 | `tests/Support/NumberWords.php` | the vocabulary, in both directions: the word a record has, and the word to write |
 | `bin/counts.php` | the renderer: writes the records from the derivations, or checks them without writing |

@@ -41,9 +41,10 @@ final class NumberWords
      * @var array<int, string>
      */
     private const WORDS = [
-        // Zero is here for a claim rather than for a count this package renders: a pending set
-        // can hold no new file at all, and the sentence that states it has no word otherwise.
-        // See `Handoff::pendingCounts()`.
+        // Zero is here because the vocabulary is also what tells a number from a word: the guard that
+        // refuses a count in section 1 of the handoff note — the one sentence whose number would be a
+        // fact about one working tree, so it names the derivation instead, `Handoff::pendingSize()` —
+        // reads a word through this table, and a "zero" it did not know is a count it would not catch.
         0 => 'zero',
         1 => 'one',
         2 => 'two',

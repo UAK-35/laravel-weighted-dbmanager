@@ -6,6 +6,7 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Docs;
 
 use PHPUnit\Framework\TestCase;
 use Uak35\WeightedDbManager\Tests\Support\Handoff;
+use Uak35\WeightedDbManager\Tests\Support\NumberWords;
 use Uak35\WeightedDbManager\Tests\Support\SkillDescriptions;
 
 /**
@@ -31,8 +32,9 @@ use Uak35\WeightedDbManager\Tests\Support\SkillDescriptions;
  *
  *   What is left is what the note says about the tree *now*, and that is what these tests hold:
  *   the paths it names, the commits and tags it names, the one command name it carries, the files
- *   it describes, the version lane it claims is still open, and — through the gitignored
- *   `.agents/machine.local.json` — the environment table of section 5. That record belongs to the
+ *   it describes, the version lane it claims is still open, the derivation it names for the size of
+ *   the pending set — the one claim in it no number could be held to — and, through the gitignored
+ *   `.agents/machine.local.json`, the environment table of section 5. That record belongs to the
  *   machine rather than to the package, so a checkout that has none (a fresh clone, CI's runner)
  *   skips those comparisons instead of running them against nothing.
  *
@@ -190,42 +192,500 @@ final class HandoffTest extends TestCase
     }
 
     /**
-     * The size of that pending set, which the list itself cannot hold: a table can be complete while
-     * the sentence over it describes a different size, and the size is what a reader takes away
-     * first — how much is uncommitted, and whether it is work they are standing in the middle of.
+     * The three blocks the note renders rather than writes: section 1's table, section 2's table and
+     * section 2's listing, each compared with what git says at the register the note names.
      *
-     * The comparison is made only where there is something to compare, and the skip is the point
-     * rather than a hole: the counts are about a working tree, a clean one has nothing for them to
-     * disagree with, and that is the state a clone and CI's runner are in — the same shape as the
-     * machine record, where an absent file is a skip and a present one that disagrees is a failure.
+     * WHY THE NOTE DOES NOT WRITE THEM ITSELF
+     * ---------------------------------------
+     *   Each of those blocks is a set of files or a set of commits, and a number over it — how many
+     *   paths the register does not carry, how many commits no remote has, how they break down, which
+     *   commits the listing shows. Every one is a question git answers, and copying the answer in by
+     *   hand is how a note states a number the tree does not have: the count of uncommitted paths is
+     *   a fact about one working tree, and the register row moves the moment anything is committed.
+     *
+     *   So the blocks are derived — `bin/handoff.php` writes them from the same `rendered()` this
+     *   reads — and this holds the file to what that derivation says. The reading is taken at the
+     *   register the note itself names rather than at `HEAD`, which is the note's design: it
+     *   describes a commit older than the one that lands it, so rendering at `HEAD` would report a
+     *   fresh note stale the moment it was committed. A block out of step here is repaired by running
+     *   the renderer, not by editing the number.
      */
-    public function test_the_pending_counts_are_the_size_of_this_working_tree(): void
+    public function test_the_generated_blocks_are_what_the_renderer_writes(): void
     {
-        $tree = Handoff::uncommitted();
-
-        if ($tree['total'] === 0) {
-            $this->markTestSkipped('This checkout has nothing uncommitted, and the counts section 1 states are about the working tree the note was taken on.');
+        foreach (Handoff::blocks() as $name) {
+            self::assertSame(
+                Handoff::rendered($name),
+                Handoff::block($name),
+                sprintf(
+                    "HANDOFF.md's `%s` block is not what git says it is. The block is an output rather than a claim:\n".
+                    'run `php bin/handoff.php` and it follows the tree, so neither a set of files nor a count in '.
+                    'it can be stated by whoever re-takes the note.',
+                    $name,
+                ),
+            );
         }
+    }
 
-        $claim = Handoff::pendingCounts();
+    /**
+     * The renderer itself, driven the way a re-take drives it.
+     *
+     * The comparison above holds the blocks to the derivation; this holds the command a session runs
+     * to the same answer, so the two cannot disagree about whether the note is current — a renderer
+     * that wrote one thing while the guard read another would make every re-take a coin toss.
+     */
+    public function test_the_renderer_finds_the_note_in_step(): void
+    {
+        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/handoff.php', '--check']);
 
-        self::assertSame(
-            ['total' => $claim['total'], 'changed' => $claim['changed'], 'new' => $claim['new']],
-            $tree,
+        self::assertSame(0, $run['exit'], sprintf(
+            "bin/handoff.php --check reports the note out of step with the register it names:\n%s%s",
+            $run['output'],
+            $run['error'],
+        ));
+
+        self::assertStringContainsString('all in step with git', $run['output']);
+    }
+
+    /**
+     * Where the size of the pending set comes from, now that the note does not state it.
+     *
+     * WHY THIS SHAPE AND NOT A COMPARISON OF NUMBERS
+     * ---------------------------------------------
+     *   This test used to read three counts out of section 1 and compare them with `git status`, and
+     *   it was red on every checkout but the one that wrote the note: a count of uncommitted paths is
+     *   a fact about one working tree, so any file added, deleted or reverted afterwards left the
+     *   sentence disagreeing with the tree, and the repair was a person re-reading git and editing
+     *   three words. A number no derivation can hold is not a claim this package binds, so the
+     *   sentence names the derivation instead — the command the note's own opening block tells a
+     *   reader to run — and this holds it to the two things a committed file *can* be asked for: that
+     *   it names that command, and that it does not state a count again.
+     *
+     *   The count check is a vocabulary check rather than a pattern, because the way the number would
+     *   come back is as a word — `Twelve paths differ`, `nine tracked paths changed`, `three new
+     *   files` — and `NumberWords` is the package's list of the words a record writes numbers with. It
+     *   reads the words in front of every noun the guard counts, because that is where the note put its
+     *   three counts, and it reads three of them rather than one because the note's own phrasing puts
+     *   an adjective between the number and the noun: a check that saw only `tracked` would report
+     *   agreement with a count it had never read. Which nouns those are is `Handoff::countsNoun()`'s —
+     *   the pair table the count readings are built from — so the noun this catches is the noun a
+     *   reading counts, in either of its forms, rather than a list kept here beside it. Case is the
+     *   record's (`NumberWords` folds it), and a number word nowhere near those nouns — `one working
+     *   tree` — is prose rather than a count.
+     */
+    public function test_section_1_names_the_derivation_for_the_pending_set_rather_than_a_count(): void
+    {
+        $sentence = Handoff::pendingSize();
+
+        self::assertStringContainsString(
+            '`git status --short`',
+            $sentence['text'],
             sprintf(
-                'HANDOFF.md line %d says %d path(s) differ from the register, %d of them tracked paths that '
-                ."changed and %d file(s) it does not carry; this checkout has %d, %d and %d.\n".
-                'The sentence and the tree are both claims, and this is the one that moves every time a file is '
-                .'touched after the note is taken.',
-                $claim['source'],
-                $claim['total'],
-                $claim['changed'],
-                $claim['new'],
-                $tree['total'],
-                $tree['changed'],
-                $tree['new'],
+                "HANDOFF.md line %d no longer names the command the size of the pending set is read from.\n".
+                'A count of uncommitted paths cannot be held in a committed file, so the sentence has to name the '.
+                'derivation a reader runs instead.',
+                $sentence['source'],
             ),
         );
+
+        $words = preg_split('/[^A-Za-z-]+/', $sentence['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $counted = [];
+
+        foreach ($words as $index => $word) {
+            if (! Handoff::countsNoun($word)) {
+                continue;
+            }
+
+            foreach (array_slice($words, max(0, $index - 3), min(3, $index)) as $before) {
+                if (NumberWords::knows($before)) {
+                    $counted[] = $before.' '.$word;
+                }
+            }
+        }
+
+        self::assertSame(
+            [],
+            $counted,
+            sprintf(
+                "HANDOFF.md line %d states the pending set as a count again (%s).\n".
+                'A count of uncommitted paths is a fact about one working tree — red on every checkout but the one '.
+                'that wrote the note — so the sentence names the derivation (`git status --short`) and leaves the '.
+                'number to the command.',
+                $sentence['source'],
+                implode(', ', $counted),
+            ),
+        );
+    }
+
+    /**
+     * Every count reading in this guard, held to the singular and the plural it has to accept.
+     *
+     * WHY THIS IS ITS OWN TEST
+     * ------------------------
+     *   A count reading is a pattern around a noun, and the noun has two forms: the singular a note
+     *   writes when it holds exactly one of the thing, and the plural it writes for every other count.
+     *   A pattern spelling only the plural is green against every note this package has today and blind
+     *   on the note that holds one — the one a reader would most want read — so the failure is invisible
+     *   in a diff of the record and lands on whoever writes the first such note. That is not a claim a
+     *   note makes but the shape of the reading that reads it, which is why it is held here: the forms
+     *   are declared beside the readings (`Handoff::countedNouns()`), the readings build their patterns
+     *   from that declaration, and each pair is held to both of its forms.
+     *
+     *   The other half is the reading that does not exist yet. A pattern that spells its own noun passes
+     *   every assertion above it, because the pair held here is not the pair it reads, so the guard's own
+     *   source is read for the two shapes a hand-written noun takes: a form written into a pattern —
+     *   `'/^paths$/'`, which weighs a count of many and is blind to a count of one — and a pair written out
+     *   by hand, `path|paths` or the `entr(?:y|ies)` the Unreleased totals used to carry, which is a second
+     *   spelling of a pair the table already decides. That is what makes the next reading unable to ship
+     *   without the singular rather than merely unlikely to.
+     *
+     *   A reading that counts without a noun is held through the vocabulary it takes its number from:
+     *   `NumberWords` is what spells the word a word reading matches, so the word for one has to be in
+     *   it, while a reading that matches digits (`(\d+)`) reads a count of one by construction.
+     */
+    public function test_every_count_reading_accepts_the_singular_and_the_plural_it_counts(): void
+    {
+        $counted = Handoff::countedNouns();
+
+        self::assertNotSame(
+            [],
+            $counted,
+            'The guard declares no counted noun at all, so every count its readings take is one nothing holds.',
+        );
+
+        foreach ($counted as $noun => $pair) {
+            self::assertNotSame(
+                $pair['singular'],
+                $pair['plural'],
+                sprintf(
+                    'The guard counts [%s] in one form, so a reading of it cannot tell a count of one from a count of many.',
+                    $noun,
+                ),
+            );
+
+            $pattern = '/^'.Handoff::counted($noun).'$/';
+
+            foreach ([$pair['singular'], $pair['plural']] as $form) {
+                self::assertSame(
+                    1,
+                    preg_match($pattern, $form),
+                    sprintf(
+                        'The pattern the readings build for [%s] does not read [%s], which is the %s form of a count of it: a '.
+                        'reading built from this pair cannot be read through by the note that holds that count.',
+                        $noun,
+                        $form,
+                        $form === $pair['singular'] ? 'singular' : 'plural',
+                    ),
+                );
+            }
+        }
+
+        self::assertTrue(
+            NumberWords::knows('one'),
+            'The readings that take their number from words cannot read a count of one: `NumberWords` no longer spells [one], '.
+            'and a word it does not know is a count no word reading can take.',
+        );
+
+        $spelled = self::nounsSpelledByHand(self::guardSources());
+
+        self::assertSame(
+            [],
+            $spelled,
+            sprintf(
+                "A count reading in the guard spells its own noun rather than building it from the pair:\n  - %s\n\n".
+                'A pattern built from `Handoff::counted()` reads both forms because the pair it is built from has both; one '.
+                "written out beside the table reads the form it names and no other, which is a reading able to weigh a count\n".
+                'of many and blind to a count of one — the note a reader would most want read. Declare the noun in '.
+                '`Handoff::COUNTED`, the singular and the plural, and build the pattern from the pair.',
+                implode("\n  - ", $spelled),
+            ),
+        );
+    }
+
+    /**
+     * The scan, held to the two directions it can be useless in.
+     *
+     * WHY THIS IS A TEST AND NOT A PARAGRAPH
+     * -------------------------------------
+     *   The hold above is only as good as the scan behind it, and a scan fails in two directions: it can
+     *   report nothing, which leaves a reading that spells only the plural green — the failure the whole
+     *   hold exists for — or it can report everything, which fails an innocent reading until somebody
+     *   deletes the hold rather than fixing it. Both directions are measured here, on lines the test
+     *   composes rather than finds, because the teeth were measured by hand into section 5 of the note
+     *   and a control nobody re-measures is one that rots with the reading that wrote it.
+     *
+     *   Each line is built from the declaration's own forms through variables, because the guard's own
+     *   source is what the live scan reads: a form written into *this* file is a form this file would be
+     *   refused for. That is not a way around the scan — a noun inside a variable is exactly what it
+     *   leaves alone, which is one of the three lines below that has to come back empty.
+     */
+    public function test_the_scan_refuses_every_shape_a_reading_can_ship_with(): void
+    {
+        $counted = Handoff::countedNouns();
+        $entry = $counted['entry'];
+        $path = $counted['path'];
+        $box = 'box';
+
+        $cases = [
+            // A note cannot be read through these: a form on its own, and both shapes of a pair.
+            'a plural spelled into a pattern of its own' => [
+                sprintf("if (preg_match('/^%s$/i', %s) !== 1) {", $path['plural'], '$word'),
+                "Handoff::counted('path')",
+            ],
+            'a pair written out by hand beside the table' => [
+                sprintf("if (preg_match('/^%s$/', %s) === 1) {", $entry['singular'].'|'.$entry['plural'], '$span'),
+                $entry['singular'].'|'.$entry['plural'],
+            ],
+            'a pair for a noun the table does not declare' => [
+                sprintf("preg_match('/^(%s)$/', %s)", $box.'|'.$box.'es', '$name'),
+                $box.'|'.$box.'es',
+            ],
+            // ... and these are readings: the door, a key, and a variable.
+            'a pattern the pair was built around' => [
+                sprintf("if (preg_match('/^(\d+) %s$/', %s) !== 1) {", "self::counted('entry')", '$row'),
+                null,
+            ],
+            'a form that runs into the key it names' => [
+                sprintf("if (preg_match('/^\s*%s:\s*$/', %s) === 1) {", $path['plural'], '$line'),
+                null,
+            ],
+            'a form inside a variable' => [
+                sprintf("if (preg_match('/^src/', %s) === 1) {", '$file'),
+                null,
+            ],
+        ];
+
+        foreach ($cases as $shape => [$line, $names]) {
+            $findings = self::findingsIn($line);
+
+            if ($names === null) {
+                self::assertSame([], $findings, sprintf(
+                    "The scan refuses a line it has no business refusing — %s:\n  %s\n\n".
+                    'A scan that reports everything fails an innocent reading, and a hold that does that is deleted rather '.
+                    'than fixed.',
+                    $shape,
+                    $line,
+                ));
+
+                continue;
+            }
+
+            self::assertNotSame([], $findings, sprintf(
+                "The scan read nothing in a line no note could be read through — %s:\n  %s\n\n".
+                'This is the direction the whole hold exists for: a reading that spells the form it names and no other.',
+                $shape,
+                $line,
+            ));
+
+            self::assertStringContainsString($names, implode(' ', $findings), sprintf(
+                "The scan refused %s without saying what to do about it:\n  %s",
+                $shape,
+                implode("\n  ", $findings),
+            ));
+        }
+    }
+
+    /**
+     * What the scan makes of one line of source, read as if it were the reader's — the controls above are
+     * lines rather than files, and a scan is only as good as what it says about the shape it is handed.
+     *
+     * @return list<string>
+     */
+    private static function findingsIn(string $line): array
+    {
+        return self::nounsSpelledByHand(['tests/Support/Handoff.php' => $line."\n"]);
+    }
+
+    /**
+     * Every place the guard's own source spells a noun a count reading matches, as `file:line  finding`.
+     *
+     * THE TWO SHAPES THAT ARE FINDINGS
+     * -------------------------------
+     *   A declared form written into a pattern — `'/^paths$/'` — is a reading that weighs a count of
+     *   many and is blind to a count of one, and the doors the readings are meant to go through
+     *   (`counted('path')`) are cut out of the line before it is searched for, so a pattern *built* from
+     *   the pair is not read as one that spells it. A pair written out by hand — `path|paths`, or the
+     *   `entr(?:y|ies)` the Unreleased totals used to carry — reads both forms and is refused all the
+     *   same: it is a second spelling of a pair the table already decides, and when the noun is one
+     *   nobody declared it is a reading of a count the guard holds nowhere at all.
+     *
+     *   The pair shapes are the three ways English writes a plural for a noun a pattern could count —
+     *   `s`, as in `path|paths`; `es`, as in `batch|batches`; and the `y` a plural turns into `ies` — so
+     *   an alternation that is not a noun pair (`true|false`) is left to the reading it belongs to. Prose
+     *   is not read: a docblock saying which forms a noun has is the decision written down, while only a
+     *   pattern is what a note is read through, so comment lines are stepped over and a line's own
+     *   trailing comment is cut before anything is looked for.
+     *
+     * The source is handed in rather than read here, so that the same scan can be asked about a line the
+     * controls above compose: what it reads in the guard's files and what it reads in a shape somebody
+     * handed it are the same reading, which is the only way the controls hold the live scan.
+     *
+     * @param array<string, string> $sources
+     *
+     * @return list<string>
+     */
+    private static function nounsSpelledByHand(array $sources): array
+    {
+        $found = [];
+
+        foreach ($sources as $file => $source) {
+            foreach (explode("\n", $source) as $index => $line) {
+                $trimmed = ltrim($line);
+
+                if ($trimmed === '' || str_starts_with($trimmed, '*') || str_starts_with($trimmed, '/*') || str_starts_with($trimmed, '//')) {
+                    continue;
+                }
+
+                $comment = strpos($line, '//');
+                $code = $comment === false ? $line : substr($line, 0, $comment);
+
+                foreach (array_merge(self::nounsInPatterns($code), self::nounPairs($code)) as $finding) {
+                    $found[] = sprintf('%s:%d  %s', $file, $index + 1, $finding);
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The guard's own source, keyed by the path a finding names it with: the reader that takes the
+     * note's claims, and every file of the note's own suite named after it.
+     *
+     * The suite is read as a directory rather than as a list written down here, so the next test of the
+     * note is scanned without anybody adding it to this list, and the files are read from disk rather
+     * than held as text, so what is scanned is what a commit would carry. A file that is not there is a
+     * failure rather than an empty scan: one that read nothing and found nothing would report agreement
+     * with a reading it never read.
+     *
+     * @return array<string, string>
+     */
+    private static function guardSources(): array
+    {
+        $suite = array_map(
+            static fn (string $path): string => 'tests/Unit/Docs/'.basename($path),
+            glob(Handoff::root().'/tests/Unit/Docs/Handoff*.php') ?: [],
+        );
+
+        self::assertNotSame(
+            [],
+            $suite,
+            'No file of the note\'s own suite is named after the reader, so the half of this guard that reads the guard\'s '.
+            'source is scanning nothing.',
+        );
+
+        $sources = [];
+
+        foreach (array_merge(['tests/Support/Handoff.php'], $suite) as $path) {
+            $source = @file_get_contents(Handoff::root().'/'.$path);
+
+            self::assertIsString(
+                $source,
+                sprintf('%s is not there to be read for a count reading spelled by hand — move this list with the file.', $path),
+            );
+
+            $sources[$path] = $source;
+        }
+
+        return $sources;
+    }
+
+    /**
+     * The noun-and-plural alternations in one line of code, as the line writes them — both arms, in
+     * the order they appear, for each pair whose second arm is the plural of its first.
+     *
+     * @return list<string>
+     */
+    private static function nounPairs(string $code): array
+    {
+        if (preg_match_all('/([a-z]+)\|([a-z]+)/', $code, $matches, PREG_SET_ORDER) === 0) {
+            return [];
+        }
+
+        $pairs = [];
+
+        foreach ($matches as $match) {
+            if (self::isPluralOf($match[1], $match[2])) {
+                $pairs[] = $match[1].'|'.$match[2];
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * The declared forms a line spells into a pattern of its own, each as the instruction it should have
+     * followed instead.
+     *
+     * WHAT MAKES A FORM A FINDING HERE
+     * -------------------------------
+     *   Only a line that matches text is read at all, and only a regex — a reading of the note is a
+     *   `preg_match` or a `preg_match_all`, while a `str_contains` asks whether a word is there rather
+     *   than weighing a count of it. Two kinds of word come out of the line before it is searched: the
+     *   doors (`counted('path')`, `countsNoun($word)`), because a form named *to* the door is the one way
+     *   of writing it that reads both forms; and a variable, because a noun inside a name (`$paths`,
+     *   `$file`) is not a pattern. What is left is a form standing alone in what the line matches with.
+     *
+     *   A form running straight into a colon or a dot is left alone as well: that is a noun naming a key
+     *   or a path rather than counting the thing — `phpstan.neon.dist`'s `paths:` row is the one pattern
+     *   in the guard that spells one so, and it holds no count. Anywhere else, a declared form in a
+     *   pattern is a reading that reads the form it names and no other.
+     *
+     * @return list<string>
+     */
+    private static function nounsInPatterns(string $code): array
+    {
+        if (preg_match('/\b(?:preg_match|preg_match_all)\s*\(/', $code) !== 1) {
+            return [];
+        }
+
+        $bare = preg_replace([
+            '/\b(?:counted|countsNoun)\([^)]*\)/',
+            '/\$[A-Za-z_][A-Za-z0-9_]*/',
+        ], '', $code) ?? $code;
+
+        $found = [];
+
+        foreach (self::countedForms() as $form => $noun) {
+            if (preg_match('/\b'.preg_quote($form, '/').'\b(?![:.])/', $bare) === 1) {
+                $found[] = sprintf(
+                    "the form [%s], spelled into the pattern rather than built from the pair (Handoff::counted('%s'))",
+                    $form,
+                    $noun,
+                );
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * Every form the guard declares a noun in, keyed by the form, so that a form found in a pattern is
+     * reported with the noun it counts and with the door it should have gone through.
+     *
+     * @return array<string, string>
+     */
+    private static function countedForms(): array
+    {
+        $forms = [];
+
+        foreach (Handoff::countedNouns() as $noun => $pair) {
+            $forms[$pair['singular']] = $noun;
+            $forms[$pair['plural']] = $noun;
+        }
+
+        return $forms;
+    }
+
+    /**
+     * Whether the second of two arms is the plural of the first — the three shapes a hand-written pair
+     * takes, so that an alternation which is not one (`true|false`, or a `[^}]*|[^/]+` inside a pattern
+     * spanning more than a word) is left to the reading it belongs to.
+     */
+    private static function isPluralOf(string $singular, string $plural): bool
+    {
+        return $plural === $singular.'s'
+            || $plural === $singular.'es'
+            || (str_ends_with($singular, 'y') && $plural === substr($singular, 0, -1).'ies');
     }
 
     public function test_the_commits_it_describes_are_the_ones_it_names(): void

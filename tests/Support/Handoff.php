@@ -179,10 +179,90 @@ final class Handoff
     private const UNRELEASED = '## 3. Unreleased';
     private const WORKING = '## 5. Working here';
 
+    /**
+     * The nouns the guard's count readings count, each as the two forms a note may write it in.
+     *
+     * WHY A PAIR AND NOT THE PATTERN THAT READS IT
+     * -------------------------------------------
+     *   A count of one is written with the singular and every other count with the plural, so a
+     *   reading that spells only the plural cannot read the one note holding exactly one of the thing
+     *   — and it fails in the direction nobody looks: it reports agreement with a claim it never read,
+     *   which is the failure `NumberWords` names for a word it does not know. The noun is therefore
+     *   declared here once, as both forms, and a reading builds its pattern out of the declaration
+     *   (`counted()`) rather than out of one of them, so the singular cannot be dropped by whoever
+     *   writes the next reading. `tests/Unit/Docs/HandoffTest.php` holds every pair to both forms, and
+     *   refuses to see one spelled by hand in the guard's own source.
+     *
+     *   Two readings share the table: the Unreleased totals, which read the number in front of the
+     *   noun, and section 1's refusal, which reads a number *word* in front of it. One table rather
+     *   than two, because a noun one of them counts is a noun the other has to catch, and two tables
+     *   are two chances for one of them to be missing a form — the reason `NumberWords` is one table
+     *   for its two directions rather than two of them. `path` and `file` are here for the refusal
+     *   alone: the size of the pending set is the one count this note cannot state, so the refusal has
+     *   to find the number by the noun it counts.
+     *
+     * @var array<string, array{singular: string, plural: string}>
+     */
+    private const COUNTED = [
+        'entry' => ['singular' => 'entry', 'plural' => 'entries'],
+        'path' => ['singular' => 'path', 'plural' => 'paths'],
+        'file' => ['singular' => 'file', 'plural' => 'files'],
+    ];
+
     /** The package root, for turning a path the note names into a file to look for. */
     public static function root(): string
     {
         return self::ROOT;
+    }
+
+    /**
+     * The nouns a count reading counts, keyed by the singular — the list rather than one pair, so
+     * that a test can ask what the guard counts at all rather than what one reading counts.
+     *
+     * @return array<string, array{singular: string, plural: string}>
+     */
+    public static function countedNouns(): array
+    {
+        return self::COUNTED;
+    }
+
+    /**
+     * The pattern a count reading matches one of those nouns with — both forms, or neither.
+     *
+     * The one door to a pair, and it raises for a noun the table does not declare: a pattern with one
+     * form written into it is a reading that ships unable to read a count of one, and a call here is
+     * the one shape of that which cannot happen.
+     *
+     * @throws RuntimeException when the noun is not one the table declares
+     */
+    public static function counted(string $noun): string
+    {
+        if (! isset(self::COUNTED[$noun])) {
+            throw new RuntimeException(sprintf(
+                'the guard counts no such noun as "%s": a reading builds its pattern from the pairs in this file, so '.
+                'declare the singular and the plural there first',
+                $noun,
+            ));
+        }
+
+        return '(?:'.self::COUNTED[$noun]['singular'].'|'.self::COUNTED[$noun]['plural'].')';
+    }
+
+    /**
+     * Whether a word is one of those nouns, in either form — how a reading that comes *across* a word
+     * rather than looking for one asks whether it has arrived at what it counts.
+     *
+     * Case is the record's, as it is for `NumberWords`.
+     */
+    public static function countsNoun(string $word): bool
+    {
+        foreach (self::COUNTED as $pair) {
+            if (in_array(strtolower($word), [$pair['singular'], $pair['plural']], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -310,95 +390,416 @@ final class Handoff
     }
 
     /**
-     * The size of what is uncommitted as git reports it: how many paths differ from the last commit,
-     * how many of them are files no commit carries, and how many are tracked paths that changed.
+     * The sentence section 1 names the derivation of the pending set's size in — the paragraph that
+     * says where the count comes from, rather than one that states it.
      *
-     * A deleted path is one of the changed rather than of the new, which is why the note writes the
-     * second count as *tracked paths changed* rather than as files edited.
+     * WHY A POINTER AND NOT A NUMBER
+     * ------------------------------
+     *   This sentence used to state three counts — how many paths differ from the register, how many
+     *   of those are tracked paths that changed, and how many are files no commit carries — and the
+     *   guard compared them with the working tree. That comparison could only ever be green on the
+     *   machine that wrote the note: a count of uncommitted paths is a fact about one checkout, so
+     *   every file added, deleted or reverted after the note was taken left it red until a person
+     *   re-read `git status` and edited three words. A number no derivation can hold is not one this
+     *   package binds (`docs/prose-numbers.md` keeps it out of the bound table), and rendering it is
+     *   no better: the rendered sentence would be wrong on the first clean clone. So the sentence
+     *   names the derivation — the command the note's own opening block runs — and this reads *that*
+     *   sentence, so the guard can hold it to naming one.
      *
-     * @return array{total: int, changed: int, new: int}
+     *   What is read is the claim's own phrase (*the size of the pending set*), not the command in
+     *   it: section 1 also talks *about* this change, and a paragraph that mentions the command while
+     *   describing the sentence is not a second claim. A paragraph rather than a line, for the reason
+     *   the sentence is wrapped: the command is on one physical line and the words it is about are on
+     *   the next, so a reader that stopped at the line would report a claim it had only half read. Two
+     *   paragraphs stating the claim is the one ambiguity a reader here cannot resolve, so it is
+     *   raised rather than guessed at.
      *
-     * @throws RuntimeException when git cannot be asked
+     * @return array{text: string, source: int}
+     *
+     * @throws RuntimeException when no paragraph of section 1 names it, or more than one does
      */
-    public static function uncommitted(): array
+    public static function pendingSize(): array
     {
-        $entries = self::porcelain();
-        $new = count(array_filter(
-            $entries,
-            static fn (array $entry): bool => self::isNew($entry['status']),
-        ));
+        $named = [];
 
-        return ['total' => count($entries), 'changed' => count($entries) - $new, 'new' => $new];
-    }
-
-    /**
-     * The size of the pending set as section 1 states it: how many paths differ from the register,
-     * how many of those are tracked paths that changed, and how many are files the register does not
-     * carry at all.
-     *
-     * Read out of the sentence rather than a table, because that is where the note states it — and
-     * read at all because a size is a claim like the list under it: a table can be complete while
-     * the sentence above it describes a set of a different size, and that is drift a reader is
-     * misled by rather than warned of. The shape is the claim: three words, each the number the
-     * phrase after it is about.
-     *
-     * Every noun is read as it is written — `one path differs` beside `two paths differ`, `tracked
-     * path` beside `tracked paths`, `new file` beside `new files` — because a tree can hold exactly
-     * one of any of them, and a note that had to write a plural for a count of one would be failing
-     * over grammar rather than over a size. The first of those cases is not hypothetical: a tree can
-     * be down to a single file left by a hand that is not this cycle's, and the note has to be able
-     * to say so. The teeth are unchanged either way — the word before the noun still has to be one
-     * `NumberWords` knows, and the number it names still has to be the tree's — and a number the
-     * sentence gets wrong is still the failure, which is the shape a note is read for.
-     *
-     * @return array{total: int, changed: int, new: int, source: int}
-     *
-     * @throws RuntimeException when the sentence stops stating the three numbers in that shape, or
-     *                          states one this vocabulary does not spell
-     */
-    public static function pendingCounts(): array
-    {
-        $opening = null;
-
-        // A paragraph rather than a line, because the sentence is wrapped: the count of files is one
-        // physical line and the noun it counts is the next, so a reader that stopped at the line
-        // would report a claim it had only half read.
         foreach (self::paragraphs(self::PENDING) as $paragraph) {
-            if (preg_match('/\bpaths? differs?\b/', $paragraph['text']) === 1) {
-                $opening = $paragraph;
-
-                break;
+            if (preg_match('/\bthe size of the pending set\b/i', self::plain($paragraph['text'])) === 1) {
+                $named[] = $paragraph;
             }
         }
 
-        if ($opening === null) {
+        if ($named === []) {
             throw new RuntimeException(
-                'HANDOFF.md section 1 no longer says how many paths differ from the register, so the size of '.
-                'the pending set is a claim this cannot read.',
+                'HANDOFF.md section 1 no longer says what the size of the pending set is — it has to name the '.
+                'derivation rather than state a count, because a count of uncommitted paths is a fact about one '.
+                'working tree and a committed file cannot be asked for it.',
             );
         }
 
-        $plain = self::plain($opening['text']);
-        $number = '([a-z]+(?:-[a-z]+)?)';
-
-        if (preg_match('/\b'.$number.' paths? differs?\b/', $plain, $total) !== 1
-            || preg_match('/\b'.$number.' tracked paths? changed\b/', $plain, $changed) !== 1
-            || preg_match('/\b'.$number.' new file(?:s)?\b/', $plain, $new) !== 1
-        ) {
+        if (count($named) > 1) {
             throw new RuntimeException(sprintf(
-                'HANDOFF.md line %d no longer states the pending set as [N path(s) differ … N tracked '.
-                'path(s) changed, and N new file(s)]: [%s]',
-                $opening['source'],
-                trim($opening['text']),
+                'HANDOFF.md section 1 states the size of the pending set in %d paragraphs (lines %s), and which '.
+                'one of them is the claim is not something this can read.',
+                count($named),
+                implode(', ', array_column($named, 'source')),
             ));
         }
 
-        return [
-            'total' => NumberWords::toInt($total[1]),
-            'changed' => NumberWords::toInt($changed[1]),
-            'new' => NumberWords::toInt($new[1]),
-            'source' => $opening['source'],
+        return $named[0];
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The rendered blocks: what `bin/handoff.php` writes, and what the guard checks
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The regions of the note that are written from git rather than by hand, in the order the
+     * renderer writes them.
+     */
+    private const BLOCKS = ['pending', 'unpushed', 'log'];
+
+    /**
+     * How many of the unpushed commits the listing under section 2 shows. A ceiling rather than a
+     * count: a note that listed a hundred commits would be a log, and the first ten are the ones a
+     * reader is standing in.
+     */
+    private const LISTED = 10;
+
+    /**
+     * What each pending file is, one line apiece: the prose column of section 1's table, which is
+     * the one part of a rendered block git cannot answer.
+     *
+     * WHY THE WORDS LIVE HERE AND NOT IN THE NOTE
+     * ------------------------------------------
+     *   The rows of that table are derived — the files this checkout has that the register does not
+     *   carry — and prose cannot be. So the derivation is the set and this is the words, and the note
+     *   carries the output of both; a path the register does not carry and that has no line here is
+     *   refused by name rather than rendered blank, because the refusal is the sentence a reader of
+     *   the table needs (name the file, or take it out of the tree). It is a declaration rather than a
+     *   carry-over from the note's previous table for the reason the note's own counts are declared:
+     *   a renderer whose input is the file it is about to rewrite cannot answer for the file it was
+     *   handed instead.
+     *
+     * @var array<string, string>
+     */
+    private const PENDING_DESCRIPTIONS = [
+        'BEHAVE.mdc' => "another hand's, and no batch here's: a coding-agent rule file left at the root while "
+            .'this note was re-taken — uncommitted, and named here because a file nothing names is work the '
+            .'next thread cannot see',
+        'tests/Support/RepositorySnapshot.php' => 'a repository read as one comparable value, for the two release '
+            .'guards that hold a run to writing nothing: every file under the fixture by the hash of its bytes and '
+            .'by size and mtime, and where there is a `.git`, HEAD, the branch, the refs, the index, the porcelain '
+            .'and the reflog — the reading moved out of `tests/Unit/Release/DryRunTest.php` so both files take '
+            .'one reading of one promise',
+        'bin/handoff.php' => "this note's renderer: it writes the `pending`, `unpushed` and `log` blocks from "
+            .'git through `tests/Support/Handoff.php` — the derivations the note\'s own guard reads — and refuses a file '
+            .'it has no words for rather than rendering it blank',
+        'tests/Unit/Console/DbFlipPgcatDryRunTest.php' => 'a rehearsal held to the installation rather than to its '
+            .'own report: every file under the fixture hashed on both sides of a `--dry-run`, with a real flip '
+            .'and a mutated rehearsal as the two controls',
+        'tests/Unit/Release/DerivedWritersTest.php' => 'the writers declaration held to the commands, so a derived '
+            .'file cannot be written by nobody: it forges a row into each of the three records and a marker into '
+            .'the page, runs each command over the marked tree, and asks every file whether it was the one that '
+            .'command repaired',
+        'tests/Unit/Release/ExitPathsTest.php' => 'every exit of `bin/release.php` that is not the apply — the '
+            .'refusals, the usage errors, the argument checks, the unanswered question and the dry runs, '
+            .'`--skip-ci` and declared versions among them — read on both sides of the run, with the script\'s own '
+            .'exit sites read out of the script and compared with the table',
+    ];
+
+    /**
+     * The blocks the note carries, so a test can ask for each of them by name.
+     *
+     * @return list<string>
+     */
+    public static function blocks(): array
+    {
+        return self::BLOCKS;
+    }
+
+    /**
+     * The text one block holds, as the file has it — what the markers delimit.
+     *
+     * @throws RuntimeException when the block or its markers are gone
+     */
+    public static function block(string $name): string
+    {
+        $inside = false;
+        $block = [];
+
+        foreach (self::lines() as $line) {
+            $trimmed = trim($line);
+
+            if ($trimmed === self::marker($name)) {
+                $inside = true;
+
+                continue;
+            }
+
+            if ($trimmed === self::marker($name, close: true)) {
+                return implode("\n", $block);
+            }
+
+            if ($inside) {
+                $block[] = $line;
+            }
+        }
+
+        throw new RuntimeException(sprintf(
+            'HANDOFF.md has no `%s` block: the markers that delimit what the renderer writes are gone, so a block '
+            .'nobody can find is one the suite reads as nothing.',
+            $name,
+        ));
+    }
+
+    /**
+     * What one block should say — from git, at the register the note names unless another is given.
+     *
+     * THE REGISTER IS THE NOTE'S OWN, NOT HEAD
+     * ----------------------------------------
+     *   A block rendered at `HEAD` would be out of step the moment anything was committed: the note
+     *   describes a register older than the commit that lands it, which is the design rather than
+     *   drift. So checking renders at the register the note names, and the count of unpushed commits,
+     *   the breakdown and the listing are all answers about *that* pair of commits. Writing is the
+     *   other half and it is `bin/handoff.php`'s: a re-take renders at the commit the checkout is
+     *   standing on, which is what makes the register row a new one.
+     *
+     * @throws RuntimeException when the register or a git question it needs cannot be answered, or
+     *                          when a pending file has no words declared for it
+     */
+    public static function rendered(string $name, ?string $register = null): string
+    {
+        if (!in_array($name, self::BLOCKS, true)) {
+            throw new RuntimeException(sprintf(
+                'The note renders no block called "%s"; the blocks it has are %s.',
+                $name,
+                implode(', ', self::BLOCKS),
+            ));
+        }
+
+        $register ??= self::basis()['head']['sha'];
+
+        return match ($name) {
+            'pending' => self::renderedPending($register),
+            'unpushed' => self::renderedUnpushed($register),
+            'log' => self::renderedLog($register),
+        };
+    }
+
+    /** The commit a write renders at: the one this checkout is standing on, which is the new register. */
+    public static function head(): string
+    {
+        return self::asked('rev-parse', 'HEAD')[0] ?? '';
+    }
+
+    /**
+     * Section 1's table: the files this checkout has that the register does not carry, one row
+     * apiece, with the words `PENDING_DESCRIPTIONS` holds.
+     *
+     * The set is `git ls-files --cached --others --exclude-standard` minus `git ls-tree -r` of the
+     * register, which is the question the section asks in its own words — and it is a *tree* question
+     * rather than a `git status` one, because a file the register does not carry is exactly what a
+     * reader of the table needs named, whether it is new in the index or committed on a branch the
+     * register predates.
+     */
+    private static function renderedPending(string $register): string
+    {
+        $carried = self::asked('ls-tree', '-r', '--name-only', self::full($register));
+        $pending = array_values(array_diff(self::asked('ls-files', '--cached', '--others', '--exclude-standard'), $carried));
+
+        // Sorted here rather than left as git prints them: `--cached --others` reports the two sets
+        // one after the other, so the rows would move when a path entered the index — a different
+        // order for the same set, which is a diff nobody made.
+        sort($pending);
+
+        $rows = ['| File | What it is |', '|---|---|'];
+
+        foreach ($pending as $path) {
+            $rows[] = sprintf('| `%s` | %s |', $path, self::words($path));
+        }
+
+        return implode("\n", $rows);
+    }
+
+    /**
+     * Section 2's table: the register, the remote tip, and the commits between them.
+     *
+     * The remote tip is the local `origin/dev`, which is the ref a fetch moves: the note's prose says
+     * the tip was asked of the remote itself when the section was taken, and which of the two a row
+     * came from is not something a committed file can be asked to keep.
+     */
+    private static function renderedUnpushed(string $register): string
+    {
+        $head = self::full($register);
+        $origin = self::full('origin/dev');
+
+        return implode("\n", [
+            '| Field | At the snapshot |',
+            '|---|---|',
+            sprintf('| Branch | `%s` |', self::asked('symbolic-ref', '--short', 'HEAD')[0] ?? ''),
+            sprintf('| HEAD | `%s` — *%s* |', self::short($head), self::subject($head)),
+            sprintf('| `origin/dev` | `%s` — *%s* |', self::short($origin), self::subject($origin)),
+            sprintf(
+                '| Unpushed | %d commits — the ones `git log --oneline origin/dev..HEAD` prints |',
+                (int) (self::asked('rev-list', '--count', $origin.'..'.$head)[0] ?? 0),
+            ),
+            sprintf('| Since the last tag | %s |', self::written(self::unpushedMix($origin, $head))),
+        ]);
+    }
+
+    /**
+     * The listing under section 2: the most recent unpushed commits, with the sentence that counts
+     * them.
+     */
+    private static function renderedLog(string $register): string
+    {
+        $commits = self::unpushedCommits(self::full('origin/dev'), self::full($register));
+        $listed = array_slice($commits, 0, self::LISTED);
+        $width = max(array_map(static fn (array $commit): int => strlen($commit['sha']), $listed)) + 2;
+
+        $lines = [
+            sprintf(
+                'The %s most recent are the ones a reader is most likely to be standing in the middle of:',
+                NumberWords::toWord(count($listed)),
+            ),
+            '',
+            '```',
         ];
+
+        foreach ($listed as $commit) {
+            $lines[] = str_pad($commit['sha'], $width).$commit['subject'];
+        }
+
+        $lines[] = '```';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The unpushed commits, most recent first, as the short id and the subject each row carries.
+     *
+     * @return list<array{sha: string, subject: string}>
+     */
+    private static function unpushedCommits(string $origin, string $head): array
+    {
+        $commits = [];
+
+        foreach (self::asked('log', '--format=%h%x1f%s', $origin.'..'.$head) as $line) {
+            [$sha, $subject] = array_pad(explode("\x1f", $line, 2), 2, '');
+            $commits[] = ['sha' => $sha, 'subject' => $subject];
+        }
+
+        if ($commits === []) {
+            throw new RuntimeException(
+                'The register is not ahead of `origin/dev`, so there is no commit listing to render and the '
+                .'section would be written empty.',
+            );
+        }
+
+        return $commits;
+    }
+
+    /**
+     * The shape of those commits by type, keyed by the type — the same reading `mix()` takes out of
+     * the note, taken out of the log instead.
+     *
+     * @return array<string, int>
+     */
+    private static function unpushedMix(string $origin, string $head): array
+    {
+        $mix = [];
+
+        foreach (self::unpushedCommits($origin, $head) as $commit) {
+            if (preg_match('/^([A-Za-z]+)(?:\([^)]*\))?!?:/', $commit['subject'], $matches) === 1) {
+                $type = strtolower($matches[1]);
+                $mix[$type] = ($mix[$type] ?? 0) + 1;
+            }
+        }
+
+        ksort($mix);
+
+        return $mix;
+    }
+
+    /**
+     * A tally as the note writes it: `chore 2, docs 4`, in the alphabetical order the types are
+     * keyed in, which is the order the guard compares against rather than the order of the log.
+     *
+     * @param array<string, int> $mix
+     */
+    private static function written(array $mix): string
+    {
+        return implode(', ', array_map(
+            static fn (string $type, int $count): string => $type.' '.$count,
+            array_keys($mix),
+            array_values($mix),
+        ));
+    }
+
+    /**
+     * The words one pending file is described by.
+     *
+     * @throws RuntimeException when the file the register does not carry has no line declared for it
+     */
+    private static function words(string $path): string
+    {
+        return self::PENDING_DESCRIPTIONS[$path] ?? throw new RuntimeException(sprintf(
+            'The register does not carry %s and no words are declared for it. A prose column cannot be derived, so '
+            .'add one line about it to Handoff::PENDING_DESCRIPTIONS — or take the file out of the tree, since a file '
+            .'that is not work is one .gitignore should carry.',
+            $path,
+        ));
+    }
+
+    /** One commit's abbreviated id, as git abbreviates it rather than as a fixed slice of it. */
+    private static function short(string $commit): string
+    {
+        return self::asked('rev-parse', '--short', $commit.'^{commit}')[0] ?? '';
+    }
+
+    /** One commit's subject, asked of git rather than read out of a row. */
+    private static function subject(string $commit): string
+    {
+        return self::asked('show', '-s', '--format=%s', $commit.'^{commit}')[0] ?? '';
+    }
+
+    /** The commit id a short id, a ref or a name resolves to. */
+    private static function full(string $commit): string
+    {
+        $resolved = self::asked('rev-parse', $commit.'^{commit}')[0] ?? '';
+
+        if ($resolved === '') {
+            throw new RuntimeException(sprintf('git resolved %s to nothing, and a block rendered against it would be empty.', $commit));
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * One git question with no answer this can be rendered without: a failure is raised rather than
+     * rendered, because a block written from a failed question is a block that says nothing.
+     *
+     * @return list<string>
+     */
+    private static function asked(string ...$arguments): array
+    {
+        $run = self::git(...$arguments);
+
+        if ($run['exit'] !== 0) {
+            throw new RuntimeException(sprintf(
+                'git %s could not be asked while a block was being rendered: %s',
+                implode(' ', $arguments),
+                trim($run['error']) ?: 'it said nothing',
+            ));
+        }
+
+        return self::outputLines($run['output']);
+    }
+
+    /** The comment one block is delimited by, opening or closing. */
+    private static function marker(string $name, bool $close = false): string
+    {
+        return '<!-- '.($close ? '/' : '').'handoff:'.$name.' -->';
     }
 
     /**
@@ -613,10 +1014,11 @@ final class Handoff
      * total the promotion would carry, the count under each heading it names, and the severity the
      * notes ask for.
      *
-     * The total is read as `entry` or `entries`, for the reason `pendingCounts()` reads its third
-     * noun either way: a section holding exactly one entry has no plural to write, and a note that
-     * had to write one would be failing over grammar rather than over a count. What the row calls
-     * the number is untouched — it is still digits, and the four numbers still have to be there.
+     * The total is read through `counted('entry')` rather than as a pattern written out here: a
+     * section holding exactly one entry writes the singular and every other count writes the plural,
+     * and the pair is declared once in `COUNTED`, so an edit here cannot drop the form a section with
+     * one entry needs. What the row calls the number is untouched — it is still digits, and the four
+     * numbers still have to be there.
      *
      * @return array{total: int, added: int, fixed: int, changed: int, severity: string}
      *
@@ -626,7 +1028,7 @@ final class Handoff
     {
         $counts = self::claim(self::UNRELEASED, '## Unreleased at the basis');
 
-        if (preg_match('/^(\d+) entr(?:y|ies) — (\d+) added, (\d+) fixed, (\d+) changed$/', self::plain($counts['value']), $matches) !== 1) {
+        if (preg_match('/^(\d+) '.self::counted('entry').' — (\d+) added, (\d+) fixed, (\d+) changed$/', self::plain($counts['value']), $matches) !== 1) {
             throw new RuntimeException(sprintf(
                 'HANDOFF.md line %d no longer states the Unreleased section as [total entry/entries — a Added, b '.
                 'Fixed, c Changed]: [%s]',

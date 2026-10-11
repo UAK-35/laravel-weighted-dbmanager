@@ -169,6 +169,26 @@ interpreter through the machine file rather than spelling its path out.
   are read out of the script by the shape of the call and compared with the table, because the way a
   table like this rots is an exit nothing drives rather than a row that stops matching.
 
+- **The handoff note's pending set, its unpushed count and its commit listing are rendered from git
+  rather than written by hand.** `HANDOFF.md` is the one record here that describes a moment, and
+  three parts of it change whenever the tree does: the files this checkout has that the register does
+  not carry, how many commits no remote has and how they break down, and the most recent of those
+  commits by id and subject. Every one of them is a question git answers, and each is now an output —
+  `bin/handoff.php` writes the three blocks between `<!-- handoff:NAME -->` markers through the same
+  readings the note's own guard takes in `tests/Support/Handoff.php`, so a re-take cannot state a set
+  of files, a count or a listing the tree does not have. `php bin/handoff.php --check` compares the
+  file with its derivation at the register the note *names* rather than at `HEAD` — a note describes a
+  commit older than the one that lands it — and `--register=<commit>` re-takes at another; exit codes
+  are 0 in step, 1 stale or unrenderable, 2 usage. The one input git cannot answer is the prose column
+  of section 1's table, which is declared beside the renderer: a pending file with no line there is
+  refused by name rather than rendered blank. Section 1 also stops stating the size of the pending set
+  — a count of uncommitted paths is a fact about one working tree, so the sentence names the
+  derivation (`git status --short`) and the guard holds it to that, failing a count written back in.
+  Beside it, every count the guard reads is a declared pair of forms (`entry`, `path`, `file`), so a
+  pattern is built from the declaration and reads the singular and the plural it has to accept, and
+  the guard's own source is scanned for a form — or a pair — spelled out by hand instead. The
+  renderer is `export-ignore`d, so no consumer tarball carries it.
+
 ### Fixed
 
 - **The audit record is handed back writable, so a second account can write it — on any host.** The
