@@ -1,4 +1,4 @@
-# Handoff — the state of this package, taken 2026-10-12
+# Handoff — the state of this package, taken 2026-10-15
 
 This is a snapshot for whoever opens a thread in **this** repository next: what is written
 but uncommitted, what is committed but unpushed, what is not in any release a consumer can
@@ -27,7 +27,7 @@ php bin/release.php --weigh --branch=dev --dry-run  # what a release would do ri
 ```
 
 Every number below that the register holds — sections 2 and 3 — was read off this machine on
-2026-10-12, with the remote asked directly (`git ls-remote`, which named the same commit the local
+2026-10-15, with the remote asked directly (`git ls-remote`, which named the same commit the local
 ref does) rather than trusted from the local `origin/dev` ref. Section 1 was re-taken on the same day,
 the date above, and it is the one part of this file that describes *now* rather than the commit it is
 read against.
@@ -36,8 +36,13 @@ read against.
 
 ## 1. Pending — written, green, uncommitted
 
-Nothing is pending. Everything this cycle described is a commit, and the last of them is the
-release the cycle existed for.
+**Nothing is pending.** The four commits this note lands are on `dev` with the commit before it:
+the readings and the port plan (`3f25180`), the schedule watchdog (`af1fddb`), the api page a past
+tree renders (`e06098b`) and the published config's generation (`bbfd422`), each with the changelog
+entry that weighs it. The table below is empty
+because the tree holds no file the register does not carry, which is what nothing pending looks like
+— and the schedule watchdog the note before this one called pending is section 3's `### Added` now
+rather than a file here.
 
 **The release.** `33afd4e` — *Release v0.2.0-alpha3* — is what `bin/release.php` wrote: the sixteen
 entries under `## Unreleased` promoted into `## 0.2.0-alpha3 - 2026-10-11` (six `### Added`, six
@@ -77,17 +82,18 @@ directions.
 
 The three `.tsv` records describe the tree `v0.2.0-alpha3` was cut from, and they say so in their
 header line — the release rewrites them, which is why the tree at the register is current and the
-tree the release was cut on is not. That is the check reading the stamp rather than the rows:
-against this checkout it reports the inventory current, and against the commit the release was cut
-on it exits 1 and names all three, one stale line each:
+tree the release was cut on is not. That is the check reading the stamp rather than the rows: against
+the commit the release was cut on it exits 1 and names all three, one stale line each — and against
+this checkout, which carries work no tag has, it exits 1 as well, naming the source files and the
+settings this cycle added, which the release's own records do not carry yet:
 
 ```
 php bin/inventory.php --check --at=8742456
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
-  --> • inventory is current — 40 files, 204 public methods, 239 key(s)/member(s),
-      described as v0.2.0-alpha3
+  --> exit 1: the inventory is out of step with this tree — 3, 14 and 14 line(s) stale in files.tsv,
+      methods.tsv and surface.tsv, each naming the row it does not hold
 ```
 
 Both lines are run by the guard rather than trusted, which is the change above. The split is the
@@ -132,10 +138,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `33afd4e` — *Release v0.2.0-alpha3* |
-| `origin/dev` | `33afd4e` — *Release v0.2.0-alpha3* |
-| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
-| Since the last tag | none |
+| HEAD | `bbfd422` — *feat: a published config says which key set it is, and the doctor reads the difference* |
+| `origin/dev` | `2744a13` — *docs: the handoff note is re-taken at the release commit, and its records reading is its transcript* |
+| Unpushed | 5 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 1, feat 3, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -144,18 +150,32 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-Nothing is unpushed at the register, and that is the release's own doing: `bin/release.php` refuses to
-tag while `HEAD` is not the tip of `origin/dev`, and it ends by pushing the commit and the tag
-together, so the commit it tagged is one a consumer can fetch. This note is the commit *after* the
-register, and it travels on the push below.
+The register is five commits ahead of `origin/dev`: the guarded commit path that moved out of the
+consuming application's `git/commit_paths.py` and into this repository's own `git/`, the readings and
+the port plan, and this cycle's three capabilities — the schedule that can be watched, the api page
+a past tree renders, and the published config that says which key set it is. Unpushed at the register
+means the tip its own release was pushed from, which is
+why the row reads what it does and not a backlog — `bin/release.php` refuses to tag while `HEAD` is
+not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every commit
+the release made is one a consumer can fetch. This note is the commit *after* the register, and it
+travels on the push below.
 
 <!-- handoff:log -->
-Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
+The five most recent are the ones a reader is most likely to be standing in the middle of:
+
+```
+bbfd422  feat: a published config says which key set it is, and the doctor reads the difference
+e06098b  feat: the API page of a past tree is read out of git, so a release's page is a question
+af1fddb  feat: a schedule that stops producing runs is a fault, and four surfaces say so
+3f25180  docs: the application is read file by file and by commit, and the port plan follows
+2306b43  fix: the guarded commit path is a file of this package, not the application's
+```
 <!-- /handoff:log -->
 
-The fence is a ceiling rather than the whole range, and here the range it is a ceiling over is empty:
-the register and the remote tip are one commit, so the section shows no listing and no breakdown
-rather than a shorter one. `git log --oneline origin/dev..HEAD` is the whole of it in every state.
+The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
+block carries what it prints up to that ceiling, so the section above shows the one commit between the
+register and the remote tip rather than a shorter listing. `git log --oneline origin/dev..HEAD` is the
+whole of it in every state.
 
 One consequence of that state is worth naming before the next release: the interlock the release
 checks is *satisfied* at this register, which is what let the tag be cut — so what stands between this
@@ -179,16 +199,18 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3` |
 | The latest of them | `v0.2.0-alpha3` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 0 entries — 0 added, 0 fixed, 0 changed |
-| The notes weigh as | patch — the section is empty, so there is nothing for a release to publish |
+| `## Unreleased` at the basis | 5 entries — 3 added, 2 fixed, 0 changed |
+| The notes weigh as | minor — three capabilities, which is the rung they take, and two repairs beside them |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: `v0.2.0` does not exist, so a suffixless version is still the lane ahead. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries none of them at the register, which the weighing reads as `patch` with no
-evidence beside it — the rung a release that has just emptied the section leaves. The register is
-therefore a branch with **nothing to release**: the notes are the state the release left, not a set of
-entries a promotion could carry.
+and the section carries `### Added` three times and `### Fixed` twice at the register, which the weighing
+reads as `minor` — three capabilities the rung is for, and the two repairs that landed beside them.
+The register is therefore a branch whose release would publish the schedule that can be watched, the
+api page a past tree renders, the published config that says which key set it is, and the two repairs
+the release before it did not carry — as `0.2.0`,
+the first version with no suffix, which is the lane the absent version leaves open.
 
 ### The release that cut this tag, and the row it could not write
 
@@ -215,8 +237,8 @@ own and this row is the only one it cannot satisfy as things stand.
 
 ### The release the weighing would ask for now
 
-Asked on 2026-10-12 what a release would do, `exit 0` — the plan refuses to promote anything, which is
-the honest answer to an empty section rather than a defect in it:
+Asked on 2026-10-15 what a release would do, it plans a `minor` and promotes four bullets — the two
+capabilities and the two repairs the section carries:
 
 ```bash
 php bin/release.php --weigh --branch=dev --dry-run
@@ -224,25 +246,26 @@ php bin/release.php --weigh --branch=dev --dry-run
 
 ```
   branch        dev  (dirty)
-  ci            CI failed (PHP Composer)
+  ci            HEAD is not the tip of origin/dev
   latest tag    v0.2.0-alpha3
-  bump          patch  (weighed: a patch change)
+  bump          minor  (weighed: a minor change)
   next version  0.2.0  (tag v0.2.0)
-  CHANGELOG     nothing to promote — ## Unreleased is empty, so a real run refuses here; this plan weighs the changes in it instead
-  release notes 0 bullet(s) in the promoted section
-  inventory     40 file(s), 204 method(s), 239 key(s)/member(s), described as v0.2.0  (fresh, weighed against v0.2.0-alpha3)
-  api page      38 class(es), 204 public method(s), described as v0.2.0
+  CHANGELOG     ## Unreleased -> ## 0.2.0 - 2026-10-14, new Unreleased section above
+  release notes 4 bullet(s) in the promoted section
+  inventory     42 file(s), 214 method(s), 249 key(s)/member(s), described as v0.2.0  (fresh, weighed against v0.2.0-alpha3)
+  api page      40 class(es), 214 public method(s), described as v0.2.0
   branch-alias  dev-dev, dev-main -> 0.2.x-dev  (unchanged)
   commit        Release v0.2.0
   tag           git tag -a v0.2.0 -m "v0.2.0"
   push          git push origin dev --follow-tags
 ```
 
-Three lines of it are the state this note describes rather than a step of a release. `ci` is the red
-run on the register — a release would refuse on it, and the re-take this note lands is what makes the
-next reading of that line green. `CHANGELOG` is the empty section, which is what the row above says.
-`branch` is `(dirty)` because the re-take is measured in the working tree it was taken in; the note
-commit is what makes it clean.
+Three lines of it are the state this note describes rather than a step of a release. `ci` is the
+interlock the four unpushed commits leave: a real run refuses to tag until they are on `origin/dev`,
+which is section 2's job and the `pkg-push` runbook's rather than this note's. `CHANGELOG` is the four
+entries section 3's table counts, which the promotion would move into `0.2.0 - 2026-10-14`. `branch`
+is `(dirty)` because the re-take is measured in the working tree it was taken in; the note commit is
+what makes it clean.
 
 That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers in
 it that *are* checkable are held, though they are two different readings now: the entries the notes
@@ -252,11 +275,12 @@ answer about the working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Nothing at the register, and that is what a release leaves: `bin/release.php` promotes the notes into
-the released section and writes a bare `## Unreleased` above them, leaving the headings to the first
-change that adds one. The sixteen entries the tag carries — six `### Added`, six `### Changed`, four
-`### Fixed` — are the pgcat cycle's work and the four guard repairs described above; the one entry the
-working tree carries is this note's own, and it is under `### Fixed` beside them.
+Five entries at the register, and they are this cycle's: three `### Added` for the schedule that can
+be watched, the api page a past tree renders and the published config that says which key set it is,
+and two `### Fixed` for the repairs the release before this one left — the guarded commit path, and
+the records reading that holds the commands section 1 quotes. The sixteen entries the tag carries —
+six `### Added`, six `### Changed`, four `### Fixed` — are the pgcat cycle's work and the guard
+repairs before them, and the promotion would carry all five of these with them.
 
 What those sixteen change for a consumer is written in the released section rather than repeated here.
 What is *not* in them is anything the three `.tsv` records, `API.md` or the changelog cannot account
@@ -300,8 +324,9 @@ What publishing this release still needs, and what is done:
 
 1. the release itself — cut, tagged and pushed as `v0.2.0-alpha3`, on a commit the CI rail had
    verified, without `--skip-ci`: done;
-2. this note, re-taken at the register the release left and landed as a commit of its own on `dev`,
-   because the release did not re-take it: this commit;
+2. this note, re-taken at the register the release left — and at the three commits this cycle landed
+   on top of it, because a release is the state of the branch and not only of the tag — and landed as
+   a commit of its own on `dev`: this commit, the fifth unpushed one section 2 counts;
 3. raise the consumer's pin, in the application repository, to the new tag;
 4. the application-side switches and schedule entries a flip needs, which live in that repository
    and are not part of this package.
