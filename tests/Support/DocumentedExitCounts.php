@@ -10,6 +10,7 @@ use Uak35\WeightedDbManager\Tests\Unit\Console\DbDoctorTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbFlipPgcatCommandTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbProbeReplicasCommandTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbReplicaStatusTest;
+use Uak35\WeightedDbManager\Tests\Unit\Console\DbSchedulerWatchdogTest;
 use Uak35\WeightedDbManager\Tests\Unit\Console\DbWindowFlipCommandTest;
 
 /**
@@ -120,6 +121,7 @@ final class DocumentedExitCounts
         DbFlipPgcatCommandTest::class,
         DbReplicaStatusTest::class,
         DbWindowFlipCommandTest::class,
+        DbSchedulerWatchdogTest::class,
     ];
 
     /**
@@ -221,6 +223,29 @@ final class DocumentedExitCounts
                 'pinned' => "/the window flip's (\\w+) documented kinds/",
                 'counts' => 'the distinct cases `DbWindowFlipCommandTest::documentedSituations()` names',
                 'expected' => self::documentedCases(DbWindowFlipCommandTest::class),
+            ],
+            // The watchdog's two numbers are the widest gap in this record: eight routes down two
+            // channels is sixteen cells, and the table an operator reads has six rows — three of
+            // them reached by more than one route, which is the table's claim that `stale` and
+            // `not_judged` are one verdict each with two sentences. The two phrases are worded away
+            // from the other commands' patterns on purpose: "a nine-cell matrix, and this guard" is
+            // the probe's sentence and "its six-cell matrix, and this guard" is the distribution's,
+            // so a third sentence of that shape would be one pattern matching two commands' numbers.
+            //
+            // The flag is not one of these counts, deliberately. `--strict` is a boolean on one
+            // route, and a matrix that carried it would be thirty-two cells — past the end of the
+            // vocabulary these numbers are spelled in.
+            'the watchdog\'s exit matrix, as documented-exit-codes.md counts its cells' => [
+                'record' => self::RECORD,
+                'pinned' => '/the watchdog\'s ([\w-]+) cells across its routes and the two channels/',
+                'counts' => '`DbSchedulerWatchdogTest::exitCodeProvider()`',
+                'expected' => self::cells(DbSchedulerWatchdogTest::class),
+            ],
+            'the watchdog\'s documented cases, as documented-exit-codes.md counts them' => [
+                'record' => self::RECORD,
+                'pinned' => '/the watchdog\'s ([\w-]+) documented cases, their numbers in both/',
+                'counts' => 'the distinct cases `DbSchedulerWatchdogTest::documentedSituations()` names',
+                'expected' => self::documentedCases(DbSchedulerWatchdogTest::class),
             ],
             'the replica-status exit matrix, as documented-exit-codes.md counts its cells' => [
                 'record' => self::RECORD,

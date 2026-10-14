@@ -283,21 +283,46 @@ final class FlipSchedule
      */
     public static function options(Repository $config): array
     {
-        $setting = 'swrr.pgcat.schedule.enabled';
-        $schedule = ConfigValue::assoc($config->get('db-manager.swrr.pgcat.schedule'));
-        $follows = SwitchValue::read($config->get('db-manager.swrr.pgcat.enabled'), false)['on'];
+        return [
+            ...self::settings(
+                $config->get('db-manager.swrr.pgcat.schedule'),
+                $config->get('db-manager.swrr.pgcat.enabled'),
+            ),
+            'setting' => 'swrr.pgcat.schedule.enabled',
+        ];
+    }
 
-        ['on' => $enabled, 'refused' => $refused] = SwitchValue::read($schedule['enabled'] ?? null, $follows);
+    /**
+     * The same settings from the raw block rather than from the config repository.
+     *
+     * Two readers of one rule: this class reads the schedule out of the repository when it registers
+     * the entry, and {@see ScheduleBeat} reads the same block out of the flipper's own config slice
+     * — which is the `swrr.pgcat` array, not a repository — to know whether anything is scheduled to
+     * watch. Splitting the reading is what keeps one answer to "is this entry registered" instead of
+     * two that drift: `$follows` is the `swrr.pgcat.enabled` switch the fallback follows, and the
+     * `setting` key `options()` adds is the caller's, because only a caller that has a setting to
+     * report needs it named.
+     *
+     * @param mixed $schedule the `db-manager.swrr.pgcat.schedule` block as it was configured
+     * @param mixed $follows  the `db-manager.swrr.pgcat.enabled` switch, which the fallback follows
+     *
+     * @return array{enabled: bool, name: string, log: string, interval_minutes: int, refused: string|null}
+     */
+    public static function settings(mixed $schedule, mixed $follows): array
+    {
+        $block = ConfigValue::assoc($schedule);
+        $follows = SwitchValue::read($follows, false)['on'];
 
-        $name = ConfigValue::string($schedule['name'] ?? null, self::DEFAULT_NAME);
-        $log = ConfigValue::string($schedule['log'] ?? null, self::defaultLog());
+        ['on' => $enabled, 'refused' => $refused] = SwitchValue::read($block['enabled'] ?? null, $follows);
+
+        $name = ConfigValue::string($block['name'] ?? null, self::DEFAULT_NAME);
+        $log = ConfigValue::string($block['log'] ?? null, self::defaultLog());
 
         return [
             'enabled' => $enabled,
             'name' => $name === '' ? self::DEFAULT_NAME : $name,
             'log' => $log === '' ? self::defaultLog() : $log,
-            'interval_minutes' => self::intervalMinutes($schedule['interval_minutes'] ?? null),
-            'setting' => $setting,
+            'interval_minutes' => self::intervalMinutes($block['interval_minutes'] ?? null),
             'refused' => $refused,
         ];
     }
@@ -309,10 +334,39 @@ final class FlipSchedule
      * names for itself (`Event::getDefaultOutput()` and `ensureOutputIsBeingCaptured()` both land
      * under `storage/logs`), and because the application's other scheduled tasks already log
      * there.
+     *
+     * Resolved only when there is a container that can answer, and the relative path returned when
+     * there is not: registering the entry happens under an application, but the same settings are
+     * read by {@see ScheduleBeat}, which the flipper builds from its own config slice — and the
+     * flipper is a value object that unit tests construct with a bare container. `storage_path()`
+     * would be a fatal error in that shape (`Container::storagePath()` is a method of the
+     * application, not of the base container), and a schedule reading that cannot be performed
+     * outside an application is a watchdog nobody can test. The path is the entry's *output* —
+     * nothing derives from it — so the unrooted spelling costs nothing in the one place it appears.
      */
     public static function defaultLog(): string
     {
-        return storage_path(self::DEFAULT_LOG);
+        $container = self::container();
+
+        return $container !== null && method_exists($container, 'storagePath')
+            ? storage_path(self::DEFAULT_LOG)
+            : self::DEFAULT_LOG;
+    }
+
+    /**
+     * The container this boot has, typed as the plain object a container is.
+     *
+     * The type is deliberately widened here, and this is the only place it matters. `app()` is
+     * declared to return an application and a static analysis believes the declaration, which is
+     * what turns the `method_exists()` above into a question that has already been answered: it
+     * reports the guard as redundant and the guard is not — the base container has no
+     * `storagePath()` at all, and a bare one is the shape a unit test constructs this class with.
+     * The question above is about the container in hand rather than about the class a signature
+     * names, so that is the type it is asked of.
+     */
+    private static function container(): ?object
+    {
+        return function_exists('app') ? app() : null;
     }
 
     /**

@@ -97,6 +97,7 @@ final class JsonEnvelope
         'db:replica-status' => ['key' => 'kind', 'table' => '### Reading the distribution: `db:replica-status`'],
         'db:doctor' => ['key' => 'verdict', 'table' => '### The preflight as data: db:doctor --json'],
         'db:pgcat-window-flip' => ['key' => 'kind', 'table' => '### The reader-window tasks: `db:pgcat-window-flip`'],
+        'db:scheduler-watchdog' => ['key' => 'kind', 'table' => '### When the schedule stops: `db:scheduler-watchdog`'],
     ];
 
     /**

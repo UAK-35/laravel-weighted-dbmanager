@@ -6,6 +6,7 @@ use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipResult;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -2283,10 +2284,18 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
-     * A closed window is a decision, not a bad run: the command exits 0, nothing is written, and
-     * supervisor is not even asked. That last one is the point of checking the window before the
-     * lock — a container that has stopped trying must not look busy, and a minute of every one of
-     * its remaining minutes must not be spent on a question whose answer cannot change.
+     * A closed window is a decision, not a bad run: the command exits 0, no mode and no run are
+     * recorded, and supervisor is not even asked. That last one is the point of checking the window
+     * before the lock — a container that has stopped trying must not look busy, and a minute of
+     * every one of its remaining minutes must not be spent on a question whose answer cannot
+     * change.
+     *
+     * The one thing the run does write is the beat, and it is the file's own reason: the entry is
+     * still registered and still runs every minute after the window has closed, so a state file
+     * with nothing in it cannot tell "ran and decided nothing" from "has not run since it
+     * converged" — and it is the second one, eighty-five minutes of it, that this file exists to
+     * make visible. The beat is therefore asserted *instead of* the mode and the run, not beside
+     * them: what a run after the window must never do is move the convergence verdict.
      */
     public function test_a_closed_window_stops_the_flip_without_touching_anything(): void
     {
@@ -2305,7 +2314,19 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame([], $this->copyLog, 'no config was copied');
         $this->assertSame([], $this->cmdLog, 'supervisor was asked nothing at all');
         $this->assertSame([], $this->lockLog, 'the lock is not taken by a run that cannot act');
-        $this->assertFileDoesNotExist($this->stateFile, 'a run after the window must not record a mode or a run');
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+        $this->assertIsArray($state, 'the run stamped its beat, which is the one file it may touch');
+        $this->assertSame(
+            [ScheduleBeat::STATE_KEY],
+            array_keys($state),
+            'a run after the window records the beat and nothing else — no mode, no run, no convergence',
+        );
+        $this->assertIsString($state[ScheduleBeat::STATE_KEY], 'the beat is a timestamp string');
+        $this->assertNotFalse(
+            strtotime($state[ScheduleBeat::STATE_KEY]),
+            'and one that parses, because an unreadable stamp is treated as no stamp at all',
+        );
     }
 
     /**

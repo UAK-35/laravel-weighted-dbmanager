@@ -106,7 +106,7 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 
 | Claim | The sentence, as the record writes it | What it counts, and what the number is derived from |
 |---|---|---|
-| the commands the provider registers, as README.md counts them | "All **five** are registered by the provider" | the command classes in `src/Console/Commands/` |
+| the commands the provider registers, as README.md counts them | "All **six** are registered by the provider" | the command classes in `src/Console/Commands/` |
 | the shapes the log-severity decision was weighed against, as README.md counts them | "the **seven** shapes it was weighed against" | the candidate headings of `boot-audit-log-severity.md`, less the chosen one |
 | the audit's finding keys, as boot-audit-surfaces.md counts them | "pgcat is one of **twenty-two** keys", "would put **twenty-two** keys' worth …" | the provider's `KEY_*` constants |
 | the finding lists one boot spreads, as boot-audit-finding-keys.md counts them | "the **eight** methods whose lists are spread into one boot's findings" | the `...$this->` spreads in `reportBootAudit()` |
@@ -115,11 +115,13 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the keys in the richest boot, as boot-audit-finding-keys.md counts them | "**eight** findings, **eight** keys, the exact set" | `WeightedDatabaseServiceProviderTest::RICHEST_BOOT_KEYS` |
 | the replica settings the audit refuses, as boot-audit-finding-keys.md counts them | "all **three** replica settings unreadable" | the provider's `REPLICA_METADATA` table |
 | the boot lines that carry a severity, as boot-audit-log-severity.md counts them | "`logContext()`, the **five** call sites" | the `self::logContext(` calls in `BootAudit.php` |
-| the commands whose exit code this record is about, as it counts them | "**Five** commands in this package are scheduled", "All **five** are checked by mutation rather than by argument", "the **five** tables, and the sentences naming the test that reads each one" | the matrices `DocumentedExitCounts` names — which commands have one is a decision, and the record counts the list |
+| the commands whose exit code this record is about, as it counts them | "**Six** commands in this package are scheduled", "All **six** are checked by mutation rather than by argument", "the **six** tables, and the sentences naming the test that reads each one" | the matrices `DocumentedExitCounts` names — which commands have one is a decision, and the record counts the list |
 | the doctor's exit matrix, as documented-exit-codes.md counts its cells | "a **fourteen**-cell matrix" | `DbDoctorTest::exitCodeProvider()` |
 | the probe's exit matrix, as documented-exit-codes.md counts its cells | "a **nine**-cell matrix" | `DbProbeReplicasCommandTest::exitCodeProvider()` |
 | the flip's exit matrix, as documented-exit-codes.md counts its cells | "a **eighteen**-cell matrix" | `DbFlipPgcatCommandTest::exitCodeProvider()` |
 | the replica-status exit matrix, as documented-exit-codes.md counts its cells | "its **six**-cell matrix" | `DbReplicaStatusTest::exitCodeProvider()` |
+| the watchdog's exit matrix, as documented-exit-codes.md counts its cells | "the watchdog's **sixteen** cells across its routes and the two channels" | `DbSchedulerWatchdogTest::exitCodeProvider()` |
+| the watchdog's documented cases, as documented-exit-codes.md counts them | "the watchdog's **eight** documented cases, their numbers in both" | the distinct cases `DbSchedulerWatchdogTest::documentedSituations()` names |
 | the routes the replica-status table documents, as documented-exit-codes.md counts them | "the **three** routes its table documents" | the distinct cases `DbReplicaStatusTest::documentedSituations()` names |
 | the probe's documented cases, as documented-exit-codes.md counts them | "the table has **five** documented cases", "the sweep's **five** documented cases", "the probe's **five** rows document `0`" | the distinct cases `DbProbeReplicasCommandTest::documentedSituations()` names |
 | the probe's rows that document a zero, as documented-exit-codes.md counts them | "**two** of the probe's five rows document `0`" | the README's `db:probe-replicas` exit table, rows whose code is 0 |
@@ -132,9 +134,9 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the ways a flip can politely do nothing, as DbFlipPgcatCommandTest counts them | "the **three** ways a flip can politely do nothing are one documented case" | the same cells, stated in the map's own docblock — the copy that had drifted to "two" |
 | the ways a command can be refused, as DbFlipPgcatCommandTest counts them | "the **three** ways a command can be refused are another" | the same cells, stated in the map's own docblock |
 | the doctor's documented cases, as documented-exit-codes.md counts them | "the doctor's **three** documented cases" | the README's `db:doctor` exit table, which the doctor's matrix is written as |
-| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **fourteen**-row description of what each check judges" | the README's `db:doctor` check table |
-| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **fourteen** verdicts, one per row" | the README's `db:doctor` check table |
-| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **fourteen** otherwise" | the README's `db:doctor` check table |
+| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **fifteen**-row description of what each check judges" | the README's `db:doctor` check table |
+| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **fifteen** verdicts, one per row" | the README's `db:doctor` check table |
+| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **fifteen** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **twelve** values a run can reach" | the README's `kind` table |
 | the reasons a replica is excluded, as pool-exclusions.md counts them | "the reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
 | the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **six** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |

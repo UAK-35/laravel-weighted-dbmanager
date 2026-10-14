@@ -990,9 +990,13 @@ grep -c '"resolved":true' storage/logs/laravel.log       # and the clears
 
 Point a load balancer, an ECS health check or a deploy gate at the route and read the status
 code: `200` means the one real query on the pinned connection answered, `503` means it did
-not. Nothing else in the payload moves it, deliberately — which is what makes the route safe
-to gate on, and also why everything else has to be its own rule. The first row below is the
-status code's own fact, spelled out again because a rule that reads it can say *why*:
+not — or that one of the verdicts a query cannot reach says the container is not the shape the
+configuration asked for: the boot window's convergence, the reader windows' step, the pool the
+pooler holds, and the schedule that moves the mode at all. Each of those is narrow by design, so a
+healthy deploy never sees `503` from one. Every *other* field in the payload is a reading, and a
+rule that reads it has to be written by whoever needs it — which is what makes the route safe to
+gate on. The first row below is the status code's own fact, spelled out again because a rule that
+reads it can say *why*:
 
 | the rule | what it means | what to do |
 |---|---|---|
@@ -1003,6 +1007,7 @@ status code's own fact, spelled out again because a rule that reads it can say *
 | `audit.severity == "error"` | a refused value is standing: the same comparison as the log rule, polled instead of streamed | page |
 | `audit.available == false` | nothing could be read at all — `error` null is a provider that is not registered, a set `error` is a record that is not a record | ticket / page, and the next table says which |
 | `pgcat.mismatch == true` | flipping is armed where it can never act: there is no pool to swap | ticket |
+| `schedule.failed == true` | the per-minute entry has stopped producing runs, so the mode is the last one a flip wrote and the boot window that would have noticed it answered once and will not answer again | page |
 
 The whole of it as one gate, for a cron job, a sidecar or a deploy step. `curl` without
 `--fail`, because the body is what the rules read — and the audit is left out on purpose rather
@@ -1094,7 +1099,7 @@ closes itself, and a page that never closes is a defect or a file.
 
 ## Artisan commands
 
-All five are registered by the provider.
+All six are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
@@ -1103,6 +1108,7 @@ All five are registered by the provider.
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL |
 | `php artisan db:pgcat-window-flip --mode=readers\|writer --at=HH:MM[:SS] [--json]` | One firing of a reader-window task: probe the mode's target, then apply it at the boundary (scheduled by the provider as `activate_readers` and `deactivate_readers`) |
+| `php artisan db:scheduler-watchdog [--strict] [--json]`                      | Fail when the schedule has stopped running the per-minute flip — for a container's own healthcheck, so a silently dead cron line cannot go unnoticed |
 
 ```php
 // routes/console.php
@@ -1334,6 +1340,76 @@ jq -e '.probe.available and .probe.answered >= 1' boundary.json
 jq -e '.applied_mode == "readers"' boundary.json
 ```
 
+### When the schedule stops: `db:scheduler-watchdog`
+
+The boot window answers once. It closes eight minutes after a container starts, and after that the
+per-minute entry is a deliberate no-op: a container that converged in its first minutes and lost
+its cron line an hour later keeps serving, keeps answering `select 1`, keeps reporting the mode the
+last run applied, and reads *converged* for the rest of its life. That is not a hypothetical — it is
+the 85 minutes a deployment of this package spent with a dead cron line, with every field of
+`/health/db` reading `ok` throughout.
+
+So every run of the entry stamps a beat in the flip's state file — including the runs after the
+window has closed, which record nothing else — and one command asks whether anything is still
+stamping it. It does no work to ask: no query, no probe, no socket, no lock, no write. It reads the
+file the flip already wrote and compares two numbers, so it can be asked every minute for the life
+of the container:
+
+```sh
+php artisan db:scheduler-watchdog --strict   # 0 while the schedule runs, 1 when it stops
+```
+
+| what the watchdog found                                                       | `kind`          | `--strict` off | `--strict` on |
+|-------------------------------------------------------------------------------|-----------------|----------------|---------------|
+| the per-minute entry is producing runs                                        | `running`       | `0`            | `0`           |
+| the per-minute entry is not scheduled, so nothing stamps a beat               | `not_scheduled` | `0`            | `0`           |
+| the container is still inside its boot window, so nothing is judged yet       | `not_judged`    | `0`            | `0`           |
+| the container recorded no boot time, so the window cannot be judged          | `not_judged`    | `0`            | `0`           |
+| the watch is switched off (`swrr.pgcat.schedule.stale_after_missed_runs`)     | `watch_off`     | `0`            | `1`           |
+| the last run is older than the tolerance — the schedule has stopped           | `stale`         | `1`            | `1`           |
+| no run has been recorded at all since the window closed                        | `stale`         | `1`            | `1`           |
+| the container has no flipper, so there is no schedule to read                 | `unbound`       | `1`            | `1`           |
+
+The last two rows are one verdict with two sentences, deliberately: a schedule that never started
+and a schedule that stopped are the same fault one interval apart, and reporting the first as
+"unknown" would be the silence the command exists to remove.
+
+`--strict` exists for one row. An installation that has switched the watch off with
+`swrr.pgcat.schedule.stale_after_missed_runs = 0` has made a *choice* rather than broken its
+schedule, so it is warned about and exits `0` by default — exactly as `db:doctor`'s `schedule beat`
+row warns about it — but without the flag the setting that makes a dead cron invisible would also
+make the command that exists to notice one pass for ever, so a container healthcheck that would
+rather be restarted than run unwatched passes `--strict`.
+
+The tolerance is counted in *missed runs*, not in seconds, so it follows the cadence rather than
+having to be raised by hand every time the cadence is:
+
+| Setting | Default | What it decides |
+|---|---|---|
+| `swrr.pgcat.schedule.stale_after_missed_runs` | `5` | How many runs of the entry may go missing before the schedule counts as stopped — five minutes at the shipped one-minute cadence, twenty-five at `interval_minutes: 5`. A negative, or a value that is not a number, resolves to the default; `0` switches the judgement off, which is what `--strict` refuses. |
+
+Nothing here measures anything itself. The tolerance, the three silences, the age and both sentences
+come from the flipper's own `scheduleStatus()`, which is the block `/health/db` publishes under
+`schedule` and the block `db:doctor`'s `schedule beat` row prints — so the endpoint, the preflight
+and this command cannot describe one state three ways. `--json` writes the same run as one object,
+in the envelope `db:pgcat-flip` and `db:probe-replicas` write: the verdict, the code, the beat — its
+timestamp, its age and the limit it was compared with — and the two settings the limit came from, so
+a `stale` can be explained without opening a configuration file:
+
+```bash
+php artisan db:scheduler-watchdog --json > beat.json
+jq -e '.kind == "running" and .exit_code == 0' beat.json
+jq -e '.age_seconds < .stale_after_seconds' beat.json
+jq -e '.missed_runs == 5 and .interval_minutes == 1' beat.json
+```
+
+Two other surfaces answer the same question, and neither of them is this one. `/health/db` publishes
+the block under `schedule` and returns `503` when the beat has stopped, for the monitor *outside* the
+container; `db:doctor`'s `schedule beat` row fails, and `--strict` fails a release, for the preflight
+*before* one. This command is for the healthcheck *inside* the container, which has no HTTP client to
+call the endpoint with and no preflight to run: `CMD php artisan db:scheduler-watchdog --strict` is
+the whole of it.
+
 ### Reading the distribution: `db:replica-status`
 
 Prints each weighted replica's host, port, CPU cores, RAM, resolved weight, share of reads, health
@@ -1447,7 +1523,7 @@ details.
 ### Preflight: `db:doctor`
 
 `php artisan db:doctor` answers the question a deploy actually cares about — *will
-this installation do what it is configured to do?* Fourteen things can be wrong while
+this installation do what it is configured to do?* Fifteen things can be wrong while
 the application still boots and answers requests, and each one is a row:
 
 | Row                  | Fails when                                                                                                                                         |
@@ -1464,6 +1540,7 @@ the application still boots and answers requests, and each one is a row:
 | `pgcat mode`         | **Fails** when the pooler is on the configuration the reader windows are not asking for, and leads with which way round it is: the writer-only config while a reader window is open, so every read the resolver meant for the replica pool reaches the writer, or the readers config outside every window, so reads keep reaching a replica through the hours the fallback holds them on the writer. Reads pgcat's own *file* rather than the mode the last flip recorded, so a task that booted outside a window, converged to the writer-only config and never flipped again still shows here — that shape is the incident the row exists for. Prints the flipper's own sentence rather than a second copy of it, the same one `/health/db` reports and logs, which names the file in place and the command that moves it; so no `suggestion`, and the verdict is dated from the boot window like the endpoint's. Passes when the flipper is not armed — no file is compared, so the two cannot disagree — and when the file could not be read at all, which is reported as *nothing compared* rather than as a pass, because judging a file is `pgcat files`' row |
 | `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. **Fails** on that refusal, which is the pooler's own sentence rather than this package's reading, and this is the read-only half of the self-heal the per-minute flip performs: one PostgreSQL v3 startup packet per declared pool and the first message back, on the address and the bound `swrr.pgcat.pool_probe.*` names, with no credentials, no `psql` and no connection through the pool. A pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach — but a pooler that authenticates *first*, which is what the deployment this was written against was measured doing, answers *every* name, so there the row reports what the pooler said rather than a proof that each pool is there. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
 | `flip schedule`      | nothing moves the pooler at the boundaries the configuration is written for. *Warns* when the reader-window tasks are on and no boundary is scheduled — every window is unusable, or too short to hold `lead_seconds` + `grace_seconds` — and when the flipper is armed with neither the per-minute entry nor the window tasks on, which leaves pgcat's file where the last write put it while the resolver's mode moves on. **Fails** on either `swrr.pgcat.schedule.enabled` or `swrr.pgcat.schedule.windows.enabled` written as something that is not on or off — the two switches `switch values` does not cover — naming the value, the accepted spellings and the value the setting falls back to, which for these two is *on* for the cadence and *off* for the tasks, each the value its setting documents. On a run that reads cleanly it says which mechanism answers a boundary: the reader-window tasks, named with their boundaries and their lead and grace, or the per-minute entry alone, which converges the pool in the first minutes after a container starts and is then a no-op. Both on is **not** a fault and is reported as what it is — the per-minute entry checks the boot window before it takes its lock, so once a container has converged it cannot act on a boundary at all — and the row prints no `suggestion`, because the repair for the one warning is a choice between two settings |
+| `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |
 | `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — except the unwritable record, which is the one state whose own record cannot hold the date it would print |
 | `store reachability` | the primary store cannot serve a read: no usable `redis` binding, or a connection that refuses — workers then fall back to an in-process rotation that is not shared between them |
 

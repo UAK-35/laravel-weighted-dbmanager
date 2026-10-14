@@ -46,6 +46,15 @@ use Throwable;
  *     that a query cannot see: pgcat can be answering while the container is
  *     still the wrong shape, and a scheduler that stopped running the flip is
  *     invisible from every other field here
+ *   • whether the per-minute entry is still *producing runs* — `schedule`, the beat it
+ *     leaves in the state file on every run and the age of that beat against the
+ *     tolerance `swrr.pgcat.schedule.stale_after_missed_runs` derives from the cadence.
+ *     This is the boot window's blind spot, and the reason it has to be asked
+ *     separately: the window above answers once, eight minutes after boot, and the
+ *     entry is a deliberate no-op afterwards — so a container whose cron died an hour
+ *     later reads converged for the rest of its life. A beat that has stopped makes
+ *     the payload `degraded`, and a container that has never produced one is reported
+ *     the same way rather than as silence — see scheduleVerdict()
  *   • whether that pooler is still in step with the reader windows that move the
  *     mode every day — `reader_window`, which holds what the windows ask for right
  *     now beside what pgcat's own file actually is. The boot window above can only
@@ -180,6 +189,12 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         // is the failure that outlives a successful boot.
         $readerWindow = $this->readerWindowVerdict($pgcat);
 
+        // And the half neither of the two can state: whether the entry that moves the mode at all
+        // is still being run. The window stops judging eight minutes after boot and the reader
+        // windows speak again only at a boundary, so a cron that died in between is a container
+        // that is converged, in step, and has nothing coming.
+        $schedule = $this->scheduleVerdict($pgcat);
+
         // The third reading, and the only one that asks the pooler anything: a program can be
         // RUNNING, hold the right file, and still have no pool for a database the application is
         // connected to — every read to it fails while supervisord calls the pooler healthy. Off by
@@ -210,11 +225,12 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             && $this->allReplicasHealthy($replicas)
             && $probe['ok'] !== false
             && !$flip['failed']
+            && !$schedule['failed']
             && !$readerWindow['failed']
             && !$poolProbe['failed'];
 
         if (!$allHealthy) {
-            $this->logDegraded($probe, $replicas, $errors, $flip, $readerWindow, $poolProbe, $pgcat);
+            $this->logDegraded($probe, $replicas, $errors, $flip, $schedule, $readerWindow, $poolProbe, $pgcat);
         }
 
         return response()->json([
@@ -223,6 +239,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'replicas' => $replicas,
             'pgcat' => $pgcat,
             'flip' => $flip,
+            'schedule' => $schedule,
             'reader_window' => $readerWindow,
             'pool_probe' => $poolProbe,
             'audit' => $this->audit(),
@@ -280,6 +297,64 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
                     : 'the flip did not converge inside this container\'s window')
                 : null,
             'window' => $window,
+        ];
+    }
+
+    /**
+     * Whether the schedule that runs the per-minute flip is still producing runs.
+     *
+     * The boot window's blind spot, and the shape of an incident rather than a theory: the window
+     * judges a container's first eight minutes and then stops, because the per-minute entry is a
+     * deliberate no-op after it, so a container that converged and then lost its cron line reads
+     * converged for the rest of its life. That was 85 minutes on the deployment this was written
+     * for, and every other field of this payload read `ok` throughout: the query answered, the
+     * replicas were healthy, the window had closed with a convergence inside it, and the last mode a
+     * flip recorded was the right one because nothing had moved to displace it.
+     *
+     * `db:pgcat-flip` stamps a beat in the state file on every run — including the runs that decide
+     * nothing — and the flipper compares its age with the tolerance the cadence defines. Three states
+     * come back and only the third is a failure:
+     *
+     * - **Not applicable**: the per-minute entry is not scheduled, or the tolerance is switched off.
+     *   Nothing writes a beat or ages one, and `not_judged` says which.
+     * - **Not judged**: the container is still inside its boot window, or has no boot stamp at all.
+     *   Both are the line the window itself draws — a starting container is not a stopped schedule.
+     * - **Stale**: the beat is older than the tolerance, *or* there has never been one since the
+     *   window closed. The second is the same fault one interval earlier, and reporting it as a
+     *   failure is what keeps a health check from passing while nothing has ever run the entry.
+     *
+     * Deliberately not folded in from the boot window's verdict, which fails in part of that case
+     * too: the two answer different questions about one silence — did this container ever converge,
+     * and is anything still running — and a container can fail either without the other.
+     *
+     * @param array<string, mixed>|null $pgcat the summary `index()` already read
+     *
+     * @return array{applicable: bool, failed: bool, reason: string|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int}
+     */
+    private function scheduleVerdict(?array $pgcat): array
+    {
+        /** @var array<string, mixed>|null $schedule */
+        $schedule = is_array($pgcat['schedule'] ?? null) ? $pgcat['schedule'] : null;
+        $applicable = $pgcat !== null && ($schedule['applicable'] ?? false) === true;
+
+        return [
+            'applicable' => $applicable,
+            'failed' => $applicable && ($schedule['stale'] ?? null) === true,
+            // The flipper's own sentence, not a second copy of it: it names the age, the cadence
+            // the beat is late against and the repair, and this endpoint, `db:doctor`'s row and
+            // `db:scheduler-watchdog` all print the one string.
+            'reason' => $applicable && is_string($schedule['reason'] ?? null) && $schedule['reason'] !== ''
+                ? $schedule['reason']
+                : null,
+            // Why nothing was judged, when nothing was: emitting nothing at all is what this
+            // endpoint did before and it reads as a pass, so the sentence is published even though
+            // no verdict rests on it.
+            'not_judged' => is_string($schedule['not_judged'] ?? null) ? $schedule['not_judged'] : null,
+            'last_beat_at' => is_string($schedule['last_beat_at'] ?? null) ? $schedule['last_beat_at'] : null,
+            'age_seconds' => is_int($schedule['age_seconds'] ?? null) ? $schedule['age_seconds'] : null,
+            'stale_after_seconds' => is_int($schedule['stale_after_seconds'] ?? null)
+                ? $schedule['stale_after_seconds']
+                : 0,
         ];
     }
 
@@ -400,11 +475,12 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * @param array<string, array<string, mixed>> $replicas the `replicas` block of the payload
      * @param array<string, string>           $errors   the `errors` block of the payload
      * @param array<string, mixed>            $flip     the `flip` block of the payload
+     * @param array<string, mixed>            $schedule the `schedule` block of the payload
      * @param array<string, mixed>            $readerWindow the `reader_window` block of the payload
      * @param array<string, mixed>            $poolProbe the `pool_probe` block of the payload
      * @param array<string, mixed>|null       $pgcat    the `pgcat` block of the payload
      */
-    private function logDegraded(array $probe, array $replicas, array $errors, array $flip, array $readerWindow, array $poolProbe, ?array $pgcat): void
+    private function logDegraded(array $probe, array $replicas, array $errors, array $flip, array $schedule, array $readerWindow, array $poolProbe, ?array $pgcat): void
     {
         $reasons = [];
 
@@ -422,6 +498,10 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
 
         if (($flip['failed'] ?? false) === true) {
             $reasons[] = 'the pgcat flip never converged inside the container\'s boot window';
+        }
+
+        if (($schedule['failed'] ?? false) === true) {
+            $reasons[] = 'the schedule has stopped producing runs of the per-minute flip';
         }
 
         if (($readerWindow['failed'] ?? false) === true) {
@@ -445,6 +525,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'pgcat_window' => $pgcat['window'] ?? null,
             'flip_failed' => $flip['failed'] ?? false,
             'flip_reason' => $flip['reason'] ?? null,
+            'schedule' => $schedule,
             'reader_window' => $readerWindow,
             'pool_probe' => $poolProbe,
         ]);

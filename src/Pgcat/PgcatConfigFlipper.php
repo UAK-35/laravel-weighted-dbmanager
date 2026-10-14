@@ -215,6 +215,13 @@ final class PgcatConfigFlipper
      */
     private readonly ?\Closure $poolProbe;
 
+    /**
+     * The scheduled entry's beat and the bound its silence is judged against. Built from the same
+     * config slice as the window beside it — and given that window, when the window was defaulted
+     * here rather than injected, so a test that fakes the container's clock fakes it for both.
+     */
+    private readonly ScheduleBeat $beat;
+
     /** @var \Closure(int): void */
     private \Closure $sleeper;
 
@@ -250,8 +257,13 @@ final class PgcatConfigFlipper
         // the pooler's answer unexamined. Defaulted from `swrr.pgcat.pool_probe` below, and
         // injected so a test can answer without opening a socket.
         ?\Closure $poolProbe = null,
+        // The beat the scheduled entry leaves and the tolerance its silence is judged with.
+        // Defaulted from `swrr.pgcat.schedule` and the window above, so the two readings of
+        // "has this container been moving" share one clock and one boot stamp.
+        ?ScheduleBeat $beat = null,
     ) {
         $this->window = $window ?? FlipWindow::fromConfig($config);
+        $this->beat = $beat ?? ScheduleBeat::fromConfig($config, $this->window);
 
         // Null is a decision, not a fallback: an installation that has not switched the probe
         // on gets no closure, so nothing opens a socket on the poll path. The default is only
@@ -315,7 +327,22 @@ final class PgcatConfigFlipper
      * If they differ, swap the pgcat config and restart pgcat. Update state.
      */
     public function applyCurrentState(): FlipResult
-    {
+    {        // First on every run that is the scheduled job — including the runs that decide nothing at
+        // all, which is why it is here rather than beside the state writes below. The state file
+        // already records what a run *did*, and that is not the question a schedule that stopped
+        // raises: those keys are the boot window's evidence, written inside it and never again, so
+        // a container whose cron dies an hour after it converged leaves a state file that reads
+        // exactly like a healthy one. The beat is the other fact — that the entry ran — and it is
+        // the only one a run can write without changing what the window found. See ScheduleBeat.
+        //
+        // After the switch below and not before it, because "there is no schedule to watch" and
+        // "the schedule ran" are different facts and an inert flipper is the first: pgcat off, or
+        // a connection this package will not touch, is an installation whose per-minute entry is
+        // not registered either (`swrr.pgcat.schedule.enabled` follows `swrr.pgcat.enabled`), so a
+        // beat stamped there would be a state file written for a run that is not scheduled — and
+        // answering that pgcat's files are untouched. The window-closed path below is the opposite
+        // case and keeps the beat: the entry is still registered and still running every minute
+        // after the window has closed, and it is precisely that silence the beat exists to catch.
         $reason = $this->disabledReason();
         if (!empty($reason)) {
             return FlipResult::noChange(
@@ -324,11 +351,18 @@ final class PgcatConfigFlipper
             );
         }
 
+        $this->beat();
+
+
         // The window is checked before the lock, because a closed window has nothing to
         // serialise: nothing is read, written or run, and taking the lock only to release it
         // would make a stopped flipper look busy. A run that lands here is not recorded
         // either — the convergence verdict is about what happened *inside* the window, so a
-        // run after it has closed must not be able to change the answer.
+        // run after it has closed must not be able to change the answer. The beat written above
+        // is the exception and the reason it is stamped before this check rather than with the
+        // state writes below: "this run decided nothing" and "no run happened at all" are the
+        // two states this method cannot tell apart from the state file alone once the window has
+        // closed, and only the second one is a stopped schedule.
         if ($this->window->closed()) {
             return FlipResult::windowClosed(
                 currentMode: $this->resolver->currentModeName(),
@@ -1211,7 +1245,15 @@ final class PgcatConfigFlipper
      * `db:replica-status` and `db:pgcat-flip --status` must not be able to read two different
      * answers to one question.
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}}
+     * `schedule` is {@see scheduleStatus()}: whether the per-minute entry is still producing runs,
+     * which is the one thing neither block beside it can see. The window judges a container's first
+     * minutes and then stops, and the reader-window verdict speaks again only when a boundary moves
+     * — so a schedule that died in between leaves a container that looks converged, is out of step
+     * with nothing yet, and has no run coming. It travels here rather than in an accessor of its own
+     * for the third time and the same reason: four surfaces print this verdict and none of them may
+     * compute it.
+     *
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}, schedule: array{applicable: bool, stale: bool|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, reason: string|null}}
      */
     public function healthSummary(): array
     {
@@ -1229,7 +1271,33 @@ final class PgcatConfigFlipper
             'warning' => $this->armingWarning(),
             'window' => $this->windowStatus(),
             'reader_window' => $this->readerWindowVerdict(),
+            'schedule' => $this->scheduleStatus(),
         ];
+    }
+
+    /**
+     * The schedule as a verdict: is the per-minute entry producing runs, and how long since it did.
+     *
+     * The other half of the boot window, and the half that has no end. The window asks whether a
+     * *booting* container converged and answers once; this asks whether the entry is still running
+     * and can answer at any moment of the container's life. Both are needed, and neither implies the
+     * other: a container can converge inside its window and lose its schedule afterwards — which is
+     * the state a container sat in for 85 minutes, with every reading healthy — and a container whose
+     * schedule never started at all fails both, in their own words, because the two are different
+     * questions about the same silence.
+     *
+     * Read off the state file rather than off the schedule, deliberately: `schedule:list` shows what
+     * is *configured* to run, which is the question `db:doctor`'s `flip schedule` row already asks,
+     * and the failure this exists for is a schedule that is configured exactly as expected and not
+     * firing. The verdict itself — the tolerance, the four silences, the sentence — belongs to
+     * {@see ScheduleBeat}, so the endpoint, the row and the watchdog command print one answer rather
+     * than three ages of one file.
+     *
+     * @return array{applicable: bool, stale: bool|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, reason: string|null}
+     */
+    public function scheduleStatus(): array
+    {
+        return $this->beat->verdict($this->readState());
     }
 
     /**
@@ -2480,6 +2548,40 @@ final class PgcatConfigFlipper
             'last_flipped_at' => $this->nowIso(),
             'flipped_by' => 'pgcat-flipper',
         ]);
+    }
+
+    /**
+     * Stamp the beat every run of the scheduled entry leaves behind.
+     *
+     * WHY THIS IS NOT `recordRun()`
+     *   `recordRun()` answers what a run *did* — how many there were, which kind, when it converged
+     *   — and all of it is the boot window's evidence, so it is written inside the window and the
+     *   state file stops moving when the window closes. A stopped schedule therefore leaves the same
+     *   file as a healthy one, for as long as the container lives: the last run an hour ago, the
+     *   convergence it recorded on its second try, and nothing to say that the entry that wrote it is
+     *   not running any more. `beat_at` is the fact that closes it, and it is written on every run,
+     *   including the ones that take the closed-window path and record nothing else.
+     *
+     * WHY IT IS WRITTEN WITHOUT THE LOCK
+     *   The lock serialises flips — the file swap and the supervisor command — and a beat is not a
+     *   flip: it is one `readState()` and one `writeState()` of a merge that changes a single key.
+     *   Taking the lock here would also mean a run that is about to be a no-op waits behind a flip in
+     *   another process, which is the busiest moment a container has. The cost of not taking it is
+     *   one lost beat: a flip writing its own state in the same instant can replace this from a copy
+     *   it read a moment earlier, so the beat is at most one cadence stale — which the tolerance
+     *   {@see ScheduleBeat} judges with is measured in cadences and absorbs.
+     *
+     * And a run the flipper is *told* to make does not stamp it: `forceMode()` — which
+     * `db:pgcat-flip --force-mode` and the reader-window tasks are — is a request from outside the
+     * schedule rather than the entry firing, and a schedule that is being driven by hand is exactly
+     * the schedule whose beat should not be kept alive by it.
+     */
+    private function beat(): void
+    {
+        $state = $this->readState();
+        $state[ScheduleBeat::STATE_KEY] = $this->nowIso();
+
+        $this->writeState($state);
     }
 
     /**

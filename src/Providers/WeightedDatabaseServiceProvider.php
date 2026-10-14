@@ -14,6 +14,7 @@ use Uak35\WeightedDbManager\Console\Commands\DbDoctor;
 use Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand;
 use Uak35\WeightedDbManager\Console\Commands\DbProbeReplicas;
 use Uak35\WeightedDbManager\Console\Commands\DbReplicaStatus;
+use Uak35\WeightedDbManager\Console\Commands\DbSchedulerWatchdog;
 use Uak35\WeightedDbManager\Console\Commands\DbWindowFlipCommand;
 use Uak35\WeightedDbManager\Database\Weighted\HealthMonitor;
 use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
@@ -567,7 +568,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * Config publishing + artisan command registration + the flip's schedule.
      *
      * Laravel auto-discovers commands only from the application's own
-     * app/Console/Commands directory, so the package registers all five of
+     * app/Console/Commands directory, so the package registers all six of
      * its commands here:
      *
      *   db:doctor              preflight: every way the configuration cannot work
@@ -575,6 +576,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      *   db:probe-replicas      active SELECT 1 probing of every replica
      *   db:pgcat-flip          keep pgcat.toml in step with the reader window
      *   db:pgcat-window-flip   probe a boundary's target, then apply that mode
+     *   db:scheduler-watchdog  fail when the schedule stops running the per-minute flip
      *
      * parent::boot() is called first — it is what points Eloquent at this
      * manager (Model::setConnectionResolver) and hands models the event
@@ -601,6 +603,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 DbProbeReplicas::class,
                 DbFlipPgcatCommand::class,
                 DbWindowFlipCommand::class,
+                DbSchedulerWatchdog::class,
             ]);
 
             // The flip is this package's command, and every choice about how often it runs and

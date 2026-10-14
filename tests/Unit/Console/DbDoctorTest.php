@@ -18,6 +18,7 @@ use Uak35\WeightedDbManager\Database\Weighted\RedisAtomicStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\BootAudit;
@@ -1566,7 +1567,7 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('14 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString('15 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
         $this->assertSame(1, $exit);
     }
 
@@ -2957,13 +2958,13 @@ class DbDoctorTest extends TestCase
     private static function exitCodeProfile(string $profile): array
     {
         return match ($profile) {
-            'healthy' => [14, 0, 0],
-            'warned' => [13, 1, 0],
-            'warned-twice' => [12, 2, 0],
-            'failed' => [13, 0, 1],
-            'failed-twice' => [12, 0, 2],
-            'mixed' => [12, 1, 1],
-            'mixed-twice' => [10, 2, 2],
+            'healthy' => [15, 0, 0],
+            'warned' => [14, 1, 0],
+            'warned-twice' => [13, 2, 0],
+            'failed' => [14, 0, 1],
+            'failed-twice' => [13, 0, 2],
+            'mixed' => [13, 1, 1],
+            'mixed-twice' => [11, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -4103,6 +4104,16 @@ class DbDoctorTest extends TestCase
         }
 
         $paths = $this->armPgcat($overrides);
+
+        // A container an hour into its life is one whose per-minute entry has been running, and the
+        // beat is what says so: a boot stamp with no beat beside it is exactly the fault `schedule
+        // beat` exists to report, so a fixture built to leave every other row judging a working
+        // installation would otherwise reach exit 1 on the row the test is not about.
+        if ($windowClosed) {
+            file_put_contents($paths['state_file'], json_encode([
+                ScheduleBeat::STATE_KEY => gmdate(DATE_ATOM),
+            ]));
+        }
 
         file_put_contents(
             $paths['readers_path'],

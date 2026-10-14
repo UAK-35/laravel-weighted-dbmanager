@@ -193,6 +193,32 @@ return [
                 // something else. An installation needing a cadence wider than an hour registers
                 // its own `db:pgcat-flip` entry, which the duplicate guard leaves alone.
                 'interval_minutes' => env('SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES', 1),
+                // How many runs may go missing before the schedule counts as stopped, and
+                // `db:doctor`'s `schedule beat` row, `/health/db` and `db:scheduler-watchdog` say
+                // so. Five, which is five cadences: five minutes at the interval above, and
+                // twenty-five at `interval_minutes: 5`. A count of runs rather than a number of
+                // seconds, so the bound follows the cadence — a fixed duration would have to be
+                // raised by hand every time the interval was, and the value somebody forgot would
+                // fail a health check on a schedule that was doing exactly what it was configured
+                // to do.
+                //
+                // It is judged against the beat the entry leaves in `state_file`: every run stamps
+                // it, including the no-op runs after `flip_window_seconds` has closed, which is the
+                // only record of the entry still firing. A schedule that stops is invisible without
+                // it — the container keeps serving, keeps answering `select 1`, and keeps reporting
+                // the mode the last run applied.
+                //
+                // `0` (or a negative) switches the judgement off, the way
+                // `audit.store_probe_seconds = 0` switches the store probe off. That is reported
+                // rather than silent: the row fails on it and `--strict` fails a release on it,
+                // because an installation that has switched off the only check that notices a dead
+                // cron is a fact a preflight should state.
+                //
+                // Left uncast, deliberately: `(int) 'five'` is 0, and 0 is switched off here — so a
+                // value this cannot read resolves to the default rather than to the setting's
+                // opposite. Spelling it as a number is the whole of the syntax; `Uak35\WeightedDb
+                // Manager\Pgcat\ScheduleBeat` is where the tolerance and its sentences live.
+                'stale_after_missed_runs' => env('SWRR_PGCAT_SCHEDULE_STALE_AFTER_MISSED_RUNS', 5),
                 // What `schedule:list` shows the entry as, and what the duplicate guard matches
                 // against: an entry already carrying this name, or one already running the
                 // command, is left alone rather than joined by a second per-minute run.

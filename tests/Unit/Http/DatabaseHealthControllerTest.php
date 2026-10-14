@@ -525,9 +525,137 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('reader_window.applicable', true)
             ->assertJsonPath('reader_window.failed', false)
             ->assertJsonPath('reader_window.applied', 'readers')
-            ->assertJsonPath('reader_window.reason', null);
+            ->assertJsonPath('reader_window.reason', null)
+            // The third silence, and the other one this fixture has to be healthy about: the
+            // entry is scheduled and its beat is a minute old, so nothing here is stale.
+            ->assertJsonPath('schedule.applicable', true)
+            ->assertJsonPath('schedule.failed', false)
+            ->assertJsonPath('schedule.not_judged', null)
+            ->assertJsonPath('pgcat.schedule.stale', false);
 
         Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The failure this endpoint could not previously see: a container that converged, stayed in
+     * step, and whose per-minute entry has since stopped running.
+     *
+     * Every other field of this payload is `ok` — the query answered, the window closed with a
+     * convergence inside it, pgcat's file is the variant the day asks for — and the state file
+     * still reads like a healthy one, because what it records is what a run *did* and the last run
+     * did the right thing. Only the age of the beat is about whether runs are still happening, and
+     * it is the field the deployment this was written for kept answering `ok` through, for 85
+     * minutes, while the pooler it maintains was nobody's job.
+     */
+    public function test_a_schedule_that_stopped_producing_runs_degrades_the_payload_and_is_logged(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            // Past five missed minutes, which is the shipped tolerance: `schedule.interval_minutes`
+            // is one and `stale_after_missed_runs` defaults to five.
+            beatAt: gmdate(DATE_ATOM, time() - 900),
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            ->assertJsonPath('pinned.ok', true)
+            ->assertJsonPath('flip.failed', false)
+            ->assertJsonPath('reader_window.failed', false)
+            ->assertJsonPath('schedule.applicable', true)
+            ->assertJsonPath('schedule.failed', true)
+            ->assertJsonPath('schedule.not_judged', null)
+            ->assertJsonPath('pgcat.schedule.stale', true);
+
+        $this->assertGreaterThanOrEqual(900, $response->json('schedule.age_seconds'));
+        $this->assertSame(
+            300,
+            $response->json('schedule.stale_after_seconds'),
+            'five missed one-minute runs, as the setting derives it',
+        );
+        $this->assertStringContainsString('db:pgcat-flip', (string) $response->json('schedule.reason'));
+
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(function (string $message, array $context = []): bool {
+                return str_contains($message, 'health/db degraded')
+                    && str_contains($message, 'the schedule has stopped producing runs of the per-minute flip')
+                    && ($context['schedule']['failed'] ?? null) === true
+                    && ($context['schedule']['age_seconds'] ?? null) >= 900;
+            });
+    }
+
+    /**
+     * The same fault one interval earlier, and the reason the verdict is a failure rather than a
+     * silence: a beat that was never written is "no run has happened since this container came
+     * up", not "nothing to report". A payload that only ages a beat it has would answer `ok` for
+     * a container whose cron was never wired up at all — the one state where the repair is not
+     * waiting on the next run.
+     */
+    public function test_a_container_that_has_never_stamped_a_beat_is_degraded_too(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'readers', stampBeat: false);
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            ->assertJsonPath('schedule.applicable', true)
+            ->assertJsonPath('schedule.failed', true)
+            ->assertJsonPath('schedule.last_beat_at', null)
+            ->assertJsonPath('schedule.age_seconds', null)
+            ->assertJsonPath('schedule.not_judged', null)
+            ->assertJsonPath('flip.failed', false);
+
+        $this->assertStringContainsString('no run of db:pgcat-flip has been recorded', (string) $response->json('schedule.reason'));
+
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(function (string $message, array $context = []): bool {
+                return str_contains($message, 'the schedule has stopped producing runs of the per-minute flip')
+                    // `array_key_exists` rather than a null-coalesce on purpose: the field the
+                    // context has to carry here is the *absence* of a stamp, and `?? null` would
+                    // answer the same for a key that was dropped.
+                    && array_key_exists('last_beat_at', $context['schedule'] ?? [])
+                    && $context['schedule']['last_beat_at'] === null;
+            });
+    }
+
+    /**
+     * A container that is still inside its boot window is not a container whose schedule has
+     * stopped: the entry has had no time to beat yet, and the same line the boot verdict draws —
+     * "starting" is not "broken" — has to be drawn here or every deployment alarms on the way up.
+     */
+    public function test_a_schedule_inside_the_boot_window_is_not_judged(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 60, appliedMode: 'readers', stampBeat: false);
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('schedule.applicable', true)
+            ->assertJsonPath('schedule.failed', false)
+            ->assertJsonPath('pgcat.schedule.stale', null);
+
+        $this->assertStringContainsString('still inside its boot window', (string) $response->json('schedule.not_judged'));
     }
 
     /**
@@ -801,6 +929,11 @@ class DatabaseHealthControllerTest extends TestCase
      * with, injected so the endpoint can be driven without a pooler: a real probe is what
      * `PgcatConfigFlipperTest` and `PoolProbeTest` cover, and what this file is about is the
      * endpoint's reading of the answers.
+     *
+     * `$beatAt` and `$stampBeat` are the schedule's two levers: the state record carries a beat at
+     * "now" by default, which is the healthy container every other case in this file describes, and
+     * a case about a stopped schedule passes a stamp old enough to have missed the tolerance — or
+     * `$stampBeat: false` for the container the beat has never been written in at all.
      */
     private function bindWindowFlipper(
         ?int $bootedSecondsAgo,
@@ -808,6 +941,8 @@ class DatabaseHealthControllerTest extends TestCase
         ?array $readerWindows = null,
         array $pools = [],
         ?\Closure $poolProbe = null,
+        ?string $beatAt = null,
+        bool $stampBeat = true,
     ): PgcatConfigFlipper {
         $dir = sys_get_temp_dir().'/swrr-health-window-'.bin2hex(random_bytes(4));
 
@@ -844,6 +979,14 @@ class DatabaseHealthControllerTest extends TestCase
         // The state record is written with them, and it is what lets the two verdicts be told
         // apart: a run converged *inside* the boot window, so the boot verdict is healthy and the
         // only thing left to fail on is the file the pooler is still sitting on.
+        //
+        // `beat_at` rides with the convergence record for the same reason it rides with it in the
+        // file the flipper writes: the state a run leaves behind is both facts at once, and a
+        // container whose schedule had stopped would not have converged at all. Written as "now"
+        // because that is what a container whose per-minute entry is still running has — and this
+        // fixture is a *healthy* container, so the schedule verdict must be `ok` here and the
+        // status can only move for the reason each test is about. `$beatAt` and `$stampBeat` are
+        // how the tests that *are* about the schedule say otherwise.
         if ($appliedMode !== null) {
             $sections = implode('', array_map(static fn (string $pool): string => "[pools.{$pool}]\n", $pools));
 
@@ -856,15 +999,23 @@ class DatabaseHealthControllerTest extends TestCase
 
             if ($bootedSecondsAgo !== null) {
                 $convergedAt = gmdate(DATE_ATOM, time() - $bootedSecondsAgo + 60);
-
-                file_put_contents($config['state_file'], (string) json_encode([
+                $state = [
                     'last_mode' => $appliedMode,
                     'last_run_at' => $convergedAt,
                     'last_kind' => 'flipped',
                     'runs' => 1,
                     'converged_at' => $convergedAt,
                     'converged_mode' => $appliedMode,
-                ]));
+                ];
+
+                // The absence is a state of its own rather than a null to fall back from: a
+                // container that has never run the entry is exactly the 85-minute incident, and
+                // it is the case this endpoint used to answer `ok` to.
+                if ($stampBeat) {
+                    $state['beat_at'] = $beatAt ?? gmdate(DATE_ATOM);
+                }
+
+                file_put_contents($config['state_file'], (string) json_encode($state));
             }
         }
 

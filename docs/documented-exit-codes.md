@@ -20,7 +20,7 @@ the gate and by the suite.
 ## Why this needed deciding at all
 
 An exit code is a contract with whatever runs the command: a scheduler, a deploy gate, an
-alert. Five commands in this package are scheduled, and each has a matrix that pins its
+alert. Six commands in this package are scheduled, and each has a matrix that pins its
 codes against fixtures built for the purpose. The README states the same codes in a table an
 operator reads — a `what the sweep found` column and an `exit` column, a truth table over
 `--strict` — and that table was maintained by hand, next to the code, in a different file.
@@ -45,6 +45,7 @@ so its single `1` is two returns to keep in step rather than one.
 | `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a eighteen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
 | `db:pgcat-window-flip` | which route a firing takes: refused, switched off, unbound, before its window, inside it at the boundary, past its grace, on another day, the mode already applied, the lock held elsewhere, and whether the target answered | the window flip's twelve documented kinds, their numbers, and that every cell of it is an instance of one |
 | `db:replica-status` | one input: is the weighted manager bound — and one return *per channel*, which is where the hole was | its six-cell matrix, and this guard: the three routes its table documents, each of them run on the terminal and again as an object. This row used to say "not a matrix", and borrowed the probe's `unbound` cell for its single `1` — a claim about another command's guard, while the terminal half of this command's own return was driven by nothing |
+| `db:scheduler-watchdog` | three inputs into two codes: the age of the beat every run of the per-minute entry leaves in the flip's state file, the switches that decide whether anything ages it at all (`schedule.enabled`, `stale_after_missed_runs`), and the container's boot window, which is where judging begins | the watchdog's sixteen cells across its routes and the two channels, and this guard: eight routes down both channels, which is what makes the channel a way to reach a code without the sentence that explains it. `--strict` is the one rule a row cannot hold — a flag, not a state — so it is pinned by a test of its own, the way `--status` winning over a rehearsal is |
 
 `bin/checks.php` also exits non-zero from more than one check, but it is the gate that runs the
 other pins rather than a command this package ships, and its rule is one condition over an
@@ -76,7 +77,7 @@ column, a row with a different number of cells — throws, because a guard that 
 nothing reports agreement with a table it never found.
 
 The heading parameter matters for `db:doctor` in particular: that section's first table is
-the fourteen-row description of what each check judges, not the exit-code table, so "first table
+the fifteen-row description of what each check judges, not the exit-code table, so "first table
 under the heading" would bind the wrong thing. Selecting by column is what makes the guard
 say what it is about.
 
@@ -182,14 +183,17 @@ the drift rather than the repair.
 | `DbFlipPgcatCommandTest::test_the_matrix_agrees_with_the_readme_exit_table` | the flip's ten documented cases, their numbers, and that every one of its eighteen cells is an instance of one |
 | `DbReplicaStatusTest::test_the_matrix_agrees_with_the_readme_exit_table` | the three routes its table documents, their numbers, and that every cell of the matrix is an instance of one |
 | `DbWindowFlipCommandTest::test_the_documented_kinds_are_the_kinds_the_matrix_reaches` | the window flip's sixteen-cell matrix, and that each cell's verdict is documented with the code it exits |
+| `DbSchedulerWatchdogTest::test_the_matrix_agrees_with_the_readme_exit_table` | the watchdog's eight documented cases, their numbers in both `--strict` columns, and that every cell of the matrix is an instance of one |
+| `DbSchedulerWatchdogTest::test_the_strict_flag_moves_one_route_and_no_other` | the one rule the watchdog's table names that a row cannot hold: `--strict` moves the switched-off watch and nothing else, down both channels |
 | `DbFlipPgcatCommandTest::test_the_prose_that_restates_the_table_states_the_same_codes` | the sentences in three other sections that restate one of the flip's rows, the code each one writes, and the row it is a paraphrase of |
 | `DbFlipPgcatCommandTest::test_status_wins_when_a_rehearsal_is_asked_for_at_the_same_time` | the one rule the flip's table names that a row cannot hold |
 
-All five are checked by mutation rather than by argument: reverting `every replica failed` to
+All six are checked by mutation rather than by argument: reverting `every replica failed` to
 `0`, reverting `warnings, no failures` under `--strict` to `0`, reverting the flip's `a step a
 flip needs did not work` to `0`, reverting the distribution's `unbound` to `0`, reverting the
-window task's `deferred` to `0`, inserting an extra documented row, rewording a documented row,
-and deleting one cell's assignment each produce exactly one failure naming the case.
+window task's `deferred` to `0`, reverting the watchdog's `stale` to `0`, inserting an extra
+documented row, rewording a documented row, and deleting one cell's assignment each produce exactly
+one failure naming the case.
 
 ## Known limitations
 
@@ -219,7 +223,7 @@ and deleting one cell's assignment each produce exactly one failure naming the c
   read here; the check table is bound by its row *names* elsewhere — `DbDoctorTest` compares it
   with the rows the command builds and `ProseNumbersTest` binds the counts the records state
   about it. A *sentence* that restates a code is the other shape, and one command binds those now:
-  `db:pgcat-flip`'s paraphrases are compared with the row each one restates. The other three
+  `db:pgcat-flip`'s paraphrases are compared with the row each one restates. The other four
   commands' prose restatements are not bound — how far a paraphrase may drift before it stops
   being one is a judgement, and it has been made for the command that has three of them.
 - **The parser is a parser.** It reads the first table under a heading with a named column, so
@@ -256,6 +260,7 @@ and deleting one cell's assignment each produce exactly one failure naming the c
 | `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the flip's matrix, its provider, and the map from each cell to its documented case |
 | `tests/Unit/Console/DbReplicaStatusTest.php` | the distribution's matrix — its routes against the two channels — and the map from each cell to its documented case |
 | `tests/Unit/Console/DbWindowFlipCommandTest.php` | the window flip's matrix — its routes against the two channels — and the map from each cell to the verdict it reports |
-| `README.md` | the five tables, and the sentences naming the test that reads each one |
+| `tests/Unit/Console/DbSchedulerWatchdogTest.php` | the watchdog's matrix — its routes against the flag and the two channels — and the map from each cell to the case it documents |
+| `README.md` | the six tables, and the sentences naming the test that reads each one |
 | `tests/Support/DocumentedExitCounts.php` | the counts this record states, each derived from its provider |
 | `bin/counts.php` | the renderer: writes this record from those derivations, or checks it without writing |

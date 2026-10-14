@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Added
+
+- **A schedule that stops is now a fault rather than a silence, and `db:scheduler-watchdog` is what
+  a container's own healthcheck runs to catch it.** The per-minute flip is a deliberate no-op after
+  the boot window closes, so the flip's state file stopped moving eight minutes into a container's
+  life: a container that converged and then lost its cron line kept serving, kept answering
+  `select 1`, kept reporting the mode the last run applied, and read *converged* on every field of
+  `/health/db` until somebody noticed — which took 85 minutes on the deployment this was written
+  for. Every run of the entry now stamps a beat in that file, including the runs that decide
+  nothing, and four surfaces report it: `db:doctor`'s new `schedule beat` row fails when the beat
+  has stopped, `/health/db` publishes a `schedule` block and returns `503`, and
+  `php artisan db:scheduler-watchdog` exits `1` for a container healthcheck — it opens no socket,
+  takes no lock and writes nothing, so it can be asked every minute. The tolerance is
+  `swrr.pgcat.schedule.stale_after_missed_runs` (`SWRR_PGCAT_SCHEDULE_STALE_AFTER_MISSED_RUNS`,
+  default `5`), counted in *missed runs* rather than seconds so it follows the cadence: five minutes
+  at the shipped one-minute interval, twenty-five at five. `0` switches the watch off, which
+  `--strict` refuses — the setting that makes a dead cron invisible must not also make the command
+  that exists to notice one pass for ever. A route that was never judged (the entry is not
+  scheduled, the container is still inside its boot window, or its boot was never stamped) says so
+  in words and exits `0`, because "nothing is watched" and "watched, and it is well" must not be
+  the same silence.
+
 ### Fixed
 
 - **The guarded commit path is a file of this repository, and the skill that names it points

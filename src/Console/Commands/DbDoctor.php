@@ -15,6 +15,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
@@ -304,6 +305,7 @@ class DbDoctor extends Command
             $rows[] = $this->pgcatMode();
             $rows[] = $this->poolProbe();
             $rows[] = $this->flipSchedule();
+            $rows[] = $this->scheduleBeat();
             $rows[] = $this->storeProbe();
             $rows[] = $this->storeReachability($manager, $connection);
         }
@@ -2296,6 +2298,104 @@ class DbDoctor extends Command
         }
 
         return $this->datedRow('flip schedule', $problems, $this->recordedFindings());
+    }
+
+    /**
+     * Whether the schedule that runs the per-minute flip is still producing runs.
+     *
+     * WHY THIS ROW EXISTS, AND WHY IT IS NOT THE ONE ABOVE IT
+     *   `flip schedule` asks what is *configured* to move the pooler — an operator reads it before a
+     *   release and learns which mechanism answers a boundary. This one asks whether that mechanism
+     *   has been *running*, which is a different failure at a different moment: the entry can be
+     *   registered by the provider, listed by `schedule:list`, armed exactly as documented, and not
+     *   firing, because the cron line (or `schedule:work`) that runs the container's schedule is
+     *   gone. Nothing in the configuration changed, no row above it is wrong, and pgcat stays where
+     *   the last write left it while every reading says the installation is well.
+     *
+     *   That is not a hypothetical: it is how a deployment sat for 85 minutes with a dead cron, and
+     *   it is why the row exists rather than being folded into the one above. The boot window does
+     *   not cover it either — the window judges a container's first eight minutes and then, by
+     *   design, stops, so afterwards a container nobody is scheduling looks like one that is.
+     *
+     * THE VERDICT IS THE FLIPPER'S, AND NOTHING IS MEASURED HERE
+     *   The age, the tolerance and both sentences come from
+     *   {@see PgcatConfigFlipper::scheduleStatus()}, which is the same block `/health/db` publishes,
+     *   so the row, the endpoint and `db:scheduler-watchdog` cannot describe one state three ways.
+     *   The three states that are not a failure are not a pass by omission either — each says why it
+     *   is not one:
+     *
+     *   - **Not scheduled**: the per-minute entry is off, so nothing stamps a beat. The row prints
+     *     the flipper's sentence and leaves the *choice* between the two mechanisms to `flip
+     *     schedule`, which is where it is judged — two rows arguing one setting is how a reader
+     *     learns to skim them.
+     *   - **Switched off**: the tolerance is zero, which is the documented way to keep this verdict
+     *     off. It *warns* rather than failing: an installation that has switched off the only check
+     *     that notices a dead cron is a fact a preflight should put in front of somebody, and
+     *     `--strict` is how a release gate acts on it.
+     *   - **Not judged yet**: the container is still inside its boot window, or has no boot stamp to
+     *     measure one from. A container that has not finished starting is not a stopped schedule, and
+     *     one nobody stamped must not be failed for the absence of a file the package did not write.
+     *
+     * No finding key: the boot record is one file per *installation* and this verdict is about one
+     * container's schedule, so there is no key for a date to be remembered under — the age is in the
+     * row's own sentence, which is the fact an operator acts on.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function scheduleBeat(): array
+    {
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row(
+                'schedule beat',
+                self::PASS,
+                'the flipper is not bound, so no entry is scheduled and there is no beat to age — the '
+                .'`flip schedule` row names that fault',
+            );
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row(
+                'schedule beat',
+                self::FAIL,
+                'the flipper could not be built, so the schedule cannot be watched: '.$e->getMessage(),
+            );
+        }
+
+        $config = $this->laravel->make(Repository::class);
+        $entry = FlipSchedule::options($config);
+        $missed = ScheduleBeat::missedRuns($config->get('db-manager.swrr.pgcat.schedule'));
+        $verdict = $flipper->scheduleStatus();
+
+        if ($verdict['stale'] === true) {
+            return $this->row('schedule beat', self::FAIL, (string) $verdict['reason']);
+        }
+
+        // The switch as a warning, and only where it decides something: an installation whose entry
+        // is not scheduled has no beat to age whatever this setting says, and is reported by the
+        // state above rather than twice.
+        if ($entry['enabled'] && $missed <= 0) {
+            return $this->row(
+                'schedule beat',
+                self::WARN,
+                'nothing would notice a schedule that stopped: the watch is switched off '
+                .'(swrr.pgcat.schedule.stale_after_missed_runs = 0), and the beat is still written, so '
+                .'switching it back on reports the age it would have had',
+            );
+        }
+
+        if ($verdict['stale'] === null) {
+            return $this->row('schedule beat', self::PASS, (string) $verdict['not_judged']);
+        }
+
+        return $this->row('schedule beat', self::PASS, sprintf(
+            'the per-minute entry is running: its last beat was %s ago, and the tolerance is %d missed '
+            .'run(s) at a cadence of %s',
+            ScheduleBeat::ageText((int) ($verdict['age_seconds'] ?? 0)),
+            $missed,
+            $entry['interval_minutes'] === 1 ? '1 minute' : $entry['interval_minutes'].' minutes',
+        ));
     }
 
     /**
