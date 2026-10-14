@@ -28,6 +28,14 @@
 /HANDOFF.md         export-ignore
 /AGENTS.md          export-ignore
 /BEHAVE.mdc         export-ignore
+
+# The reading records behind the port plan: working documents about the consuming
+# application, kept here rather than shipped to whoever installs this package.
+/all-externally-related.md    export-ignore
+/app-externally-related.md    export-ignore
+/app-removables.md            export-ignore
+/git-externally-related.md    export-ignore
+/site-to-package-port-plan.md export-ignore
 /git/commit_paths.py export-ignore
 /bin/api.php          export-ignore
 /bin/checks.php       export-ignore

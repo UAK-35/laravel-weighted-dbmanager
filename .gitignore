@@ -12,3 +12,6 @@
 /.freebuff/project-id
 /.agents/*.local.json
 /opencode.jsonc
+/oc-session-*.md
+/lpr-git/
+/lpr-compare/
