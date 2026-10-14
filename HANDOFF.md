@@ -36,10 +36,10 @@ read against.
 
 ## 1. Pending — written, green, uncommitted
 
-**Nothing is pending.** The four commits this note lands are on `dev` with the commit before it:
+**Nothing is pending.** The five commits this note lands are on `dev` with the commit before it:
 the readings and the port plan (`3f25180`), the schedule watchdog (`af1fddb`), the api page a past
-tree renders (`e06098b`) and the published config's generation (`bbfd422`), each with the changelog
-entry that weighs it. The table below is empty
+tree renders (`e06098b`), the published config's generation (`bbfd422`) and the paths a flip cycle
+writes (`f782eb0`), each with the changelog entry that weighs it. The table below is empty
 because the tree holds no file the register does not carry, which is what nothing pending looks like
 — and the schedule watchdog the note before this one called pending is section 3's `### Added` now
 rather than a file here.
@@ -92,7 +92,7 @@ php bin/inventory.php --check --at=8742456
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with this tree — 3, 14 and 14 line(s) stale in files.tsv,
+  --> exit 1: the inventory is out of step with this tree — 3, 16 and 16 line(s) stale in files.tsv,
       methods.tsv and surface.tsv, each naming the row it does not hold
 ```
 
@@ -138,10 +138,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `bbfd422` — *feat: a published config says which key set it is, and the doctor reads the difference* |
+| HEAD | `f782eb0` — *feat: the paths a flip cycle writes are judged beside the ones a flip step names* |
 | `origin/dev` | `2744a13` — *docs: the handoff note is re-taken at the release commit, and its records reading is its transcript* |
-| Unpushed | 5 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 1, feat 3, fix 1 |
+| Unpushed | 7 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 2, feat 4, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -150,10 +150,11 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is five commits ahead of `origin/dev`: the guarded commit path that moved out of the
+The register is six commits ahead of `origin/dev`: the guarded commit path that moved out of the
 consuming application's `git/commit_paths.py` and into this repository's own `git/`, the readings and
-the port plan, and this cycle's three capabilities — the schedule that can be watched, the api page
-a past tree renders, and the published config that says which key set it is. Unpushed at the register
+the port plan, and this cycle's four capabilities — the schedule that can be watched, the api page
+a past tree renders, the published config that says which key set it is, and the file preconditions
+that now cover a whole flip cycle. Unpushed at the register
 means the tip its own release was pushed from, which is
 why the row reads what it does and not a backlog — `bin/release.php` refuses to tag while `HEAD` is
 not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every commit
@@ -161,9 +162,11 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The five most recent are the ones a reader is most likely to be standing in the middle of:
+The seven most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+f782eb0  feat: the paths a flip cycle writes are judged beside the ones a flip step names
+eb884fe  docs: the handoff note is re-taken at the published config's generation
 bbfd422  feat: a published config says which key set it is, and the doctor reads the difference
 e06098b  feat: the API page of a past tree is read out of git, so a release's page is a question
 af1fddb  feat: a schedule that stops producing runs is a fault, and four surfaces say so
@@ -199,17 +202,18 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3` |
 | The latest of them | `v0.2.0-alpha3` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 5 entries — 3 added, 2 fixed, 0 changed |
-| The notes weigh as | minor — three capabilities, which is the rung they take, and two repairs beside them |
+| `## Unreleased` at the basis | 6 entries — 4 added, 2 fixed, 0 changed |
+| The notes weigh as | minor — four capabilities, which is the rung they take, and two repairs beside them |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: `v0.2.0` does not exist, so a suffixless version is still the lane ahead. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries `### Added` three times and `### Fixed` twice at the register, which the weighing
-reads as `minor` — three capabilities the rung is for, and the two repairs that landed beside them.
+and the section carries `### Added` four times and `### Fixed` twice at the register, which the weighing
+reads as `minor` — four capabilities the rung is for, and the two repairs that landed beside them.
 The register is therefore a branch whose release would publish the schedule that can be watched, the
-api page a past tree renders, the published config that says which key set it is, and the two repairs
-the release before it did not carry — as `0.2.0`,
+api page a past tree renders, the published config that says which key set it is, the file
+preconditions that now cover a whole flip cycle, and the two repairs the release before it did not
+carry — as `0.2.0`,
 the first version with no suffix, which is the lane the absent version leaves open.
 
 ### The release that cut this tag, and the row it could not write
@@ -275,12 +279,12 @@ answer about the working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Five entries at the register, and they are this cycle's: three `### Added` for the schedule that can
-be watched, the api page a past tree renders and the published config that says which key set it is,
-and two `### Fixed` for the repairs the release before this one left — the guarded commit path, and
-the records reading that holds the commands section 1 quotes. The sixteen entries the tag carries —
-six `### Added`, six `### Changed`, four `### Fixed` — are the pgcat cycle's work and the guard
-repairs before them, and the promotion would carry all five of these with them.
+Six entries at the register, and they are this cycle's: four `### Added` for the schedule that can be
+watched, the api page a past tree renders, the published config that says which key set it is and the
+paths a flip cycle writes, and two `### Fixed` for the repairs the release before this one left — the
+guarded commit path, and the records reading that holds the commands section 1 quotes. The sixteen
+entries the tag carries — six `### Added`, six `### Changed`, four `### Fixed` — are the pgcat cycle's
+work and the guard repairs before them, and the promotion would carry all six of these with them.
 
 What those sixteen change for a consumer is written in the released section rather than repeated here.
 What is *not* in them is anything the three `.tsv` records, `API.md` or the changelog cannot account
