@@ -185,4 +185,147 @@ final class PublicApiReportTest extends TestCase
         $this->assertSame(0, $exit, 'php bin/api.php --check refused the committed page:' . PHP_EOL . $process->getErrorOutput() . $process->getOutput());
         $this->assertStringContainsString('api report is current', $process->getOutput());
     }
+
+    /**
+     * The pages of *this* repository's tags, read back off the trees that published them.
+     *
+     * WHY THE REAL HISTORY RATHER THAN A FIXTURE
+     * -----------------------------------------
+     *   A fixture pins the reader against a repository it built itself, which says nothing about
+     *   whether a *real* old tree can be rebuilt at all — a layout that moved, a `surface.tsv`
+     *   written by an older generator, a tag cut before there was a record to render. Those are
+     *   properties of this history rather than of the reader.
+     *
+     *   The two tags are read for different reasons. The newest is the closed loop: `git show
+     *   <tag>:API.md` is the page that release actually shipped, and the run has to produce those
+     *   bytes from that tree — the property every release relies on, asserted against the blob
+     *   rather than against a second render of the same reader, which would agree with itself while
+     *   both were wrong. The one before it is the control, because its published page is *not* what
+     *   its tree holds: `v0.2.0-alpha2` rewrote the record and left the page describing the release
+     *   before it, and the re-render was a follow-up commit — `PublishedPageTest` says the same in
+     *   its own words. So a reader that printed the checkout's page, or the tag's blob, would pass
+     *   the first assertion and fail this one, which is the whole reason both tags are here.
+     *
+     *   Every derived file is hashed before and after, because the mode's promise is that a read is
+     *   a read: a refactor that wrote the page — or the record — it rendered would leave the rest of
+     *   this green.
+     */
+    public function test_the_page_a_tag_published_is_the_page_a_run_at_that_tag_renders(): void
+    {
+        [$newest, $previous] = self::versionTags();
+
+        $before = self::digests();
+
+        $published = self::api('--at=' . $newest);
+        $older = self::api('--at=' . $previous);
+
+        $this->assertSame(0, $published->getExitCode(), 'php bin/api.php --at=' . $newest . ' refused:' . PHP_EOL . $published->getErrorOutput());
+        $this->assertSame(0, $older->getExitCode(), 'php bin/api.php --at=' . $previous . ' refused:' . PHP_EOL . $older->getErrorOutput());
+
+        // The closed loop: the page printed for the newest tag is the one that tag published, byte
+        // for byte. This is the assertion a stale release page fails — as `v0.2.0-alpha2`'s did.
+        $this->assertSame(
+            self::published($newest),
+            self::normalise($published->getOutput()),
+            "the page printed for {$newest} is not the page that tag published",
+        );
+
+        // ...and the control: the tag before it published a page its own tree does not render, so
+        // the two runs cannot have printed one page between them, and neither is the checkout's.
+        $this->assertNotSame(
+            self::published($previous),
+            self::normalise($older->getOutput()),
+            "the page printed for {$previous} is the blob at that tag, which is the page its release left behind",
+        );
+        $this->assertNotSame(self::normalise($published->getOutput()), self::normalise($older->getOutput()), 'two tags, one page');
+        $this->assertSame(self::published($newest), self::page(), 'the checkout\'s page has moved on from the newest tag, which this test assumes');
+
+        // Each page says which tree it describes, and the note about where it came from is on the
+        // other stream — a note in front of the bytes is a page that does not render.
+        $this->assertStringContainsString('describes the tree at **' . $newest . '**', $published->getOutput());
+        $this->assertStringContainsString('describes the tree at **' . $previous . '**', $older->getOutput());
+        $this->assertStringContainsString('reading the tree at ' . $previous . ' out of git', $older->getErrorOutput());
+        $this->assertStringNotContainsString('reading the tree at', $older->getOutput());
+
+        $this->assertSame($before, self::digests(), 'a read wrote one of the derived files in this checkout');
+    }
+
+    /**
+     * The two newest version tags, newest first.
+     *
+     * Two, because the test above is about a page that moved on: one tag would let a reader that
+     * printed the tree it was standing in pass. A checkout with fewer than two is not this
+     * repository mid-release, it is a clone that has no history to read — the test says so rather
+     * than asserting on an empty string.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private static function versionTags(): array
+    {
+        $process = new Process(['git', 'tag', '--list', 'v*', '--sort=-v:refname'], self::root());
+        $process->setTimeout(30);
+        $process->run();
+
+        $tags = array_values(array_filter(preg_split('/\R/', $process->getOutput()) ?: []));
+
+        if (count($tags) < 2) {
+            self::markTestSkipped('this checkout has fewer than two version tags, so there is no past page to read');
+        }
+
+        return [$tags[0], $tags[1]];
+    }
+
+    /** The page a tag published, as git holds it — the only copy of it left, and the ground truth. */
+    private static function published(string $tag): string
+    {
+        $process = new Process(['git', 'show', $tag . ':API.md'], self::root());
+        $process->setTimeout(30);
+
+        if ($process->run() !== 0) {
+            self::fail("git could not read API.md out of {$tag}:" . PHP_EOL . $process->getErrorOutput());
+        }
+
+        return self::normalise($process->getOutput());
+    }
+
+    /**
+     * The bytes of every derived file, for asserting that a read left all of them alone.
+     *
+     * The record as well as the page: `--at` reads the record out of git, so a run that opened the
+     * files behind it would be the failure this covers — and a run that *wrote* one of them would be
+     * the failure that costs a release its evidence.
+     *
+     * @return array<string, string>
+     */
+    private static function digests(): array
+    {
+        $digests = [];
+
+        foreach (['API.md', 'files.tsv', 'methods.tsv', 'surface.tsv'] as $name) {
+            $digest = @hash_file('sha256', self::root() . '/' . $name);
+
+            if ($digest === false) {
+                self::fail($name . ' is not there, so there is nothing to protect.');
+            }
+
+            $digests[$name] = $digest;
+        }
+
+        return $digests;
+    }
+
+    /** The generator, run the way a pipeline would run it. */
+    private static function api(string ...$arguments): Process
+    {
+        $process = new Process([PHP_BINARY, self::root() . '/bin/api.php', ...$arguments], self::root());
+        $process->setTimeout(60);
+        $process->run();
+
+        return $process;
+    }
+
+    private static function normalise(string $text): string
+    {
+        return str_replace(["\r\n", "\r"], "\n", $text);
+    }
 }

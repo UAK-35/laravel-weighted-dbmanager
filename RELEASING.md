@@ -134,6 +134,14 @@ page that cannot be written stops the release before the tag like every other st
 writes. `PublicApiReportTest` runs the generator backwards against the committed pair, and
 `php bin/api.php --check` is the read-only half a pipeline calls.
 
+A past tree's page is read rather than rewritten. `php bin/api.php --at=REF` prints the page
+the tree at a tag, a branch or a commit renders — the rows out of git and the stamp that ref
+is, the way `bin/inventory.php --at=REF` reads them, so one release's page can be answered
+for without checking that release out — and writes nothing, because the page a checkout
+ships is the checkout's and a past release's written beside it would describe a second tree.
+`--check --at=REF` is the same question without the print, and it is the release's own guard
+on the tree the ref names.
+
 The page is not written by a rule of its own. Every file derived from the record is a row of
 one list, `derivedFiles()` in `bin/surface.php` — the three records and this page today — and
 each row also names the commands that write it, which is the second question a reader of the

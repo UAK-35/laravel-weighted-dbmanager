@@ -2298,7 +2298,9 @@ bin/inventory.php        writes files.tsv, methods.tsv and surface.tsv, and the 
                          rendered from them, from the working tree — or the record alone
                          from any ref with --at= (see RELEASING.md)
 bin/api.php              renders API.md — the public API page — from that record, so the
-                         rows a release weighs are also the page a consumer reads
+                         rows a release weighs are also the page a consumer reads, and
+                         prints the page a past tree renders with --at=REF, writing
+                         nothing (see RELEASING.md)
 bin/blame.php            which signal names one symbol, and what it contributed to the bump
 bin/publish-config.php   publishes the sample config into an application
 files.tsv, methods.tsv,  what the last release shipped — its files, their public methods,

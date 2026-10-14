@@ -24,6 +24,22 @@
   in words and exits `0`, because "nothing is watched" and "watched, and it is well" must not be
   the same silence.
 
+- **The API page of a past tree can be read out of git, so a release's published page is a question
+  rather than a checkout.** `API.md` is one file and it describes the tree in front of it, so a past
+  release's page has no second copy to write beside it — replacing the page with another tree's
+  publishes a consumer-facing document that disagrees with the record on disk, which is the failure
+  the page exists to make impossible. `php bin/api.php --at=REF` therefore renders instead of
+  writing: the rows are rebuilt out of the tree a tag, a branch or a commit holds, exactly as
+  `bin/inventory.php --at=REF` reads them, the stamp is the release that ref is, and the bytes go to
+  stdout with a note on stderr — so a redirect gets a page and the checkout is left alone. The
+  read-only half is the question a release's own commit has to answer: `--check --at=REF` compares
+  the page on disk with the one that tree renders — green on the tree the ref names, and red against
+  an older tag on a checkout that has moved on, which is the honest answer about a pair. A ref this
+  repository does not have is refused before anything is read, because a ref that does not resolve
+  reads as a tree with no files in it and a page rendered from that record announces a package with
+  no API. Reading a ref needed the rows to be read from one place, so `apiRefRecord()` and
+  `refInventoryRecords()` are the record this renders from rather than a second reader beside them.
+
 ### Fixed
 
 - **The guarded commit path is a file of this repository, and the skill that names it points

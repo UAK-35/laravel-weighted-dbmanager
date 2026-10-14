@@ -44,6 +44,26 @@ final class PublishedPageTest extends TestCase
     private const FIXED = "### Fixed\n\n- A ported defect, fixed.\n";
 
     /**
+     * A class the fixture gains, so the record beside the page can be made to move on.
+     *
+     * The tests about reading a *past* tree need two of them: a page that is the same either way
+     * would pass whatever the reader did, which is the failure these are about.
+     */
+    private const EXTRA = <<<'PHP'
+    <?php
+
+    namespace Fixture;
+
+    class Extra
+    {
+        public function extra(): string
+        {
+            return 'extra';
+        }
+    }
+    PHP;
+
+    /**
      * The state the defect left behind is the state to test from: the record and the page both
      * describing `v1.0.0`, committed, with the tool agreeing that they agree. The release is then
      * the only thing that can move the page to the tag it cut.
@@ -162,6 +182,148 @@ final class PublishedPageTest extends TestCase
             $repo->read('methods.tsv'),
             'the record on disk is the one the plan had to read past, and it does not know about Extra',
         );
+    }
+
+    /**
+     * A past release's page, rendered out of the tree its tag holds — and this checkout's page left
+     * where it was.
+     *
+     * WHY THIS IS A READ RATHER THAN A SECOND PAGE
+     * -------------------------------------------
+     *   `API.md` is one file, and the one a checkout ships describes that checkout: it is the page
+     *   the record beside it renders. A past release's page is therefore not something a command can
+     *   write *down* — replacing the page with another tree's publishes a consumer-facing document
+     *   that disagrees with the record in front of it, which is the failure the page exists to make
+     *   impossible. So `--at` prints: the rows come out of the tag's tree the way
+     *   `bin/inventory.php --at` reads them, the stamp is that tree's release, and the bytes go to
+     *   stdout. The two tags here hold different rows on purpose.
+     *
+     *   The page is the output, so the note about where it came from is on the other stream — a note
+     *   in front of the bytes would be a page that does not render, and a test that read the two
+     *   streams together could not tell a clean redirect from a broken one.
+     */
+    public function test_a_read_at_a_ref_prints_that_trees_page_and_writes_nothing(): void
+    {
+        $repo = ReleaseRepo::make(self::ADDED);
+        $repo->tag('v1.0.0');
+        $repo->refreshInventory();
+        $repo->script('api.php');
+        $repo->commit('chore: the record and the page at v1.0.0');
+
+        $published = $repo->read('API.md');
+
+        // The tree moves on and the second release's page is written over the same file, which is
+        // what makes the read below the only way back to the first one.
+        $repo->write('src/Extra.php', self::EXTRA . "\n");
+        $repo->commit('feat: a second class with a public method');
+        $repo->tag('v1.1.0');
+        $repo->refreshInventory();
+        $repo->script('api.php');
+        $repo->commit('chore: the record and the page at v1.1.0');
+
+        $now = $repo->read('API.md');
+
+        $run = $repo->scriptRun('api.php', '--at=v1.0.0');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->refused('reading the tree at v1.0.0 out of git, not the checkout — nothing is written'),
+            $run->describe(),
+        );
+
+        // The bytes are the page that release published, read back off the tag that published it:
+        // that is the closed loop, and anything less is a promise about a renderer rather than the
+        // past page a reader asked for.
+        $this->assertSame($published, str_replace(["\r\n", "\r"], "\n", $run->output), $run->describe());
+        $this->assertNotSame($now, $published, 'the two tags have to render different pages for this to mean anything');
+        $this->assertStringContainsString('**v1.0.0**', $run->output, $run->describe());
+        $this->assertStringNotContainsString('Extra', $run->output, 'the page printed is the tag\'s, and the class the tag does not have is on the newer one');
+
+        // ...and the page in the checkout is the one the second release left, byte for byte: a read
+        // that repaired the file it read would be the write this mode exists not to do.
+        $this->assertSame($now, $repo->read('API.md'), 'the read wrote the checkout\'s page');
+    }
+
+    /**
+     * A ref this repository does not have is refused before anything is read, and nothing is
+     * printed under its name.
+     *
+     * A ref that does not resolve reads as a tree with no files in it, so the refusal is the one
+     * outcome that is not merely confusing: a page rendered from that empty record is a consumer
+     * document announcing a package with no API.
+     */
+    public function test_a_ref_this_repository_does_not_have_is_refused_rather_than_read_as_an_empty_tree(): void
+    {
+        $repo = ReleaseRepo::make(self::ADDED);
+        $repo->tag('v1.0.0');
+        $repo->refreshInventory();
+        $repo->script('api.php');
+        $repo->commit('chore: the record and the page at v1.0.0');
+
+        $before = $repo->read('API.md');
+
+        $run = $repo->scriptRun('api.php', '--at=v9.9.9');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue($run->refused('v9.9.9 is not a ref this repository has'), $run->describe());
+        $this->assertSame('', $run->output, 'a refused read printed a page');
+        $this->assertSame($before, $repo->read('API.md'), $run->describe());
+    }
+
+    /**
+     * `--check --at=REF` answers the question a release's own commit has to answer, in both
+     * directions: whether the page in this checkout is the one that tree's record renders.
+     *
+     * Run against the tag the page was written at, it is the release's own guard. Run against an
+     * older one after the page has moved on, it says no — and says what to do about it, which is
+     * nothing: the page a checkout ships is the checkout's, and no run writes another tree's. That
+     * is why the refusal names a report rather than a repair, and why the mode exists at all.
+     */
+    public function test_check_at_answers_whether_the_page_on_disk_is_the_one_that_tree_renders(): void
+    {
+        $repo = ReleaseRepo::make(self::ADDED);
+        $repo->tag('v1.0.0');
+        $repo->refreshInventory();
+        $repo->script('api.php');
+        $repo->commit('chore: the record and the page at v1.0.0');
+
+        $current = $repo->scriptRun('api.php', '--check', '--at=v1.0.0');
+
+        $this->assertSame(0, $current->exitCode, $current->describe());
+        $this->assertTrue(
+            $current->said('the page on disk is the one the tree at v1.0.0 renders'),
+            $current->describe(),
+        );
+
+        $repo->write('src/Extra.php', self::EXTRA . "\n");
+        $repo->commit('feat: a second class with a public method');
+        $repo->tag('v1.1.0');
+        $repo->refreshInventory();
+        $repo->script('api.php');
+        $repo->commit('chore: the record and the page at v1.1.0');
+
+        $stale = $repo->scriptRun('api.php', '--check', '--at=v1.0.0');
+
+        $this->assertSame(1, $stale->exitCode, $stale->describe());
+        $this->assertTrue($stale->refused('The API report is out of step with the tree at v1.0.0'), $stale->describe());
+        $this->assertTrue($stale->refused("No run writes another tree's page"), $stale->describe());
+
+        // The checkout's own page is still the one the checkout's own record renders: comparing it
+        // with another tree's is a question, not a rewrite.
+        $plain = $repo->scriptRun('api.php', '--check');
+
+        $this->assertSame(0, $plain->exitCode, $plain->describe());
+    }
+
+    /** The flags that cannot mean what they say are refused the way an unknown option is. */
+    public function test_an_at_with_no_ref_is_a_usage_error(): void
+    {
+        $repo = ReleaseRepo::make(self::ADDED);
+
+        $run = $repo->scriptRun('api.php', '--at=');
+
+        $this->assertSame(2, $run->exitCode, $run->describe());
+        $this->assertTrue($run->refused('--at= needs a ref: a tag, a branch or a commit.'), $run->describe());
     }
 
     /**

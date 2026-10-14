@@ -35,6 +35,7 @@ declare(strict_types=1);
  * -----
  *   php bin/api.php                 write API.md from the record on disk
  *   php bin/api.php --check         compare, write nothing, exit 1 when out of step
+ *   php bin/api.php --at=REF        print the page the tree at REF renders, write nothing
  *   php bin/api.php --root=PATH     run against another checkout
  *   php bin/api.php --help
  *
@@ -45,10 +46,30 @@ declare(strict_types=1);
  *   so a page whose row does not name it is one it refuses to write rather than a path it
  *   happens to know.
  *
+ * `--at=REF` IS A READ, NOT A SECOND PAGE TO KEEP IN STEP
+ * -----------------------------------------------------
+ *   The page a checkout ships describes the checkout: `API.md` is one file and it names the
+ *   tree the record beside it describes. A past release's page is therefore not something
+ *   this command can write *down* — a page replaced with another tree's is a consumer-facing
+ *   document that disagrees with the record in front of it, which is the failure the page
+ *   exists to make impossible. What it can do is render one: `--at=REF` rebuilds the rows out
+ *   of git the way `bin/inventory.php --at=REF` does, stamps them with the release that tree
+ *   is, and prints the page they render on stdout. Nothing is written and the checkout is
+ *   left alone.
+ *
+ *   `--check --at=REF` is the read-only half of that pair, and it asks the question a
+ *   release's own commit has to answer: is the page on disk the one the record of that tree
+ *   renders? Run on the tree the ref names, it is the release's own guard; run against an
+ *   older tag on a checkout that has moved on it is red, which is the honest answer to a
+ *   question about a pair — the page on disk describes the checkout, and that tree's is
+ *   another page. Neither mode writes, so the answer is a report rather than a repair — the
+ *   page a checkout ships is written by the run that owns the record it renders.
+ *
  * EXIT CODES
  * ----------
- *   0 written, or already current under --check; 1 the record is missing or names more
- *   than one tree, or the page is out of step; 2 usage error.
+ *   0 written, printed, or already current under --check; 1 the record is missing or names
+ *   more than one tree, the ref is not one this repository has, or the page is out of step;
+ *   2 usage error.
  */
 
 require_once __DIR__ . '/surface.php';
@@ -56,6 +77,7 @@ require_once __DIR__ . '/surface.php';
 if (apiInvoked()) {
     $root = str_replace('\\', '/', dirname(__DIR__));
     $check = false;
+    $at = null;
 
     foreach (array_slice($_SERVER['argv'], 1) as $argument) {
         if ($argument === '--help' || $argument === '-h') {
@@ -65,6 +87,12 @@ if (apiInvoked()) {
 
         if ($argument === '--check') {
             $check = true;
+
+            continue;
+        }
+
+        if (str_starts_with($argument, '--at=')) {
+            $at = substr($argument, 5);
 
             continue;
         }
@@ -80,12 +108,48 @@ if (apiInvoked()) {
         exit(2);
     }
 
+    // A flag that cannot mean what it was asked is answered before anything is read, the way an
+    // unknown option is: `--at=` with no ref names no tree, and a page printed under no tree's
+    // name is a page that describes nothing.
+    if ($at !== null && trim($at) === '') {
+        fwrite(STDERR, '--at= needs a ref: a tag, a branch or a commit.' . PHP_EOL . PHP_EOL);
+        apiUsage();
+        exit(2);
+    }
+
     if (!is_dir($root . '/src')) {
         fwrite(STDERR, "Not a package root — no src/ under {$root}." . PHP_EOL);
         exit(1);
     }
 
-    exit(apiMain($root, $check));
+    if ($at !== null) {
+        // Asked before the tree is read, because a ref that does not resolve reads as a tree with no
+        // files in it — and a page rendered from an empty record describes a package with no API.
+        // git's own words are carried into the message: "no such ref" and "not a repository" are
+        // different problems with the same exit code.
+        $resolved = git($root, ['rev-parse', '--verify', $at . '^{commit}']);
+        $reason = trim(strtok($resolved['output'], "\n") ?: '');
+
+        if ($resolved['exit'] !== 0) {
+            fwrite(STDERR, sprintf(
+                '✗ Nothing to read: %s is not a ref this repository has%s' . PHP_EOL,
+                $at,
+                $reason === '' ? '.' : ' — ' . $reason,
+            ));
+
+            exit(1);
+        }
+
+        // The page is the output of the run that prints one, so the note about where it came from
+        // goes to the other stream: a note in front of the bytes would be a page that does not
+        // render. A check prints no page, so its note is an ordinary one.
+        apiNote(
+            sprintf('reading the tree at %s out of git, not the checkout — nothing is written', $at),
+            !$check,
+        );
+    }
+
+    exit(apiMain($root, $check, $at));
 }
 
 /**
@@ -145,6 +209,35 @@ function apiRecord(string $root): array
 function apiReport(string $root): string
 {
     return apiMarkdown(apiRecord($root));
+}
+
+/**
+ * The record the tree at a ref holds, rebuilt out of git: the rows and the stamp from one tree.
+ *
+ * The reader on disk refuses when three files disagree about the tree they describe, because three
+ * files can be written at three moments. A ref cannot disagree with itself — `refInventoryRecords()`
+ * reads one tree out of the object store and `inventoryTagAt()` names the release that tree is — so
+ * this is a reader rather than a check, and the page it renders is the page that release published
+ * wherever that release published one in step with its record.
+ *
+ *   `v0.2.0-alpha2` is the release that did not: its commit rewrote the three files and left the page
+ * describing the tree before it, and a page no release wrote cannot be recovered from its rows —
+ * that one was re-rendered by hand in a follow-up commit. So the honest reading of a ref is at the
+ * tree, and `git show <tag>:API.md` is the other question: what that release actually shipped is
+ * evidence about the run that wrote the page rather than about the tree it describes.
+ *
+ * @return array{stamp: string, files: list<array<string, string>>, methods: list<array<string, string>>, surface: list<array<string, string>>}
+ */
+function apiRefRecord(string $root, string $ref): array
+{
+    $rows = refInventoryRecords($root, $ref);
+
+    return [
+        'stamp' => inventoryTagAt($root, $ref),
+        'files' => $rows['files'],
+        'methods' => $rows['methods'],
+        'surface' => $rows['surface'],
+    ];
 }
 
 /**
@@ -533,17 +626,20 @@ function apiInvoked(): bool
 }
 
 /**
- * Write the page, or answer for it under `--check`.
+ * Write the page, print it for a ref, or answer for it under `--check`.
+ *
+ * A run with `--at` reaches the stdout branch and no further: the page it renders is another tree's,
+ * and a second page written over the checkout's is a consumer-facing document disagreeing with the
+ * record in front of it. That is also why the path is asked for below that branch rather than above
+ * it — where a page lives is a question about *writing* one, and a row that stopped naming this
+ * command took the writing away rather than the reading.
  */
-function apiMain(string $root, bool $check): int
+function apiMain(string $root, bool $check, ?string $at = null): int
 {
     try {
-        $record = apiRecord($root);
-        $path = apiReportPath($root);
+        $record = $at === null ? apiRecord($root) : apiRefRecord($root, $at);
     } catch (RuntimeException $error) {
-        fwrite(STDERR, PHP_EOL . '✗ Nothing to publish: ' . $error->getMessage() . '.' . PHP_EOL . PHP_EOL);
-
-        return 1;
+        return apiRefusal($error);
     }
 
     $page = apiMarkdown($record);
@@ -554,21 +650,37 @@ function apiMain(string $root, bool $check): int
         $record['stamp'],
     );
 
+    if ($at !== null && !$check) {
+        echo $page;
+
+        return 0;
+    }
+
+    try {
+        $path = apiReportPath($root);
+    } catch (RuntimeException $error) {
+        return apiRefusal($error);
+    }
+
     if ($check) {
         $onDisk = @file_get_contents($path);
+        $bytes = $onDisk === false ? '' : str_replace(["\r\n", "\r"], "\n", $onDisk);
 
-        if ($onDisk !== false && str_replace(["\r\n", "\r"], "\n", $onDisk) === $page) {
-            apiNote('api report is current — ' . $described);
+        if ($onDisk !== false && $bytes === $page) {
+            apiNote($at === null
+                ? 'api report is current — ' . $described
+                : sprintf('the page on disk is the one the tree at %s renders — %s', $at, $described));
 
             return 0;
         }
 
-        fwrite(STDERR, PHP_EOL . '✗ The API report is out of step with the record:' . PHP_EOL . PHP_EOL);
-        fwrite(STDERR, '    ' . basename($path) . ': ' . apiDrift(
-            $onDisk === false ? '' : str_replace(["\r\n", "\r"], "\n", $onDisk),
-            $page,
-        ) . PHP_EOL);
-        fwrite(STDERR, PHP_EOL . 'Run php bin/api.php to write it and commit it.' . PHP_EOL . PHP_EOL);
+        fwrite(STDERR, PHP_EOL . '✗ The API report is out of step with '
+            . ($at === null ? 'the record:' : 'the tree at ' . $at . ':') . PHP_EOL . PHP_EOL);
+        fwrite(STDERR, '    ' . basename($path) . ': ' . apiDrift($bytes, $page) . PHP_EOL);
+        fwrite(STDERR, PHP_EOL . ($at === null
+            ? 'Run php bin/api.php to write it and commit it.'
+            : 'No run writes another tree\'s page: the page a checkout ships is the checkout\'s, and'
+                . ' php bin/api.php writes it from the record on disk.') . PHP_EOL . PHP_EOL);
 
         return 1;
     }
@@ -583,6 +695,17 @@ function apiMain(string $root, bool $check): int
     apiNote('stage it with: git add -- ' . basename($path));
 
     return 0;
+}
+
+/**
+ * A run that cannot do what it was asked, in the shape every refusal here has: what was refused, and
+ * the exit code a caller branches on.
+ */
+function apiRefusal(RuntimeException $error): int
+{
+    fwrite(STDERR, PHP_EOL . '✗ Nothing to publish: ' . $error->getMessage() . '.' . PHP_EOL . PHP_EOL);
+
+    return 1;
 }
 
 /**
@@ -626,9 +749,22 @@ function apiShorter(string $line): string
     return strlen($line) > 68 ? substr($line, 0, 67) . '…' : $line;
 }
 
-function apiNote(string $message): void
+/**
+ * A note about a run — on stdout for the runs that write a page or answer for one, and on stderr for
+ * the run that prints the page itself, where the page is the output and a note in front of it would
+ * be a page that does not render.
+ */
+function apiNote(string $message, bool $toStderr = false): void
 {
-    echo '• ' . $message . PHP_EOL;
+    $line = '• ' . $message . PHP_EOL;
+
+    if ($toStderr) {
+        fwrite(STDERR, $line);
+
+        return;
+    }
+
+    echo $line;
 }
 
 function apiUsage(): void
@@ -640,12 +776,17 @@ function apiUsage(): void
       php bin/api.php [options]
 
     Options:
+          --at=REF         Read the tree at REF — a tag, a branch or a commit — instead of the
+                           record on disk, and print the page it renders. Nothing is written:
+                           the page a checkout ships describes the checkout. With --check it
+                           reports whether the page on disk is the one that ref renders.
           --check          Compare with the record, write nothing, exit 1 when out of step.
           --root=PATH      Package root to describe (default: the parent of bin/).
       -h, --help           Show this help.
 
     The release script refreshes this page in the release commit, so running it by hand
-    is for seeing what it would publish.
+    is for seeing what it would publish — and `--at=REF` is for reading the page a past
+    tree renders without touching this one's.
 
     TXT;
 }
