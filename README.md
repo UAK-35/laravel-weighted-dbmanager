@@ -1530,7 +1530,7 @@ the application still boots and answers requests, and each one is a row:
 |----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | `provider swap`      | the framework's `DatabaseServiceProvider` is still in charge, so `db` is not the weighted manager and reads are unweighted                         |
 | `weighted factory`   | `db.factory` is not `WeightedConnectionFactory` — the replica is chosen there, so weighting is not running either                                  |
-| `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value) |
+| `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value). *Warns* as well when the file's own `generation` — the key set it was published as — is behind this package's, or is a value that is not a whole number, or is absent because the file predates the key, or is *ahead* of it, and passes when the copy's keys are current, whatever the installer put in them. The policy is the file's own, `Support\ConfigSchema`, and the three cases are in [docs/config-generations.md](docs/config-generations.md) |
 | `pgcat gate`         | `swrr.pgcat.enabled` is on where pgcat cannot act, or armed while a path a flip needs is unset. Reads the boot record as well as this boot's verdict, so it also fails with the age of a mismatch an earlier boot recorded, and warns when one is on record for a connection this run does not inspect. Prints `swrr.pgcat.enabled = false` as a `suggestion` for the switch armed where pgcat cannot act, and nothing for the other two failures: the paths it names are this installation's to choose |
 | `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. Names **every** problem it finds, one sentence each and each dated from its own finding, and prints a `suggestion` per problem where the package can state the repair exactly: `chmod +r` for a source it cannot read, `chmod +w` for a file it cannot write and `chmod +wx` for a directory (a rename has to traverse it), and — for an *empty* `config_path`/`state_file`/`lock_file` — the setting line with the value the published config ships. A path that is not there, and an empty `readers_path`/`no_readers_path`, get no line: those values are this installation's to choose, and a plausible-looking path pasted into configuration replaces the operator's intent with this tool's |
 | `pgcat supervisor`   | the flipper is armed and the command it runs *after* the swap cannot work: its executable does not resolve for this user (not an absolute path, not on `PATH`), the program name is an unquoted glob the shell may rewrite, supervisorctl cannot answer, or supervisor does not know the program. Read-only: the flip's own command with `status` in the verb position, plus — only when supervisor does not know the program, the one fault whose repair is a name — the bare `supervisorctl status` that lists what supervisord is running, whose nearest names the row then reports. Prints the setting line to paste as a `suggestion` for the two faults that reduce to a command — an unquoted program name, and a command left empty — and nothing for the rest, which are repaired in a `PATH`, a running supervisord or a `[program:]` section; an unknown program is named in the row's sentence rather than printed as a line, because a near miss is a ranked answer and a `suggestion` is a value a gate may apply without reading it |
@@ -1603,7 +1603,8 @@ Connection inspected: pgsql, followed connection is pgsql
 
 PASS  provider swap       WeightedDatabaseServiceProvider is in charge, weighted manager bound
 PASS  weighted factory    db.factory is Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory
-PASS  published config    config/db-manager.php is published and differs from the sample
+PASS  published config    config/db-manager.php is published, differs from the sample, and declares
+                          the current key set (generation = 1)
 FAIL  pgcat gate          swrr.pgcat.enabled is true but pgcat will never act: connection "sqlite"
                           uses driver "sqlite", and pgcat only fronts PostgreSQL. ... — recorded
                           unresolved since 2026-09-20T08:15:00+00:00
@@ -1895,7 +1896,7 @@ $ php artisan db:doctor --strict --json
         {
             "name": "published config",
             "verdict": "PASS",
-            "detail": "config/db-manager.php is published and differs from the sample",
+            "detail": "config/db-manager.php is published, differs from the sample, and declares the current key set (generation = 1)",
             "suggestions": []
         },
         {

@@ -24,6 +24,35 @@
   in words and exits `0`, because "nothing is watched" and "watched, and it is well" must not be
   the same silence.
 
+- **A published `config/db-manager.php` now says which key set it is, and `db:doctor` says when that
+  key set is behind the package it runs.** The sample config is published *into* an application once
+  and then edited there — nothing writes over it again unless somebody asks for `--force` — so that
+  file is the one thing in an installation that ages without moving: a key added to the sample
+  afterwards is a key the application never receives, and the installation keeps reading the
+  documented default for it while the changelog describes a release that does something else. Nothing
+  is malformed, no row fails, and every reading of the file is of a key set that stopped moving at the
+  moment it was published. `config/db-manager.php` therefore carries one whole number, a top-level
+  `generation`, and `Support\ConfigSchema` owns it: the key name, the number this package ships, the
+  release each generation was introduced in, and the three sentences a copy behind it is reported
+  with. It is raised when the *keys* move — a key added, removed or moved — and never for a changed
+  default, a reworded comment or a new env var behind a key that already exists, because none of
+  those is something a published copy has to be republished to keep working; a version cannot answer
+  the question either, since `v0.2.0-alpha3` names a release rather than the keys in a file somebody
+  may have edited thirty times since. `db:doctor`'s `published config` row compares the copy's number
+  with the package's and stays a *warning*: running an older published config is not a fault, it is a
+  fact a preflight states. The reading is of the file an application actually has — `config()` is the
+  merge of the sample and the published copy, so a file that predates the key would read as the
+  package's own generation, which is the silence it exists to break — and the four states are told
+  apart rather than collapsed: a copy at this generation passes whatever the installer decided to put
+  in it, a copy behind warns with both generations and both releases, the cost (the keys added since
+  are read from their defaults) and the repair, a copy that carries no such key is reported as one
+  published before the key existed, a copy *ahead* of the package says its extra keys are ignored,
+  and a value that is not a whole number is a value to fix rather than a copy to republish.
+  `docs/config-generations.md` is the policy record beside it, and the worked example is the one a
+  publisher is most likely to write: what must not be done to the keys this package reads as switches
+  — a `(bool)` cast in front of one reads `'off'` as on, and a `swrr.connection` chain ending at
+  another driver's name arms pgcat against a connection it cannot act on.
+
 - **The API page of a past tree can be read out of git, so a release's published page is a question
   rather than a checkout.** `API.md` is one file and it describes the tree in front of it, so a past
   release's page has no second copy to write beside it — replacing the page with another tree's

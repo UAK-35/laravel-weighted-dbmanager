@@ -22,6 +22,7 @@ use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ConfigSchema;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
@@ -2254,6 +2255,48 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('vendor:publish --tag=db-manager-config', $row);
     }
 
+    /**
+     * What a published file's own *key set* is worth saying — the half a published copy cannot keep
+     * in step on its own, because nothing writes over it again unless somebody asks for `--force`.
+     *
+     * Each case is one state of the reading: the sample's own number (silent), a key set behind it,
+     * a file published before the key existed — which is every copy published before this release —
+     * a value nobody can read as a whole number, and a file from a newer release than the package
+     * running. The row is asserted by its verdict and by one phrase the reading is about rather than
+     * word for word: `Support\ConfigSchemaTest` holds the sentences, and copying them here as well
+     * would be a second spelling of one rule.
+     *
+     * @param string $literal what the sample's `generation` line is replaced with — empty, for a file
+     *                        that predates the key rather than carrying a number
+     * @param string $verdict `PASS` or `WARN`, the verdict the row prints
+     * @param string $phrase  something the detail has to carry for the row to be about this case
+     *
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function publishedGenerations(): array
+    {
+        return [
+            'the key set this package ships' => ["'generation' => ".ConfigSchema::GENERATION.',', 'PASS', 'current key set'],
+            'a key set behind this one' => ["'generation' => ".(ConfigSchema::GENERATION - 1).',', 'WARN', 'republish'],
+            'published before the key existed' => ['', 'WARN', 'before the key existed'],
+            'a value that is not a whole number' => ["'generation' => 'five',", 'WARN', "'five'"],
+            'a file from a newer release' => ["'generation' => ".(ConfigSchema::GENERATION + 1).',', 'WARN', 'ignored'],
+        ];
+    }
+
+    #[DataProvider('publishedGenerations')]
+    public function test_the_published_config_row_reads_the_key_set_the_file_itself_declares(string $literal, string $verdict, string $phrase): void
+    {
+        $this->publishConfigDeclaring($literal);
+
+        [$output] = $this->doctor();
+
+        $row = $this->rowContaining($output, 'published config');
+
+        $this->assertStringStartsWith($verdict.'  published config', $row);
+        $this->assertStringContainsString($phrase, $row);
+    }
+
     public function test_a_clean_installation_says_so(): void
     {
         // Reads go through the writer, the store answers, pgcat is off and the
@@ -3220,6 +3263,28 @@ class DbDoctorTest extends TestCase
         $sample = (string) file_get_contents(dirname(__DIR__, 3) . '/config/db-manager.php');
 
         file_put_contents($dir . '/db-manager.php', $sample . "\n// reviewed for this test\n");
+
+        $this->app->useConfigPath($dir);
+    }
+
+    /**
+     * Publish the sample with its `generation` line replaced by `$literal`, so the row's reading of
+     * the key set a *file* declares is what is under test rather than the sample's own.
+     *
+     * The copy is made to differ from the sample — one appended comment, the way
+     * `usePublishedConfig()` does it — because a byte-identical copy is a different state of the row,
+     * asserted by its own test, and a fixture that left the two identical would test that state while
+     * reading as though it tested this one.
+     */
+    private function publishConfigDeclaring(string $literal): void
+    {
+        $dir = $this->tempDir();
+        $sample = (string) file_get_contents(dirname(__DIR__, 3) . '/config/db-manager.php');
+        $line = "'".ConfigSchema::KEY."' => ".ConfigSchema::GENERATION.',';
+
+        $this->assertStringContainsString($line, $sample, 'the sample declares the generation line this test replaces');
+
+        file_put_contents($dir . '/db-manager.php', str_replace($line, $literal, $sample)."\n// reviewed for this test\n");
 
         $this->app->useConfigPath($dir);
     }

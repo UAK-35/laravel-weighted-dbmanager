@@ -21,6 +21,7 @@ use Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ConfigSchema;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
@@ -1016,7 +1017,83 @@ class DbDoctor extends Command
             );
         }
 
-        return $this->row('published config', self::PASS, 'config/db-manager.php is published and differs from the sample');
+        // The values in the file are the installer's; the *keys* in it are this package's, and they
+        // are the half a published file cannot keep in step on its own. The file is read rather than
+        // the repository asked, because the repository is the merge of the sample and this file: a
+        // key the published copy is missing falls back to the sample's value and would read as
+        // current. See ConfigSchema.
+        $reading = $this->publishedGeneration($published);
+
+        if ($reading['error'] !== null) {
+            return $this->row('published config', self::WARN, sprintf(
+                'config/db-manager.php is published and differs from the sample, but it could not be read as '
+                .'a config file, so the key set it holds cannot be placed against this package\'s (%s = %d): %s',
+                ConfigSchema::KEY,
+                ConfigSchema::GENERATION,
+                $reading['error'],
+            ));
+        }
+
+        $stale = ConfigSchema::sentence($reading);
+
+        if ($stale !== null) {
+            return $this->row(
+                'published config',
+                self::WARN,
+                'config/db-manager.php is published and differs from the sample, but '.$stale,
+            );
+        }
+
+        return $this->row('published config', self::PASS, sprintf(
+            'config/db-manager.php is published, differs from the sample, and declares the current key set '
+            .'(%s = %d)',
+            ConfigSchema::KEY,
+            ConfigSchema::GENERATION,
+        ));
+    }
+
+    /**
+     * The generation a published `config/db-manager.php` declares, read out of the file itself.
+     *
+     * WHY THE FILE AND NOT THE REPOSITORY
+     *   `config('db-manager.generation')` is the *merge* of this package's sample and the published
+     *   copy, with the copy winning key by key — so a published file that predates the key reads as
+     *   the package's own generation, which is exactly the silence this reading exists to break. The
+     *   file is therefore read the way every other question about an application's own config is
+     *   asked: the array the file returns.
+     *
+     *   Read inside a buffer and with the buffers this read opened closed again, because a config
+     *   file may print — nothing forbids it — and because a file that throws must be reported as a
+     *   row rather than as a doctor that died. The buffers above the one this opened belong to
+     *   whatever called the command and are left alone, which is the same rule the `--config-file`
+     *   vet keeps for the same reason.
+     *
+     * The keys are {@see ConfigSchema::of()}'s three and a fourth: `error` is the reason a file could
+     * not be read at all — a syntax error, a missing include — and is null when it was read, in which
+     * case the other three are the reading of the array it returned.
+     *
+     * @return array{present: bool, declared: int|null, raw: mixed, error: string|null}
+     */
+    private function publishedGeneration(string $path): array
+    {
+        $depth = ob_get_level();
+
+        try {
+            ob_start();
+            $loaded = (static fn (string $file): mixed => require $file)($path);
+        } catch (Throwable $e) {
+            while (ob_get_level() > $depth) {
+                ob_end_clean();
+            }
+
+            return ['present' => false, 'declared' => null, 'raw' => null, 'error' => $e->getMessage()];
+        }
+
+        while (ob_get_level() > $depth) {
+            ob_end_clean();
+        }
+
+        return [...ConfigSchema::of($loaded), 'error' => null];
     }
 
     /**

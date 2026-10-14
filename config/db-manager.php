@@ -6,6 +6,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | The key set this file is
+    |--------------------------------------------------------------------------
+    |
+    | One whole number, raised when the *keys* below change — a key added, removed
+    | or moved — and never for a changed default, a reworded comment or a new env
+    | var behind a key that already exists. It is what makes a published copy
+    | answerable: `config/db-manager.php` is copied into an application once and
+    | then edited there, so a key added to this file afterwards is a key no
+    | application ever receives, and the installation keeps reading the default for
+    | it while the changelog describes a release that does something else. Nothing
+    | about that is malformed, which is why it has to be a number a preflight can
+    | compare rather than something a reader is expected to notice.
+    |
+    | `db:doctor`'s `published config` row compares the published copy's number with
+    | this one and names the release each is from; `Support\ConfigSchema` owns the
+    | number, the key and those sentences, and a test in
+    | `tests/Unit/Support/ConfigSchemaTest.php` holds this literal to it in both
+    | directions, so the two cannot drift.
+    |
+    | Spelling it as a number is the whole of the syntax. A value that is not a whole
+    | number is reported as unreadable rather than resolved to a default, because
+    | the two faults want different repairs: republish, or fix the value.
+    |
+    */
+
+    'generation' => 1,
+
+    /*
+    |--------------------------------------------------------------------------
     | SWRR global settings
     |--------------------------------------------------------------------------
     |
