@@ -24,6 +24,26 @@
   in words and exits `0`, because "nothing is watched" and "watched, and it is well" must not be
   the same silence.
 
+- **The paths a flip *cycle* writes are judged beside the ones a flip step names, and every file
+  finding carries the mode and owner it was found with.** A production container passed every other
+  gate and could not flip: its target and its audit record were not writable, and nothing said so
+  until the moment traffic was supposed to switch. `db:doctor`'s `pgcat files` row and the boot
+  audit's file findings read one list — `PgcatConfigFlipper::fileProblems()`, the class that owns the
+  paths — and that list now covers what a *cycle* writes rather than only what a *step* reads: the
+  boot stamp `swrr.pgcat.boot_file` points at, whose directory has to accept the write the
+  container's entrypoint makes (an unwritable one leaves `FlipWindow::closed()` false forever, so the
+  per-minute entry keeps flipping instead of standing down after its window), and the `.lock`
+  companion the audit record is locked on, which nothing judged before and which fails silently — the
+  record is replaced by a rename, so the lock lives beside it, and an untakeable one lets two boots
+  write the record at once (`swrr.audit.file.lock.unusable`, one finding of its own). The record
+  *file* itself is deliberately not on the list: `store probe` and `swrr.audit.file.unwritable`
+  already judge it, in the sentence the object that owns the record writes, and a second row printing
+  it would be one fault reported twice. The lock is judged only while the record is usable, for the
+  same reason. Every problem's sentence now ends with the facts the check already held — `mode 0644,
+  owner app:www-data`, numeric ids where the platform cannot name an account — because an unwritable
+  path is one question away from *by whom*, and the repair differs depending on whether the mode is
+  narrow or the owner is somebody else.
+
 - **A published `config/db-manager.php` now says which key set it is, and `db:doctor` says when that
   key set is behind the package it runs.** The sample config is published *into* an application once
   and then edited there — nothing writes over it again unless somebody asks for `--force` — so that

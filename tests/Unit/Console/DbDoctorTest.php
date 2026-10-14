@@ -472,6 +472,56 @@ class DbDoctorTest extends TestCase
         $this->assertSame(0, $exit);
     }
 
+    /**
+     * The paths a flip *cycle* writes are reported by the row that already lists the paths a flip
+     * *step* reads — the boot stamp the container's entrypoint writes and the `.lock` companion the
+     * audit record is locked on — each with the mode and owner it was found with and the sentence
+     * that says what an unwritable one costs.
+     *
+     * The reading is the flipper's own list, so `pgcat files` is one answer about every path this
+     * package has to be able to write while a flip is armed rather than two rows that can disagree.
+     * The stamp's directory is a regular file where a directory is wanted, which holds on every
+     * filesystem — no mode bits are involved — and the lock needs a read-only file, so the case
+     * skips where the platform ignores the bit.
+     */
+    public function test_the_paths_a_flip_cycle_writes_are_reported_by_the_row_that_lists_the_rest(): void
+    {
+        $blocked = $this->tempDir().'/blocked';
+        file_put_contents($blocked, '');
+
+        // A record that can be written — so its lock is judged rather than moot — with a lock beside
+        // it that cannot be.
+        $record = $this->tempDir().'/swrr-audit.json';
+        file_put_contents($record, '{}');
+        file_put_contents($record.'.lock', '');
+        @chmod($record.'.lock', 0o444);
+
+        if (is_writable($record.'.lock')) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        $this->bindRedis(reachable: true);
+        $this->armPgcat(['boot_file' => $blocked.'/container-booted-at']);
+
+        // The record the audit locks is `swrr.audit.file`, and the flipper judges its lock beside
+        // its own paths — so the path is set the way an installation sets it and both singletons
+        // are dropped, which is what makes the resolved record path the one the row reports.
+        config()->set('db-manager.swrr.audit.file', $record);
+        $this->app->forgetInstance(BootAudit::class);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat files');
+
+        $this->assertStringStartsWith('FAIL  pgcat files', $row);
+        $this->assertStringContainsString('boot stamp', $row);
+        $this->assertStringContainsString('boot window never closes', $row);
+        $this->assertStringContainsString('audit lock', $row);
+        $this->assertStringContainsString('two boots can write the record at once', $row);
+        $this->assertStringContainsString('mode ', $row, 'the mode and owner found travel with each sentence');
+        $this->assertSame(1, $exit);
+    }
+
     public function test_a_missing_source_file_is_named_before_any_flip_happens(): void
     {
         $paths = $this->armPgcat();

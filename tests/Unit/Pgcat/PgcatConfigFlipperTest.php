@@ -177,6 +177,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $lockFile = null,
         ?\Closure $poolProbe = null,
         ?\Closure $sleeper = null,
+        ?string $auditFile = null,
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -229,6 +230,7 @@ class PgcatConfigFlipperTest extends TestCase
             connectionSource: $connectionSource ?? ActiveConnection::DEFAULT_SOURCE,
             poolProbe: $poolProbe,
             sleeper: $sleeper,
+            auditFile: $auditFile,
         );
 
         return $flipper;
@@ -1534,6 +1536,88 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame([PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $line], $problems['config_path']);
         $this->assertSame([PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $line], $problems['state_file']);
         $this->assertSame([PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $line], $problems['lock_file']);
+    }
+
+    /**
+     * The two paths a flip *cycle* writes that no step of a flip names: the container's boot
+     * stamp and the `.lock` companion the audit record is locked on.
+     *
+     * They are the gap a deployment found — a container that passed every other gate and could not
+     * flip, logging that its target and its record were not writable — and the reading that judges
+     * them is the list `fileProblems()` already answers with, so a preflight that asks whether this
+     * installation can carry out what it is configured to do asks it about these too. Each sentence
+     * carries the consequence (a window that never closes, two boots writing one record) and the
+     * mode and owner found, because "not writable" is one question away from "by whom".
+     *
+     * The blocked directory is a regular file where a directory is wanted, which holds on every
+     * filesystem — no mode bits are involved, which is why that half is asserted on all of them. The
+     * lock is a real file with the read-only bit on, so the case needs a filesystem that honours it
+     * (`chmod` on Windows sets the attribute, and PHP reads it back through `is_writable()`).
+     */
+    public function test_the_paths_a_flip_cycle_writes_are_judged_beside_the_ones_a_flip_step_names(): void
+    {
+        $blocked = $this->tmp.'/blocked';
+        file_put_contents($blocked, '');
+
+        // The record itself is usable — that is what makes its lock worth judging at all — and the
+        // lock beside it is not: a record that cannot be written is one finding, the audit's own.
+        $record = $this->tmp.'/swrr-audit.json';
+        file_put_contents($record, '{}');
+
+        $lock = $record.'.lock';
+        file_put_contents($lock, '');
+        @chmod($lock, 0o444);
+
+        if (is_writable($lock)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        $flipper = $this->build(
+            'readers',
+            ['boot_file' => $blocked.'/container-booted-at'],
+            auditFile: $record,
+        );
+
+        $problems = [];
+
+        foreach ($flipper->fileProblems() as $problem) {
+            $problems[$problem['setting']] = $problem;
+        }
+
+        $line = 'chmod +wx '.escapeshellarg($blocked);
+
+        $this->assertSame(PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $problems['boot_file']['kind']);
+        $this->assertSame($blocked, $problems['boot_file']['path'], 'the directory is what a mode is changed on, so it is what the line names');
+        $this->assertSame($line, $problems['boot_file']['suggestion']);
+        $this->assertStringContainsString('boot window never closes', $problems['boot_file']['sentence']);
+        $this->assertStringContainsString('mode ', $problems['boot_file']['sentence'], 'the facts the path was found with travel with the sentence');
+
+        $this->assertSame(PgcatConfigFlipper::FILE_UNWRITABLE, $problems['audit_lock']['kind']);
+        $this->assertSame($lock, $problems['audit_lock']['path']);
+        $this->assertSame('chmod +w '.escapeshellarg($lock), $problems['audit_lock']['suggestion']);
+        $this->assertStringContainsString('two boots can write the record at once', $problems['audit_lock']['sentence']);
+
+        $this->assertSame(
+            ['boot_file' => 'swrr.pgcat.boot_file', 'audit_lock' => 'swrr.audit.file.lock'],
+            PgcatConfigFlipper::fileSettingPaths(),
+            'the record names where each of the two settings is written, because neither is a setting a flip step reads',
+        );
+    }
+
+    public function test_a_writable_tree_says_nothing_about_the_paths_a_flip_cycle_writes(): void
+    {
+        $flipper = $this->build(
+            'readers',
+            ['boot_file' => $this->tmp.'/container-booted-at'],
+            auditFile: $this->tmp.'/swrr-audit.json',
+        );
+
+
+        $this->assertSame(
+            [],
+            $flipper->fileProblems(),
+            'none of the three exists yet, which is normal for all of them, and the directory that will take each one is writable',
+        );
     }
 
     /**

@@ -80,7 +80,7 @@ says?* — and the decision is where it can be asked without overwriting either 
 | A | leave them to the boot log | nothing to find them with; already the status quo | **rejected** — the defect |
 | B | a dedicated `db:audit` command | one more surface to know about, and none of them are visited by default | **rejected** — the finding has to find the operator, not the other way round |
 | C | a dedicated `/health/audit` endpoint | a second payload to keep in step with the health one | **rejected** — the audit is a property of the installation, which is what `/health/db` already is |
-| D | fold them into the `pgcat` block | the block is one producer's snapshot; the findings are cross-cutting | **rejected** — pgcat is one of twenty-two keys |
+| D | fold them into the `pgcat` block | the block is one producer's snapshot; the findings are cross-cutting | **rejected** — pgcat is one of twenty-four keys |
 | E | make the endpoint `degraded` and `503` while a finding stands | a load balancer evicts an instance over a setting it is not using | **rejected** — see below |
 | F | make `db:replica-status` exit non-zero | scripts that print a table start failing over a config typo | **rejected** — the gate belongs to `db:doctor` |
 | G | have `db:doctor` read the log instead of the record | log rotation and interleaving by workers; no keyed lookup, no first sighting | **rejected** — the record is the thing that survives the process |
@@ -128,16 +128,22 @@ feature: is flipping armed, and can it act. The audit is the opposite: its keys 
 `database.read.cpu_cores.refused` and `database.read.ram_gb.refused` — the last three being
 the replica settings, which are the connection's rather than `swrr`'s, so their keys name
 the path an operator edits and the connection is in the finding's context instead. Five of
-them are the file preconditions a flip needs — `swrr.pgcat.config_path.unusable`,
-`swrr.pgcat.readers_path.unusable`, `swrr.pgcat.no_readers_path.unusable`,
-`swrr.pgcat.state_file.unusable` and `swrr.pgcat.lock_file.unusable` — one per setting, so a
-source that cannot be read and a target that cannot be written are two findings with two
-repairs rather than one that resolves both together. Two are the store probe's own states —
+them are the paths this package has to be able to write while a flip is armed —
+`swrr.pgcat.config_path.unusable`, `swrr.pgcat.readers_path.unusable`,
+`swrr.pgcat.no_readers_path.unusable`, `swrr.pgcat.state_file.unusable`,
+`swrr.pgcat.lock_file.unusable`, `swrr.pgcat.boot_file.unusable` and
+`swrr.audit.file.lock.unusable` — one per setting, so a source that cannot be read and a target
+that cannot be written are two findings with two repairs rather than one that resolves both
+together. They come from `PgcatConfigFlipper::fileProblems()` as one list, which is also what
+`db:doctor`'s `pgcat files` row prints: two paths on it are not pgcat's at all — the boot stamp
+the container's entrypoint writes, and the `.lock` companion the audit record is locked on — and
+the record *file* itself is not on it, because `swrr.audit.file.unwritable` below is that path's
+reading and the object that owns the record is the one that judges it. Two are the store probe's own states —
 `swrr.audit.store_probe_seconds.off` for a probe switched off on purpose, and
 `swrr.audit.file.unwritable` for the record that throttles it, which is the one finding whose own
 record can never hold its date — and they are keyed because the row reporting them has to be able
 to say how long the installation has been unable to check its store. Filing all of those under
-`pgcat` would put twenty-two keys' worth of claims inside one feature's block, and a finding about
+`pgcat` would put twenty-four keys' worth of claims inside one feature's block, and a finding about
 the weight formula would disappear for an installation that has no pgcat wiring at all.
 
 ### E — let the findings move the endpoint's status

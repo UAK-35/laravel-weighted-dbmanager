@@ -261,6 +261,13 @@ final class PgcatConfigFlipper
         // Defaulted from `swrr.pgcat.schedule` and the window above, so the two readings of
         // "has this container been moving" share one clock and one boot stamp.
         ?ScheduleBeat $beat = null,
+        // The boot audit's record. Passed in rather than read from this slice, because it is
+        // `swrr.audit.file` rather than a pgcat key — and judged here anyway, because it is one
+        // of the paths this package has to be able to write while a flip is armed and the whole
+        // point of the reading below is that it is *one* list: a path judged unwritable here is
+        // judged unwritable by the row and by the boot record alike. Null means the caller did
+        // not resolve it, and then it is not judged.
+        private readonly ?string $auditFile = null,
     ) {
         $this->window = $window ?? FlipWindow::fromConfig($config);
         $this->beat = $beat ?? ScheduleBeat::fromConfig($config, $this->window);
@@ -1079,7 +1086,118 @@ final class PgcatConfigFlipper
             }
         }
 
+        // Three paths this package has to be able to write that no step of a flip names, judged
+        // beside the five above because an unwritable one is the same class of fault as the rest:
+        // the boot stamp the container's entrypoint writes, the audit record every boot writes its
+        // findings into, and the `.lock` companion two boots serialise that write on. They were the
+        // gap the deployment this list came from found — a container that passed every other gate
+        // and could not flip, logging that its target and its record were not writable — so a
+        // preflight that answers "can this installation carry out what it is configured to do?"
+        // answers it about these too, in the row and the record that already list the other five.
+        //
+        // Each is judged as a *writer*: all three may legitimately not exist yet (a container an
+        // hour old has a stamp; one being provisioned does not), so what is asked is the directory
+        // they will be created in, and the file itself only when it is already there and cannot be
+        // written. The cost sentence is the reason the path is on the list at all, and the mode and
+        // owner travel with it: see fileProblem().
+        foreach ($this->writtenPaths() as $setting => $row) {
+            $path = $row['path'];
+
+            if ($path === '' || self::writable($path)) {
+                continue;   // not resolved by the caller, or nothing to report about it
+            }
+
+            // The file itself when it is there, and the directory that will have to take it when
+            // it is not — which is where the mode is changed either way, so it is the path the
+            // sentence and the repair line name.
+            $there = file_exists($path);
+
+            $problems[] = $this->fileProblem(
+                $setting,
+                $there ? self::FILE_UNWRITABLE : self::FILE_DIRECTORY_UNWRITABLE,
+                $there ? $path : dirname($path),
+                $there
+                    ? "{$row['label']} [{$path}] is not writable, so {$row['cost']}."
+                    : "{$row['label']} directory [".dirname($path)."] is not writable, so {$row['cost']}.",
+            );
+        }
+
         return $problems;
+    }
+
+    /**
+     * Whether this package can create or write a path: the file itself when it is already there,
+     * and the directory it will be created in when it is not — which is the normal state of all
+     * three of the paths above on a container that has not booted yet.
+     */
+    private static function writable(string $path): bool
+    {
+        return file_exists($path) ? is_writable($path) : self::directoryWritable(dirname($path));
+    }
+
+    /**
+     * The paths this package must be able to write while a flip is armed, and what an unwritable
+     * one costs — the three that are not a flip step's own path.
+     *
+     * The consequences are the ones the faults were observed with rather than a general statement
+     * about permissions: an unwritable boot stamp leaves `FlipWindow::closed()` permanently false,
+     * so the per-minute entry keeps flipping instead of standing down after the window; an
+     * unwritable record cannot remember a finding or the store probe's throttle, so a fault is
+     * logged once and the store is PINGed on every boot; and an untakeable lock lets two boots
+     * write the record at once, which is the merge the audit's own log line reports.
+     *
+     * `swrr.audit.file` is not a key of this class's slice — the provider resolves it and passes it
+     * in, because the class that owns the paths is the class that should judge them. The record
+     * *file* itself is deliberately not on this list: `db:doctor`'s `store probe` row and
+     * `BootAudit`'s finding already judge it (`BootAudit::probeUnwritableSentence()`), the reading
+     * belongs to the object that owns the record, and a second row printing the same sentence would
+     * be one fault reported twice. What is on the list is the record's **lock**, which nothing
+     * judged, and the boot stamp, which nothing judged.
+     *
+     * @return array<string, array{path: string, label: string, cost: string}>
+     */
+    private function writtenPaths(): array
+    {
+        $auditFile = $this->auditFile ?? '';
+
+        $paths = [
+            'boot_file' => [
+                'path' => $this->window->bootFile(),
+                'label' => 'boot stamp',
+                'cost' => 'the container cannot record when it booted, and the boot window never '
+                    .'closes: the entry flips on every run instead of standing down after it',
+            ],
+        ];
+
+        // The lock is judged only while the record itself is usable. A record that cannot be
+        // written is one finding — `BootAudit`'s own, the store probe's, which the row for the
+        // record prints — and the lock's state beside it is moot: the same unwritable directory
+        // would be two findings for one fault, and a reader would have to work out that they are
+        // one fault from two sentences.
+        if ($auditFile !== '' && self::writable($auditFile)) {
+            $paths['audit_lock'] = [
+                'path' => $auditFile.'.lock',
+                'label' => 'audit lock',
+                'cost' => 'two boots can write the record at once: one boot\'s findings are '
+                    .'overwritten by the other\'s rather than merged with them',
+            ];
+        }
+
+        return $paths;
+    }
+
+    /**
+     * The config path each setting above is written at, for the record's context: five of them are
+     * pgcat's and the other three are not.
+     *
+     * @return array<string, string>
+     */
+    public static function fileSettingPaths(): array
+    {
+        return [
+            'boot_file' => 'swrr.pgcat.boot_file',
+            'audit_lock' => 'swrr.audit.file.lock',
+        ];
     }
 
     /**
@@ -1093,13 +1211,75 @@ final class PgcatConfigFlipper
      */
     private function fileProblem(string $setting, string $kind, string $path, string $sentence): array
     {
+        // What the path was found *with*, after what is wrong with it: an operator reading "not
+        // writable" is one question away from "by whom", and the answer is a fact the check
+        // already holds — it asked the filesystem about this path. It is appended rather than
+        // added as a field so a sentence stays one sentence wherever it is printed, and it is
+        // absent for a path that is not there: there is no mode to quote for a file nobody has.
+        $facts = self::facts($path);
+
         return [
             'setting' => $setting,
             'kind' => $kind,
             'path' => $path,
-            'sentence' => $sentence,
+            'sentence' => $facts === null ? $sentence : rtrim($sentence, '.').' ('.$facts.').',
             'suggestion' => $this->suggestionForFileProblem($setting, $kind, $path),
         ];
+    }
+
+    /**
+     * The mode and owner a path was found with, as an operator reads them — `mode 0644, owner
+     * app:www-data` — or null when there is nothing to quote.
+     *
+     * Both halves matter to the fault this is printed beside: an unwritable flip target is
+     * usually a file that belongs to another account, and the repair differs depending on
+     * whether the mode is too narrow or the owner is somebody else. A numeric id is used when
+     * the platform cannot name the account (no `posix` extension, a container with no passwd
+     * entry), because an id an operator can `ls -n` against is a better answer than silence.
+     */
+    private static function facts(string $path): ?string
+    {
+        if ($path === '' || !file_exists($path)) {
+            return null;
+        }
+
+        $parts = [];
+        $mode = @fileperms($path);
+
+        if (is_int($mode)) {
+            // The permission bits alone: the file type is what `is_dir()` already decided, and a
+            // four-digit octal is what `chmod` and `stat` are read with.
+            $parts[] = sprintf('mode %04o', $mode & 0o7777);
+        }
+
+        $owner = self::account(@fileowner($path), 'posix_getpwuid');
+        $group = self::account(@filegroup($path), 'posix_getgrgid');
+
+        if ($owner !== null) {
+            $parts[] = 'owner '.($group === null ? $owner : $owner.':'.$group);
+        }
+
+        return $parts === [] ? null : implode(', ', $parts);
+    }
+
+    /**
+     * A user or group id as a name, or as the number itself when the platform cannot name it.
+     */
+    private static function account(int|false $id, string $namer): ?string
+    {
+        if ($id === false) {
+            return null;
+        }
+
+        if (function_exists($namer)) {
+            $entry = @$namer($id);
+
+            if (is_array($entry) && isset($entry['name']) && is_string($entry['name'])) {
+                return $entry['name'];
+            }
+        }
+
+        return (string) $id;
     }
 
     /**

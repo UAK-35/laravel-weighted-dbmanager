@@ -233,6 +233,31 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
     public const KEY_PGCAT_LOCK_FILE_UNUSABLE = 'swrr.pgcat.lock_file.unusable';
 
     /**
+     * The container's boot stamp cannot be written where `swrr.pgcat.boot_file` points.
+     *
+     * The stamp is what `FlipWindow::closed()` reads, and a window with no stamp is *closed* by
+     * nothing: the per-minute entry keeps flipping for the whole life of the container instead of
+     * standing down after its first minutes, so the window the configuration describes never
+     * exists. It is audited for the reason every other file precondition is — the fault is a fact
+     * about the installation from the moment the directory stops taking the write, and the boot
+     * that finds it is the only surface that can say so before a deploy's rehearsal does.
+     */
+    public const KEY_PGCAT_BOOT_FILE_UNUSABLE = 'swrr.pgcat.boot_file.unusable';
+
+    /**
+     * The audit record's `.lock` companion cannot be written, so nothing serialises two boots'
+     * writes to the record.
+     *
+     * The lock is taken on a file *beside* the record, because the write replaces the record by
+     * renaming a temp over it — so a record that is perfectly writable can still have a lock that
+     * cannot be taken, and the failure is silent: both boots merge, both write, and the later write
+     * keeps only what it read (`BootAudit::reportKept()` is the log line for the other direction).
+     * Nothing judged it before this, which is why it is a key of its own rather than a sentence
+     * folded into the record's.
+     */
+    public const KEY_AUDIT_LOCK_UNUSABLE = 'swrr.audit.file.lock.unusable';
+
+    /**
      * The finding each file problem is recorded under, by the setting it is about.
      *
      * Declared once because three places need it and none of them may guess: the boot audit
@@ -249,6 +274,8 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         'no_readers_path' => self::KEY_PGCAT_NO_READERS_PATH_UNUSABLE,
         'state_file' => self::KEY_PGCAT_STATE_FILE_UNUSABLE,
         'lock_file' => self::KEY_PGCAT_LOCK_FILE_UNUSABLE,
+        'boot_file' => self::KEY_PGCAT_BOOT_FILE_UNUSABLE,
+        'audit_lock' => self::KEY_AUDIT_LOCK_UNUSABLE,
     ];
 
     /**
@@ -458,11 +485,17 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             $config = $app->make(Repository::class);
             $swrr = ConfigValue::assoc($config->get('db-manager.swrr'));
             $pgcat = ConfigValue::assoc($swrr['pgcat'] ?? null);
+            $audit = ConfigValue::assoc($swrr['audit'] ?? null);
 
             $current = self::currentConnection($config);
 
             return new PgcatConfigFlipper(
                 resolver: $app->make(TimeWindowResolver::class),
+                // The audit record, resolved by the same call the audit itself resolves it with
+                // (see BootAudit::resolveFile) rather than by a second expression here: the flipper
+                // judges the record's `.lock` companion, and two expressions that both decide where
+                // the record lives are two paths from the day one of them is edited.
+                auditFile: BootAudit::resolveFile($audit, $sysTempDir.'/swrr-audit.json'),
                 config: $pgcat,
                 stateFile: ConfigValue::string(
                     $pgcat['state_file'] ?? null,
@@ -509,10 +542,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             $provider = $this;
 
             return new BootAudit(
-                file: ConfigValue::string(
-                    $audit['file'] ?? null,
-                    $sysTempDir . '/swrr-audit.json',
-                ),
+                file: BootAudit::resolveFile($audit, $sysTempDir . '/swrr-audit.json'),
                 storeProbeSeconds: ConfigValue::int($audit['store_probe_seconds'] ?? null, 60),
                 currentFindings: static fn (): array => $provider->liveFindings(),
             );
@@ -884,7 +914,13 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 warning: $problem['sentence'],
                 resolution: self::fileResolution($problem['setting']),
                 context: [
-                    'setting' => 'swrr.pgcat.'.$problem['setting'],
+                    // The setting the problem is about, as it is written in a config file. Five
+                    // of the settings are pgcat's and two are not — the boot stamp is
+                    // `swrr.pgcat.boot_file`, and the record's lock lives beside
+                    // `swrr.audit.file` — so the path comes from the class that owns the list
+                    // rather than being assembled here.
+                    'setting' => PgcatConfigFlipper::fileSettingPaths()[$problem['setting']]
+                        ?? 'swrr.pgcat.'.$problem['setting'],
                     'path' => $problem['path'],
                     'state' => $problem['kind'],
                 ],
@@ -905,6 +941,8 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             'config_path' => 'The pgcat flip target is usable again — it is there, and the directory it sits in accepts the copy a flip writes beside it — or pgcat flipping is off.',
             'readers_path' => 'The reader variant a flip swaps in is readable again, or pgcat flipping is off.',
             'no_readers_path' => 'The writer-only variant a flip swaps in is readable again, or pgcat flipping is off.',
+            'boot_file' => 'The container can record when it booted again — the boot stamp is writable where swrr.pgcat.boot_file points — or pgcat flipping is off.',
+            'audit_lock' => 'The audit record can be locked again, so two boots cannot write it at once, or pgcat flipping is off.',
             default => 'The directory a flip records its state and stands down in is writable again, or pgcat flipping is off.',
         };
     }

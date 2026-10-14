@@ -700,6 +700,23 @@ final class BootAudit
     }
 
     /**
+     * The file a `swrr.audit` slice names a record in, with this class's own fallback applied.
+     *
+     * Published because the record is one of the paths this package has to be able to write and more
+     * than one object judges it: the provider builds the audit with it, and the pgcat flipper judges
+     * the `.lock` companion the record is locked on. An expression written out twice is two paths
+     * from the day one of the two is edited, and the record is exactly the file whose second copy an
+     * installation never notices.
+     */
+    public static function resolveFile(mixed $audit, string $fallback): string
+    {
+        return ConfigValue::string(
+            is_array($audit) ? ($audit['file'] ?? null) : null,
+            $fallback,
+        );
+    }
+
+    /**
      * The sentence for a record the probe cannot be remembered in, shared with the row for the same
      * reason. This one is not a choice: the record is the throttle, so nothing runs the PING and
      * nothing reports an unreachable store, on every boot, from the boot that finds the file.
