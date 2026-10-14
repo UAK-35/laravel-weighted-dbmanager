@@ -484,6 +484,36 @@ class DbDoctorTest extends TestCase
      * filesystem — no mode bits are involved — and the lock needs a read-only file, so the case
      * skips where the platform ignores the bit.
      */
+    /**
+     * The image build catches it before the deploy's rehearsal does: a container whose PHP has
+     * `proc_open` in `disable_functions` passes every other gate and cannot flip, because the
+     * Process class spawns the supervisor command with it. The row is the same reading a flip
+     * gets — the step's own verdict — so a row that fails and a flip that refuses are impossible
+     * to disagree, and the stub is the step's answer rather than the machine's: a suite cannot
+     * make `function_exists('proc_open')` lie, and the defect has to be reproducible on a machine
+     * that does not have it.
+     */
+    public function test_a_platform_that_cannot_spawn_a_process_is_reported_without_a_flip(): void
+    {
+        $this->bindRedis(reachable: true);
+        $paths = $this->armPgcat();
+
+        $this->app->instance(
+            SupervisorStep::class,
+            new SupervisorStep((new FakeSupervisor())->runner(), 5, procOpenAvailable: false),
+        );
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat supervisor');
+
+        $this->assertStringStartsWith('FAIL  pgcat supervisor', $row);
+        $this->assertStringContainsString('proc_open is not available', $row);
+        $this->assertStringContainsString('disable_functions', $row);
+        $this->assertStringContainsString('cannot be run at all', $row);
+        $this->assertStringContainsString('supervisorctl', $row, 'the row names the command it could not run');
+        $this->assertSame(1, $exit);
+    }
+
     public function test_the_paths_a_flip_cycle_writes_are_reported_by_the_row_that_lists_the_rest(): void
     {
         $blocked = $this->tempDir().'/blocked';

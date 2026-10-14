@@ -77,6 +77,24 @@ Each has a different repair — install it, quote the name, fix the group name, 
 unmask supervisord — and each is a *fault code* rather than a message, so the row, the
 flip's refusal and the rehearsal can say which one it is without re-deriving it.
 
+### 2a. The one symptom that was three faults
+
+The first row above and the last one used to be reported the same way when a command did not
+answer at all — `did not answer in time`, with whatever the shell or the runtime said after it —
+and a production container proved how little that says. Its PHP had `proc_open` in
+`disable_functions`, so every external command failed before it existed; the flip reported
+`rename refused never reached`, the supervisor step's sentence blamed a timeout, and the answer it
+quoted was the Process class saying it relies on `proc_open`. Three states are told apart now,
+because each is repaired somewhere else:
+
+* **the platform cannot spawn a process** — `unspawnable`, raised before anything is run, with the
+  `disable_functions` value this process read and the ini line to change. It is the one an *image
+  build* is meant to catch: a container with it passes every other gate and cannot flip, so
+  `db:doctor` reports it without a flip being attempted;
+* **the shell cannot find the binary** — `unresolved`, the exit code `127` and the words the shell
+  said, because the repair is a `PATH` rather than a daemon;
+* **the command genuinely took too long** — `unanswered`, with the seconds it waited.
+
 ### 2b. The answer that is not a fault: a program supervisord knows and is not running
 
 `supervisorctl status` exits non-zero the moment one program it was asked about is not
@@ -457,7 +475,8 @@ try { $this->restartSupervisor(); }
 catch (\Throwable $e) { … $this->rollBack($target, …); }   // ← and put back if it fails anyway
 ```
 
-The first step catches all six faults this record lists, before the file moves. The second
+The first step catches all nine faults this record lists — its own four, and the states beside
+them that §2a and §2b tell apart — before the file moves. The second
 covers what a check cannot: supervisorctl answered `status` and then failed the command —
 it raced with a restart, or pgcat would not come back up. Rolling back is the only
 honest answer there, because the invariant that matters is "disk agrees with the running

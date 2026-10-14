@@ -127,6 +127,18 @@ final class SupervisorStep
 
     public const FAULT_UNANSWERED = 'unanswered';
 
+    /**
+     * No command can be spawned at all: `proc_open` is not available to this PHP installation.
+     *
+     * It is a fault of its own rather than a kind of `unanswered`, because the repair is nowhere
+     * near the others: nothing in this package can run a process here, so a flip's last step cannot
+     * run however the PATH, the name and supervisord are arranged — and the fix is a line in the
+     * ini file this process reads. The container this was found in had proc_open in
+     * `disable_functions`, passed every other gate, and rolled a deploy back: the sentence says so
+     * before a rehearsal has to.
+     */
+    public const FAULT_UNSPAWNABLE = 'unspawnable';
+
     public const FAULT_ERRORED = 'errored';
 
     /**
@@ -169,8 +181,15 @@ final class SupervisorStep
      *        timeout, because that is what a flip does
      * @param int $timeout seconds to wait for an answer before giving up
      */
-    public function __construct(?\Closure $runner = null, private readonly int $timeout = 5)
-    {
+    public function __construct(
+        ?\Closure $runner = null,
+        private readonly int $timeout = 5,
+        // Whether this PHP can spawn a process at all, or null to ask the installation. Injected
+        // because the answer decides what a supervisor failure *is* — a real container with
+        // proc_open disabled and a rehearsal in a process that has it cannot be told apart by the
+        // failure alone — and because `function_exists()` cannot be made to lie inside a test.
+        private readonly ?bool $procOpenAvailable = null,
+    ) {
         $this->runner = $runner ?? function (string $command): array {
             try {
                 $process = Process::fromShellCommandline($command);
@@ -630,6 +649,26 @@ final class SupervisorStep
             );
         }
 
+        // Before anything is run: on an installation that cannot spawn a process, every command
+        // below fails the same way, and the one fact worth reporting is the one nothing else can
+        // see — this is what an image build has to catch, because a container with this defect
+        // passes every other check and cannot flip.
+        $unspawnable = $this->processUnavailable();
+
+        if ($unspawnable !== null) {
+            return $this->verdict(
+                usable: false,
+                fault: self::FAULT_UNSPAWNABLE,
+                detail: sprintf('%s cannot be run at all: %s', $status['command'], $unspawnable),
+                context: [
+                    'status_command' => $status['command'],
+                    'program' => $status['program'],
+                    'quoted_program' => $status['quoted_program'],
+                    'fault' => self::FAULT_UNSPAWNABLE,
+                ],
+            );
+        }
+
         [$exit, $stdout, $stderr] = $this->run($status['command']);
         $answer = trim($stdout) !== '' ? trim($stdout) : trim($stderr);
 
@@ -644,10 +683,50 @@ final class SupervisorStep
         $answerLines = self::answerLines($answer);
 
         if ($exit === -1) {
+            // Three states, one message until now, and the repair is in a different file for each:
+            // the shell could not find the program (a PATH), the platform cannot spawn anything
+            // (an ini file), or the command genuinely took too long (the daemon, or the timeout).
+            // The answer is quoted either way, because it is what the shell said.
+            if (self::looksLikeAMissingProgram($exit, $answer)) {
+                return $this->verdict(
+                    usable: false,
+                    fault: self::FAULT_UNRESOLVED,
+                    detail: sprintf(
+                        '%s could not be run: the shell could not find %s on this PATH (exit 127: %s), so nothing can ask supervisor anything',
+                        $status['command'],
+                        $status['bin'],
+                        $answerLines,
+                    ),
+                    context: $context,
+                );
+            }
+
             return $this->verdict(
                 usable: false,
                 fault: self::FAULT_UNANSWERED,
-                detail: sprintf('%s did not answer in time: %s', $status['command'], $answerLines),
+                detail: sprintf(
+                    '%s did not answer in time (waited %d second%s): %s',
+                    $status['command'],
+                    $this->timeout,
+                    $this->timeout === 1 ? '' : 's',
+                    $answerLines,
+                ),
+                context: $context,
+            );
+        }
+
+        // A 127 outside the timeout branch is the same missing program, refused by the shell before
+        // any daemon was reached — supervisorctl itself is not the thing that could not answer.
+        if (self::looksLikeAMissingProgram($exit, $answer)) {
+            return $this->verdict(
+                usable: false,
+                fault: self::FAULT_UNRESOLVED,
+                detail: sprintf(
+                    '%s could not be run: the shell could not find %s on this PATH (exit 127: %s), so nothing can ask supervisor anything',
+                    $status['command'],
+                    $status['bin'],
+                    $answerLines,
+                ),
                 context: $context,
             );
         }
@@ -767,6 +846,47 @@ final class SupervisorStep
             'exit' => $exit,
             'answer' => self::answerLines($answer),
         ];
+    }
+
+    /**
+     * Why no command can be spawned here, or null when processes can be spawned.
+     *
+     * `disable_functions` is named with the value it holds rather than as a rule, because the
+     * repair is to edit that line: a `proc_open` that is not a function at all *is* the disable,
+     * and an operator reading "not available" has to know which directive removed it. The value is
+     * whatever this process read — a `php.ini` this container carries, most often — and the
+     * sentence says so rather than quoting a path the package does not know.
+     */
+    public function processUnavailable(): ?string
+    {
+        if ($this->procOpenAvailable ?? function_exists('proc_open')) {
+            return null;
+        }
+
+        $disabled = trim((string) ini_get('disable_functions'));
+
+        return sprintf(
+            'proc_open is not available to this PHP installation, and the Process class spawns every command '
+            .'with it — so no supervisor command, and no flip, can work here. It is disabled by '
+            .'`disable_functions` in the php.ini this process read%s; remove proc_open from that line and '
+            .'restart the process that runs the flip. A container that disables it passes every other check '
+            .'and fails at the moment traffic is meant to switch.',
+            $disabled === '' ? ' (the directive is empty in this process, which means another layer removed it)' : ': '.$disabled,
+        );
+    }
+
+    /**
+     * Whether an answer is a shell saying it could not find the program, rather than one from the
+     * daemon: `sh` answers 127 and says "not found", Windows' cmd.exe says it "is not recognized".
+     */
+    private static function looksLikeAMissingProgram(int $exit, string $answer): bool
+    {
+        // The exit code is the signal, because it is the shell's own and a daemon's words are its
+        // own: supervisord answers "no such file" for a socket that is not there, which is a
+        // different repair, so its text must not be read as this one.
+        return $exit === 127
+            || stripos($answer, 'command not found') !== false
+            || stripos($answer, 'is not recognized as an internal or external command') !== false;
     }
 
     /**

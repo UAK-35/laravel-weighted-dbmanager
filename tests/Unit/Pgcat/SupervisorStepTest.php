@@ -428,6 +428,44 @@ final class SupervisorStepTest extends TestCase
     }
 
     /**
+     * Three ways a command can fail to answer, which used to be one sentence: the platform cannot
+     * spawn a process at all, the shell cannot find the program, or the command genuinely took too
+     * long. Each is repaired somewhere else — an ini file, a PATH, the daemon — and the container
+     * this was written for passed every other gate with `proc_open` in `disable_functions` and
+     * reported its rollback as `did not answer in time`.
+     */
+    public function test_a_platform_that_cannot_spawn_a_process_is_its_own_fault(): void
+    {
+        $binary = $this->fakeBinary($this->tempDir());
+        $ran = [];
+
+        $verdict = (new SupervisorStep($this->recorder($ran), 5, procOpenAvailable: false))
+            ->inspect($binary . ' restart "pgcat:*"');
+
+        $this->assertFalse($verdict['usable']);
+        $this->assertSame(SupervisorStep::FAULT_UNSPAWNABLE, $verdict['fault']);
+        $this->assertStringContainsString('proc_open is not available', $verdict['detail']);
+        $this->assertStringContainsString('disable_functions', $verdict['detail']);
+        $this->assertStringContainsString('remove proc_open from that line', $verdict['detail']);
+        $this->assertSame([], $ran, 'nothing is spawned to find out that nothing can be spawned');
+    }
+
+    public function test_a_binary_that_is_not_on_the_path_is_not_a_timeout(): void
+    {
+        $binary = $this->fakeBinary($this->tempDir());
+
+        $ran = [];
+        $verdict = (new SupervisorStep($this->recorder($ran, '', 'sh: supervisorctl: command not found', 127)))
+            ->inspect($binary . ' restart "pgcat:*"');
+
+        $this->assertFalse($verdict['usable']);
+        $this->assertSame(SupervisorStep::FAULT_UNRESOLVED, $verdict['fault']);
+        $this->assertStringContainsString('could not find', $verdict['detail']);
+        $this->assertStringContainsString('exit 127', $verdict['detail']);
+        $this->assertStringNotContainsString('did not answer in time', $verdict['detail']);
+    }
+
+    /**
      * A command that drives something else, or drives supervisorctl without naming a
      * program, is usable with nothing checked — and the fault says which of the two, because
      * that is what decides where an operator would look if it ever failed.

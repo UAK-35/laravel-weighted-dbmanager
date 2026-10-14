@@ -24,6 +24,20 @@
   in words and exits `0`, because "nothing is watched" and "watched, and it is well" must not be
   the same silence.
 
+- **A supervisor failure says which of three ways it failed, so an image build catches a container
+  that cannot spawn a process at all.** A production container had `proc_open` in
+  `disable_functions`, passed every other gate, and could not flip: the supervisor step reported
+  `rename refused never reached`, its detail said the command `did not answer in time`, and the
+  answer it printed was the Process class saying it relies on `proc_open`. The three states behind
+  that one sentence are now told apart, because each is repaired somewhere else — an ini file, a
+  `PATH`, the daemon or the timeout. `proc_open` unavailable is a fault of its own
+  (`SupervisorStep::FAULT_UNSPAWNABLE`), raised before anything is spawned and naming the
+  `disable_functions` value this process read and the line to change; a shell that cannot find the
+  binary is `unresolved` with the exit code `127` rather than a timeout; and the timeout keeps its
+  sentence with the seconds it waited. `db:doctor`'s `pgcat supervisor` row prints the step's own
+  verdict, so an image build reports the same thing a deploy's rehearsal would — without running a
+  flip, and on a machine whose PHP *can* spawn processes, since the reading is injectable.
+
 - **The paths a flip *cycle* writes are judged beside the ones a flip step names, and every file
   finding carries the mode and owner it was found with.** A production container passed every other
   gate and could not flip: its target and its audit record were not writable, and nothing said so
