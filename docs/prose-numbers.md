@@ -139,7 +139,7 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **fifteen** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **twelve** values a run can reach" | the README's `kind` table |
 | the reasons a replica is excluded, as pool-exclusions.md counts them | "the reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
-| the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **six** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
+| the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **nine** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
 | the keys the envelope writes, as command-json-envelope.md counts them | "writes **five** keys, in the same order, for every report", "holds the **five** keys in the order", "one of the **five** core keys" | `JsonEnvelope::CORE` |
 | the metadata floors, as replica-metadata-refusal.md counts them | "the **three** `*_FLOOR` constants" | the `*_FLOOR` constants on `ReplicaMetadata` |
 | the classifier's cases, as replica-metadata-refusal.md counts them | "`ReplicaMetadataTest` (**nine** cases)" | the test methods `ReplicaMetadataTest` declares |
