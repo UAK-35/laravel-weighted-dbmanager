@@ -2082,7 +2082,13 @@ class DbDoctorTest extends TestCase
             [['start' => '10:00:00', 'end' => '14:20:00'], ['start' => '17:00:00', 'end' => '20:30:00']],
             [1, 2, 3, 4, 5],
         );
-        config()->set('db-manager.swrr.pgcat.schedule.windows.enabled', true);
+        // And this entry disarmed on purpose: with both armed the row warns that two mechanisms own
+        // the mode, which is the test below this one. One mechanism is the clean reading here, and
+        // the two switches are written in one call because they are read out of one block.
+        config()->set('db-manager.swrr.pgcat.schedule', [
+            'enabled' => false,
+            'windows' => ['enabled' => true],
+        ]);
 
         [$output, $exit] = $this->doctor();
         $row = $this->rowContaining($output, 'flip schedule');
@@ -2094,10 +2100,58 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('activate_readers:17:00', $row);
         $this->assertStringContainsString('deactivate_readers:20:30', $row);
         $this->assertStringContainsString('probing from 480s before its boundary to 480s after it', $row);
-        // The per-minute entry is on here, and the row says why that is not a conflict rather
-        // than leaving the operator to wonder which of the two wins.
-        $this->assertStringContainsString('it stops at the end of the boot window', $row);
+        // The per-minute entry is off here, and the row says so rather than leaving the operator to
+        // work out from two switches which mechanism answers a boundary.
+        $this->assertStringContainsString('the per-minute entry is off, so one mechanism decides the mode', $row);
+        $this->assertStringNotContainsString('two mechanisms own the pooler', $row);
         $this->assertSame(0, $exit);
+    }
+
+    /**
+     * Both mechanisms armed: reported by name, as a warning, and dated from its own finding.
+     *
+     * Neither arrangement is malformed — an installation may be halfway through the documented
+     * migration, which is to disarm this entry in the same change that arms the tasks — so this is
+     * not a failure. What it must not be is silent: the two keys are named, and what they share is
+     * the part neither setting shows on its own, because a mode the tasks apply goes through the
+     * flipper's forced path and is not recorded as a boot convergence. The record is what the key
+     * adds over the row: this row describes this boot, and `recorded unresolved since` says how long
+     * the pair has been armed.
+     */
+    public function test_the_flip_schedule_row_warns_when_both_mechanisms_are_armed(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        $this->useReaderFallback([['start' => '10:00:00', 'end' => '14:20:00']], [1, 2, 3, 4, 5]);
+        // `swrr.pgcat.schedule.enabled` is not written here: `armPgcat()` arms `pgcat.enabled` and
+        // the entry follows it, which is the state an installation that turned the tasks on without
+        // disarming this one actually lands in.
+        config()->set('db-manager.swrr.pgcat.schedule.windows.enabled', true);
+
+        $this->recordFindings([
+            WeightedDatabaseServiceProvider::KEY_FLIP_MECHANISMS_CONTENDED => '2026-09-20T08:15:00+00:00',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'flip schedule');
+
+        $this->assertStringStartsWith('WARN  flip schedule', $row);
+        $this->assertStringContainsString('the pooler follows the day: 2 boundary task(s)', $row);
+        $this->assertStringContainsString('activate_readers:10:00', $row);
+        $this->assertStringContainsString('deactivate_readers:14:20', $row);
+        $this->assertStringContainsString('two mechanisms own the pooler\'s mode', $row);
+        $this->assertStringContainsString('swrr.pgcat.schedule.enabled', $row);
+        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled are both on', $row);
+        $this->assertStringContainsString('no boundary is contended', $row);
+        $this->assertStringContainsString('not written as a boot convergence', $row);
+        $this->assertStringContainsString('Arm one and disarm the other in the same change', $row);
+        $this->assertStringContainsString('recorded unresolved since 2026-09-20T08:15:00+00:00', $row);
+        $this->assertSame(0, $exit, 'a warning fails a preflight only under --strict');
+
+        [, $strictExit] = $this->doctor(strict: true);
+
+        $this->assertSame(1, $strictExit, '--strict fails a release for two mechanisms owning one mode');
     }
 
     public function test_the_flip_schedule_row_warns_when_nothing_is_scheduled_to_move_the_pooler(): void

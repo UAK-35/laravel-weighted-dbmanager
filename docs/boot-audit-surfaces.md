@@ -80,7 +80,7 @@ says?* — and the decision is where it can be asked without overwriting either 
 | A | leave them to the boot log | nothing to find them with; already the status quo | **rejected** — the defect |
 | B | a dedicated `db:audit` command | one more surface to know about, and none of them are visited by default | **rejected** — the finding has to find the operator, not the other way round |
 | C | a dedicated `/health/audit` endpoint | a second payload to keep in step with the health one | **rejected** — the audit is a property of the installation, which is what `/health/db` already is |
-| D | fold them into the `pgcat` block | the block is one producer's snapshot; the findings are cross-cutting | **rejected** — pgcat is one of twenty-four keys |
+| D | fold them into the `pgcat` block | the block is one producer's snapshot; the findings are cross-cutting | **rejected** — pgcat is one of twenty-five keys |
 | E | make the endpoint `degraded` and `503` while a finding stands | a load balancer evicts an instance over a setting it is not using | **rejected** — see below |
 | F | make `db:replica-status` exit non-zero | scripts that print a table start failing over a config typo | **rejected** — the gate belongs to `db:doctor` |
 | G | have `db:doctor` read the log instead of the record | log rotation and interleaving by workers; no keyed lookup, no first sighting | **rejected** — the record is the thing that survives the process |
@@ -120,7 +120,8 @@ where "what does this installation say about itself" is answered.
 (`PgcatConfigFlipper::healthSummary()`) is read by three surfaces, and it is scoped to one
 feature: is flipping armed, and can it act. The audit is the opposite: its keys are
 `swrr.pgcat.enabled.refused`, `swrr.pgcat.use_reload.refused`,
-`swrr.allow_local_fallback.refused`, `swrr.pgcat.gate`, `swrr.reader_windows.refused`,
+`swrr.allow_local_fallback.refused`, `swrr.pgcat.gate`, `swrr.pgcat.schedule.both_armed`,
+`swrr.reader_windows.refused`,
 `swrr.reader_days.refused`, `swrr.reader_fallback.always_readers`,
 `swrr.reader_fallback.always_writer`, `swrr.reader_fallback.unmatchable_windows`,
 `swrr.primary_store.unknown`, `swrr.primary_store.unreachable`,
@@ -143,7 +144,7 @@ reading and the object that owns the record is the one that judges it. Two are t
 `swrr.audit.file.unwritable` for the record that throttles it, which is the one finding whose own
 record can never hold its date — and they are keyed because the row reporting them has to be able
 to say how long the installation has been unable to check its store. Filing all of those under
-`pgcat` would put twenty-four keys' worth of claims inside one feature's block, and a finding about
+`pgcat` would put twenty-five keys' worth of claims inside one feature's block, and a finding about
 the weight formula would disappear for an installation that has no pgcat wiring at all.
 
 ### E — let the findings move the endpoint's status

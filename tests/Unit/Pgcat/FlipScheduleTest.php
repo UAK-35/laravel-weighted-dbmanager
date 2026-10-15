@@ -9,6 +9,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Log;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SplFileInfo;
@@ -236,6 +237,91 @@ final class FlipScheduleTest extends TestCase
         $this->assertNull(
             FlipSchedule::register(new Schedule(), $this->configure(['enabled' => false], ['enabled' => 'flase'])),
             'the document\'s default is pgcat in both directions: with pgcat off, a refused switch is off as well',
+        );
+    }
+
+    /**
+     * The published copy takes no default for the switch, which is the other half of the rule
+     * above: the file ships `env('SWRR_PGCAT_SCHEDULE_ENABLED')` with **no second argument**, so the
+     * value is absent and the fallback to `swrr.pgcat.enabled` is what decides the entry.
+     *
+     * A `false` written there is not the same thing as leaving it out. It is a *value* — the switch
+     * off on purpose — and the class reads it as one, so a copy that declared it would ship an
+     * entry that stays off on an installation whose flipper is armed, against its own comment and
+     * against what the class documents. That is why the absence is asserted against the text that
+     * ships rather than against this process's environment: an exported variable must not be able to
+     * make the file read as though it declared something.
+     */
+    public function test_the_published_config_takes_no_default_for_the_switch_so_it_follows(): void
+    {
+        $sample = (string) file_get_contents(dirname(__DIR__, 3).'/config/db-manager.php');
+
+        preg_match("/'schedule'\\s*=>\\s*\\[(.*?)'windows'\\s*=>\\s*\\[/s", $sample, $block);
+
+        $this->assertNotSame('', $block[1] ?? '', 'the sample no longer declares the schedule block in the shape this reads');
+
+        $this->assertStringContainsString(
+            "'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED'),",
+            $block[1],
+            'the shipped switch is undeclared so that it follows swrr.pgcat.enabled',
+        );
+
+        $this->assertDoesNotMatchRegularExpression(
+            "/env\\(\\s*'SWRR_PGCAT_SCHEDULE_ENABLED'\\s*,\\s*[^)]+\\)/",
+            $block[1],
+            'a default in the file is a value the switch is set to, which is the one thing this copy must not write',
+        );
+    }
+
+    /**
+     * The one-mechanism invariant as one sentence: two switches on, one mode, two owners.
+     *
+     * Both keys are named because that is what a reader acts on — which pair to look at — and the
+     * cost is named beside them, because it is the part neither setting can show on its own: a mode
+     * the window tasks apply goes through the flipper's forced path and is deliberately *not*
+     * written as a boot convergence, so the readings that describe the per-minute entry's
+     * convergence describe a mechanism that has stopped acting. The boot window is in the sentence
+     * for the same reason: it is what bounds the overlap, and it is the evidence that the two read
+     * the same resolver and contend for nothing.
+     */
+    public function test_both_mechanisms_armed_are_reported_by_both_keys(): void
+    {
+        $sentence = FlipSchedule::bothArmedSentence(['enabled' => true], ['enabled' => true], 480);
+
+        $this->assertNotNull($sentence);
+        $this->assertStringContainsString('swrr.pgcat.schedule.enabled', $sentence);
+        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled', $sentence);
+        $this->assertStringContainsString('are both on', $sentence);
+        $this->assertStringContainsString('no boundary is contended', $sentence);
+        $this->assertStringContainsString('480s after the container starts', $sentence);
+        $this->assertStringContainsString('not written as a boot convergence', $sentence);
+        $this->assertStringContainsString('Arm one and disarm the other in the same change', $sentence);
+    }
+
+    /**
+     * One mechanism is silence, whichever of the two it is — and so is a block that says nothing at
+     * all, which is the ordinary state rather than an edge: the per-minute entry inherits
+     * `pgcat.enabled` and the tasks ship off, so a clean installation must produce no sentence here
+     * rather than an empty one.
+     *
+     * @return array<string, array{0: array<string, mixed>, 1: array<string, mixed>}>
+     */
+    public static function mechanismPairs(): array
+    {
+        return [
+            'the per-minute entry alone' => [['enabled' => true], ['enabled' => false]],
+            'the reader-window tasks alone' => [['enabled' => false], ['enabled' => true]],
+            'neither' => [['enabled' => false], ['enabled' => false]],
+            'nothing written at all' => [[], []],
+        ];
+    }
+
+    #[DataProvider('mechanismPairs')]
+    public function test_one_armed_mechanism_is_not_a_contention(array $perMinute, array $windows): void
+    {
+        $this->assertNull(
+            FlipSchedule::bothArmedSentence($perMinute, $windows, 480),
+            'one owner of the mode is the clean reading, not a quiet one',
         );
     }
 

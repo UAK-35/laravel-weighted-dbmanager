@@ -129,6 +129,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         self::KEY_REPLICA_RAM_REFUSED,
         self::KEY_STORE_PROBE_OFF,
         self::KEY_STORE_PROBE_FILE_UNWRITABLE,
+        self::KEY_FLIP_MECHANISMS_CONTENDED,
     ];
 
     /**
@@ -256,6 +257,19 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * folded into the record's.
      */
     public const KEY_AUDIT_LOCK_UNUSABLE = 'swrr.audit.file.lock.unusable';
+
+    /**
+     * Both mechanisms that can move the pooler are armed: one mode with two owners, and a record
+     * only one of them writes.
+     *
+     * A warning, and the level is the decision: neither arrangement is malformed, and the documented
+     * migration to the reader-window tasks is to disarm this entry in the same change that arms
+     * them — so an installation caught halfway through that change is the installation doing the
+     * right thing slowly, and a preflight that failed it would be refusing exactly that one. What
+     * the record adds over the row is the date: `flip schedule` describes this boot, and this key
+     * says how long the pair has been armed. See `FlipSchedule::bothArmedSentence()`.
+     */
+    public const KEY_FLIP_MECHANISMS_CONTENDED = 'swrr.pgcat.schedule.both_armed';
 
     /**
      * The finding each file problem is recorded under, by the setting it is about.
@@ -762,6 +776,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             ...$this->replicaMetadataFindings($this->app->make(Repository::class)),
             ...$this->primaryStoreFindings($store, $swrr, $probeStore),
             ...$this->weightFormulaFindings($swrr),
+            ...$this->flipMechanismFindings($config, $flipper),
             ...$this->storeProbeFindings($audit),
         ];
 
@@ -822,9 +837,50 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 ...$this->replicaMetadataFindings($config),
                 ...$this->primaryStoreFindings($store, $swrr, probeStore: false),
                 ...$this->weightFormulaFindings($swrr),
+                ...$this->flipMechanismFindings($config, $flipper),
                 ...$this->storeProbeFindings($audit),
             ],
         ];
+    }
+
+    /**
+     * Both mechanisms that can move the pooler armed at once, one mode and two owners.
+     *
+     * The sentence is `FlipSchedule::bothArmedSentence()`'s, so the row that reports it prints the
+     * same words this finding logs — the pair is one reading of two switches and neither surface
+     * may phrase it differently. Empty while the flipper is inert: nothing moves the pooler then,
+     * so nothing owns its mode, which is the same conclusion `pgcat files`, `pgcat supervisor` and
+     * `flip schedule` reach and say the same way.
+     *
+     * @return list<BootAuditFinding>
+     */
+    private function flipMechanismFindings(Repository $config, PgcatConfigFlipper $flipper): array
+    {
+        if (!$flipper->isEnabled()) {
+            return [];
+        }
+
+        $sentence = FlipSchedule::bothArmedSentence(
+            FlipSchedule::options($config),
+            WindowFlipSchedule::settings($config),
+            $flipper->window()->seconds(),
+        );
+
+        if ($sentence === null) {
+            return [];
+        }
+
+        return [new BootAuditFinding(
+            key: self::KEY_FLIP_MECHANISMS_CONTENDED,
+            warning: $sentence,
+            resolution: 'One mechanism owns the mode again — swrr.pgcat.schedule.enabled or '
+                .'swrr.pgcat.schedule.windows.enabled is off — or pgcat flipping is off, so nothing moves the pooler.',
+            context: [
+                'setting' => 'swrr.pgcat.schedule.enabled',
+                'other_setting' => 'swrr.pgcat.schedule.windows.enabled',
+                'window_seconds' => $flipper->window()->seconds(),
+            ],
+        )];
     }
 
     /**

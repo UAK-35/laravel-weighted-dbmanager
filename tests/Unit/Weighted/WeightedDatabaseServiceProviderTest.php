@@ -1368,6 +1368,63 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     }
 
     /**
+     * Two mechanisms armed at once: one mode, two owners, and a record only one of them writes.
+     *
+     * Recorded under one key, with the sentence `db:doctor`'s `flip schedule` row prints — two
+     * switches read one way, so neither surface may phrase it differently — and at `warning` level,
+     * because the documented migration is to disarm this entry in the same change that arms the
+     * tasks: an installation caught halfway through that change is doing the right thing slowly, and
+     * a preflight that failed it would refuse exactly that one.
+     *
+     * What the finding adds over the row is the date: the row describes this boot, the record says
+     * how long the pair has been armed. So both halves are asserted here — the line the first boot
+     * logs, and the resolution the boot that disarms one of the two logs instead.
+     */
+    public function test_two_mechanisms_armed_at_once_are_recorded_and_closed_out(): void
+    {
+        $this->armTheFlip();
+        // Both switches inside the one block they are read from: the entry armed on its own switch
+        // rather than by inheritance, so this test is about the pair rather than about the fallback.
+        $this->usePgcat(['schedule' => ['enabled' => true, 'windows' => ['enabled' => true]]]);
+
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertCount(1, $records, 'one finding, one line');
+        $this->assertSame('warning', $records[0]['level'], 'an installation mid-migration is warned about, not failed');
+        $this->assertStringContainsString('two mechanisms own the pooler', $records[0]['message']);
+        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled are both on', $records[0]['message']);
+        $this->assertStringContainsString('not written as a boot convergence', $records[0]['message']);
+        $this->assertSame(
+            WeightedDatabaseServiceProvider::KEY_FLIP_MECHANISMS_CONTENDED,
+            $records[0]['context']['finding'],
+        );
+        $this->assertSame(
+            ['swrr.pgcat.schedule.both_armed'],
+            $this->recordedKeys(),
+            'the key is what dates the pair, so it is the record that carries it',
+        );
+
+        // Disarming one of the two closes it out: one mechanism owns the mode again, which is the
+        // other half of every finding this boot writes. The switch is written rather than deleted,
+        // because a block that says nothing is the *inherited* state, which here is armed.
+        $this->usePgcat(['schedule' => ['enabled' => false, 'windows' => ['enabled' => true]]]);
+        self::resetBootAuditGuard();
+
+        // The same listener as the boot above, because `collectLogs()` appends to the list it was
+        // given: a second call would register a second listener writing into the same array.
+        $this->reportBootAudit();
+
+        $this->assertCount(2, $records, 'the resolution, and nothing else');
+        $this->assertStringContainsString('One mechanism owns the mode again', $records[1]['message']);
+        $this->assertStringContainsString('swrr.pgcat.schedule.enabled', $records[1]['message'], 'the resolution names the switch that closes it');
+        $this->assertSame([], $this->recordedKeys());
+    }
+
+    /**
      * A switch is the one setting a cast must not be trusted with: `(bool) 'false'` is true, so
      * the three commonest ways of writing *off* used to read as *on* — and on
      * `swrr.pgcat.enabled` that arms a file swap. Every value that is not on or off is refused

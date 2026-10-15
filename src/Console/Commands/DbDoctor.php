@@ -2327,22 +2327,39 @@ class DbDoctor extends Command
                     )).'.',
                 'suggestion' => null,
             ];
+        } elseif ($windows['enabled'] && $perMinute['enabled']) {
+            // Both mechanisms armed: one mode, two owners. Neither arrangement is malformed and an
+            // installation may be halfway through the documented migration — disarm this entry in
+            // the same change that arms the tasks — so it is a warning that names both keys rather
+            // than a failure. The sentence is `FlipSchedule::bothArmedSentence()`'s, the same words
+            // the boot finding logs, and the key is what dates it: this row describes this boot,
+            // the record says how long the pair has been armed.
+            $problems[] = [
+                'status' => self::WARN,
+                'key' => WeightedDatabaseServiceProvider::KEY_FLIP_MECHANISMS_CONTENDED,
+                'sentence' => sprintf(
+                    'the pooler follows the day: %d boundary task(s) — %s — each probing from %ds before '
+                    .'its boundary to %ds after it. %s',
+                    count($plan['entries']),
+                    implode(', ', array_column($plan['entries'], 'name')),
+                    $windows['lead_seconds'],
+                    $windows['grace_seconds'],
+                    (string) FlipSchedule::bothArmedSentence($perMinute, $windows, $flipper->window()->seconds()),
+                ),
+                'suggestion' => null,
+            ];
         } elseif ($windows['enabled']) {
             $problems[] = [
                 'status' => self::PASS,
                 'key' => null,
                 'sentence' => sprintf(
                     'the pooler follows the day: %d boundary task(s) — %s — each probing from %ds before '
-                    .'its boundary to %ds after it, and the per-minute entry is %s.',
+                    .'its boundary to %ds after it, and the per-minute entry is off, so one mechanism '
+                    .'decides the mode.',
                     count($plan['entries']),
                     implode(', ', array_column($plan['entries'], 'name')),
                     $windows['lead_seconds'],
                     $windows['grace_seconds'],
-                    // The two are not in conflict: the per-minute entry stops at the end of the boot
-                    // window, so it cannot act on a boundary after a container has converged.
-                    $perMinute['enabled']
-                        ? 'on as well — no boundary is contended, because it stops at the end of the boot window'
-                        : 'off, so one mechanism decides the mode',
                 ),
                 'suggestion' => null,
             ];

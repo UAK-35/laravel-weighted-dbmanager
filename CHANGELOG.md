@@ -4,6 +4,25 @@
 
 ### Added
 
+- **Two mechanisms armed at once are reported by name, with a finding of their own to date the
+  pair.** `swrr.pgcat.schedule.enabled` converges the pool at container start and is a no-op for the
+  rest of the container's life; `swrr.pgcat.schedule.windows.enabled` moves it at each reader-window
+  boundary, for as long as the container lives. Read the same resolver they cannot both act on one
+  boundary — the per-minute entry checks the boot window before it takes its lock and returns
+  `window_closed` once a container has converged — so an installation with both on is not racing, and
+  `db:doctor`'s `flip schedule` row used to say so and pass. What that reading left out is the part
+  neither setting shows on its own: the two do not share a *record* of what they did. A mode the
+  tasks apply goes through the flipper's forced path (`forceMode()`), which is deliberately not
+  written as a boot convergence, so `db:doctor`'s `pgcat mode` row and `/health/db` describe the
+  entry's convergence while the tasks are the thing moving the file, for ever. The row now *warns*,
+  naming both keys in the same sentence the boot audit logs (`FlipSchedule::bothArmedSentence()`, so
+  the two surfaces cannot phrase one reading two ways), and the state is a boot finding of its own —
+  `swrr.pgcat.schedule.both_armed` — so the row dates the pair rather than only reporting it. It is a
+  warning rather than a failure because neither arrangement is malformed: the documented migration to
+  the tasks is to disarm this entry in the same change that arms them, and a preflight that failed
+  the state in the middle of that change would refuse exactly the installation doing the right thing
+  slowly. `--strict` fails it, which is what makes it a release gate rather than a line nobody reads.
+
 - **A schedule that stops is now a fault rather than a silence, and `db:scheduler-watchdog` is what
   a container's own healthcheck runs to catch it.** The per-minute flip is a deliberate no-op after
   the boot window closes, so the flip's state file stopped moving eight minutes into a container's
@@ -104,6 +123,29 @@
   `refInventoryRecords()` are the record this renders from rather than a second reader beside them.
 
 ### Fixed
+
+- **The published config's `swrr.pgcat.schedule.enabled` really does follow `swrr.pgcat.enabled`,
+  which is what every surface already promised.** The file shipped `env('SWRR_PGCAT_SCHEDULE_ENABLED',
+  false)` — a *value*, present on every installation — while its own comment, the class, `README.md`'s
+  setting table and `db:doctor`'s row all described the key as following `pgcat.enabled` when it is
+  left unset. The inheritance was therefore dead in every published copy, in the one direction that
+  matters: an installation that armed `pgcat.enabled` and said nothing about the schedule got the
+  entry *off*, with pgcat's file left where the last write put it and nothing in the day to move it.
+  The default is now deliberately absent (`env('SWRR_PGCAT_SCHEDULE_ENABLED')`, no second argument),
+  so absent means *follow*, and a value written there means what it says — `false` is the switch off
+  on purpose, and is also how a copy says "the reader-window tasks own this". A copy that had been
+  written around the old default keeps behaving as it was configured to; the file's comment now states
+  which of the two shapes to write and why.
+
+- **An `interval_minutes` the entry cannot read resolves to the class's own default, and the comment
+  says which number that is.** The cadence setting falls back to
+  `FlipSchedule::DEFAULT_INTERVAL_MINUTES` for every value the cron expression cannot state — `0`, a
+  negative, a non-number, anything past 59, where a minute step wraps past the top of the hour — and
+  the rule is that every way this setting can be wrong runs *more* often than was asked for rather
+  than less, because an unreadable interval must not be the thing that leaves a pooler un-repaired. A
+  copy that declares a wider cadence than the package's own default therefore gets the default for an
+  unreadable value, not the value it wrote, and the comment beside it now says so as the rule rather
+  than as the arithmetic.
 
 - **The guarded commit path is a file of this repository, and the skill that names it points
   there.** The rule that a commit carries only the paths it names lived in the LPR application's

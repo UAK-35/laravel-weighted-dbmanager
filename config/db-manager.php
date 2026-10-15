@@ -203,12 +203,19 @@ return [
             //
             // `enabled` is a switch, read as one — `(bool) 'off'` is true and this one decides
             // whether a file is swapped every minute — so `yes`/`no` work and a value that is
-            // neither is reported instead of being cast. Left unset it follows `enabled` above,
-            // and so does a refused value: an installation that has not armed the flipper has
-            // nothing for a schedule to keep in step, and a typo must not be what stops the
-            // flip.
+            // neither is reported instead of being cast. **Left unset it follows `enabled`
+            // above**, and so does a refused value: an installation that has not armed the
+            // flipper has nothing for a schedule to keep in step, and a typo must not be what
+            // stops the flip.
+            //
+            // The default is deliberately *absent* rather than `false`. A `false` written here is
+            // a value — the switch is then off on purpose, and `FlipSchedule::settings()` reads it
+            // as one — so a copy declaring it would ship a schedule that stays off on an
+            // installation whose flipper is armed, which is the opposite of the sentence above and
+            // of what the class documents. Write `false` only to disarm the entry on an armed
+            // installation; write nothing to let it follow.
             'schedule' => [
-                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED', false),
+                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED'),
                 // How often the flip runs, in whole minutes: 1 is the shipped cadence and 5 is
                 // `SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES=5`, which is a step of five in the minute
                 // field. Raising it is a trade rather than a saving — what bounds the attempts is
@@ -219,8 +226,13 @@ return [
                 // A value this cannot express — 0, a negative, a non-number, or more than 59,
                 // because a minute step wraps rather than meaning what it says past the top of the
                 // hour — resolves to 1 rather than being written into an expression that means
-                // something else. An installation needing a cadence wider than an hour registers
-                // its own `db:pgcat-flip` entry, which the duplicate guard leaves alone.
+                // something else. `1` is the class's own default — `FlipSchedule::DEFAULT_INTERVAL_MINUTES`,
+                // which is also what this file ships — and that is the whole of the rule: a copy that
+                // declares `2` here still gets 1 for a value it cannot read, because every way this
+                // setting can be wrong has to run *more* often than was asked for, never less — an
+                // unreadable interval must not be the thing that leaves a pooler un-repaired. An
+                // installation needing a cadence wider than an hour registers its own `db:pgcat-flip`
+                // entry, which the duplicate guard leaves alone.
                 'interval_minutes' => env('SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES', 1),
                 // How many runs may go missing before the schedule counts as stopped, and
                 // `db:doctor`'s `schedule beat` row, `/health/db` and `db:scheduler-watchdog` say

@@ -263,6 +263,50 @@ final class FlipSchedule
     }
 
     /**
+     * What is worth saying when both mechanisms that can move the pooler are armed at once, or null
+     * when only one of them owns the mode.
+     *
+     * TWO MECHANISMS, ONE MODE, ONE RECORD THAT ONLY ONE OF THEM WRITES
+     * ----------------------------------------------------------------
+     *   This entry converges the pool at container start and is a no-op for the rest of the
+     *   container's life, bounded by `swrr.pgcat.flip_window_seconds`; the reader-window tasks move
+     *   the pool at each boundary, for as long as the container lives. Read the same resolver, they
+     *   cannot both act on one boundary — but they do not share a *record* of what they did either:
+     *   a mode the window tasks apply goes through the flipper's forced path, which is deliberately
+     *   not written as a boot convergence, so the two surfaces that read that record (`db:doctor`'s
+     *   `pgcat mode` row and `/health/db`) describe the entry's convergence while the tasks are the
+     *   thing actually moving the file.
+     *
+     *   It is a *warning* rather than a failure because neither arrangement is malformed: an
+     *   installation may be mid-migration between the two mechanisms — the documented migration is
+     *   to disarm this entry in the same change that arms the tasks — and a preflight that failed a
+     *   release for the state in the middle of that change would be refusing exactly the
+     *   installation that is doing the right thing slowly. What it must not be is silent: the two
+     *   keys are named, so the reader knows which pair to look at.
+     *
+     * @param array<string, mixed> $perMinute the answer {@see self::options()} gave
+     * @param array<string, mixed> $windows   the answer `WindowFlipSchedule::settings()` gave
+     */
+    public static function bothArmedSentence(array $perMinute, array $windows, int $windowSeconds): ?string
+    {
+        if (!($perMinute['enabled'] ?? false) || !($windows['enabled'] ?? false)) {
+            return null;
+        }
+
+        return sprintf(
+            'two mechanisms own the pooler\'s mode: swrr.pgcat.schedule.enabled and '
+            .'swrr.pgcat.schedule.windows.enabled are both on. They read the same resolver, so no '
+            .'boundary is contended — this entry stops at the end of the boot window (%ds after the '
+            .'container starts) — but they do not share a record of what they did: a mode the window '
+            .'tasks apply goes through the flipper\'s forced path, which is not written as a boot '
+            .'convergence, so the readings that describe the entry\'s convergence describe a mechanism '
+            .'that has stopped acting. Arm one and disarm the other in the same change: this is a '
+            .'warning rather than a failure because an installation may be halfway through that.',
+            $windowSeconds,
+        );
+    }
+
+    /**
      * The settings the entry is built from, read out of `db-manager.swrr.pgcat.schedule`.
      *
      * `enabled` is a switch and is read as one rather than cast: `(bool) 'off'` is true, and this
