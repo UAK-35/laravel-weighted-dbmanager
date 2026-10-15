@@ -39,8 +39,9 @@ read against.
 **Nothing is pending.** Every commit this note lands is on `dev` with the commit before it: the
 readings and the port plan (`3f25180`), the schedule watchdog (`af1fddb`), the api page a past tree
 renders (`e06098b`), the published config's generation (`bbfd422`), the paths a flip cycle writes
-(`f782eb0`) and the supervisor's three failures (`3c2e61f`), each with the changelog entry that
-weighs it. The table below is empty
+(`f782eb0`), the supervisor's three failures (`3c2e61f`) and the two mechanisms that can move the
+pooler being reported by name (`5af2df5`), each with the changelog entry that weighs it. The table
+below is empty
 because the tree holds no file the register does not carry, which is what nothing pending looks like
 — and the schedule watchdog the note before this one called pending is section 3's `### Added` now
 rather than a file here.
@@ -65,19 +66,13 @@ five tests to the store they judge: four of them read a run's exit code without 
 `db:doctor`'s `store reachability` row PINGs, so on a workstation with a Redis answering they passed
 by accident and on the runner all four failed while every row they assert on read correctly.
 
-**The change riding with this note.** The reader that holds section 1's transcript to the commands it
-quotes. It used to require exit 1 — the three records out of step with the commit the note names — and
-that is not a state a note can be committed in at the end of a release cycle: the release writes the
-records, so at the commit it leaves they are current and `--check` exits 0, which is exactly the
-commit a release's re-take is taken at. A fixed exit could only ever catch the direction it was
-written for, and it refused the note the release most needs. What is read now is what the note
-*quotes*: the commands come out of section 1's transcript, the guard runs each one, and the exit code
-written beside it has to be the one it returned — so a note that writes `exit 1` beside a command
-that exits 0 fails, and so does a command that failed under a summary saying it did not. The transcript
-is found by the block that quotes `self::RECORDS`, the one command under `bin/` this reads; the
-arguments come off the line and the program and its path are written in the guard, so a line cannot
-rename the tool into something nobody runs. Section 5 records the controls, measured in both
-directions.
+**What this note lands with.** Nothing beside it: the register commit it describes is `5af2df5`, and
+what that one changes is section 3's `### Added` — two mechanisms that can own the pooler's mode at
+once are now reported by name rather than passed over by `db:doctor`'s `flip schedule` row, which is a
+sentence in `FlipSchedule`, a boot finding (`swrr.pgcat.schedule.both_armed`) and a warning that
+`--strict` fails — with the two `### Fixed` entries the published copy's own comments had contradicted.
+The note itself is prose only, which is what a re-take is: the rendered blocks come out of git and
+nothing else in it claims a fact a command could not answer.
 
 ### The records carry the stamp of the tag they were written at
 
@@ -93,7 +88,7 @@ php bin/inventory.php --check --at=8742456
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with this tree — 3, 18 and 17 line(s) stale in files.tsv,
+  --> exit 1: the inventory is out of step with this tree — 3, 19 and 18 line(s) stale in files.tsv,
       methods.tsv and surface.tsv, each naming the row it does not hold
 ```
 
@@ -139,10 +134,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `3c2e61f` — *feat: a supervisor failure names which of three things went wrong* |
+| HEAD | `5af2df5` — *feat: two mechanisms armed at once are reported by name, not passed over* |
 | `origin/dev` | `2744a13` — *docs: the handoff note is re-taken at the release commit, and its records reading is its transcript* |
-| Unpushed | 9 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 3, feat 5, fix 1 |
+| Unpushed | 11 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 4, feat 6, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -151,12 +146,13 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is nine commits ahead of `origin/dev`: the guarded commit path that moved out of the
+The register is eleven commits ahead of `origin/dev`: the guarded commit path that moved out of the
 consuming application's `git/commit_paths.py` and into this repository's own `git/`, the readings and
-the port plan, the two re-takes this cycle's notes were taken in, and this cycle's five capabilities
-— the schedule that can be watched, the api page a past tree renders, the published config that says
-which key set it is, the file preconditions that cover a whole flip cycle, and the supervisor's three
-failures. Unpushed at the register
+the port plan, the three re-takes this cycle's notes were taken in, and this cycle's six
+capabilities — the schedule that can be watched, the api page a past tree renders, the published
+config that says which key set it is, the file preconditions that cover a whole flip cycle, the
+supervisor's three failures, and the two mechanisms that can move the pooler being reported by name.
+Unpushed at the register
 means the tip its own release was pushed from, which is
 why the row reads what it does and not a backlog — `bin/release.php` refuses to tag while `HEAD` is
 not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every commit
@@ -164,9 +160,11 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The nine most recent are the ones a reader is most likely to be standing in the middle of:
+The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+5af2df5  feat: two mechanisms armed at once are reported by name, not passed over
+5ce2422  docs: the handoff note is re-taken at the supervisor's three failures
 3c2e61f  feat: a supervisor failure names which of three things went wrong
 6dc5198  docs: the handoff note is re-taken at the flip cycle's file preconditions
 f782eb0  feat: the paths a flip cycle writes are judged beside the ones a flip step names
@@ -175,14 +173,14 @@ bbfd422  feat: a published config says which key set it is, and the doctor reads
 e06098b  feat: the API page of a past tree is read out of git, so a release's page is a question
 af1fddb  feat: a schedule that stops producing runs is a fault, and four surfaces say so
 3f25180  docs: the application is read file by file and by commit, and the port plan follows
-2306b43  fix: the guarded commit path is a file of this package, not the application's
 ```
 <!-- /handoff:log -->
 
 The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
-block carries what it prints up to that ceiling, so the section above shows the one commit between the
-register and the remote tip rather than a shorter listing. `git log --oneline origin/dev..HEAD` is the
-whole of it in every state.
+block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
+commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
+register the range is one commit longer than the ceiling, so the listing stops at `3f25180` and
+`2306b43` is the oldest of the eleven that it does not carry.
 
 One consequence of that state is worth naming before the next release: the interlock the release
 checks is *satisfied* at this register, which is what let the tag be cut — so what stands between this
@@ -206,18 +204,19 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3` |
 | The latest of them | `v0.2.0-alpha3` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 7 entries — 5 added, 2 fixed, 0 changed |
-| The notes weigh as | minor — five capabilities, which is the rung they take, and two repairs beside them |
+| `## Unreleased` at the basis | 10 entries — 6 added, 4 fixed, 0 changed |
+| The notes weigh as | minor — six capabilities, which is the rung they take, and four repairs beside them |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: `v0.2.0` does not exist, so a suffixless version is still the lane ahead. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries `### Added` five times and `### Fixed` twice at the register, which the
-weighing reads as `minor` — five capabilities the rung is for, and the two repairs that landed beside
+and the section carries `### Added` six times and `### Fixed` four times at the register, which the
+weighing reads as `minor` — six capabilities the rung is for, and the four repairs that landed beside
 them. The register is therefore a branch whose release would publish the schedule that can be
 watched, the api page a past tree renders, the published config that says which key set it is, the
-file preconditions that cover a whole flip cycle, the supervisor's three failures, and the two
-repairs the release before it did not carry — as `0.2.0`,
+file preconditions that cover a whole flip cycle, the supervisor's three failures, the two mechanisms
+that can own the pooler's mode being reported by name, and the four repairs the release before it did
+not carry — as `0.2.0`,
 the first version with no suffix, which is the lane the absent version leaves open.
 
 ### The release that cut this tag, and the row it could not write
@@ -245,8 +244,8 @@ own and this row is the only one it cannot satisfy as things stand.
 
 ### The release the weighing would ask for now
 
-Asked on 2026-10-15 what a release would do, it plans a `minor` and promotes four bullets — the two
-capabilities and the two repairs the section carries:
+Asked on 2026-10-15 what a release would do, it plans a `minor` and promotes ten bullets — the six
+capabilities and the four repairs the section carries:
 
 ```bash
 php bin/release.php --weigh --branch=dev --dry-run
@@ -258,10 +257,10 @@ php bin/release.php --weigh --branch=dev --dry-run
   latest tag    v0.2.0-alpha3
   bump          minor  (weighed: a minor change)
   next version  0.2.0  (tag v0.2.0)
-  CHANGELOG     ## Unreleased -> ## 0.2.0 - 2026-10-14, new Unreleased section above
-  release notes 4 bullet(s) in the promoted section
-  inventory     42 file(s), 214 method(s), 249 key(s)/member(s), described as v0.2.0  (fresh, weighed against v0.2.0-alpha3)
-  api page      40 class(es), 214 public method(s), described as v0.2.0
+  CHANGELOG     ## Unreleased -> ## 0.2.0 - 2026-10-15, new Unreleased section above
+  release notes 10 bullet(s) in the promoted section
+  inventory     43 file(s), 221 method(s), 257 key(s)/member(s), described as v0.2.0  (fresh, weighed against v0.2.0-alpha3)
+  api page      41 class(es), 221 public method(s), described as v0.2.0
   branch-alias  dev-dev, dev-main -> 0.2.x-dev  (unchanged)
   commit        Release v0.2.0
   tag           git tag -a v0.2.0 -m "v0.2.0"
@@ -269,27 +268,30 @@ php bin/release.php --weigh --branch=dev --dry-run
 ```
 
 Three lines of it are the state this note describes rather than a step of a release. `ci` is the
-interlock the four unpushed commits leave: a real run refuses to tag until they are on `origin/dev`,
-which is section 2's job and the `pkg-push` runbook's rather than this note's. `CHANGELOG` is the four
-entries section 3's table counts, which the promotion would move into `0.2.0 - 2026-10-14`. `branch`
+interlock the eleven unpushed commits leave: a real run refuses to tag until they are on `origin/dev`,
+which is section 2's job and the `pkg-push` runbook's rather than this note's. `CHANGELOG` is the ten
+entries section 3's table counts, which the promotion would move into `0.2.0 - 2026-10-15`. `branch`
 is `(dirty)` because the re-take is measured in the working tree it was taken in; the note commit is
 what makes it clean.
 
 That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers in
 it that *are* checkable are held, though they are two different readings now: the entries the notes
 carry **at the register** (the table at the top of this section — none) and the state of the three
-records (section 1, whose transcript the guard now runs). Its own `0 bullet(s)` is the weighing's
+records (section 1, whose transcript the guard now runs). Its own `10 bullet(s)` is the weighing's
 answer about the working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Seven entries at the register, and they are this cycle's: five `### Added` for the schedule that can
+Ten entries at the register, and they are this cycle's: six `### Added` for the schedule that can
 be watched, the api page a past tree renders, the published config that says which key set it is, the
-paths a flip cycle writes and the supervisor's three failures, and two `### Fixed` for the repairs
-the release before this one left — the guarded commit path, and the records reading that holds the
-commands section 1 quotes. The sixteen entries the tag carries — six `### Added`, six `### Changed`,
-four `### Fixed` — are the pgcat cycle's work and the guard repairs before them, and the promotion
-would carry all seven of these with them.
+paths a flip cycle writes, the supervisor's three failures and the two mechanisms that can own the
+pooler's mode being reported by name, and four `### Fixed` for the repairs the release before this one
+left — the guarded commit path, and the records reading that holds the commands section 1 quotes —
+beside the two the register itself settled: the published copy's `swrr.pgcat.schedule.enabled`, whose
+shipped default quietly prevented the inheritance every surface promised, and the rule its
+`interval_minutes` falls back by. The sixteen entries the tag carries — six `### Added`, six
+`### Changed`, four `### Fixed` — are the pgcat cycle's work and the guard repairs before them, and the
+promotion would carry all ten of these with them.
 
 What those sixteen change for a consumer is written in the released section rather than repeated here.
 What is *not* in them is anything the three `.tsv` records, `API.md` or the changelog cannot account
@@ -334,8 +336,8 @@ What publishing this release still needs, and what is done:
 1. the release itself — cut, tagged and pushed as `v0.2.0-alpha3`, on a commit the CI rail had
    verified, without `--skip-ci`: done;
 2. this note, re-taken at the register the release left — and at the three commits this cycle landed
-   on top of it, because a release is the state of the branch and not only of the tag — and landed as
-   a commit of its own on `dev`: this commit, the fifth unpushed one section 2 counts;
+   on top of it, because a release is the state of the branch and not only of the tag —   and landed as
+   a commit of its own on `dev`: this commit, the commit the register is followed by;
 3. raise the consumer's pin, in the application repository, to the new tag;
 4. the application-side switches and schedule entries a flip needs, which live in that repository
    and are not part of this package.
