@@ -36,7 +36,7 @@ That is the same problem `db:pgcat-flip --json` was built for, and the reasoning
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
 here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
-nineteen verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+twenty verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
 likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
@@ -147,7 +147,7 @@ the flipper and the health endpoint read which connection is in play, so this ke
 them about which config key the name came from.
 
 Beside `strict` sits `connection_only`, the other flag that changes what a run *asks* rather than how
-it is reported: `true` on a `db:doctor --connection-only` run, which leaves the four rows whose
+it is reported: `true` on a `db:doctor --connection-only` run, which leaves the six rows whose
 subject is outside the process out of `checks` entirely (see below). A gate that requires a row has to
 be able to see that this report was never going to carry it, and a boolean is that fact. The two
 flags are the fields a job reads to know what kind of run it is holding; everything a gate selects on
@@ -188,8 +188,8 @@ sentence exists to prevent.
 
 ### The row list is not a fixed length
 
-`checks` is every row the run built. That is nineteen on an installation where `db` resolves to the
-weighted manager and **seven** where it does not — the replica rows are only asked when there is a
+`checks` is every row the run built. That is twenty on an installation where `db` resolves to the
+weighted manager and **eight** where it does not — the replica rows are only asked when there is a
 manager to ask them of, which is a property of the rendered command that predates this flag, and
 `--connection-only` removes six more by design (`connection_only` below). So `name` is the row's
 identity and the thing to select on; the order and the count are the table's, and are documented as
@@ -288,11 +288,13 @@ the two tables look alike would be a table the matrix could not check.
 ### A bounded run is the same envelope with fewer rows
 
 `--connection-only` is the one flag that changes *which rows exist*, and a gate has to be able to see
-that: four rows — `pgcat supervisor`, `pool probe`, `store probe`, `store reachability` — are left out
-of a bounded run entirely, because each one's subject is outside the process, and a row that reports
+that: six rows — `pgcat supervisor`, `pool probe`, `read caps`, `standby feedback`, `store probe`,
+`store reachability` — are left out of a bounded run entirely, because each one's subject is outside
+the process: a supervisord to ask, a pooler to open a startup packet to, and a read endpoint to
+connect to and read its own `statement_timeout` and `hot_standby_feedback` off. A row that reports
 its own missing prerequisite as the installation's fault is worse than a row that is not printed. The
 object publishes `connection_only: true` for exactly that reason, and `checks` is the full run's list
-less those four, in the order a full run asks them. Nothing else about the envelope moves: the same
+less those six, in the order a full run asks them. Nothing else about the envelope moves: the same
 key set, `verdict` from the rows that were asked, and `exit_code` from `gateFailed()` over the same
 rule — which is what lets one gate read a bounded report and a full one without learning a second
 shape.
@@ -335,7 +337,7 @@ it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Seven rows when `db` does not resolve, nineteen otherwise, and
+- **The row set is not a fixed length.** Eight rows when `db` does not resolve, twenty otherwise, and
   six fewer than either in a `--connection-only` run, which is why the object publishes that flag. A gate
   must select by `name` — the row's identity, and the same string the table prints — and nothing in the
   object states how many rows there "should" be, so a gate that expects a particular row to exist has

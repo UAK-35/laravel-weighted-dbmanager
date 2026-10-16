@@ -1747,7 +1747,7 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('19 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString('20 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
         $this->assertSame(1, $exit);
     }
 
@@ -2763,7 +2763,7 @@ class DbDoctorTest extends TestCase
     }
 
     /**
-     * The same rule where there is no weighted manager: of the six rows that do not need one, the
+     * The same rule where there is no weighted manager: of the rows that do not need one, the
      * supervisor row is the only one whose subject is outside the process, and it is the one that
      * goes.
      */
@@ -2778,7 +2778,7 @@ class DbDoctorTest extends TestCase
         [$json] = $this->doctorJson(connectionOnly: true);
 
         $this->assertSame(
-            ['boot environment', 'provider swap', 'weighted factory', 'published config', 'pgcat gate', 'pgcat files'],
+            ['boot environment', 'provider swap', 'weighted factory', 'published config', 'pgcat gate', 'pgcat files', 'variant shape'],
             array_column($this->report($json)['checks'], 'name'),
         );
         $this->assertSame([], $supervisor->ran);
@@ -3508,14 +3508,17 @@ class DbDoctorTest extends TestCase
             // profile: the fixture arms none of them (`swrr.read_path.enabled` is off, so neither
             // probing row opens a connection) and the pair reading asks a config, so all three
             // are silences these fixtures do not spoil — the +3 is the point rather than a value.
-            // `boot environment` is the other one that is always a PASS here, for its own reason.
-            'healthy' => [19, 0, 0],
-            'warned' => [18, 1, 0],
-            'warned-twice' => [17, 2, 0],
-            'failed' => [18, 0, 1],
-            'failed-twice' => [17, 0, 2],
-            'mixed' => [17, 1, 1],
-            'mixed-twice' => [15, 2, 2],
+            // `boot environment` is the other one that is always a PASS here, for its own reason,
+            // and `variant shape` is a third: the flipper is armed against a file set whose
+            // variants declare no pool the fixture's connection writes with, which is the silence
+            // that row calls *nothing to compare* — so the +1 is likewise the point.
+            'healthy' => [20, 0, 0],
+            'warned' => [19, 1, 0],
+            'warned-twice' => [18, 2, 0],
+            'failed' => [19, 0, 1],
+            'failed-twice' => [18, 0, 2],
+            'mixed' => [18, 1, 1],
+            'mixed-twice' => [16, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -3674,7 +3677,7 @@ class DbDoctorTest extends TestCase
      * The report's row for one check, by the name the table prints.
      *
      * Selected by name because the row set is not a fixed length: a `db` that does not resolve to
-     * the weighted manager leaves the six configuration rows and no replica rows at all, so a job
+     * the weighted manager leaves the eight configuration rows and no replica rows at all, so a job
      * written against `checks[9]` would read a different check on exactly the installations it
      * exists to catch.
      *

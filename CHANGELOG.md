@@ -4,6 +4,57 @@
 
 ### Added
 
+- **What a deployment of this package has to have is written down, in
+  [docs/deployment-contract.md](docs/deployment-contract.md).** The package installs its code and
+  nothing it *needs*: not the pooler whose configuration a flip swaps, not the supervisord that is
+  asked to reload it, not the directory the flip's state is written into, and not the store the
+  weighted state is read from. Those are the deployment's, and until now they were written down only
+  in the consuming application's records — a design record about the pooler's boot, a troubleshooting
+  record of what failed in the field, and the shell scripts that do it. The record states the shape a
+  deployment has to have for this package's own readings to be honest, what each missing piece costs
+  (a flip that cannot get its copy into place, a pooler that comes back serving pools the connection
+  does not name, a health check that reports a container healthy while the pooler behind it serves
+  nothing), and the row or command that asks about it: the three rendered variants and the
+  prune-before-start rule, the pinned and compiled pooler, the boot stamp, the per-minute entry with
+  its window and its `flock`, the writable state directory, a spawnable supervisor, the container
+  health check, the store and what its absence means, the read caps that need not match the write
+  cap, and the two deploy gates that read this package — `flip-rehearsal.sh`, which branches on the
+  `kind` in `db:pgcat-flip --dry-run --json` and so makes that report a contract in another
+  repository, and `pgcat-health-gate.sh`, whose one real query goes through the connection this
+  package weights. Its citations name the application's files rather than quote them, because this
+  package's suite reads its own tree; the record states that as its first limitation rather than
+  leaving a reader to assume a guard holds it.
+
+- **The file a flip would swap *in* is judged before the swap: `db:doctor`'s `variant shape` row and a
+  `variant shape` step in `db:pgcat-flip --dry-run`.** Every pgcat reading before this one is about
+  an *ability* — the paths resolve, the files are readable, the command runs, the pooler answers —
+  and none of them is about the file's content. A variant can be readable, writable and swapped in
+  cleanly and still be the wrong shape: a `[pools.<name>]` header no pool name can be read out of (a
+  truncated template, a `[pools]` with no pool below it), a variant that declares no pool the pinned
+  connection writes through, a readers variant missing a pool that connection's `read` list weights,
+  a writer-only variant that still declares one of the readers it exists to leave out, or a file in
+  place that is half a rendered variant — a pool commented out leaves all of the read pools or none
+  of them, and half of them is the mixture. pgcat validates its servers when it starts, so a flip to
+  any of those is a pooler that does not come back, and until now the package found out by watching
+  it fail to answer.
+  `Uak35\WeightedDbManager\Pgcat\VariantShape` reads the three configured files and the pool names
+  the pinned connection is written with — its own `database`, and each `read` entry's, off the same
+  reader the pool probe uses — and holds one against the other. A name **no** configured variant
+  declares is deliberately not judged, because Laravel's `database` is a database name on every
+  connection and a pool name only where a pooler is in front, so failing it would fail the
+  configuration that works; a path that cannot be read is skipped rather than reported, because
+  `pgcat files` owns it and the flip's own `read source` step fails on the source a run is about to
+  swap; and the summary counts the files it did read. The one warning is a pool whose addresses do
+  not resolve *from here*: the container's boot prunes a pool it cannot resolve, so a flip to that
+  file puts back the failure the prune exists for — and it warns rather than fails because resolution
+  is a fact about the host that asks, where a build container, a runner or a release engineer's
+  laptop is not the network the pooler will start in. Nothing swaps a variant while the flipper is
+  inert, so the row passes without judging there, and it prints no `suggestion`: the repair is a pool
+  name, a renderer or a resolver, and none of them is a value this line can name. The reading is one
+  class with two surfaces — the row, which is answered in a `--connection-only` run because it reads
+  files and asks the running pooler nothing, and the rehearsal's step, which runs before the temp
+  write so a rehearsal that would refuse has not written into the target's directory.
+
 - **The two cancellations a routed read can meet are now read before traffic arrives: `read caps`,
   `standby feedback` and `read/write pair`.** This package chooses the endpoint a read lands on, and
   that endpoint can cancel the read in two ways a caller cannot tell apart: `40001`, *canceling
@@ -199,6 +250,20 @@
   `refInventoryRecords()` are the record this renders from rather than a second reader beside them.
 
 ### Fixed
+
+- **A fresh clone has a machine record to copy from, and two readings of a path written in prose are
+  pinned.** `.agents/machine.local.json` is gitignored — it holds this machine's own facts — so a
+  checkout had nothing to copy from while `AGENTS.md` named a file that was not there. The same
+  record in token form is committed as `.agents/sample.machine.local.json`, `.gitignore` carries the
+  exception, and `MachinePathsTest` reads the sample back: it is in the listing the machine-path
+  guard scans, the guard finds nothing in it, and every fact that differs between two machines holds
+  a `__TOKEN__` rather than a value. The two path readings are the application's own failure asked
+  of this package's reader of prose: a `+++` header path there was keyed with the tab git terminates
+  it with, so an allowlist could never excuse a file whose name contained a space. Here the
+  terminator is not part of what is read, and a spaced directory is read whole where the path
+  continues past the space — so `Program Files` is still tolerated inside a header, and a space in
+  the last segment shortens the path rather than hiding it. Both cases are asserted, so neither is a
+  reading that agrees with nothing.
 
 - **The published config's `swrr.pgcat.schedule.enabled` really does follow `swrr.pgcat.enabled`,
   which is what every surface already promised.** The file shipped `env('SWRR_PGCAT_SCHEDULE_ENABLED',

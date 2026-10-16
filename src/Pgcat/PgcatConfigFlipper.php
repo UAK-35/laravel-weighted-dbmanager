@@ -227,6 +227,8 @@ final class PgcatConfigFlipper
 
     /**
      * @param array<string, mixed> $config pgcat config slice (see config/db-manager.php)
+     * @param array{write: string, read: list<string>} $connectionPools the pool names the pinned
+     *        connection is written with, as `VariantShape::namedPools()` reads them out of it
      */
     public function __construct(
         private readonly TimeWindowResolver $resolver,
@@ -268,6 +270,17 @@ final class PgcatConfigFlipper
         // judged unwritable by the row and by the boot record alike. Null means the caller did
         // not resolve it, and then it is not judged.
         private readonly ?string $auditFile = null,
+        // The pool names the pinned connection is written with — the pool it writes through and the
+        // pools its `read` list weights — told to the flipper by whoever resolved that connection,
+        // because a flipper holds the pgcat slice and not the connection's own entry. Empty means
+        // nothing was resolved, and then a variant's shape is read but nothing is held against it.
+        // See `VariantShape::namedPools()`.
+        private readonly array $connectionPools = ['write' => '', 'read' => []],
+        // How one address is asked whether it resolves from this host, for the reading that reports
+        // a pool the container's boot would prune. Injected so a test can answer from a strict
+        // allowlist rather than reach a resolver — the fixture discipline the boot's own prune test
+        // uses — and so an installation that resolves names some other way has one place to say so.
+        private readonly ?\Closure $hostResolver = null,
     ) {
         $this->window = $window ?? FlipWindow::fromConfig($config);
         $this->beat = $beat ?? ScheduleBeat::fromConfig($config, $this->window);
@@ -679,6 +692,40 @@ final class PgcatConfigFlipper
             'detail' => sprintf('%s (%d bytes)', $source, strlen($contents)),
         ];
 
+        // The shape of the file this flip would put in front of pgcat, read before anything is
+        // written or signalled rather than after the swap has already happened. It is performed
+        // rather than reported — it reads three files and asks a resolver, and it changes nothing —
+        // and it is the one step whose failure no later step can repair: a variant missing a pool
+        // the connection writes through is a pooler that does not come back up, and a flip that
+        // replaced the file first would have taken the running one away to get there.
+        $shape = $this->variantShape();
+        $shapeFailures = $shape->failures();
+        $shapeWarnings = $shape->warnings();
+
+        if ($shapeFailures !== []) {
+            return DryRunResult::failed(
+                mode: $mode,
+                error: $shapeFailures[0]['sentence'].' — a flip would swap in a file this installation cannot serve, so nothing would be replaced',
+                steps: [...$steps, [
+                    'step' => 'variant shape',
+                    'outcome' => DryRunResult::STEP_FAILED,
+                    'detail' => implode(' ', array_column($shapeFailures, 'sentence')),
+                ]],
+            );
+        }
+
+        $steps[] = [
+            'step' => 'variant shape',
+            'outcome' => DryRunResult::STEP_DONE,
+            // A warning is a reading, not a refusal: the pools a variant declares are the ones the
+            // container's own boot would prune, and whether a name resolves here is a fact about
+            // this host's resolver. So the step names them without failing the run, which is the
+            // line the shape's own severity draws.
+            'detail' => $shapeWarnings === []
+                ? $shape->summary()
+                : implode(' ', array_column($shapeWarnings, 'sentence')),
+        ];
+
         // The step a flip takes between reading the source and replacing the target. It is
         // read-only — `supervisorctl status "pgcat:*"` and nothing else — so the rehearsal
         // performs it rather than reporting it, which is the same rule the other steps
@@ -946,6 +993,32 @@ final class PgcatConfigFlipper
             'state_file' => sys_get_temp_dir().'/pgcat-flip-state.json',
             'lock_file' => sys_get_temp_dir().'/pgcat-flip.lock',
         ];
+    }
+
+    /**
+     * The shape of what a flip would swap to: the pools each configured variant declares, held
+     * against the pools the pinned connection is written with.
+     *
+     * It is one reading rather than two, and both surfaces ask for it here: `db:pgcat-flip --dry-run`
+     * performs it as a step before it reports the swap, and `db:doctor`'s `variant shape` row prints
+     * it, so a rehearsal and a preflight cannot disagree about whether a variant is one this
+     * installation can serve. `VariantShape` owns the rules; this method hands it the three paths a
+     * flip is armed with, the connection's own pool names and the resolver the prune reading asks.
+     *
+     * It is deliberately *not* gated on `isEnabled()`, which is the one way it differs from
+     * `fileProblems()` below. The question here is what the files declare, and that is a fact about
+     * three files rather than about whether anything is swapping them; a surface that must not judge
+     * an inert flipper says so itself — `db:doctor`'s row names the arming, and a rehearsal cannot be
+     * reached while the flipper is inert, because the gates refuse it before the steps begin.
+     */
+    public function variantShape(): VariantShape
+    {
+        return VariantShape::fromConfig(
+            $this->config,
+            $this->connectionPools,
+            $this->connectionName ?? '',
+            $this->hostResolver,
+        );
     }
 
     /**

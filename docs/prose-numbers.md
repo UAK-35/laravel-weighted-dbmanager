@@ -134,9 +134,9 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the ways a flip can politely do nothing, as DbFlipPgcatCommandTest counts them | "the **three** ways a flip can politely do nothing are one documented case" | the same cells, stated in the map's own docblock — the copy that had drifted to "two" |
 | the ways a command can be refused, as DbFlipPgcatCommandTest counts them | "the **three** ways a command can be refused are another" | the same cells, stated in the map's own docblock |
 | the doctor's documented cases, as documented-exit-codes.md counts them | "the doctor's **three** documented cases" | the README's `db:doctor` exit table, which the doctor's matrix is written as |
-| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **nineteen**-row description of what each check judges" | the README's `db:doctor` check table |
-| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **nineteen** verdicts, one per row" | the README's `db:doctor` check table |
-| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **nineteen** otherwise" | the README's `db:doctor` check table |
+| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **twenty**-row description of what each check judges" | the README's `db:doctor` check table |
+| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **twenty** verdicts, one per row" | the README's `db:doctor` check table |
+| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **twelve** values a run can reach" | the README's `kind` table |
 | the reasons a replica is excluded, as pool-exclusions.md counts them | "the reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
 | the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **nine** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |

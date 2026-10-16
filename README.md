@@ -364,6 +364,13 @@ to be told as well. `PgcatConfigFlipper` does that — it copies the variant of
 `pgcat.toml` matching the current mode into place, signals pgcat, and records the
 mode it applied. `db:pgcat-flip` drives it.
 
+What a deployment has to provide for any of that to work — the three rendered variants and the
+prune that runs before pgcat starts, a pinned and compiled pooler, the boot stamp, the per-minute
+entry with its window and its lock, a writable state directory, a spawnable supervisor, the
+container health check that asks the pooler rather than a cached route, and the two deploy gates that
+read this package — is one record, [docs/deployment-contract.md](docs/deployment-contract.md), with
+the row or command that asks about each requirement.
+
 ### It only ever acts on a PostgreSQL connection
 
 pgcat proxies PostgreSQL and nothing else. The provider therefore tells the flipper
@@ -1540,7 +1547,7 @@ details.
 ### Preflight: `db:doctor`
 
 `php artisan db:doctor` answers the question a deploy actually cares about — *will
-this installation do what it is configured to do?* Nineteen things can be wrong while
+this installation do what it is configured to do?* Twenty things can be wrong while
 the application still boots and answers requests, and each one is a row:
 
 | Row                  | Fails when                                                                                                                                         |
@@ -1551,6 +1558,7 @@ the application still boots and answers requests, and each one is a row:
 | `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value). *Warns* as well when the file's own `generation` — the key set it was published as — is behind this package's, or is a value that is not a whole number, or is absent because the file predates the key, or is *ahead* of it, and passes when the copy's keys are current, whatever the installer put in them. The policy is the file's own, `Support\ConfigSchema`, and the three cases are in [docs/config-generations.md](docs/config-generations.md) |
 | `pgcat gate`         | `swrr.pgcat.enabled` is on where pgcat cannot act, or armed while a path a flip needs is unset. Reads the boot record as well as this boot's verdict, so it also fails with the age of a mismatch an earlier boot recorded, and warns when one is on record for a connection this run does not inspect. Prints `swrr.pgcat.enabled = false` as a `suggestion` for the switch armed where pgcat cannot act, and nothing for the other two failures: the paths it names are this installation's to choose |
 | `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. Names **every** problem it finds, one sentence each and each dated from its own finding, and prints a `suggestion` per problem where the package can state the repair exactly: `chmod +r` for a source it cannot read, `chmod +w` for a file it cannot write and `chmod +wx` for a directory (a rename has to traverse it), and — for an *empty* `config_path`/`state_file`/`lock_file` — the setting line with the value the published config ships. A path that is not there, and an empty `readers_path`/`no_readers_path`, get no line: those values are this installation's to choose, and a plausible-looking path pasted into configuration replaces the operator's intent with this tool's. It judges the paths a flip *cycle* writes as well as the ones a flip step names — the boot stamp `swrr.pgcat.boot_file` points at (`FAIL` when the container can no longer record when it booted, so the boot window never closes and the entry flips on every run) and the `.lock` companion the audit record is locked on (two boots can write one record at once) — and every sentence carries the mode and owner the path was found with, because "not writable" is one question away from "by whom". The record *file* itself is the `store probe` row's reading rather than a second one here |
+| `variant shape`      | the file a flip would swap *in* is one this installation cannot serve — the row about the **content** of the three configured variants rather than about their paths, and the preflight half of the step `db:pgcat-flip --dry-run` performs before it reports a swap. **Fails** when a variant declares a `[pools…]` section no pool name can be read out of (a truncated template, a `[pools]` with no pool below it — the reader that picks up more or less than the bare name is the failure the boot's own prune test writes a case for); when a readable variant declares no pool the pinned connection writes through, which is a write with no pool to reach; when the readers variant declares none of the pools that connection's `read` list weights, so a read chosen for one lands on a pool the file does not hold; when the writer-only variant still declares one of them, which is the readers that file exists to leave out; or when the file in place is a mixture of the two shapes — all of the read pools or none of them, and half of them is what a pool commented out of a rendered variant leaves. The pools are read off the `[pools.<name>]` section headers by the same reader the pool probe uses, and the connection's names off its own `database` and its read entries' — and a name **no** configured variant declares is deliberately not judged, because Laravel's `database` is a database name on every connection and a pool name only where a pooler is in front, so failing that would fail the configuration that works. A path this reading cannot read is skipped rather than reported (`pgcat files` owns it, and the flip's own `read source` step fails on the source a run is about to swap), and the summary counts the files it did read. *Warns* when a pool a variant declares has no address that resolves from here, naming the pool and the addresses: the container's boot prunes a pool it cannot resolve, because pgcat validates every server when it starts, so a flip to that file puts the failure the prune exists for back — and it warns rather than fails because resolution is a fact about the host that asks, where a build container, a runner or a release engineer's laptop is not the network the pooler will start in. Reads the files and the configuration and asks the running pooler nothing, so it is answered in a `--connection-only` run, and passes without judging when the flipper is not armed. Prints no `suggestion`: the repair is a pool name, a renderer or a resolver, and none of them is a value this line can name |
 | `pgcat supervisor`   | the flipper is armed and the command it runs *after* the swap cannot work: its executable does not resolve for this user (not an absolute path, not on `PATH`), the program name is an unquoted glob the shell may rewrite, supervisorctl cannot answer, or supervisor does not know the program. The three ways it cannot answer are told apart rather than reported as one `did not answer in time`: `proc_open` is not available to this PHP at all, so no command can be spawned and the sentence names `disable_functions` and the line to change (`FAIL`, and the case an image build is supposed to catch — a container with it disabled passes every other gate and cannot flip); the shell cannot find the binary on `PATH` (exit `127`); or the command genuinely exceeded the step's timeout of a few seconds. Read-only: the flip's own command with `status` in the verb position, plus — only when supervisor does not know the program, the one fault whose repair is a name — the bare `supervisorctl status` that lists what supervisord is running, whose nearest names the row then reports. Prints the setting line to paste as a `suggestion` for the two faults that reduce to a command — an unquoted program name, and a command left empty — and nothing for the rest, which are repaired in a `PATH`, a running supervisord or a `[program:]` section; an unknown program is named in the row's sentence rather than printed as a line, because a near miss is a ranked answer and a `suggestion` is a value a gate may apply without reading it |
 | `replica metadata`   | *fails* when a replica's `weight`/`cpu_cores`/`ram_gb` is a value the resolver does not read as written — not a number, or a number under the floor that key is read at — naming the replica and what the resolver reads instead. A weight it cannot read is read as `0`, and `0` is how a replica is disabled, so that replica leaves the pool: without this the row reports the smaller pool as the installation. Also names a replica disabled with `weight: 0`, which is a choice and does not fail. The pool's own arithmetic comes from the resolver rather than from this row: `replicaStatus()` is the pool, `poolExclusions()` is what it does not hold and why, and the two partition the read list. *Warns* when the replicas carry no metadata at all, so the resolver picks at random while the table still looks weighted |
 | `read caps`          | *warns* when a read endpoint's own `statement_timeout` is far below the writer's — less than half of it — because a read this package routes there is then cut where the writer was configured not to cut it, so a statement the writer would have finished is cancelled instead. Asks each endpoint of the connection's `read` list **and** the writer — one query per endpoint, on a throwaway connection — and only while `swrr.read_path.enabled` (`SWRR_READ_PATH_ENABLED`) arms it: it is one connection per endpoint, so with the probe off the row says so rather than reporting silence as if the endpoints had been asked. Reports unequal caps as the fact they usually are — the pair [docs/read-path-cancellations.md](docs/read-path-cancellations.md) was measured on is 90 s against 120 s, and the whole reason a read a replica cut can be answered by the writer is that the caps differ — and never fails or warns over an endpoint that refused, timed out or answered without the setting: that endpoint is named with what it said, because reachability is the health monitor's question rather than this row's. Prints no `suggestion`: a parameter group's cap is not a value this line can write |
@@ -2061,7 +2069,7 @@ jq -e '.exit_code == 1 and .verdict == "WARN" and .strict' preflight.json    # .
 ```
 
 Two things to know about the row list. It is not a fixed length: a `db` that does not resolve to the
-weighted manager leaves the seven configuration rows and no replica rows at all, and a
+weighted manager leaves the eight configuration rows and no replica rows at all, and a
 `--connection-only` run leaves six more out by design, so select a row by
 `name` — the row's identity, and the same string the table prints — rather than by position. And
 `detail` is prose written for a reader, naming paths and commands and supervisor's own output on the
@@ -2325,10 +2333,11 @@ retried afterwards.
 src/Database/Weighted/   SWRR algorithm, weight resolver (and the exclusions it reports),
                          health monitor, state stores, connection factory, window resolver,
                          manager
-src/Pgcat/               pgcat.toml flipper, the supervisor step it runs afterwards,
-                         the two schedules the provider registers (the per-minute entry,
-                         and the reader-window tasks), and the two result value objects
-                         (a flip, and a rehearsal)
+src/Pgcat/               pgcat.toml flipper, the supervisor step it runs afterwards, the
+                         reading that holds what a flip would swap *in* against the pools the
+                         pinned connection names (VariantShape), the two schedules the provider
+                         registers (the per-minute entry, and the reader-window tasks), and the
+                         two result value objects (a flip, and a rehearsal)
 src/Providers/           WeightedDatabaseServiceProvider (replaces the framework's)
 src/Console/Commands/    db:doctor, db:replica-status, db:probe-replicas, db:pgcat-flip,
                          db:pgcat-window-flip
@@ -2357,9 +2366,11 @@ docs/                    design records for decisions that are not obvious from 
                          preflight, what the package does with replica metadata it cannot
                          read — at boot and in the preflight — what a resolver reports about
                          the replicas it did not use, how the documented exit codes are
-                         kept in step with the code, and how a number a record states is
+                         kept in step with the code, how a number a record states is
                          kept equal to the number the code has — rendered by a command
-                         where that is possible, checked where it is not
+                         where that is possible, checked where it is not — and what a
+                         deployment of this package has to provide for its readings to be
+                         honest
 bin/tools.php            where each installed tool's entry file is written down, once
 bin/tool.php             runs one of them by name: what every composer script goes through
 bin/interpreter.php      which `php.exe` the machine record names, and running a script under it —

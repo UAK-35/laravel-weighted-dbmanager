@@ -335,7 +335,7 @@ final class DbFlipPgcatCommandTest extends TestCase
 
         $this->assertIsArray($steps);
         $this->assertSame(
-            ['lock', 'read source', 'supervisor check', 'write temp', 'remove temp', 'rename', 'supervisor', 'pool read', 'state file'],
+            ['lock', 'read source', 'variant shape', 'supervisor check', 'write temp', 'remove temp', 'rename', 'supervisor', 'pool read', 'state file'],
             array_column($steps, 'step'),
             'the pipeline is a flip\'s order, so a step that stopped the run is readable next to the ones that did not',
         );

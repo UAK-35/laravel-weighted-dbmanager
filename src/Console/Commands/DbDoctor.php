@@ -37,7 +37,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * [--connection-only]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Eighteen things can be wrong while the application
+ * do", before traffic arrives. Twenty things can be wrong while the application
  * still boots and answers requests:
  *
  *   boot environment  the settings every row below judged are not the ones this
@@ -61,6 +61,17 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     traffic is supposed to switch. The one row that never prints a
  *                     suggestion: what is wrong is a path or a permission, and neither
  *                     is a value this package can name for somebody else's filesystem
+ *   variant shape     the file a flip would swap *in* is one this installation cannot
+ *                     serve: a configured path that is not a readable file, a `[pools…]`
+ *                     section no pool name can be read out of, a variant that declares no
+ *                     pool the pinned connection writes through, a readers variant missing
+ *                     a pool that connection weights, a writer-only variant that still
+ *                     declares one of them, or a file in place that is a mixture of the
+ *                     two shapes — half a rendered variant. Reads the three configured
+ *                     files and the connection's own pool names rather than the running
+ *                     pooler, so it answers before anything is swapped; a pool whose
+ *                     addresses do not resolve from here is carried as a warning, because
+ *                     resolution is a fact about this host rather than about the container
  *   pgcat supervisor  the flipper is armed but the command it runs *after* the swap
  *                     cannot work: the executable does not resolve for this user, the
  *                     program name is an unquoted glob the shell may rewrite, or
@@ -128,6 +139,14 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     cleanly, and refuses either of them written as something that
  *                     is not on or off — the two switches `switch values` does not
  *                     cover
+ *   schedule beat     the mechanism that moves the pooler is configured and has
+ *                     stopped running: the entry is registered and armed while the cron
+ *                     line that fires it is gone, so every other reading describes a
+ *                     world that stopped moving. The row reads the beat the entry
+ *                     leaves rather than the schedule it is registered in, and names
+ *                     the three causes the state file cannot show — the store the
+ *                     runs' mutexes live in, how many entries run the flip, and the
+ *                     boot stamp with the mode and owner it was found with
  *   store probe       the store reachability check can never run: probing is
  *                     switched off, or the record that throttles it cannot be
  *                     written, so the PING is skipped on every boot in silence
@@ -172,7 +191,8 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *
  * What is left is every reading that is about this boot, this configuration and these files — the
  * environment the boot read from, the provider swap, the factory, the published config's key set,
- * the gate, the files a flip needs, the replica metadata, the read path's pair, the three switches,
+ * the gate, the files a flip needs, the shape of what a flip would swap in, the replica metadata,
+ * the read path's pair, the three switches,
  * the reader windows, the mode the pooler's file is on, and both schedule rows — so a container that arms pgcat over a
  * connection pgcat cannot front still exits 1, with no store, no supervisor and no reachable
  * database.
@@ -340,7 +360,7 @@ class DbDoctor extends Command
      * WHY A TABLE AND NOT A FLAG PER CALL
      *   A row that cannot be answered does not print silence: it reports the prerequisite it is
      *   missing as a fault of the installation, so dropping one is a decision that has to be
-     *   made once and read once. Declaring the four here — and asking `asks()` rather than
+     *   made once and read once. Declaring the six here — and asking `asks()` rather than
      *   remembering to skip a call — is what stops the bounded mode drifting into a *quieter*
      *   doctor, which is the shape of this mistake: a mode that judged a store it cannot reach
      *   would fail image builds for the container that was always going to run it.
@@ -351,6 +371,12 @@ class DbDoctor extends Command
      *                         PATH and a control socket to answer
      *     `pool probe`        the pooler — it opens a PostgreSQL startup packet to the address
      *                         the probe is named for
+     *     `read caps`         the read endpoints — the row connects to each one and reads
+     *                         its own `statement_timeout`, which is a server the container
+     *                         being built has no route to
+     *     `standby feedback`  the same sweep of the same endpoints, asked for
+     *                         `hot_standby_feedback`: one reading answers both rows, so
+     *                         they are left out together or not at all
      *     `store probe`       the store — the row exists to keep an eye on the throttled PING,
      *                         and a run that does not send one has nothing to keep an eye on.
      *                         The closest call of the four, and the reason the reasons are
@@ -381,7 +407,7 @@ class DbDoctor extends Command
                             {--strict : Treat warnings as failures, for a deploy gate}
                             {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
                             {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}
-                            {--connection-only : Bound the run to what a build container can answer: leave out the four rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}';
+                            {--connection-only : Bound the run to what a build container can answer: leave out the six rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}';
 
     protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, or ask only the rows a build container can answer, with --connection-only';
 
@@ -411,11 +437,12 @@ class DbDoctor extends Command
             $this->publishedConfig(),
             $this->pgcatGate(),
             $this->pgcatFiles(),
+            $this->variantShape(),
         ];
 
         // `asks()` rather than a conditional in each caller: the rows that need something outside
         // the process are declared in one table, so which ones a bounded run leaves out is one
-        // decision rather than four that could disagree. See REACHES_OUT.
+        // decision rather than six that could disagree. See REACHES_OUT.
         if ($this->asks('pgcat supervisor')) {
             $rows[] = $this->pgcatSupervisor();
         }
@@ -1551,6 +1578,87 @@ class DbDoctor extends Command
             . ConfigValue::string($flipper->status()['config_path'])
             . ' is writable',
         );
+    }
+
+    /**
+     * The shape of what a flip would swap in — the row above judges whether a flip can *read and
+     * write* the files, and this one judges whether the file it would write is one this installation
+     * can serve.
+     *
+     * WHY A ROW OF ITS OWN
+     *   Every pgcat row before this one is about an ability — the paths resolve, the files are
+     *   readable, the command runs, the pooler answers — and none of them is about *content*. A
+     *   variant can be readable, writable and swapped in cleanly and still be the wrong shape: the
+     *   writer-only file still declaring the readers it exists to leave out, a variant with no pool
+     *   for the database its own connection writes through, or a target whose pools are half the
+     *   readers variant's because a template was rendered twice or a pool was commented out. Every
+     *   one of those ends the same way — pgcat validates its servers when it starts, so a flip to a
+     *   file like that is a pooler that does not come back — and until now the package found out by
+     *   watching the pooler fail to answer, if it found out at all.
+     *
+     *   It is also the half a flip has never rehearsed. `db:pgcat-flip --dry-run` performs the steps
+     *   that leave nothing behind and reports the ones that do not, and the file's *shape* is
+     *   neither: it is a read of three files and a resolver, so both surfaces ask for it and this row
+     *   is the preflight half. The reading itself is `PgcatConfigFlipper::variantShape()` — one
+     *   reading, two surfaces, the same sentence in both — so a rehearsal and a release gate cannot
+     *   disagree about a variant.
+     *
+     * WHAT IT READS, AND WHAT IT DELIBERATELY DOES NOT
+     *   The three configured files, the pool names the pinned connection is written with, and the
+     *   host's own resolver for the one reading about addresses. It does not ask the running pooler
+     *   (that is `pool probe`, and that row is the one left out of a bounded run), does not write, and
+     *   does not care whether the pooler is up: the question is what the file *is*, which is a fact the
+     *   pooler's own state cannot change. An inert flipper is not judged — nothing swaps a variant
+     *   there — which is the line `pgcat files` and `pgcat mode` draw as well.
+     *
+     *   The one warning is a pool whose addresses do not resolve *from here*. It is reported rather
+     *   than failed because resolution is a fact about the host that asks: a build container, a
+     *   runner or a release engineer's laptop is not the network the pooler will start in, and a
+     *   preflight that failed on it would refuse a deploy over its own DNS. The sentence says what the
+     *   boot would prune and why that matters, which is the fact an operator can act on.
+     *
+     * A failure here carries no `suggestion`: the repair is a pool name, a renderer or an address
+     * resolver, and none of them is a value this package can state for somebody else's variant.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function variantShape(): array
+    {
+        $name = 'variant shape';
+
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row($name, self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row($name, self::FAIL, 'the flipper could not be built: '.$e->getMessage());
+        }
+
+        // Moot while the flipper is inert, exactly like `pgcat files`: nothing swaps a variant, so no
+        // variant's shape is anything to an installation that will not put one in front of pgcat.
+        if (!$flipper->isEnabled()) {
+            return $this->row($name, self::PASS, 'flipper is not armed — no variant is swapped in, so none is asked what it declares');
+        }
+
+        $shape = $flipper->variantShape();
+        $failures = $shape->failures();
+
+        if ($failures !== []) {
+            return $this->row($name, self::FAIL, implode('; ', array_column($failures, 'sentence')));
+        }
+
+        $warnings = $shape->warnings();
+
+        if ($warnings !== []) {
+            return $this->row($name, self::WARN, implode('; ', array_column($warnings, 'sentence')));
+        }
+
+        // Neither a pass nor a silence beyond the two: `summary()` says which of the two states it is
+        // — a shape that was held against the connection and holds, or a connection naming no pool a
+        // variant declares, which is nothing to compare rather than something that agreed.
+        return $this->row($name, self::PASS, $shape->summary());
     }
 
     /**
@@ -3171,7 +3279,7 @@ class DbDoctor extends Command
      * connection came from without opening the config file.
      *
      * The bounded clause is not decoration. `--connection-only` prints short by design, and a
-     * report that is short without saying why reads as a report in which four checks passed —
+     * report that is short without saying why reads as a report in which six checks passed —
      * which is the one thing a bounded run must never be mistaken for. So the rows left out are
      * named, in the shape the object states them as absent names.
      *
@@ -3241,7 +3349,7 @@ class DbDoctor extends Command
      * `conclude()`, which is where the two runs meet.
      *
      * `connection_only` sits beside `strict` because it is the other flag that changes the *run*,
-     * and its claims are the ones a gate cannot make from the rows: a bounded run leaves four rows
+     * and its claims are the ones a gate cannot make from the rows: a bounded run leaves six rows
      * out of `checks` entirely, so a job that selects a row by name has to be able to see that this
      * report was never going to carry it. The rows absent are the ones named in the doctor's own
      * record, and the rendered run prints them; here the flag is what says they are missing.

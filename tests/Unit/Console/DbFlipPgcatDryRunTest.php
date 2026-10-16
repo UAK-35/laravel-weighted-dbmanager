@@ -168,6 +168,124 @@ final class DbFlipPgcatDryRunTest extends TestCase
     }
 
     /**
+     * The shape of what a rehearsal is about to swap in, read as a step of the rehearsal itself and
+     * failing the run rather than the pooler.
+     *
+     * A writer-only variant that still declares a reader is a file whose whole purpose is undone,
+     * and a flip to it is a pooler started on a configuration with a pool the file it replaced had
+     * left out — which is the failure pgcat reaches by refusing to start, at the window boundary,
+     * with nothing looking. The rehearsal is where it is cheapest to find, so it is performed before
+     * anything is written and reported as the step it is: the file the flip would take is one this
+     * installation cannot serve.
+     */
+    public function test_a_rehearsal_fails_when_the_variant_it_would_swap_in_has_the_wrong_shape(): void
+    {
+        $installation = $this->pooledInstallation(noReaders: "[pools.writer_db_1]\n[pools.reader_db_1]\n");
+
+        $before = self::snapshot($installation);
+
+        $exit = Artisan::call('db:pgcat-flip', ['--dry-run' => true]);
+        $output = Artisan::output();
+
+        $this->assertSame(1, $exit, $output);
+        $this->assertStringContainsString('a flip would fail', $output, $output);
+        $this->assertStringContainsString('swrr.pgcat.no_readers_path', $output, 'the sentence names the file');
+        $this->assertStringContainsString('declares pool "reader_db_1"', $output, 'and the pool it should not');
+        $this->assertStringContainsString('a flip would swap in a file this installation cannot serve', $output);
+
+        // The step it stopped at, and the steps it never reached: the failure is before the temp
+        // write, because a rehearsal that proved the write and then refused would have written into
+        // the target's directory to answer a question the shape had already answered.
+        $this->assertStringContainsString('variant shape', $output);
+        $this->assertStringNotContainsString('write temp', $output);
+        $this->assertStringNotContainsString('rename', $output);
+
+        $this->assertSame($before['files'], self::snapshot($installation)['files'], 'a refused rehearsal still changes nothing');
+        $this->assertFalse($installation->stateRecorded());
+    }
+
+    /**
+     * The same refusal for the other end of the shape: the file in place has lost a pool the pinned
+     * connection writes through, so the target pgcat is running on is one the installation cannot
+     * serve — the state a pool commented out of a rendered variant leaves behind.
+     */
+    public function test_a_rehearsal_fails_when_the_file_in_place_lost_a_pool_the_connection_names(): void
+    {
+        $this->pooledInstallation(inPlace: "[pools.reader_db_1]\n[pools.reader_db_2]\n");
+
+        $exit = Artisan::call('db:pgcat-flip', ['--dry-run' => true]);
+        $output = Artisan::output();
+
+        $this->assertSame(1, $exit, $output);
+        $this->assertStringContainsString('swrr.pgcat.config_path', $output, $output);
+        $this->assertStringContainsString('declares no pool "writer_db_1"', $output);
+        $this->assertStringContainsString('the file pgcat is running on has no pool for a write to reach', $output);
+    }
+
+    /**
+     * The other side of the rule, and the reason it is a rule rather than a fixture: an installation
+     * whose variants declare the pools the connection is written with rehearses to a flip, and the
+     * step says what it compared — the shape is read, not merely present.
+     */
+    public function test_a_rehearsal_of_a_consistent_tree_reports_the_shape_it_read(): void
+    {
+        $installation = $this->pooledInstallation();
+
+        $exit = Artisan::call('db:pgcat-flip', ['--dry-run' => true]);
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exit, $output);
+        $this->assertStringContainsString('would flip: never → readers', $output, $output);
+        $this->assertStringContainsString('variant shape', $output);
+        $this->assertStringContainsString('3 configured variants parse', $output);
+        $this->assertStringContainsString('the writer-only variant declares none of the 2 read pools', $output);
+        $this->assertStringContainsString('rename', $output, 'a shape that holds still rehearses the swap');
+
+        $this->assertFalse($installation->stateRecorded());
+    }
+
+    /**
+     * An installation a flip would act on and the rehearsal has a *shape* to read: the three files
+     * declare pools, and the connection the package follows is written with the names it may hold
+     * them to — a pool to write through and two to weight for reads.
+     *
+     * The connection is the whole of what makes the reading applicable rather than silent. It is a
+     * pooler-fronted connection: its `database` is the pool pgcat addresses, and each read entry
+     * names its own, which is what a weighted pick between pools looks like. A connection whose
+     * `database` is a database name no variant declares is not judged, which is the line
+     * `VariantShapeTest` pins on its own.
+     *
+     * @param string|null $inPlace the file in place, or null for the shape a flip can serve
+     * @param string|null $noReaders the writer-only variant, or null for the shape a flip can serve
+     */
+    private function pooledInstallation(?string $inPlace = null, ?string $noReaders = null): PgcatInstallation
+    {
+        $installation = $this->installation();
+
+        $readers = "[pools.writer_db_1]\n[pools.reader_db_1]\n[pools.reader_db_2]\n";
+
+        file_put_contents($installation->path('config_path'), $inPlace ?? $readers);
+        file_put_contents($installation->path('readers_path'), $readers);
+        file_put_contents($installation->path('no_readers_path'), $noReaders ?? "[pools.writer_db_1]\n");
+
+        config()->set('database.connections.pooler', [
+            'driver' => 'pgsql',
+            'host' => '127.0.0.1',
+            'port' => 5433,
+            'database' => 'writer_db_1',
+            'read' => [
+                ['host' => '127.0.0.1', 'port' => 5433, 'database' => 'reader_db_1'],
+                ['host' => '127.0.0.1', 'port' => 5433, 'database' => 'reader_db_2'],
+            ],
+        ]);
+        config()->set('database.default', 'pooler');
+
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        return $installation;
+    }
+
+    /**
      * An installation a flip would act on: the variants and the target exist, supervisor answers, the
      * resolver is in readers mode over a full-day window, and nothing has been recorded yet — so the
      * mode has changed and a flip is exactly what a run would take.

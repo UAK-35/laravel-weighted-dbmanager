@@ -26,6 +26,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
+use Uak35\WeightedDbManager\Pgcat\VariantShape;
 use Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
@@ -503,7 +504,17 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
 
             $current = self::currentConnection($config);
 
+            // The pool names the connection is written with, read out of its own entry rather than
+            // out of the pgcat block: a pool is what pgcat addresses a database by, so the names
+            // come from the connection that a query is pinned with. The flipper is told them here
+            // because it holds the pgcat slice and not the connection's — and one reading of them
+            // (`VariantShape::namedPools()`) is what the shape step, the row and this pass share.
+            $connectionPools = VariantShape::namedPools(
+                ConfigValue::assoc($config->get("database.connections.{$current['connection']}")),
+            );
+
             return new PgcatConfigFlipper(
+                connectionPools: $connectionPools,
                 resolver: $app->make(TimeWindowResolver::class),
                 // The audit record, resolved by the same call the audit itself resolves it with
                 // (see BootAudit::resolveFile) rather than by a second expression here: the flipper
