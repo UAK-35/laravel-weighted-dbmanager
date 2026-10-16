@@ -30,74 +30,59 @@ Every number below that the register holds — sections 2 and 3 — was read off
 2026-10-15, with the remote asked directly (`git ls-remote`, which named the same commit the local
 ref does) rather than trusted from the local `origin/dev` ref. Section 1 was re-taken on 2026-10-16,
 the date above, and it is the one part of this file that describes *now* rather than the commit it is
-read against — which this time means a batch that is written and green and not yet committed.
+read against — which this time means nothing is pending: the batches the notes before this one
+carried are committed, and this note is the commit after the register.
 
 ---
 
 ## 1. Pending — written, green, uncommitted
 
-**Three batches are pending, and nothing in any of them is committed: the bounded preflight, the
-causes of a silent schedule, and the read path's two cancellations.** The first is the doctor's
-newest row and its newest mode. `boot environment` reports the file this boot read its settings from
-(`environmentFilePath()`, so a `loadEnvironmentFrom()` name is reported rather than a hardcoded
-`.env`) and whether the configuration is cached — warning when the cache predates the file, which is
-the shape an image that caches at build time and mounts its environment at run time has — and the
-object publishes `swrr_connection` beside the `default_connection` it followed, because unset and
-set-to-the-default are the same routing and two different things to change. `--connection-only`
-then leaves four rows out entirely — the store's two (`store probe`, `store reachability`), the
-supervisor's (`pgcat supervisor`) and the pooler's (`pool probe`) — because a row that cannot be
-answered reports the container's own missing prerequisite, so an image was failed over a directory
-the image never owned.
+**Nothing is pending: every batch the notes before this one carried is committed on `dev` and
+unpushed.** Section 2 lists the fifteen commits, and section 3's `### Added` is where the prose that
+used to stand here belongs — a batch that has landed is a capability a consumer can install rather
+than a file somebody has to be told about. Two of them are worth naming anyway, because the cycle
+ended on them.
 
-The second is what a `stale` verdict cannot see. `stale` answers whether the per-minute entry is
-producing runs, and its sentence names the cause that is nearly always the right one — nothing is
-running it — while three others leave the state file it reads unchanged: the store the runs' overlap
-mutexes live in and whether it answered a read, how many entries on the built schedule run
-`db:pgcat-flip`, and the file the boot window is measured from with the mode and owner it was found
-with. All three are read beside the verdict — under `causes` in `db:scheduler-watchdog`, and on
-`db:doctor`'s `schedule beat` row — and none of them moves an exit code, because they are readings
-rather than verdicts.
+The first is the shape of the file a flip would swap in. `pgcat files` judged whether a flip can
+*read and write* the files, and nothing judged what the file it writes *is* — which matters because
+pgcat validates its servers when it starts, so a variant that is readable, writable and swapped in
+cleanly and still the wrong shape is a pooler that does not come back. `Pgcat\VariantShape` reads the
+three configured variants for the pools they declare and holds one against the pool names the pinned
+connection is written with: a `[pools…]` header no pool name can be read out of, a variant declaring
+no pool that connection writes through, a readers variant missing a pool it weights, a writer-only
+variant that still declares one of the readers it exists to leave out, and a file in place that is
+half a rendered variant. It is one reading with two surfaces — `db:doctor`'s `variant shape` row,
+which a `--connection-only` run answers because it reads files and asks the running pooler nothing,
+and a `variant shape` step in `db:pgcat-flip --dry-run`, which runs before the temp write so a
+rehearsal that would refuse has written nothing into the target's directory — and its one warning is
+a pool whose addresses do not resolve from where the reading was asked, because the container's boot
+prunes such a pool and a flip to that file would put the failure the prune exists for back.
 
-The third is the read path. This package chooses the endpoint a read lands on, and that endpoint can
-cancel the read as `40001` — a standby cancelling the query rather than delay recovery for the row
-versions its snapshot needed — or `57014`, its own `statement_timeout` being reached. Neither is
-visible from Laravel's configuration, because a connection names hosts and a parameter group names
-what they do, so an installation could route every read at an endpoint capped at a fraction of the
-writer's while every row read well. Three rows read what a routed read can expect — `read caps`,
-`standby feedback` and `read/write pair` — the first two behind `swrr.read_path.enabled`, off in the
-shipped config because they are one connection per endpoint, and the third asking nothing at all;
-and the contract an application answers the two cancellations with, with the measurement it came
-from, is `docs/read-path-cancellations.md`.
+The second is `docs/deployment-contract.md`, the one thing in this cycle that is not a reading: what
+a deployment of this package has to have — the three rendered variants and the prune before pgcat
+starts, the pooler's pinned and compiled version, the boot stamp, the per-minute entry with its window
+and its `flock`, the writable state directory, a spawnable supervisor, the container health check that
+asks supervisor and the port rather than a cached route, the store the weighted state lives in and
+what its absence means, and the read caps that need not match the write cap — each with what it costs
+when it is missing and the row that asks about it, and each citing the consuming application's own
+record by name, because this package's suite reads its own tree and cannot open another repository's.
+Beside those two, three smaller items landed: the token form of a machine record, committed so a clone
+has one to copy from, and two readings of a path written in prose — a git header's tab, and a space in
+a name — pinned in `MachinePathsTest` so the guard's silences stay earned.
 
-**Six files are new** — the six rows of the table below. For the schedule's causes:
-`src/Pgcat/ScheduleCauses.php`, `tests/Support/FakeCache.php` and
-`tests/Unit/Pgcat/ScheduleCausesTest.php`. For the read path:
-`src/Database/Weighted/EndpointReadings.php`, `tests/Unit/Weighted/EndpointReadingsTest.php` and
-`docs/read-path-cancellations.md`. The edits are `src/Console/Commands/DbDoctor.php` (the
-`boot environment` row, the bounded mode's list, the `schedule beat` readings and the three read-path
-rows with the switch that arms them), `src/Database/Weighted/SingleHostProbe.php` (the read path's own
-transport: one query to one host, on a connection purged whatever the query did),
-`src/Pgcat/FlipSchedule.php` (one reading of "how many entries run this command", shared by the
-duplicate guard and the report), `src/Pgcat/PgcatConfigFlipper.php` (its mode-and-owner reading made
-public, so a stamp quotes the same facts the file rows do),
-`src/Console/Commands/DbSchedulerWatchdog.php` (the causes under the verdict and on the rendered line,
-with the store named rather than asked), `config/db-manager.php` (the read path's switch and its
-bound), and the suites and records each of them is read through: `tests/Unit/Console/DbDoctorTest.php`,
-`tests/Unit/Console/DbSchedulerWatchdogTest.php`, `tests/Unit/Pgcat/FlipScheduleTest.php`,
-`tests/Support/Handoff.php` for the words above, `README.md`, `docs/db-doctor-json.md`,
-`docs/documented-exit-codes.md`, `docs/prose-numbers.md`, `docs/scheduler-watchdog.md`,
-`docs/switch-values.md` and three `## Unreleased` entries in `CHANGELOG.md`.
-
-**Nothing in those batches is committed yet.** Every commit this note *lands* is on `dev` with the commit
-before it: the readings and the port plan (`3f25180`), the schedule watchdog (`af1fddb`), the api page
-a past tree renders (`e06098b`), the published config's generation (`bbfd422`), the paths a flip cycle
-writes (`f782eb0`), the supervisor's three failures (`3c2e61f`), the two mechanisms that can move the
-pooler being reported by name (`5af2df5`) and the note that describes them (`fbec6d6`), each with the
-changelog entry that weighs it. The batches above sit on top of all of it, written and green —
-`DbDoctorTest` 179 tests, `DbSchedulerWatchdogTest` 33, `ScheduleCausesTest` 15 with one skip on this
-workstation, `EndpointReadingsTest` 27, `tests/Unit/Docs` green — and waiting for a commit; the schedule
-watchdog the note before this one called pending is section 3's `### Added` now rather than a file
-here.
+**All of it is committed, and none of it is pushed.** Every commit this note *lands* is on `dev` with
+the commit before it: the guarded commit path (`2306b43`), the readings and the port plan (`3f25180`),
+the schedule watchdog (`af1fddb`), the api page a past tree renders (`e06098b`), the published config's
+generation (`bbfd422`), the paths a flip cycle writes (`f782eb0`), the supervisor's three failures
+(`3c2e61f`), the two mechanisms that can move the pooler being reported by name (`5af2df5`) and the
+note that describes them (`fbec6d6`), the read path with a silent schedule's causes and the bounded
+preflight that carries them (`ae0e3e8`), the shape of what a flip would swap in (`2e5acd3`), and the
+deployment's contract with the machine-record sample and the two prose-path readings beside it
+(`1ce9e2f`) — each with the changelog entry that weighs it. The gate is green at this register: 13
+checks, 1390 tests, 8971 assertions, 5 skipped, 0 failures, 754.7s, with `DbDoctorTest` 179 tests,
+`VariantShapeTest` 12, `DbFlipPgcatDryRunTest` 6, `PgcatConfigFlipperTest` 123 (one skip on this
+workstation), `MachinePathsTest` 34 and `tests/Unit/Docs` 111 among them. The batches the notes before
+this one called pending are section 3's `### Added` now rather than files here.
 
 **The release.** `33afd4e` — *Release v0.2.0-alpha3* — is what `bin/release.php` wrote: the sixteen
 entries under `## Unreleased` promoted into `## 0.2.0-alpha3 - 2026-10-11` (six `### Added`, six
@@ -119,11 +104,13 @@ five tests to the store they judge: four of them read a run's exit code without 
 `db:doctor`'s `store reachability` row PINGs, so on a workstation with a Redis answering they passed
 by accident and on the runner all four failed while every row they assert on read correctly.
 
-**What this note lands with.** Nothing beside it: the register commit it describes is `5af2df5`, and
-what that one changes is section 3's `### Added` — two mechanisms that can own the pooler's mode at
-once are now reported by name rather than passed over by `db:doctor`'s `flip schedule` row, which is a
-sentence in `FlipSchedule`, a boot finding (`swrr.pgcat.schedule.both_armed`) and a warning that
-`--strict` fails — with the two `### Fixed` entries the published copy's own comments had contradicted.
+**What this note lands with.** Nothing beside it: the register commit it describes is `1ce9e2f`, and
+what that one changes is section 3's `### Added` — the deployment contract, with the machine-record
+sample and the two prose-path readings in `MachinePathsTest` — on top of the variant shape the commit
+before it added, the boot environment a row now names with the cached configuration beside it and the
+bounded `--connection-only` preflight a build container can run, the three readings beside a silent
+schedule's verdict, and the read path's caps, standby feedback and pinned pair, with
+`docs/read-path-cancellations.md` for the contract an application answers a cancellation by.
 The note itself is prose only, which is what a re-take is: the rendered blocks come out of git and
 nothing else in it claims a fact a command could not answer.
 
@@ -141,7 +128,7 @@ php bin/inventory.php --check --at=8742456
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with this tree — 5, 30 and 30 line(s) stale in files.tsv,
+  --> exit 1: the inventory is out of step with this tree — 6, 40 and 38 line(s) stale in files.tsv,
       methods.tsv and surface.tsv, each naming the row it does not hold
 ```
 
@@ -171,12 +158,6 @@ same sentence the guard gives: name it, or take it out of the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/read-path-cancellations.md` | the record for them: the two cancellations and the SQLSTATE that tells them apart, where this package stops rather than re-running a statement, the alarm an installation can install for itself, and the measurement the readings came from |
-| `src/Database/Weighted/EndpointReadings.php` | the three readings a routed read can expect, taken in one sweep: the caps on both sides, whether a standby keeps `hot_standby_feedback` on, and whether the connection declares the `read`/`write` pair a pinned statement needs |
-| `src/Pgcat/ScheduleCauses.php` | the three readings beside a silent schedule's verdict — the store its runs' mutexes live in and whether it answered, how many entries run the flip, and the boot stamp with the mode and owner it was found with |
-| `tests/Support/FakeCache.php` | the cache binding those readings are driven against: it hands out a repository that answers or refuses to hand out one at all, and it records which store was asked for |
-| `tests/Unit/Pgcat/ScheduleCausesTest.php` | the suite for them — an entry on a real schedule, a store that answers and one that does not, and a stamp whose mode the platform either respects or ignores |
-| `tests/Unit/Weighted/EndpointReadingsTest.php` | the suite for them, driven by an injected sweep so no row opens a socket — every shape a cap arrives in (`90s`, `2min`, `600ms`, and `0` as a cap of nothing), a standby with the setting off beside an answer that did not carry it, and the pair read whatever the switch says |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -193,10 +174,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `5af2df5` — *feat: two mechanisms armed at once are reported by name, not passed over* |
+| HEAD | `1ce9e2f` — *docs: the deployment's contract is written down, and a clone has a machine record to copy* |
 | `origin/dev` | `2744a13` — *docs: the handoff note is re-taken at the release commit, and its records reading is its transcript* |
-| Unpushed | 11 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 4, feat 6, fix 1 |
+| Unpushed | 15 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 6, feat 8, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -205,12 +186,13 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is eleven commits ahead of `origin/dev`: the guarded commit path that moved out of the
+The register is fifteen commits ahead of `origin/dev`: the guarded commit path that moved out of the
 consuming application's `git/commit_paths.py` and into this repository's own `git/`, the readings and
-the port plan, the three re-takes this cycle's notes were taken in, and this cycle's six
-capabilities — the schedule that can be watched, the api page a past tree renders, the published
-config that says which key set it is, the file preconditions that cover a whole flip cycle, the
-supervisor's three failures, and the two mechanisms that can move the pooler being reported by name.
+the port plan, the re-takes this cycle's notes were taken in, and this cycle's eight capabilities —
+the schedule that can be watched, the api page a past tree renders, the published config that says
+which key set it is, the file preconditions that cover a whole flip cycle, the supervisor's three
+failures, the two mechanisms that can move the pooler being reported by name, the read path's three
+readings with the bounded preflight beside them, and the shape of the file a flip would swap in.
 Unpushed at the register
 means the tip its own release was pushed from, which is
 why the row reads what it does and not a backlog — `bin/release.php` refuses to tag while `HEAD` is
@@ -222,24 +204,25 @@ travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+1ce9e2f  docs: the deployment's contract is written down, and a clone has a machine record to copy
+2e5acd3  feat: the file a flip would swap in is judged by its shape, on both surfaces
+ae0e3e8  feat: the read path, a silent schedule's causes, and a preflight a build can run
+fbec6d6  docs: the handoff note is re-taken at the mechanisms-contend finding
 5af2df5  feat: two mechanisms armed at once are reported by name, not passed over
 5ce2422  docs: the handoff note is re-taken at the supervisor's three failures
 3c2e61f  feat: a supervisor failure names which of three things went wrong
 6dc5198  docs: the handoff note is re-taken at the flip cycle's file preconditions
 f782eb0  feat: the paths a flip cycle writes are judged beside the ones a flip step names
 eb884fe  docs: the handoff note is re-taken at the published config's generation
-bbfd422  feat: a published config says which key set it is, and the doctor reads the difference
-e06098b  feat: the API page of a past tree is read out of git, so a release's page is a question
-af1fddb  feat: a schedule that stops producing runs is a fault, and four surfaces say so
-3f25180  docs: the application is read file by file and by commit, and the port plan follows
 ```
 <!-- /handoff:log -->
 
 The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
 block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
 commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
-register the range is one commit longer than the ceiling, so the listing stops at `3f25180` and
-`2306b43` is the oldest of the eleven that it does not carry.
+register the range is five commits longer than the ceiling, so the listing stops at `eb884fe`, and
+`2306b43` is the oldest of the five it does not carry — both of them named there by
+`git log --oneline origin/dev..HEAD`, which is the whole of it in every state.
 
 One consequence of that state is worth naming before the next release: the interlock the release
 checks is *satisfied* at this register, which is what let the tag be cut — so what stands between this
@@ -263,20 +246,23 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3` |
 | The latest of them | `v0.2.0-alpha3` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 10 entries — 6 added, 4 fixed, 0 changed |
-| The notes weigh as | minor — six capabilities, which is the rung they take, and four repairs beside them |
+| `## Unreleased` at the basis | 17 entries — 12 added, 5 fixed, 0 changed |
+| The notes weigh as | minor — twelve capabilities, which is the rung they take, and five repairs beside them |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: `v0.2.0` does not exist, so a suffixless version is still the lane ahead. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries `### Added` six times and `### Fixed` four times at the register, which the
-weighing reads as `minor` — six capabilities the rung is for, and the four repairs that landed beside
-them. The register is therefore a branch whose release would publish the schedule that can be
-watched, the api page a past tree renders, the published config that says which key set it is, the
-file preconditions that cover a whole flip cycle, the supervisor's three failures, the two mechanisms
-that can own the pooler's mode being reported by name, and the four repairs the release before it did
-not carry — as `0.2.0`,
-the first version with no suffix, which is the lane the absent version leaves open.
+and the section carries twelve entries under `### Added` and five under `### Fixed` at the register,
+which the weighing reads as `minor` — twelve capabilities the rung is for, and the five repairs that
+landed beside them. The register is therefore a branch whose release would publish the schedule that
+can be watched, the api page a past tree renders, the published config that says which key set it is,
+the file preconditions that cover a whole flip cycle, the supervisor's three failures, the two
+mechanisms that can own the pooler's mode being reported by name, the boot-environment row and the
+bounded `--connection-only` preflight that carries it, the three readings beside a silent schedule's
+verdict with the contract an application answers a cancellation by, the shape of the file a flip would
+swap in, and what a deployment of this package has to have — with the five repairs the release before
+it did not carry — as `0.2.0`, the first version with no suffix, which is the lane the absent version
+leaves open.
 
 ### The release that cut this tag, and the row it could not write
 
@@ -326,9 +312,8 @@ php bin/release.php --weigh --branch=dev --dry-run
   push          git push origin dev --follow-tags
 ```
 
-Three lines of it are the state this note describes rather than a step of a release. `ci` is the
-interlock the eleven unpushed commits leave: a real run refuses to tag until they are on `origin/dev`,
-which is section 2's job and the `pkg-push` runbook's rather than this note's. `CHANGELOG` is the ten
+Three lines of it are the state this note describes rather than a step of a release.`ci` is the interlock the fifteen unpushed commits leave: a real run refuses to tag until they are on
+`origin/dev`, which is section 2's job and the `pkg-push` runbook's rather than this note's. `CHANGELOG` is the seventeen
 entries section 3's table counts, which the promotion would move into `0.2.0 - 2026-10-15`. `branch`
 is `(dirty)` because the re-take is measured in the working tree it was taken in; the note commit is
 what makes it clean.
@@ -341,16 +326,20 @@ answer about the working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Ten entries at the register, and they are this cycle's: six `### Added` for the schedule that can
-be watched, the api page a past tree renders, the published config that says which key set it is, the
-paths a flip cycle writes, the supervisor's three failures and the two mechanisms that can own the
-pooler's mode being reported by name, and four `### Fixed` for the repairs the release before this one
-left — the guarded commit path, and the records reading that holds the commands section 1 quotes —
-beside the two the register itself settled: the published copy's `swrr.pgcat.schedule.enabled`, whose
-shipped default quietly prevented the inheritance every surface promised, and the rule its
-`interval_minutes` falls back by. The sixteen entries the tag carries — six `### Added`, six
-`### Changed`, four `### Fixed` — are the pgcat cycle's work and the guard repairs before them, and the
-promotion would carry all ten of these with them.
+Seventeen entries at the register, and they are this cycle's: twelve `### Added` for the schedule that
+can be watched, the api page a past tree renders, the published config that says which key set it is,
+the paths a flip cycle writes, the supervisor's three failures, the two mechanisms that can own the
+pooler's mode being reported by name, the boot environment a row now names with the cached
+configuration beside it and the bounded preflight a build container runs, the three readings beside a
+silent schedule's verdict, the read path's caps, standby feedback and pinned pair, the shape of the
+file a flip would swap in, and the contract a deployment of this package has to meet; and five
+`### Fixed` for the repairs the release before this one left — the guarded commit path, and the
+records reading that holds the commands section 1 quotes — the two the register itself settled (the
+published copy's `swrr.pgcat.schedule.enabled`, whose shipped default quietly prevented the
+inheritance every surface promised, and the rule its `interval_minutes` falls back by), and the
+machine record a clone now copies. The sixteen entries the tag carries — six `### Added`, six
+`### Changed`, four `### Fixed` — are the pgcat cycle's work and the guard repairs before them, and
+the promotion would carry all seventeen of these with them.
 
 What those sixteen change for a consumer is written in the released section rather than repeated here.
 What is *not* in them is anything the three `.tsv` records, `API.md` or the changelog cannot account

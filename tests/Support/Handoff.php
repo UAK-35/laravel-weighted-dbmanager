@@ -611,22 +611,17 @@ final class Handoff
      *
      * WHAT IS HERE, AND WHY A LINE LEAVES
      * -----------------------------------
-     *   A line is words about a *pending* file, so it goes when the file lands: the six lines that
-     *   stood here described the files the note before this one was taken with still carrying, and
-     *   they were removed when those batches were committed, because prose kept beside a table that
-     *   cannot hold its rows is the stale copy this mechanism exists to refuse. What is below is the
-     *   same rule read forwards — the files this note's own batches add, each with the one sentence a
-     *   reader needs in order to know what it is. The next file the register does not carry asks for
-     *   its line again, by name, which is the refusal doing its work rather than an accident.
+     *   A line is words about a *pending* file, so it goes when the file lands: the lines that stood
+     *   here described the files the notes before this one were taken with still carrying, and they
+     *   were removed when those batches were committed, because prose kept beside a table that cannot
+     *   hold its rows is the stale copy this mechanism exists to refuse. The rule reads forwards too:
+     *   the next file the register does not carry asks for its line again, by name, which is the
+     *   refusal doing its work rather than an accident — and that is where this map stands now, empty
+     *   at a register that carries every file the notes before it described.
      *
      * @var array<string, string>
      */
-    private const PENDING_DESCRIPTIONS = [
-        '.agents/sample.machine.local.json' => 'the token form of a machine record, committed so a fresh clone has one to copy: every fact that differs between two machines is a `__TOKEN__` there, and `tests/Unit/Support/MachinePathsTest.php` holds it to that and to the guard reading nothing in it',
-        'src/Pgcat/VariantShape.php' => 'the shape of what a flip would swap in: the three configured variants read for the pools they declare, held against the pool names the pinned connection is written with — a `[pools…]` header no pool name can be read out of, a write pool no variant declares, a read pool a readers variant leaves out, a writer-only variant that still declares one, a file that is half a rendered variant, and the one warning, a pool whose addresses do not resolve from here',
-        'tests/Unit/Pgcat/VariantShapeTest.php' => 'the suite for it — each case a small installation in the temp directory, the resolver injected, and the two readings told apart: what a variant declares, and what this host can resolve',
-        'docs/deployment-contract.md' => 'the record for the deployment itself: the three rendered variants and the prune before pgcat starts, the pinned and compiled pooler, the boot stamp, the per-minute entry with its window and its lock, the writable state directory, a spawnable supervisor, the container health check that asks the pooler, the store and what its absence means, the read caps that need not match the write cap, and the two deploy gates that read this package — each with the row that asks about it',
-    ];
+    private const PENDING_DESCRIPTIONS = [];
 
     /**
      * The blocks the note carries, so a test can ask for each of them by name.
