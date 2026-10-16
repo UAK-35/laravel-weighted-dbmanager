@@ -2556,7 +2556,10 @@ minor, a removed or renamed public symbol is a minor while 0.x and a major after
 forbids it, so a breaking change cannot be shipped as a patch. It then promotes
 `## Unreleased` to the released heading with a compare link, refreshes the three
 inventory files in the same commit, keeps both dev-lane branch aliases
-(`dev-main`, `dev-dev`) on the line being developed, and refuses to continue on a
+(`dev-main`, `dev-dev`) on the line being developed, moves the three tag rows
+`HANDOFF.md`'s section 3 names — the tags on the branch, the latest of them, and
+the suffixless version that is not there, all three of which the tag it is about to
+cut falsifies — and refuses to continue on a
 dirty tree, the wrong branch, an existing tag, an empty release section, or a
 commit CI has not verified — the tip of the branch has to be on the remote with a
 finished, passing workflow run for it, since the release commit itself cannot have

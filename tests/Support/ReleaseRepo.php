@@ -271,6 +271,38 @@ final class ReleaseRepo
         $this->write('CHANGELOG.md', "# Release Notes\n\n## Unreleased\n\n" . $unreleased);
     }
 
+    /**
+     * Give the fixture a handoff note and commit it — what a release that moves section 3's tag
+     * rows needs to have something to move, and a clean tree to be cut from.
+     *
+     * `null` copies this package's own note rather than laying out a fixture of one, because the
+     * shape a release has to move is *that* note's: the labels section 3 writes, the two-column
+     * rows, and the sentences a version sits inside. A note invented here would agree with itself
+     * about all three, which is the agreement under test.
+     *
+     * A string is written instead, for the states a release is refused in — a row reworded, a row
+     * with no version in it, or one label carried by two rows.
+     */
+    public function withNote(?string $note = null): self
+    {
+        $this->write('HANDOFF.md', $note ?? self::note());
+        $this->commit('docs: the note a release moves');
+
+        return $this;
+    }
+
+    /** This package's own note, as the bytes on disk: what `withNote()` copies. */
+    public static function note(): string
+    {
+        $note = @file_get_contents(dirname(__DIR__, 2) . '/HANDOFF.md');
+
+        if ($note === false) {
+            throw new RuntimeException('Could not read the package\'s own HANDOFF.md');
+        }
+
+        return $note;
+    }
+
     /** Stage everything and commit it, so a signal has something to read. */
     public function commit(string $message): void
     {

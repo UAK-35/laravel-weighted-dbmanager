@@ -1227,6 +1227,28 @@ final class Handoff
     }
 
     /**
+     * The lines the three tag rows sit on, read through the same `claim()` the readers above use.
+     *
+     * A release moves those rows — the ones section 3 names the tags, the latest of them and the
+     * absent suffixless version in — and it has to move *these* rows: a label compared one way by
+     * `bin/release.php` and another way here would leave this guard reading a tag the tree no
+     * longer has, on a commit already pushed. `HandoffNoteTest` holds the two readings together by
+     * asking the writer's diff to be exactly this answer, so neither side states the rule twice.
+     *
+     * @return array{tags: int, latest: int, absent: int}
+     *
+     * @throws RuntimeException when a row stops being there
+     */
+    public static function tagRowLines(): array
+    {
+        return [
+            'tags' => self::claim(self::UNRELEASED, 'Tags on the branch')['source'],
+            'latest' => self::claim(self::UNRELEASED, 'The latest of them')['source'],
+            'absent' => self::claim(self::UNRELEASED, 'A version with no suffix')['source'],
+        ];
+    }
+
+    /**
      * The version the note says a suffixless release would have to be, and says does not exist —
      * the sentence a prerelease's legality rests on.
      *

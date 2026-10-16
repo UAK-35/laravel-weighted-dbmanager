@@ -48,6 +48,7 @@ report the next version, it decides it.
 | Tag | Annotated: `git tag -a vX.Y.Z -m vX.Y.Z` |
 | Inventory | `files.tsv`, `methods.tsv` and `surface.tsv` are rewritten in the same commit, stamped with the tag being created (see [the inventory](#the-inventory)) |
 | API page | `API.md` is rendered from that record by `bin/api.php` and written into the same commit, so the page a consumer reads names the tag it was cut from rather than the one before it (see [the page a consumer reads](#the-page-a-consumer-reads)) |
+| HANDOFF.md | Section 3's three tag rows — the tags on the branch, the latest of them, and the suffixless version that is *not* there — are moved to the version being cut in the same commit, because the tag falsifies all three at once. Only the version in each row moves: the sentence around it is the note's. A package that keeps no note has nothing moved |
 
 `--dry-run` prints all of the above, the CHANGELOG head after promotion, and the
 exact git commands it would run — without writing, committing or tagging
@@ -403,6 +404,7 @@ row without one is a rail nobody has driven:
 | The declared bump is smaller than `--weigh`'s | Shipping a breaking change as a patch is the accident this policy exists to prevent. `--ignore-policy` overrides it, and the plan says so | `test_a_declared_bump_below_the_weighed_one_is_refused`, `test_ignore_policy_releases_anyway_and_says_so` |
 | The inventory is partly missing | The inventory is the only signal that carries the *file* a declaration came from, so it is the only thing that can witness a removal a second file's declaration hides, and the only thing that can witness anything on a tree with no tag. Weighing without it is the one direction a versioning signal must never be wrong in. Only a *partly present* record refuses: an entirely absent one has nothing to reproduce and is written by this release, and a stale stamp is repaired by the release that proceeds. The refusal names the missing file and `php bin/inventory.php --at=<stamp>`, and `--dry-run` reports it instead of refusing | `test_a_half_written_inventory_refuses_a_release_rather_than_weighing_without_it`, `test_the_named_repair_turns_the_refusal_into_a_weighed_release` |
 | The public surface changed and the notes do not account for it | The notes are the one signal a reader ever sees, and every other rail is satisfied by a section that is merely not empty: a new public method filed under `### Fixed` weighs a patch, the bump is taken from the surface, and the changelog then announces a fix while a consumer gained something to use. The comparison is the notes' own severity against the loudest signal that reads the surface, so a removal needs a `### Removed` entry and the refusal points at the heading to use. The refusal names the symbols. `--allow-silent-notes` overrides it, and `--dry-run` reports it instead of refusing | `test_an_addition_the_notes_do_not_account_for_is_refused`, `test_a_removal_the_notes_call_a_fix_is_refused`, `test_a_removal_filed_under_changed_is_refused_with_the_heading_to_use`, `test_the_inventory_alone_can_trip_the_rail`, `test_allow_silent_notes_releases_anyway_and_says_so`, `test_a_dry_run_warns_instead_of_refusing` |
+| A note whose tag rows cannot be moved | A release falsifies three rows of `HANDOFF.md`'s section 3 — the tags on the branch, the latest of them and the suffixless version that is not there — so it moves them. A row read by a label the note does not write, a row with no version in it, or two rows sharing one label stops the release before anything is written: the alternative is a tag whose note still names the tag before it, which CI reports once the tag has been fetched. A package that keeps no note is not this state — there is nothing to move | `test_a_note_whose_row_is_reworded_is_refused_before_anything_is_written`, `test_a_row_with_no_version_in_it_is_refused`, `test_two_rows_sharing_one_label_are_refused` |
 | Non-interactive shell | It asks before committing and tagging. `--yes` (or `--dry-run`) is required when stdin is not a terminal | `test_a_non_interactive_shell_is_refused_without_yes` |
 
 Every test named in this file is checked to exist, so a renamed test is a doc failure
@@ -458,8 +460,8 @@ state the next run recovers from rather than one it is stuck in
 
 A rail is not the only way a release stops, and the difference is worth knowing before
 reading an exit code as "nothing happened". A step of the release *itself* can fail — the
-CHANGELOG, the inventory, the API page or `composer.json` cannot be written, git will not take
-the index, or the push cannot run. A rail refuses before anything is written; these do not, so
+CHANGELOG, the inventory, the API page, `composer.json` or the note a release moves cannot be
+written, git will not take the index, or the push cannot run. A rail refuses before anything is written; these do not, so
 the tree may already have a promoted CHANGELOG in it. What never happens is a new tag, because
 the commit and the tag are the last two steps: an unpublished failure leaves no version
 behind, and the remedy is to look at the tree and run again
@@ -467,6 +469,7 @@ behind, and the remedy is to look at the tree and run again
 `test_a_composer_json_that_cannot_be_written_is_refused_after_the_notes_are_promoted`,
 `test_an_inventory_that_cannot_be_written_is_refused`,
 `test_a_page_that_cannot_be_written_is_refused_before_the_tag`,
+`test_a_note_that_cannot_be_written_is_refused_before_the_tag`,
 `test_an_index_that_cannot_be_locked_refuses_the_add`,
 `test_a_push_that_cannot_run_is_reported_after_the_tag_was_cut`). The push is the one
 exception to "no version behind": it runs after the tag, so a push that cannot run leaves the

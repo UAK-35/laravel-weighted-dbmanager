@@ -281,6 +281,26 @@
 
 ### Fixed
 
+- **The tag rows of `HANDOFF.md`'s section 3 are moved by the release that falsifies them.** The
+  note's section 3 names the tags on the branch, the latest of them and the suffixless version that is
+  *not* there — three claims about *now*, and the tag a release is about to cut falsifies all three in
+  one act. The push that publishes the tag comes after the commit the release made, so the note's own
+  guard failed on CI rather than on the machine that cut the release: every release this package has
+  tagged landed red on the same row, on a version somebody had already fetched, and the branch was
+  repaired by re-taking the note afterwards. `bin/release.php` now moves those three rows into the
+  release commit, beside the CHANGELOG, the record and the page: the list of tags gains the tag being
+  cut, the row naming the latest of them becomes it, and the absent version becomes the smallest
+  version with no suffix that is newer than it — the release a prerelease announces, or the next patch
+  above a release, which is the row the note already carried at a register whose newest tag is a
+  prerelease (`v0.2.0` beside `v0.2.0-alpha3`). Only the version in a row moves; the sentence around it
+  is the note's, and nothing else in the file is touched, because the rest of it is a snapshot of a
+  working tree taken by hand that no script can re-take. A package that keeps no note has nothing moved
+  and nothing written; a note whose row cannot be found by the label the guard reads it by, a row with
+  no version in it, or two rows sharing one label stops the release before anything is written, since
+  the alternative is the same red commit one release later. `HandoffNoteTest` drives all of it through
+  the real script against a copy of this note, including that exactly those three lines differ and that
+  the three are the lines `Handoff::tagRowLines()` reads.
+
 - **A fresh clone has a machine record to copy from, and two readings of a path written in prose are
   pinned.** `.agents/machine.local.json` is gitignored — it holds this machine's own facts — so a
   checkout had nothing to copy from while `AGENTS.md` named a file that was not there. The same

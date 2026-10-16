@@ -97,6 +97,22 @@ declare(strict_types=1);
  *   share, and a release note that has to spell every class it mentions is a rule authors
  *   route around. `### Removed` is what a removal is, and the refusal says so.
  *
+ * THE NOTE THE RELEASE MOVES
+ * --------------------------
+ *   HANDOFF.md's section 3 names the tags on the branch, the latest of them and the suffixless
+ *   version that is *not* there — three claims about *now*, and the tag this run is about to cut
+ *   falsifies all three at once. So they are moved into the release commit beside the CHANGELOG,
+ *   the record and the page, and nothing else in the note is touched: the rest of it is a
+ *   snapshot of a working tree taken by hand, and a script has no way to know what is pending,
+ *   which commits a push carries or what a thread meant, so re-taking the note is the note's own
+ *   act rather than this script's.
+ *
+ *   A package that keeps no note has nothing moved and nothing written — the fixture the release
+ *   suite drives is one. A note that is there has to be movable: a row this cannot find by the
+ *   label the guard reads it by, or two rows sharing one label, stops the release before anything
+ *   is written, because the alternative is a tag whose commit CI reports as a stale note, and by
+ *   then the tag is a version somebody has fetched.
+ *
  * PRERELEASES
  * -----------
  *   A version may carry a prerelease suffix — `-alpha1`, `-beta1`, `-rc1`, or a bare
@@ -695,6 +711,15 @@ $alias = aliasFor($version);
 $aliased = rewriteBranchAlias($composer, $alias);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// The handoff note — the three tag rows this release is about to falsify
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Read here, before the plan is printed and before anything is written, so a note this cannot
+// move stops the release with the tree as it was rather than after the CHANGELOG has been
+// promoted — the same reason the promoted notes are computed above rather than in the apply half.
+$handoff = moveHandoffTagRows($root, $version);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Plan
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -775,6 +800,16 @@ printf(
         ? 'none for the dev lanes in composer.json — left alone'
         : implode(', ', $aliased['branches']) . ' -> ' . $alias
             . ($aliased['changed'] ? '  (updated)' : '  (unchanged)'),
+    PHP_EOL,
+);
+printf(
+    "  %-13s %s%s",
+    'handoff note',
+    match (true) {
+        !$handoff['present'] => 'no HANDOFF.md in this package — none is written',
+        $handoff['moved'] === [] => 'HANDOFF.md already names ' . $tag . ' — nothing to move',
+        default => 'HANDOFF.md — ' . implode(', ', $handoff['moved']) . ' moved to ' . $tag,
+    },
     PHP_EOL,
 );
 printf("  commit        %s%s", commitMessage($version), PHP_EOL);
@@ -910,7 +945,21 @@ if ($aliased['changed']) {
     note('no extra.branch-alias for the dev lanes in composer.json — leaving it alone');
 }
 
+// The note, when a row of it moved. Written with the files above it and staged with them, so the
+// tag points at a note that names it — the whole reason the rows are moved at all.
+if ($handoff['moved'] !== [] && !write($handoff['path'], $handoff['content'])) {
+    fail('Could not write HANDOFF.md');
+}
+
+if ($handoff['moved'] !== []) {
+    note('handoff note moved to ' . $tag . ' — ' . implode(', ', $handoff['moved']));
+}
+
 $staged = ['CHANGELOG.md'];
+
+if ($handoff['moved'] !== []) {
+    $staged[] = 'HANDOFF.md';
+}
 
 // Every file the list wrote, and no file it did not: the commit cannot carry an artefact the run did
 // not produce, and cannot leave one behind.
@@ -1268,6 +1317,220 @@ function nextPrerelease(string $root, string $version): ?string
     }
 
     return sprintf('%s-%s%d', $base, $lane, $highest + 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The handoff note
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The three tag rows of HANDOFF.md's section 3, moved to the version being cut — or the note
+ * as it stands, in a package that keeps none.
+ *
+ * WHY THE RELEASE WRITES THIS FILE
+ * --------------------------------
+ *   The note's section 3 table is a claim about *now*, and a tag falsifies three rows of it in
+ *   one act: the row listing the tags on the branch does not hold the new one, the row naming
+ *   the latest of them names the tag before it, and the row naming the suffixless version that
+ *   is *not* there may name the version this release has just published. So every note written
+ *   before a release is wrong in those three rows the moment it is cut — which is what
+ *   `tests/Unit/Docs/HandoffTest.php` fails on, and because the push that publishes the tag comes
+ *   after the commit it made, the failure lands on CI rather than on the machine that cut it.
+ *
+ *   What this cannot do is re-take the note: everything else in it is a snapshot of a working
+ *   tree taken by hand, and a script has no way to know what is pending, which commits a push
+ *   carries or what a thread meant. So it moves the three rows it has just made stale and touches
+ *   nothing else, and section 3 of the note and README.md both say so for a reader.
+ *
+ *   The three values are the ones section 3's own rules give:
+ *
+ *     Tags on the branch        the row as it stands, plus the tag being cut
+ *     The latest of them        the tag being cut
+ *     A version with no suffix  the smallest version with no suffix that is newer than it — the
+ *                               release a prerelease announces, or the next patch above a
+ *                               release — which is the version the note already carries at a
+ *                               register whose newest tag is a prerelease: `v0.2.0` beside
+ *                               `v0.2.0-alpha3`
+ *
+ *   The sentence around a version is not rewritten — only the version in it is moved — so what a
+ *   row says stays what the note said, and a note that has reworded one keeps its wording. A row
+ *   with nothing in it to move, or a label that is not there at all, is a refusal rather than a
+ *   release: a note left describing the tag before this one is a commit CI reports as stale, and
+ *   a refusal a reader can act on beats a red build they did not cause.
+ *
+ * @return array{path: string, present: bool, content: string, moved: list<string>, absent: string}
+ */
+function moveHandoffTagRows(string $root, string $version): array
+{
+    $path = $root . '/HANDOFF.md';
+    $tag = 'v' . $version;
+
+    // The smallest version with no suffix that is newer than the tag being cut. A prerelease
+    // announces the release it will take, so that release is the answer; a release is already
+    // the smallest suffixless version at its version, so the next patch above it is.
+    $absent = isPrerelease($version) ? releasePart($version) : bump($version, 'patch');
+
+    $note = [
+        'path' => $path,
+        'present' => is_file($path),
+        'content' => '',
+        'moved' => [],
+        'absent' => $absent,
+    ];
+
+    if (!$note['present']) {
+        return $note;
+    }
+
+    $content = @file_get_contents($path);
+
+    if ($content === false) {
+        fail(
+            'HANDOFF.md is there and could not be read, so the tag rows this release moves cannot be'
+            . ' moved — and a tag cut on a note that still names the last one is a commit CI reports'
+            . ' as stale.',
+        );
+    }
+
+    // Read by the plain label, named as the note writes it: the two are one list, so a refusal
+    // can say which row is missing in the words section 3 uses for it.
+    $wanted = [
+        'tags on the branch' => 'Tags on the branch',
+        'the latest of them' => 'The latest of them',
+        'a version with no suffix' => 'A version with no suffix',
+    ];
+    $lines = explode("\n", $content);
+    $found = [];
+
+    foreach ($lines as $position => $line) {
+        $label = noteRowLabel($line);
+
+        if ($label === null || !isset($wanted[$label])) {
+            continue;
+        }
+
+        if (isset($found[$label])) {
+            fail(sprintf(
+                'HANDOFF.md carries two [%s] rows, so which of them the note means cannot be read:'
+                . ' the table is read by its labels, and this release moves the rows that guard reads.',
+                $wanted[$label],
+            ));
+        }
+
+        $found[$label] = $position;
+    }
+
+    $missing = array_values(array_diff_key($wanted, $found));
+
+    if ($missing !== []) {
+        fail(sprintf(
+            'HANDOFF.md carries no [%s] row, so this release cannot move the note past %s — a note'
+            . ' left naming the tag before this one is a commit CI reports as stale. Write the row as'
+            . ' section 3 of the note writes it, or take HANDOFF.md out of the tree.',
+            implode('] or [', $missing),
+            $tag,
+        ));
+    }
+
+    foreach ($found as $label => $position) {
+        $cells = noteRowCells($lines[$position]);
+
+        if (count($cells) !== 2) {
+            fail(sprintf(
+                'HANDOFF.md line %d is the note\'s [%s] row and is not a two-column row, so there is no'
+                . ' value cell in it to move to %s. The tag table is a label and a value, the way'
+                . ' section 3 writes it.',
+                $position + 1,
+                $cells === [] ? $label : $cells[0],
+                $tag,
+            ));
+        }
+
+        [$written, $value] = [$cells[0], $cells[1]];
+
+        if ($label === 'tags on the branch') {
+            // Appended rather than rebuilt from `git tag`: the row is the tags the note says are
+            // on the branch, which is a list a person keeps. This release knows one tag to add,
+            // and a list rewritten from the tags on this machine would be a different claim.
+            $value = str_contains($value, '`' . $tag . '`') ? $value : $value . ', `' . $tag . '`';
+        } else {
+            // Only the version moves: the note's sentence around it is left as it was written. The
+            // `v` is the note's — a version is written with one in every row of this table — so the
+            // absent version is written the way the row already carries it.
+            $target = $label === 'the latest of them' ? $tag : 'v' . $absent;
+            $moved = preg_replace('/`v[0-9][0-9A-Za-z.\-]*`/', '`' . $target . '`', $value, 1, $count);
+
+            if ($count === 0) {
+                fail(sprintf(
+                    'HANDOFF.md line %d is the note\'s [%s] row and names no version, so there is'
+                    . ' nothing in it to move to %s. The row is read by the first `vX.Y.Z` span it'
+                    . ' writes.',
+                    $position + 1,
+                    $written,
+                    $target,
+                ));
+            }
+
+            $value = (string) $moved;
+        }
+
+        // A row that already says this is a row nobody wrote: a re-run over a note that was moved
+        // and not committed writes nothing rather than a second copy of the tag.
+        if ($value === $cells[1]) {
+            continue;
+        }
+
+        $lines[$position] = '| ' . $written . ' | ' . $value . ' |';
+        $note['moved'][] = $written;
+    }
+
+    if ($note['moved'] !== []) {
+        $note['content'] = implode("\n", $lines);
+    }
+
+    return $note;
+}
+
+/**
+ * One markdown row's cells, trimmed — the line as the note writes it, backticks included.
+ *
+ * @return list<string>
+ */
+function noteRowCells(string $line): array
+{
+    $cells = array_map('trim', explode('|', trim($line)));
+
+    if ($cells !== [] && $cells[0] === '') {
+        array_shift($cells);
+    }
+
+    if ($cells !== [] && end($cells) === '') {
+        array_pop($cells);
+    }
+
+    return array_values($cells);
+}
+
+/**
+ * A row's label — its first cell, plain — or null for a line that is not a table row.
+ *
+ * Plain is the comparison the guard that reads these rows makes: the words are the label's
+ * identity, and backticks, capitalisation and spacing are prose. `Handoff::claim()` in
+ * `tests/Support/Handoff.php` is the other half of the rule, and the two have to agree — a label
+ * read one way here and another way there is either a release that moves a row the guard is not
+ * reading, or one refused over a row the guard would have found.
+ */
+function noteRowLabel(string $line): ?string
+{
+    if (!str_starts_with(trim($line), '|')) {
+        return null;
+    }
+
+    $cells = noteRowCells($line);
+
+    return $cells === []
+        ? null
+        : strtolower(trim((string) preg_replace('/\s+/', ' ', str_replace('`', '', $cells[0]))));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
