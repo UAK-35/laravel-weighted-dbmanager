@@ -93,7 +93,7 @@ note that describes them (`fbec6d6`), the read path with a silent schedule's cau
 preflight that carries them (`ae0e3e8`), the shape of what a flip would swap in (`2e5acd3`), andthe deployment's contract with the machine-record sample and the two prose-path readings beside it
 (`1ce9e2f`), and the connector a connection is built through (`53d6352`) — each with the changelog
 entry that weighs it. The gate is green with this note in the tree: 13
-checks, 1403 tests, 9090 assertions, 5 skipped, 0 failures, 515.7s, with `DbDoctorTest` 183 tests,
+checks, 1403 tests, 9090 assertions, 5 skipped, 0 failures, 549.8s, with `DbDoctorTest` 183 tests,
 `VariantShapeTest` 12, `DbFlipPgcatDryRunTest` 6, `PgcatConfigFlipperTest` 123 (one skip on this
 workstation), `MachinePathsTest` 34, `ConnectorInUseTest` 9 and `tests/Unit/Docs` 111 among them. The batches the notes before
 this one called pending are section 3's `### Added` now rather than files here.
