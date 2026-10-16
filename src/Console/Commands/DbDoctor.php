@@ -26,6 +26,7 @@ use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigSchema;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\ConnectorInUse;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
 use Uak35\WeightedDbManager\Support\RedisAccess;
@@ -37,7 +38,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * [--connection-only]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Twenty things can be wrong while the application
+ * do", before traffic arrives. Twenty-one things can be wrong while the application
  * still boots and answers requests:
  *
  *   boot environment  the settings every row below judged are not the ones this
@@ -52,6 +53,22 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     binding `db`, so reads are unweighted and nothing says so
  *   weighted factory  the factory is where the replica is chosen, so a host app
  *                     that rebinds `db.factory` silently loses weighting too
+ *   connector         the connection is built through a connector class, and a host
+ *                     application can replace the framework's own with one of its own
+ *                     — a `db.connector.<driver>` binding, which is the first branch
+ *                     the framework's factory takes. Nothing in configuration shows
+ *                     that: an installation can read exactly as documented while every
+ *                     connection goes through a class nobody can see, which on a
+ *                     PostgreSQL connection is where an application adds the option
+ *                     path it writes its own hosts with. The row names the class, says
+ *                     whether it is the framework's or the installation's and which
+ *                     binding answered, and fails when nothing can be built at all —
+ *                     the connection's name is not declared, or its driver has no
+ *                     connector. It asks the factory that builds connections rather
+ *                     than restating the framework's map, so it cannot describe a
+ *                     factory this installation does not have; where `db.factory`
+ *                     cannot be asked (resolving it threw, or it is not a factory)
+ *                     the row says so and leaves that binding to `weighted factory`
  *   published config  the application never published its own config/db-manager.php
  *                     and is running on the sample values
  *   pgcat gate        swrr.pgcat.enabled is on for a connection pgcat cannot
@@ -190,7 +207,8 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * is not one yet.
  *
  * What is left is every reading that is about this boot, this configuration and these files — the
- * environment the boot read from, the provider swap, the factory, the published config's key set,
+ * environment the boot read from, the provider swap, the factory and the connector it would build,
+ * the published config's key set,
  * the gate, the files a flip needs, the shape of what a flip would swap in, the replica metadata,
  * the read path's pair, the three switches,
  * the reader windows, the mode the pooler's file is on, and both schedule rows — so a container that arms pgcat over a
@@ -409,7 +427,7 @@ class DbDoctor extends Command
                             {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}
                             {--connection-only : Bound the run to what a build container can answer: leave out the six rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}';
 
-    protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, or ask only the rows a build container can answer, with --connection-only';
+    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, or ask only the rows a build container can answer, with --connection-only';
 
     public function handle(): int
     {
@@ -434,6 +452,7 @@ class DbDoctor extends Command
             $this->bootEnvironment(),
             $this->providerSwap($manager, $resolutionError),
             $this->weightedFactory(),
+            $this->connector(),
             $this->publishedConfig(),
             $this->pgcatGate(),
             $this->pgcatFiles(),
@@ -1247,6 +1266,75 @@ class DbDoctor extends Command
         }
 
         return $this->row('weighted factory', self::PASS, 'db.factory is ' . WeightedConnectionFactory::class);
+    }
+
+    /**
+     * Which connector class the connection is built through, and where that answer came from.
+     *
+     * WHY THIS IS A ROW
+     *   The factory above decides how a connection is built; this decides what builds it. A host
+     *   application replaces the framework's PostgreSQL connector by binding
+     *   `db.connector.pgsql` — the first branch the framework's own `createConnector()` takes —
+     *   and the replacement is often load-bearing: it is where an application adds the option
+     *   path its own connection config is written with. None of that is visible in configuration,
+     *   and none of it is visible from `weighted factory` either, which stops at the class of the
+     *   binding that builds connections rather than the class that builds *this* one.
+     *
+     *   A replaced connector is a pass, deliberately: it is a documented extension point and the
+     *   ordinary way an application adds to the framework, so a row that warned on it would warn
+     *   on the installations that are doing the right thing. What the row is for is being able to
+     *   *see* it — the class, whether it is the framework's own or the installation's, and the
+     *   binding that answered — which is what makes an option path that has gone missing a
+     *   five-second question rather than a two-repository one.
+     *
+     *   It fails where nothing can be built at all: the connection `ActiveConnection` follows is
+     *   not declared (no driver), or declares a driver no connector is registered for. Both are
+     *   a mistyped name or driver rather than a fault of this package, and neither is reported by
+     *   any other row — the gate only asks what pgcat can front, and only while it is armed.
+     *
+     *   Where `db.factory` cannot be asked — resolving it threw, or what it resolved to is not a
+     *   `ConnectionFactory` — the row passes and says the reading was not taken, the way every
+     *   other row that cannot be asked does. That binding's own fault is `weighted factory`'s to
+     *   report, and it is reported there: a second failure for one cause would make the tally read
+     *   as two problems.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function connector(): array
+    {
+        $reading = ConnectorInUse::resolve($this->laravel->make(Repository::class), $this->laravel);
+
+        if ($reading['factory_error'] !== null) {
+            return $this->row('connector', self::PASS, sprintf(
+                '%s, so which connector builds [%s] is not read here — the weighted factory row is where '
+                .'that binding is judged',
+                $reading['factory'] === null
+                    ? 'db.factory could not be resolved: '.$reading['factory_error']
+                    : 'db.factory '.$reading['factory_error'],
+                $reading['connection'],
+            ));
+        }
+
+        if ($reading['error'] !== null) {
+            return $this->row('connector', self::FAIL, sprintf(
+                'connection [%s] (%s) resolves no connector: %s',
+                $reading['connection'],
+                $reading['source'],
+                $reading['error'],
+            ));
+        }
+
+        return $this->row('connector', self::PASS, sprintf(
+            'connection [%s] (driver %s) is built by %s — %s',
+            $reading['connection'],
+            $reading['driver'],
+            (string) $reading['connector'],
+            $reading['binding'] === null
+                ? 'the framework\'s own connector for that driver: nothing is bound at '
+                    .ConnectorInUse::BINDING_PREFIX.$reading['driver']
+                : 'resolved from the '.$reading['binding'].' binding, an installation\'s connector in place '
+                    .'of the framework\'s own',
+        ));
     }
 
     /**

@@ -173,13 +173,13 @@ final class ProseNumbersTest extends TestCase
             // `bin/counts.php` writes the record from. See the class docblock.
             'the rows a doctor asks, as db-doctor-json.md counts them in its opening claim' => [
                 'record' => 'docs/db-doctor-json.md',
-                'pinned' => '/A doctor has\s+(\w+) verdicts, one per row/',
+                'pinned' => '/A doctor has\s+([\w-]+) verdicts, one per row/',
                 'counts' => 'the README\'s `db:doctor` check table, which `DbDoctorTest` binds to the rows the command builds',
                 'expected' => count(self::readmeChecks()),
             ],
             'the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit' => [
                 'record' => 'docs/db-doctor-json.md',
-                'pinned' => '/resolve, (\w+) otherwise/',
+                'pinned' => '/resolve, ([\w-]+) otherwise/',
                 'counts' => 'the README\'s `db:doctor` check table, which `DbDoctorTest` binds to the rows the command builds',
                 'expected' => count(self::readmeChecks()),
             ],

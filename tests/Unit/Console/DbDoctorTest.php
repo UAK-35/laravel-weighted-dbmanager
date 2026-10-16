@@ -6,11 +6,13 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Console;
 
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\Connectors\ConnectionFactory;
+use Illuminate\Database\Connectors\PostgresConnector;
 use InvalidArgumentException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
+use stdClass;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Uak35\WeightedDbManager\Database\Weighted\AtomicStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
@@ -178,6 +180,118 @@ class DbDoctorTest extends TestCase
         $this->assertStringStartsWith('FAIL  weighted factory', $this->rowContaining($output, 'weighted factory'));
         $this->assertStringContainsString('replica selection happens there', $output);
         $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The class that builds the connection, which configuration cannot show.
+     *
+     * Laravel takes a `db.connector.<driver>` binding before its own map, so an application
+     * that replaces the PostgreSQL connector replaces it for every connection this package
+     * builds — and that class is often load-bearing, because it is where an application adds
+     * the option path its own connection config is written with. Reading as documented while
+     * building through somebody else's class is the state this row makes visible, and the
+     * question it answers is the one `weighted factory` stops short of: that row names the
+     * class of the binding that builds connections, this one names the connector they are
+     * built through.
+     */
+    public function test_the_connector_row_names_the_class_the_connection_is_built_through(): void
+    {
+        [$output] = $this->doctor();
+
+        $row = $this->checkNamed($this->report($this->doctorJson()[0]), 'connector');
+
+        $this->assertSame('PASS', $row['verdict']);
+        $this->assertSame(
+            'connection ['.self::CONNECTION.'] (driver pgsql) is built by '.PostgresConnector::class
+            .' — the framework\'s own connector for that driver: nothing is bound at db.connector.pgsql',
+            $row['detail'],
+        );
+        $this->assertSame([], $row['suggestions'], 'the repair is a binding, and a binding is not a config line');
+        $this->assertStringStartsWith('PASS  connector', $this->rowContaining($output, 'connector'));
+    }
+
+    /**
+     * The replacement itself: a class the installation registered, named with the key that
+     * answered it. Deliberately a pass — replacing the connector is the framework's own
+     * extension point and the ordinary way an application adds to it, so warning here would
+     * warn on the installations doing the right thing. What the row is for is being able to
+     * see which class is in use without opening a repository.
+     */
+    public function test_the_connector_row_names_an_installations_own_connector_and_its_binding(): void
+    {
+        $replacement = new class () extends PostgresConnector {};
+        $this->app->instance('db.connector.pgsql', $replacement);
+
+        [$output] = $this->doctor();
+
+        $row = $this->checkNamed($this->report($this->doctorJson()[0]), 'connector');
+
+        $this->assertSame('PASS', $row['verdict']);
+        $this->assertSame(
+            'connection ['.self::CONNECTION.'] (driver pgsql) is built by '.$replacement::class
+            .' — resolved from the db.connector.pgsql binding, an installation\'s connector in place '
+            .'of the framework\'s own',
+            $row['detail'],
+        );
+        $this->assertStringStartsWith('PASS  connector', $this->rowContaining($output, 'connector'));
+    }
+
+    /**
+     * The failure: a connection nothing can build. A name `swrr.connection` no configuration
+     * declares is a typo away, and until this row nothing said so — the gate only asks what
+     * pgcat can front, and only while it is armed. The sentence names the setting the name came
+     * from, so the repair is a value rather than a search, and carries the framework's own
+     * refusal rather than a second way of saying it.
+     */
+    public function test_the_connector_row_fails_when_nothing_can_build_the_connection(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcat();
+        config()->set('db-manager.swrr.connection', 'weighted_typo');
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output, $exit] = $this->doctor();
+        $report = $this->report($this->doctorJson()[0]);
+        $row = $this->checkNamed($report, 'connector');
+
+        $this->assertSame('FAIL', $row['verdict']);
+        $this->assertSame(
+            'connection [weighted_typo] (db-manager.swrr.connection) resolves no connector: '
+            .'A driver must be specified.',
+            $row['detail'],
+        );
+        $this->assertStringStartsWith('FAIL  connector', $this->rowContaining($output, 'connector'));
+
+        $failed = array_values(array_map(
+            static fn (array $check): string => (string) $check['name'],
+            array_filter($report['checks'], static fn (array $check): bool => $check['verdict'] === 'FAIL'),
+        ));
+
+        $this->assertSame(['connector'], $failed, 'this row is the run\'s only failure, so the code is its');
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * A `db.factory` that cannot be asked. The binding is the framework's extension point for
+     * the whole class, so a reading that guessed past it would describe a factory this
+     * installation does not have — and its own fault is `weighted factory`'s to report.
+     * One cause, one failure: the tally is what a deploy reads.
+     */
+    public function test_the_connector_row_leaves_an_unaskable_factory_to_the_weighted_factory_row(): void
+    {
+        $this->app->instance('db.factory', new stdClass());
+
+        [$output] = $this->doctor();
+
+        $row = $this->checkNamed($this->report($this->doctorJson()[0]), 'connector');
+
+        $this->assertSame('PASS', $row['verdict'], 'a reading that was not taken is not a second failure');
+        $this->assertSame(
+            'db.factory stdClass is not a ConnectionFactory, so which connector builds ['
+            .self::CONNECTION.'] is not read here — the weighted factory row is where that binding is judged',
+            $row['detail'],
+        );
+        $this->assertStringStartsWith('FAIL  weighted factory', $this->rowContaining($output, 'weighted factory'));
     }
 
     public function test_it_fails_the_driver_gate_when_pgcat_is_switched_on_where_it_cannot_act(): void
@@ -1747,7 +1861,11 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('20 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString(
+            count($this->documentedChecks()) . ' checks',
+            $output,
+            'a suggestion belongs to a row, it is not a check of its own',
+        );
         $this->assertSame(1, $exit);
     }
 
@@ -2778,7 +2896,7 @@ class DbDoctorTest extends TestCase
         [$json] = $this->doctorJson(connectionOnly: true);
 
         $this->assertSame(
-            ['boot environment', 'provider swap', 'weighted factory', 'published config', 'pgcat gate', 'pgcat files', 'variant shape'],
+            ['boot environment', 'provider swap', 'weighted factory', 'connector', 'published config', 'pgcat gate', 'pgcat files', 'variant shape'],
             array_column($this->report($json)['checks'], 'name'),
         );
         $this->assertSame([], $supervisor->ran);
@@ -3020,13 +3138,13 @@ class DbDoctorTest extends TestCase
      * The rows the README documents are the rows the command builds — by name, not by count.
      *
      * Three numbers in the records describe this list and nothing compared them with it: the
-     * README's "Twelve things can be wrong", `docs/documented-exit-codes.md`'s "the twelve-row
-     * description of what each check judges", and `docs/db-doctor-json.md`'s "twelve ... and six
-     * where it does not". The exit tables already have a guard for this class of drift one level
+     * README's "Twenty-one things can be wrong", `docs/documented-exit-codes.md`'s "the
+     * twenty-one-row description of what each check judges", and `docs/db-doctor-json.md`'s
+     * "twenty-one ... and nine where it does not". The exit tables already have a guard for this class of drift one level
      * up; this is the same guard for the row list, and the comparison is by name because a count
      * can be right while the list is wrong — and it is the names a reader selects on.
      *
-     * The unweighted half is the same claim from the other side: the six rows that do not need a
+     * The unweighted half is the same claim from the other side: the nine rows that do not need a
      * weighted manager are what an installation with a broken swap produces, and the record counts
      * them separately for exactly that reason.
      */
@@ -3046,13 +3164,13 @@ class DbDoctorTest extends TestCase
 
         $this->assertSame(
             count($documented),
-            $this->numberClaim('README.md', '/(\w+) things can be wrong/'),
+            $this->numberClaim('README.md', '/([\w-]+) things can be wrong/'),
             'the README counts the rows its own table lists',
         );
 
         $this->assertSame(
             count($documented),
-            $this->numberClaim('docs/db-doctor-json.md', '/That is (\w+) on an installation where `db` resolves/'),
+            $this->numberClaim('docs/db-doctor-json.md', '/That is ([\w-]+) on an installation where `db` resolves/'),
             'db-doctor-json.md counts the weighted run the README documents',
         );
 
@@ -3060,13 +3178,13 @@ class DbDoctorTest extends TestCase
 
         $this->assertSame(
             count($unweighted),
-            $this->numberClaim('docs/db-doctor-json.md', '/and \*\*(\w+)\*\* where it does not/'),
+            $this->numberClaim('docs/db-doctor-json.md', '/and \*\*([\w-]+)\*\* where it does not/'),
             'db-doctor-json.md counts the rows a run without the weighted manager asks',
         );
 
         $this->assertSame(
             count($unweighted),
-            $this->numberClaim('README.md', '/(\w+) configuration rows/'),
+            $this->numberClaim('README.md', '/([\w-]+) configuration rows/'),
             'the README counts the rows a run asks without the weighted manager too',
         );
 
@@ -3512,13 +3630,16 @@ class DbDoctorTest extends TestCase
             // and `variant shape` is a third: the flipper is armed against a file set whose
             // variants declare no pool the fixture's connection writes with, which is the silence
             // that row calls *nothing to compare* — so the +1 is likewise the point.
-            'healthy' => [20, 0, 0],
-            'warned' => [19, 1, 0],
-            'warned-twice' => [18, 2, 0],
-            'failed' => [19, 0, 1],
-            'failed-twice' => [18, 0, 2],
-            'mixed' => [18, 1, 1],
-            'mixed-twice' => [16, 2, 2],
+            // `connector` is a fourth for the same kind of reason: no profile moves the connection
+            // or binds `db.connector.pgsql`, so every one of them names the framework's own
+            // connector for a pgsql connection and passes.
+            'healthy' => [21, 0, 0],
+            'warned' => [20, 1, 0],
+            'warned-twice' => [19, 2, 0],
+            'failed' => [20, 0, 1],
+            'failed-twice' => [19, 0, 2],
+            'mixed' => [19, 1, 1],
+            'mixed-twice' => [17, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -3677,7 +3798,7 @@ class DbDoctorTest extends TestCase
      * The report's row for one check, by the name the table prints.
      *
      * Selected by name because the row set is not a fixed length: a `db` that does not resolve to
-     * the weighted manager leaves the eight configuration rows and no replica rows at all, so a job
+     * the weighted manager leaves the nine configuration rows and no replica rows at all, so a job
      * written against `checks[9]` would read a different check on exactly the installations it
      * exists to catch.
      *
@@ -4415,7 +4536,7 @@ class DbDoctorTest extends TestCase
     }
 
     /**
-     * The rows a run builds when `db` is not the weighted manager: the six that do not ask it.
+     * The rows a run builds when `db` is not the weighted manager: the nine that do not ask it.
      *
      * @return list<string>
      */

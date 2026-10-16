@@ -36,7 +36,7 @@ That is the same problem `db:pgcat-flip --json` was built for, and the reasoning
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
 here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
-twenty verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+twenty-one verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
 likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
@@ -188,8 +188,8 @@ sentence exists to prevent.
 
 ### The row list is not a fixed length
 
-`checks` is every row the run built. That is twenty on an installation where `db` resolves to the
-weighted manager and **eight** where it does not — the replica rows are only asked when there is a
+`checks` is every row the run built. That is twenty-one on an installation where `db` resolves to the
+weighted manager and **nine** where it does not — the replica rows are only asked when there is a
 manager to ask them of, which is a property of the rendered command that predates this flag, and
 `--connection-only` removes six more by design (`connection_only` below). So `name` is the row's
 identity and the thing to select on; the order and the count are the table's, and are documented as
@@ -245,6 +245,7 @@ about, and which of the two it is:
 | `config file` (vet) | the shape the file needs to be judged at all, and the bytes it printed while it was being read | **both named** — the shape is the file's and the bytes are what `config:cache` would write into the cached config |
 | `provider swap` | a `db` that would not resolve, a provider that is not registered, a `db` that is not the weighted manager | one fact in three diagnoses: the last two are the same cause, and both `weighted factory` and `pgcat gate` name the missing provider in the same run |
 | `weighted factory` | `db.factory` that could not be resolved, and one that is not the weighted factory | mutually exclusive — a binding that threw has no class to inspect |
+| `connector` | the class the connection is built through with the binding that answered it, a connection nothing can build, and a `db.factory` that cannot be asked at all | one answer per state, and the three are mutually exclusive: a connector that could be built has no error, one that could not has no class, and a factory that cannot be asked reports neither — and it is *one* sentence in each, because the class and where it came from are halves of a single fact (the framework's own, with nothing bound at `db.connector.<driver>`, against the installation's, resolved from that binding) |
 | `published config` | no published file at all, one byte-identical to the sample, and one whose own `generation` — the key set it was published as — is behind this package's, ahead of it, absent, or a value that is not a whole number | mutually exclusive — a file that is not there cannot be identical to anything, and a byte-identical copy declares the sample's own generation: the row prints one sentence per run, and [config-generations.md](config-generations.md) is what each of them means |
 | `pgcat gate` | the driver mismatch, and an armed flipper whose paths are unset | mutually exclusive by construction (`isMismatched()` and `isEnabled()` cannot both hold), and `pgcat files` names the paths |
 | `pgcat files` | every file precondition a flip needs | **several, named all** — the register |
@@ -337,7 +338,7 @@ it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Eight rows when `db` does not resolve, twenty otherwise, and
+- **The row set is not a fixed length.** Nine rows when `db` does not resolve, twenty-one otherwise, and
   six fewer than either in a `--connection-only` run, which is why the object publishes that flag. A gate
   must select by `name` — the row's identity, and the same string the table prints — and nothing in the
   object states how many rows there "should" be, so a gate that expects a particular row to exist has

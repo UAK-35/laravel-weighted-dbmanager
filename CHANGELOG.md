@@ -4,6 +4,36 @@
 
 ### Added
 
+- **The connector a connection is actually built through is named by `db:doctor`'s `connector` row.**
+  Laravel builds every connection's PDO through a connector chosen from the connection's own `driver`,
+  and `Illuminate\Database\Connectors\ConnectionFactory::createConnector()` takes a
+  `db.connector.<driver>` container binding **before** its own map — so an application that binds
+  `db.connector.pgsql` has replaced the framework's PostgreSQL connector for every connection of that
+  driver, and nothing in `config/database.php` says so. That class is usually load-bearing rather than
+  decorative: it is where an application adds the option path its own connection config is written
+  with, so an installation can read exactly as this package documents, boot cleanly, and build every
+  connection through a class nobody looking at a config file can see. The reading is
+  `Uak35\WeightedDbManager\Support\ConnectorInUse`, and it asks the rule the way the framework does —
+  the binding first, the framework's map second — rather than restating the map, so it cannot describe
+  a factory this installation does not have. The row names the class, says whether it is the
+  framework's own or the installation's, and names the binding that answered; a replaced connector is
+  a **pass**, deliberately, because that binding is the framework's own extension point and the
+  ordinary way an application adds to it, and a row that warned on it would warn on the installations
+  doing the right thing. It **fails** where nothing can be built at all: the connection
+  `ActiveConnection` follows is not declared (the framework's own *A driver must be specified.*) or
+  declares a driver no connector is registered for (*Unsupported driver [x].*) — a mistyped name or
+  driver, which no other row reports, since the gate only asks what pgcat can front and only while it
+  is armed — and the sentence names the setting the connection's name came from, so the repair is a
+  value rather than a search. Where `db.factory` cannot be asked at all (resolving it threw, or it
+  resolved to something that is not a `ConnectionFactory`) the row says the reading was not taken and
+  leaves that binding to `weighted factory`, because one cause reported twice reads as two problems.
+  It constructs nothing but the connector itself, which is what `createConnector()` does and the only
+  way the question is answerable — the framework's own connectors open nothing — and no connection,
+  socket or file is touched. Asked in a `--connection-only` run, because it reads configuration and a
+  binding and nothing outside the process, and it prints no `suggestion`: the repair is a binding, not
+  a config line. The doctor's row count, its `--connection-only` narrative and the four records that
+  state those numbers move with it.
+
 - **What a deployment of this package has to have is written down, in
   [docs/deployment-contract.md](docs/deployment-contract.md).** The package installs its code and
   nothing it *needs*: not the pooler whose configuration a flip swaps, not the supervisord that is

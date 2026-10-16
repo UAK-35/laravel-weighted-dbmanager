@@ -165,7 +165,7 @@ final class DocumentedExitCounts
             ],
             'the checks the doctor judges, as documented-exit-codes.md counts the README table' => [
                 'record' => self::RECORD,
-                'pinned' => '/the (\w+)-row description of what each check judges/',
+                'pinned' => '/the ([\w-]+)-row description of what each check judges/',
                 'counts' => 'the README\'s `db:doctor` check table',
                 'expected' => self::readmeRows(self::DOCTOR_HEADING, 'Row'),
             ],
