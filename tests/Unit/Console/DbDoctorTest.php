@@ -17,6 +17,7 @@ use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\RedisAtomicStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
+use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
@@ -60,8 +61,10 @@ class DbDoctorTest extends TestCase
     private const JSON_KEYS = [
         'command',
         'connection',
+        'swrr_connection',
         'default_connection',
         'strict',
+        'connection_only',
         'verdict',
         'exit_code',
         'counts',
@@ -71,8 +74,19 @@ class DbDoctorTest extends TestCase
     /** @var list<string> */
     private array $tempDirs = [];
 
+    /** The configuration cache a test claimed the boot read from, deleted in `tearDown()`. */
+    private ?string $configCache = null;
+
     protected function tearDown(): void
     {
+        // A test that claimed the configuration was cached wrote a cache file where the framework
+        // looks for one, and the next test's boot must not find it there.
+        if ($this->configCache !== null) {
+            @unlink($this->configCache);
+
+            $this->configCache = null;
+        }
+
         foreach ($this->tempDirs as $dir) {
             $this->removeTree($dir);
         }
@@ -1410,6 +1424,91 @@ class DbDoctorTest extends TestCase
         ];
     }
 
+    /**
+     * The two probing rows with the switch armed, over the real probe: each endpoint is asked, and an
+     * endpoint that is not there is a reading rather than a failure.
+     *
+     * The rows are asked through `SingleHostProbe`, so this is the one test here that opens a
+     * connection — and it is pointed at a closed port on the loopback address, which refuses in the
+     * driver the way a host that is not listening does, without a test waiting on a socket. What it
+     * asserts is the claim the rows make about such an endpoint: it is named with what it said, the
+     * verdict does not move, and the reading that asks nothing is answered anyway.
+     *
+     * The switch is the documented one (`swrr.read_path.enabled`), off in the shipped config, so
+     * arming it here is a decision this row makes rather than the fixture's state.
+     */
+    public function test_the_read_path_rows_ask_each_endpoint_and_report_a_refusal_as_a_silence(): void
+    {
+        $this->bindRedis(reachable: true);
+
+        config()->set('db-manager.swrr.read_path', ['enabled' => true, 'timeout_ms' => 500]);
+        config()->set('database.connections.' . self::CONNECTION, [
+            'driver' => 'pgsql',
+            'database' => 'app',
+            'host' => '127.0.0.1',
+            'port' => 1,
+            'read' => [['host' => '127.0.0.1', 'port' => 1]],
+            'write' => ['host' => '127.0.0.1', 'port' => 1],
+        ]);
+
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$json] = $this->doctorJson();
+        $report = $this->report($json);
+
+        $caps = $this->checkNamed($report, 'read caps');
+
+        $this->assertSame('PASS', $caps['verdict'], 'an endpoint that refused is a reading, not a failure');
+        $this->assertStringContainsString('no read endpoint on [weighted] could be asked what it is capped at', $caps['detail']);
+        $this->assertStringContainsString('127.0.0.1:1 did not answer', $caps['detail']);
+        $this->assertStringContainsString('neither did the writer', $caps['detail']);
+
+        $feedback = $this->checkNamed($report, 'standby feedback');
+
+        $this->assertSame('PASS', $feedback['verdict']);
+        $this->assertStringContainsString('no read endpoint on [weighted] could be asked about `hot_standby_feedback`', $feedback['detail']);
+        $this->assertStringContainsString('127.0.0.1:1 did not answer', $feedback['detail']);
+
+        // The one of the three that asks nothing is answered whatever the endpoints did.
+        $pair = $this->checkNamed($report, 'read/write pair');
+
+        $this->assertSame('PASS', $pair['verdict']);
+        $this->assertStringContainsString('declares both halves of the pair', $pair['detail']);
+        $this->assertStringContainsString('writes reach 127.0.0.1:1', $pair['detail']);
+    }
+
+    /**
+     * The switch is read the way every other switch in this package is: a value that is not on or off
+     * is refused, with the spellings, and resolves to the documented default — here *off*, so a typo
+     * cannot open a connection per endpoint on a preflight somebody runs in a deploy.
+     */
+    public function test_a_read_path_switch_that_is_not_a_switch_is_refused_and_reads_as_off(): void
+    {
+        $this->bindRedis(reachable: true);
+
+        config()->set('db-manager.swrr.read_path', ['enabled' => 'maybe']);
+
+        [$json] = $this->doctorJson();
+        $report = $this->report($json);
+
+        foreach (['read caps', 'standby feedback'] as $name) {
+            $row = $this->checkNamed($report, $name);
+
+            $this->assertSame('PASS', $row['verdict'], 'a refused switch is not a fault: it is read as the default');
+            $this->assertStringContainsString('the probe is not armed', $row['detail']);
+            $this->assertStringContainsString('db-manager.swrr.read_path.enabled is "maybe"', $row['detail']);
+            $this->assertStringContainsString('a switch is on or off', $row['detail']);
+            $this->assertStringContainsString('neither row asks an endpoint', $row['detail']);
+        }
+
+        // The reading that does not depend on the switch says nothing about a refusal.
+        $this->assertStringNotContainsString(
+            'swrr.read_path.enabled',
+            $this->checkNamed($report, 'read/write pair')['detail'],
+            'the pair reading is a fact about the configuration, and the switch does not decide it',
+        );
+    }
+
     public function test_the_reader_windows_row_fails_a_flat_string_and_names_the_entry(): void
     {
         // The way a person naturally writes a window, and not a window. Read as "no
@@ -1648,7 +1747,7 @@ class DbDoctorTest extends TestCase
             "suggestion          swrr.reader_windows = [['start' => '10:00:00', 'end' => '14:20:00']]",
             $this->suggestion($output),
         );
-        $this->assertStringContainsString('15 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
+        $this->assertStringContainsString('19 checks', $output, 'a suggestion belongs to a row, it is not a check of its own');
         $this->assertSame(1, $exit);
     }
 
@@ -2236,6 +2335,93 @@ class DbDoctorTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // schedule beat — whether the mechanism has been running, and the three causes a
+    // verdict cannot see
+    //
+    // `flip schedule` reads what is *configured* to move the pooler; this row reads whether
+    // that mechanism has been *running*, which is a different failure at a different moment.
+    // Three of the causes of a silence are invisible in the state file the verdict reads — a
+    // store the runs' mutexes cannot be taken in, two entries running one command, a boot
+    // stamp nothing can read — so they are read beside the verdict and named in the row.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * An armed, running installation: the verdict passes and the row *also* names what it read.
+     *
+     * The readings are attached rather than judged, which is why the row still passes: the status
+     * and the exit code stay the beat's, and none of these is a state a release should be refused
+     * over on its own. The store is asked here, because a preflight may reach out — the mode that may
+     * not is the bounded one, and it says so instead (see the test below).
+     */
+    public function test_the_schedule_beat_row_names_the_readings_beside_the_verdict(): void
+    {
+        $stamp = $this->tempDir().'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 3600));
+
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $paths = $this->armPgcat(['boot_file' => $stamp, 'flip_window_seconds' => 480]);
+
+        // The beat a run of the entry leaves behind, a moment ago, judged against a window that
+        // closed an hour ago: the state the row is written for when nothing is wrong.
+        file_put_contents($paths['state_file'], (string) json_encode([
+            ScheduleBeat::STATE_KEY => gmdate(DATE_ATOM),
+        ]));
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'schedule beat');
+
+        $this->assertStringStartsWith('PASS  schedule beat', $row);
+        $this->assertStringContainsString('the per-minute entry is running', $row);
+        $this->assertStringContainsString('The schedule\'s own readings:', $row);
+        $this->assertStringContainsString('1 entry carries `'.FlipSchedule::DEFAULT_NAME.'`', $row);
+        $this->assertStringContainsString($stamp, $row, 'the stamp the window was judged against');
+        $this->assertStringContainsString('readable and writable', $row);
+        $this->assertStringContainsString('mutexes live in', $row);
+        $this->assertStringContainsString('answered a read', $row, 'a preflight asks the store; the bounded mode is what does not');
+        $this->assertSame(0, $exit, 'a reading is not a verdict: the row still passes on the beat');
+    }
+
+    /**
+     * An installation that has not armed the entry has nothing for the readings to explain, so the
+     * row says what the flipper found and nothing else — the same rule the row already follows for
+     * the switch that turns the watch off.
+     */
+    public function test_the_schedule_beat_row_reads_nothing_when_the_entry_is_not_scheduled(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->usePublishedConfig();
+        $this->armPgcat();
+        config()->set('db-manager.swrr.pgcat.schedule', ['enabled' => false]);
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'schedule beat');
+
+        $this->assertStringContainsString('is not scheduled', $row);
+        $this->assertStringNotContainsString('The schedule\'s own readings', $row);
+    }
+
+    /**
+     * The bounded run is the one that may not reach the store, and its row says which reading it did
+     * not take rather than leaving the store's reachability looking unremarkable: a report that cannot
+     * ask must not read as one that asked and was answered.
+     */
+    public function test_the_bounded_run_says_which_reading_it_did_not_take(): void
+    {
+        $this->usePublishedConfig();
+        $this->armPgcat();
+
+        [$output] = $this->doctor(connectionOnly: true);
+        $row = $this->rowContaining($output, 'schedule beat');
+
+        $this->assertStringContainsString('The schedule\'s own readings:', $row);
+        $this->assertStringContainsString('was not asked', $row);
+        $this->assertStringContainsString('bounded to what a build container can answer', $row);
+        $this->assertStringNotContainsString('answered a read', $row);
+        $this->assertStringContainsString('1 entry carries', $row, 'the other two readings are taken either way');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // switch values — the three on/off settings, read as they were written
     //
     // `(bool) 'false'` is true, so the three commonest ways of writing *off* used to read as
@@ -2443,6 +2629,189 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringContainsString('0 failed', $output);
         $this->assertStringNotContainsString('FAIL', $output);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The two facts no other row can state, in the state a deploy normally leaves them: a settings
+     * file this boot read, and no configuration cache — so the values every other row judged are the
+     * ones the files spell.
+     */
+    public function test_the_boot_environment_row_names_the_file_this_boot_read(): void
+    {
+        $this->bindRedis(reachable: true);
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+
+        $file = $this->useEnvironmentFile();
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'boot environment');
+
+        $this->assertStringStartsWith('PASS  boot environment', $row);
+        $this->assertStringContainsString($file, $row, 'the row names the file it read rather than the convention');
+        $this->assertStringContainsString('the configuration is not cached', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * A cache built at or after the settings file is the order `config:cache` documents, so the
+     * values the rows above read are the ones the files spell and the row is a fact, not a warning.
+     */
+    public function test_the_boot_environment_row_passes_a_cache_that_is_not_older(): void
+    {
+        $this->bindRedis(reachable: true);
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+
+        $this->useEnvironmentFile();
+        $cache = $this->useConfigCache();
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'boot environment');
+
+        $this->assertStringStartsWith('PASS  boot environment', $row);
+        $this->assertStringContainsString($cache, $row);
+        $this->assertStringContainsString('not older than that file', $row);
+    }
+
+    /**
+     * The trap the row exists for, and the one state it fails a release on: an image cached its
+     * configuration at build time and the `.env` beside it was written afterwards, so the deploy's
+     * setting reaches nothing — the rows above are judging the cached values.
+     */
+    public function test_the_boot_environment_row_warns_when_the_settings_file_is_newer_than_the_cache(): void
+    {
+        $this->bindRedis(reachable: true);
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+
+        $file = $this->useEnvironmentFile();
+        $cache = $this->useConfigCache();
+
+        // Written after the cache, which is what the write order of a cache-then-mount deploy is.
+        touch($file, time() + 60);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'boot environment');
+
+        $this->assertStringStartsWith('WARN  boot environment', $row);
+        $this->assertStringContainsString($cache, $row);
+        $this->assertStringContainsString('config:clear', $row, 'the warning names the one command that repairs it');
+        $this->assertSame(0, $exit, 'a warning is a fact until the run is a gate');
+
+        [$strict, $strictExit] = $this->doctor(strict: true);
+
+        $this->assertSame(1, $strictExit, '--strict is how a deploy refuses to ship a configuration nothing obeys');
+        $this->assertStringContainsString('--strict counts the', $strict);
+    }
+
+    /**
+     * The mode's whole claim, asserted from the outside rather than from the row list: a run whose
+     * store would refuse and whose supervisor records every command still exits 1 for a pgcat switch
+     * armed over a connection pgcat cannot front — and neither the store nor the supervisor was ever
+     * reached, because the six rows whose subject is outside the process were left out rather than
+     * judged.
+     *
+     * The rows it does ask are compared with a full run's, by name and in order, which is the half a
+     * count cannot state: `checks` is the full list less those six, so nothing else moved.
+     */
+    public function test_the_connection_only_mode_asks_nothing_outside_the_container(): void
+    {
+        $redis = $this->bindRedis(reachable: false);
+        $this->armPgcat();
+        $supervisor = $this->bindSupervisor();
+
+        // A connection pgcat can never front: the state a build container is most likely to be in,
+        // and the one this mode still has to fail on.
+        config()->set('database.connections.' . self::CONNECTION . '.driver', 'sqlite');
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output, $exit] = $this->doctor(connectionOnly: true);
+        $gate = $this->rowContaining($output, 'pgcat gate');
+
+        $this->assertStringStartsWith('FAIL  pgcat gate', $gate);
+        $this->assertStringContainsString('pgcat will never act', $gate);
+        $this->assertSame(1, $exit, 'the mode is bounded in what it asks, not in what it reports');
+
+        $this->assertSame([], $redis->asked, 'a bounded run opens no connection to the store');
+        $this->assertSame([], $supervisor->ran, 'a bounded run spawns nothing, so supervisor is never asked');
+        $this->assertStringContainsString('--connection-only', $output, 'the rendered run says it was bounded');
+
+        $leftOut = ['pgcat supervisor', 'pool probe', 'read caps', 'standby feedback', 'store probe', 'store reachability'];
+
+        [$json, $jsonExit] = $this->doctorJson(connectionOnly: true);
+        $report = $this->report($json);
+
+        $this->assertSame($exit, $jsonExit, 'the report and the table are one run');
+        $this->assertTrue($report['connection_only'], 'the object says the run was bounded, so a gate can see a row it wants was never asked');
+
+        $names = array_column($report['checks'], 'name');
+
+        $this->assertSame([], array_values(array_intersect($leftOut, $names)), 'the six rows that reach outside the process are not asked at all');
+
+        // Nothing else moved: the full run's rows, less those four, in the order the full run asks
+        // them. The full run is asked last, because it is the one that spends the store and the
+        // supervisor the assertions above hold to nothing.
+        [$full] = $this->doctorJson();
+        $fullNames = array_column($this->report($full)['checks'], 'name');
+
+        $this->assertSame($leftOut, array_values(array_intersect($leftOut, $fullNames)), 'the full run asks the six rows this test is about');
+        $this->assertSame(
+            array_values(array_diff($fullNames, $leftOut)),
+            $names,
+            'a bounded run asks the same rows, in the same order, less the ones that reach out',
+        );
+        $this->assertFalse($this->report($full)['connection_only']);
+    }
+
+    /**
+     * The same rule where there is no weighted manager: of the six rows that do not need one, the
+     * supervisor row is the only one whose subject is outside the process, and it is the one that
+     * goes.
+     */
+    public function test_the_connection_only_mode_leaves_the_supervisor_out_without_the_weighted_manager(): void
+    {
+        $this->app->instance('db.factory', new ConnectionFactory($this->app));
+        $this->app->instance('db', new DatabaseManager($this->app, $this->app->make('db.factory')));
+        DB::clearResolvedInstance('db');
+
+        $supervisor = $this->bindSupervisor();
+
+        [$json] = $this->doctorJson(connectionOnly: true);
+
+        $this->assertSame(
+            ['boot environment', 'provider swap', 'weighted factory', 'published config', 'pgcat gate', 'pgcat files'],
+            array_column($this->report($json)['checks'], 'name'),
+        );
+        $this->assertSame([], $supervisor->ran);
+    }
+
+    /**
+     * The setting beside the connection it produced. Unset, the package follows `database.default`;
+     * set to that same name it follows a connection somebody chose — the same routing and two
+     * different things to change — and the followed connection alone cannot say which one this is.
+     */
+    public function test_the_report_publishes_the_connection_setting_beside_the_connection_it_followed(): void
+    {
+        $this->bindRedis(reachable: true);
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$json] = $this->doctorJson();
+        $report = $this->report($json);
+
+        $this->assertNull($report['swrr_connection'], 'a setting that says nothing is published as null, not as a name');
+        $this->assertSame(self::CONNECTION, $report['default_connection']);
+
+        // The same name, written — indistinguishable from the run above by everything but this key.
+        config()->set('db-manager.swrr.connection', self::CONNECTION);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output, $exit] = $this->doctor();
+        [$json] = $this->doctorJson();
+        $report = $this->report($json);
+
+        $this->assertSame(self::CONNECTION, $report['swrr_connection']);
+        $this->assertSame(self::CONNECTION, $report['default_connection']);
+        $this->assertStringContainsString('named by db-manager.swrr.connection', $output);
         $this->assertSame(0, $exit);
     }
 
@@ -3135,13 +3504,18 @@ class DbDoctorTest extends TestCase
     private static function exitCodeProfile(string $profile): array
     {
         return match ($profile) {
-            'healthy' => [15, 0, 0],
-            'warned' => [14, 1, 0],
-            'warned-twice' => [13, 2, 0],
-            'failed' => [14, 0, 1],
-            'failed-twice' => [13, 0, 2],
-            'mixed' => [13, 1, 1],
-            'mixed-twice' => [11, 2, 2],
+            // Three more PASSes than the row list had before the read path's three rows, on every
+            // profile: the fixture arms none of them (`swrr.read_path.enabled` is off, so neither
+            // probing row opens a connection) and the pair reading asks a config, so all three
+            // are silences these fixtures do not spoil — the +3 is the point rather than a value.
+            // `boot environment` is the other one that is always a PASS here, for its own reason.
+            'healthy' => [19, 0, 0],
+            'warned' => [18, 1, 0],
+            'warned-twice' => [17, 2, 0],
+            'failed' => [18, 0, 1],
+            'failed-twice' => [17, 0, 2],
+            'mixed' => [17, 1, 1],
+            'mixed-twice' => [15, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -3429,13 +3803,13 @@ class DbDoctorTest extends TestCase
      *
      * @return array{0: string, 1: int}
      */
-    private function doctor(bool $strict = false): array
+    private function doctor(bool $strict = false, bool $connectionOnly = false): array
     {
         $buffer = new BufferedOutput();
 
         $exit = $this->app->make(Kernel::class)->call(
             'db:doctor',
-            ['connection' => self::CONNECTION, '--strict' => $strict],
+            ['connection' => self::CONNECTION, '--strict' => $strict, '--connection-only' => $connectionOnly],
             $buffer,
         );
 
@@ -3729,7 +4103,7 @@ class DbDoctorTest extends TestCase
         $report = json_decode($output, true);
 
         $this->assertIsArray($report, "The object did not parse:\n" . $output);
-        $this->assertSame(['command', 'config_file', 'strict', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
         $this->assertSame($path, $report['config_file']);
         $this->assertSame('FAIL', $report['verdict']);
         $this->assertSame(1, $report['exit_code']);
@@ -3840,7 +4214,7 @@ class DbDoctorTest extends TestCase
         $report = json_decode($output, true);
 
         $this->assertIsArray($report, "The object did not parse:\n" . $output);
-        $this->assertSame(['command', 'config_file', 'strict', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
         $this->assertSame($path, $report['config_file']);
         $this->assertSame(['config file', 'replica metadata'], array_column($report['checks'], 'name'));
         $this->assertSame(['checks' => 2, 'passed' => 1, 'warnings' => 0, 'failed' => 1], $report['counts']);
@@ -3912,13 +4286,13 @@ class DbDoctorTest extends TestCase
      *
      * @return array{0: string, 1: int}
      */
-    private function doctorJson(bool $strict = false): array
+    private function doctorJson(bool $strict = false, bool $connectionOnly = false): array
     {
         $buffer = new BufferedOutput();
 
         $exit = $this->app->make(Kernel::class)->call(
             'db:doctor',
-            ['connection' => self::CONNECTION, '--strict' => $strict, '--json' => true],
+            ['connection' => self::CONNECTION, '--strict' => $strict, '--json' => true, '--connection-only' => $connectionOnly],
             $buffer,
         );
 
@@ -4202,6 +4576,55 @@ class DbDoctorTest extends TestCase
      * A throwaway directory to hold a pgcat file set, remembered so tearDown can
      * delete it — including the read-only-shaped entries a failing check implies.
      */
+    /**
+     * Point the boot at a settings file this test owns, and return its path.
+     *
+     * The row names the file the boot was *pointed at* rather than the conventional `.env`, so
+     * moving the app's environment path is what makes the assertion about the row's reading instead
+     * of about whichever file the machine running the suite happens to have beside the skeleton.
+     */
+    private function useEnvironmentFile(string $name = '.env'): string
+    {
+        $dir = $this->tempDir();
+
+        // The framework joins the path and the file name with `DIRECTORY_SEPARATOR`, so this test
+        // builds the path it will compare the row's sentence against the same way.
+        $file = $dir . DIRECTORY_SEPARATOR . $name;
+
+        file_put_contents($file, "APP_ENV=testing\n");
+
+        $this->app->useEnvironmentPath($dir);
+        $this->app->loadEnvironmentFrom($name);
+
+        return $file;
+    }
+
+    /**
+     * Leave a configuration cache where the framework looks for one and tell the container the boot
+     * read from it — the two halves `getCachedConfigPath()` and `configurationIsCached()` are
+     * answered from, so the row's comparison is driven rather than inferred from whatever is on this
+     * machine.
+     *
+     * The file goes to the path the framework itself names, which is the one `config:cache` writes:
+     * `APP_CONFIG_CACHE` is not a lever a test can pull here, because `normalizeCachePath()` treats
+     * an absolute path as one that starts with `/`, so a Windows temp path is silently prefixed with
+     * the application's base path instead. `tearDown()` deletes it, because the next test's boot
+     * would otherwise find a cache nobody claimed.
+     */
+    private function useConfigCache(): string
+    {
+        $cache = $this->app->getCachedConfigPath();
+
+        file_put_contents($cache, "<?php\n\nreturn [];\n");
+
+        $this->configCache = $cache;
+
+        // What `LoadConfiguration` binds when it loads the cached arrays instead of the config files.
+        $this->app->instance('config_loaded_from_cache', true);
+
+        return $cache;
+    }
+
     private function tempDir(): string
     {
         $dir = sys_get_temp_dir() . '/db-doctor-' . bin2hex(random_bytes(6));

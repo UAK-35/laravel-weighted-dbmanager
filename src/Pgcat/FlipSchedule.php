@@ -246,20 +246,55 @@ final class FlipSchedule
      * register a second `db:pgcat-flip` beside theirs, and two runs a minute of a command that
      * swaps a file is exactly what the overlap protection is not able to prevent across two
      * entries.
+     *
+     * One reading of one question rather than a second pass over the events, because
+     * {@see self::entries()} is asked the same question from the other side: this method wants to
+     * know whether the answer is zero, and the report a silent schedule is diagnosed with wants the
+     * two numbers themselves.
      */
     public static function isRegistered(Schedule $schedule, string $name): bool
     {
+        return self::entries($schedule, $name)['total'] > 0;
+    }
+
+    /**
+     * How many entries on `$schedule` run this package's command, and how many of those carry the
+     * name this installation gave the entry.
+     *
+     * The two numbers are asked together because they separate the three shapes an installation can
+     * be in, and a caller that had only one of them could not tell them apart: **one of each** is
+     * the normal case — the entry this package registers, named as the installation named it;
+     * **one entry, none named** is an installation whose own `db:pgcat-flip` event is the one doing
+     * the work, which the duplicate guard deliberately leaves alone; and **two or more** is the
+     * one shape no installation should have, because the framework's mutex cannot serialise two
+     * entries — `withoutOverlapping()` names each event's mutex after its own expression and
+     * command, and this class adds a per-container suffix to one of them — so both run every
+     * minute and the flipper's own `flock` is what makes the second one `skipped`.
+     *
+     * @return array{total: int, named: int}
+     */
+    public static function entries(Schedule $schedule, string $name): array
+    {
+        $entries = ['total' => 0, 'named' => 0];
+
         foreach ($schedule->events() as $event) {
-            if (is_string($event->description) && $event->description === $name) {
-                return true;
+            $carriesName = is_string($event->description) && $event->description === $name;
+            $runsCommand = is_string($event->command) && str_contains($event->command, self::COMMAND);
+
+            // Both readings of one entry, so an entry that is both named and running the command —
+            // which is what this class registers — is one entry rather than two.
+            if (! $carriesName && ! $runsCommand) {
+                continue;
             }
 
-            if (is_string($event->command) && str_contains($event->command, self::COMMAND)) {
-                return true;
+            $entries['total']++;
+
+            if ($carriesName) {
+                $entries['named']++;
             }
         }
 
-        return false;
+        return $entries;
     }
 
     /**

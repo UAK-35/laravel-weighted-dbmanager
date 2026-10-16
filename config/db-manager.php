@@ -96,6 +96,38 @@ return [
         'reader_days' => [1, 2, 3, 4, 5],   // ISO-8601: 1=Mon … 7=Sun
         'timezone' => 'UTC',
 
+        // ── The endpoints on the read path (optional) ────────────────────────────
+        //
+        // Two of the things a routed read can be cut by are the servers' own settings
+        // and are nowhere in this file: the `statement_timeout` each endpoint is
+        // capped at, and whether a standby keeps `hot_standby_feedback` on. The caps
+        // live in a parameter group rather than in a Laravel config file, so the only
+        // way `db:doctor` can report them is to ask — one throwaway connection per
+        // endpoint on the connection's `read` list, plus the writer, and one query.
+        //
+        // That is why it is opt-in and read as a switch. When it is on:
+        //
+        //   read caps        what each endpoint is capped at, and whether the writer's
+        //                    cap is the longer one — which is the whole reason a read a
+        //                    replica cut can be answered by escalating to the writer
+        //   standby feedback whether every standby this package sends reads to keeps
+        //                    `hot_standby_feedback` on. A standby without it asks the
+        //                    primary to drop nothing, so a query there can be cancelled
+        //                    by a conflict with recovery (SQLSTATE 40001) at any moment,
+        //                    which is the failure the recording under `docs/` describes
+        //
+        // Neither row fails an installation over an endpoint that did not answer, and
+        // neither is judged at all when this is off: the rows say the probe is not
+        // armed and name this key, rather than reporting silence as if the endpoints
+        // had been asked. `timeout_ms` bounds the connect, so a preflight cannot wait
+        // on an endpoint that is not there.
+        //
+        // See Uak35\WeightedDbManager\Database\Weighted\EndpointReadings.
+        'read_path' => [
+            'enabled' => env('SWRR_READ_PATH_ENABLED', false),
+            'timeout_ms' => (int) env('SWRR_READ_PATH_TIMEOUT_MS', 2000),
+        ],
+
         // ── Pgcat toml flipper (optional) ────────────────────────────────────────
         //
         // Keeps pgcat.toml in lock-step with the reader/writer mode decided above.

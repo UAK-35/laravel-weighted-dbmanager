@@ -408,6 +408,53 @@ final class FlipScheduleTest extends TestCase
     }
 
     /**
+     * The two numbers the report a silent schedule is diagnosed with is built from, and the three
+     * shapes they separate: this package's entry, an entry the installation wrote itself, and two
+     * registrations of one command.
+     *
+     * Counted together because the criteria overlap: the entry this class registers carries the name
+     * *and* runs the command, so counting each criterion on its own would report the normal case as
+     * two entries. Which entry is whose is the name's answer — the command says only that somebody is
+     * running it.
+     */
+    public function test_the_two_counts_separate_the_three_shapes_an_installation_can_be_in(): void
+    {
+        $ours = new Schedule();
+        $ours->command(FlipSchedule::COMMAND)->name(FlipSchedule::DEFAULT_NAME);
+
+        $theirs = new Schedule();
+        $theirs->command(FlipSchedule::COMMAND)->everyMinute();
+
+        $both = new Schedule();
+        $both->command(FlipSchedule::COMMAND)->name(FlipSchedule::DEFAULT_NAME);
+        $both->command(FlipSchedule::COMMAND)->everyMinute();
+
+        $neither = new Schedule();
+        $neither->call(static fn (): null => null);
+
+        $this->assertSame(
+            ['total' => 1, 'named' => 1],
+            FlipSchedule::entries($ours, FlipSchedule::DEFAULT_NAME),
+            'the entry this package registers is one entry rather than one per criterion',
+        );
+        $this->assertSame(
+            ['total' => 1, 'named' => 0],
+            FlipSchedule::entries($theirs, FlipSchedule::DEFAULT_NAME),
+            'an entry the installation wrote runs the command and carries no name of ours',
+        );
+        $this->assertSame(
+            ['total' => 2, 'named' => 1],
+            FlipSchedule::entries($both, FlipSchedule::DEFAULT_NAME),
+            'two registrations of one command are two runs a minute',
+        );
+        $this->assertSame(
+            ['total' => 0, 'named' => 0],
+            FlipSchedule::entries($neither, FlipSchedule::DEFAULT_NAME),
+            'an entry that is neither is not counted at all',
+        );
+    }
+
+    /**
      * `withoutOverlapping()` names its mutex `sha1(expression + command)` by itself, which is the
      * *same name in every container* when the cache store is shared — so one slow container would
      * hold the lock for all of them. The name is scoped instead, and the hostname being unreadable

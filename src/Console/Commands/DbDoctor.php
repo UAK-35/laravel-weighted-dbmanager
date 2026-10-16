@@ -6,9 +6,11 @@ namespace Uak35\WeightedDbManager\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
+use Uak35\WeightedDbManager\Database\Weighted\EndpointReadings;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
@@ -16,6 +18,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
+use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
@@ -31,11 +34,20 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
 
 /**
  * php artisan db:doctor [connection] [--strict] [--json] [--config-file=path]
+ * [--connection-only]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Fourteen things can be wrong while the application
+ * do", before traffic arrives. Eighteen things can be wrong while the application
  * still boots and answers requests:
  *
+ *   boot environment  the settings every row below judged are not the ones this
+ *                     installation's files spell: the configuration is cached from
+ *                     before the environment file was last written, so a value the
+ *                     operator changed has not reached the running process. The two
+ *                     facts — the file this boot read and whether the configuration
+ *                     is cached — are the framework's own (`environmentFilePath()`,
+ *                     `configurationIsCached()`), and the row is the one place a
+ *                     container that cached at build time says so before a deploy
  *   provider swap     the framework's DatabaseServiceProvider is still the one
  *                     binding `db`, so reads are unweighted and nothing says so
  *   weighted factory  the factory is where the replica is chosen, so a host app
@@ -81,6 +93,24 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     cores or memory is a value the resolver cannot read, which
  *                     drops it from the pool or weights it as something else while
  *                     the pool still looks whole
+ *   read caps         a read endpoint is capped — by its own `statement_timeout` — far below
+ *                     the writer's, so a read this package routes there is cut where the
+ *                     writer was configured not to cut it. The caps live in a parameter
+ *                     group rather than in any file this package reads, so the row asks
+ *                     each endpoint, one connection each, and only while
+ *                     `swrr.read_path.enabled` arms it. An endpoint that did not answer is
+ *                     named with what it said and is never a failure
+ *   standby feedback  a standby in the read list has `hot_standby_feedback` off, so it does
+ *                     not ask the primary to hold the row versions a query's snapshot needs
+ *                     — and a read chosen for it can be cancelled by a conflict with
+ *                     recovery (SQLSTATE 40001) at any moment, which is the failure the
+ *                     caller has to answer. Read by the same sweep as the caps above
+ *   read/write pair   what a statement pinned to the write connection reaches: the connection
+ *                     declares a `read` list and a `write` block, one of the two, or neither,
+ *                     and Laravel honours the pin only where the two halves are distinct. A
+ *                     reading rather than a verdict — a single-host connection is a
+ *                     documented installation, and whether an application pins reads is its
+ *                     own setting
  *   switch values     swrr.pgcat.enabled, swrr.pgcat.use_reload or
  *                     swrr.allow_local_fallback is written as something that is not
  *                     on or off, which is refused: a cast reads 'false', 'off' and
@@ -128,15 +158,43 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * because a near miss is a ranked answer for a reader and a line is a value a gate may apply
  * without reading it.
  *
+ * CONNECTION-ONLY MODE
+ * --------------------
+ * `--connection-only` bounds the installation run to what a build container can answer. The six
+ * rows whose subject is something the container may not have are left out — the store (`store
+ * probe`, `store reachability`), the supervisor (`pgcat supervisor`), the pooler (`pool probe`)
+ * and the read path's own endpoints (`read caps`, `standby feedback`) — because a row that cannot
+ * be answered does not print silence: it reports the container's own
+ * missing prerequisite, and an image build fails over the absence of a thing the running container
+ * was always going to provide. It is the same mistake the `--config-file` mode exists to avoid,
+ * one step further in: a question that belongs to the running installation, asked of something that
+ * is not one yet.
+ *
+ * What is left is every reading that is about this boot, this configuration and these files — the
+ * environment the boot read from, the provider swap, the factory, the published config's key set,
+ * the gate, the files a flip needs, the replica metadata, the read path's pair, the three switches,
+ * the reader windows, the mode the pooler's file is on, and both schedule rows — so a container that arms pgcat over a
+ * connection pgcat cannot front still exits 1, with no store, no supervisor and no reachable
+ * database.
+ *
+ * Nothing about the rows it does ask changes: same names, same sentences, same verdicts, and the
+ * same exit rule (`gateFailed()`), and the object is the same one with `checks` holding the rows
+ * that were asked. That is deliberate rather than convenient — a gate written against a full run
+ * reads a bounded one, and a row missing from `checks` is the only way the two differ. The rendered
+ * run says which rows it left out, because a shorter report read as a complete one would be this
+ * command telling an operator that six questions passed when they were never asked.
+ *
  * READ ONLY
  * ---------
  * Every check inspects configuration, resolved classes and the store. Nothing is
- * written, no replica is probed with a query and no flip is attempted, so the
- * command is safe in a deploy pipeline and against a live database. Two checks reach
- * over the network and neither writes anything: the store check's PING, where an
- * unreachable store costs one connect timeout, and `pool probe`, which is one bounded
- * startup packet per pool when — and only when — the probe is armed. A probe that is not
- * armed opens no socket at all. The one other
+ * written, no replica is probed with `SELECT 1` and no flip is attempted, so the
+ * command is safe in a deploy pipeline and against a live database. The checks that reach
+ * over the network write nothing either: the store check's PING, where an
+ * unreachable store costs one connect timeout; `pool probe`, which is one bounded
+ * startup packet per pool; and the two read-path readings, which are one query per
+ * endpoint on a connection that is purged on the way out — a settings query, not a
+ * probe of what a replica answers. Each of the two is armed or not by its own
+ * setting, and a probe that is not armed opens no socket at all. The one other
  * processes this command starts are the read-only `supervisorctl status` commands that
  * `pgcat supervisor` derives from the flip's own command — the same binary, the same
  * program name, `status` in the verb position, plus the bare `supervisorctl status` that
@@ -175,6 +233,16 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * report an operator read and the object a job parsed name the same row the same way, and
  * there is no mapping between the two to drift.
  *
+ * Three of the keys name the subject rather than the run, and are the ones that vary: an
+ * installation run publishes the connection it inspected, the connection it followed
+ * (`default_connection`) and the value `db-manager.swrr.connection` was written with
+ * (`swrr_connection`, null when the setting says nothing) — so *unset* and *set to the name of
+ * the default* stay distinguishable in the object, which they stop being the moment the setting
+ * has done its work and both read as the same followed connection. A config-file run publishes
+ * the file it read instead. Beside `strict` sits `connection_only`, the other flag that changes
+ * what a run *inspects* rather than how it is reported: a gate that requires a row has to be able
+ * to see that this run never asked it.
+ *
  * `exit_code` travels inside the object because the two halves of the one answer belong to
  * one artefact. A row's verdict says how the installation looks; the code says what the
  * gate decided about that; and `strict` explains the only case where they differ — with the
@@ -196,7 +264,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * `connections` block for the read list of the connection named on the command line, and a file
  * holding both is judged for both.
  *
- * It exists for the one moment the twelve rows above cannot serve. A pipeline vetting a config
+ * It exists for the one moment the rows above cannot serve. A pipeline vetting a config
  * on a branch has the *old* configuration installed — the provider swap, the gate, the files,
  * the replica metadata and the store are all question about the running application, and every
  * one of them would be answered about the incumbent and printed next to the candidate's name.
@@ -266,13 +334,56 @@ class DbDoctor extends Command
         'swrr.allow_local_fallback' => 'the switch falls back to on — the value this setting documents — so a read that cannot reach a replica may still be served from the in-process fallback',
     ];
 
+    /**
+     * The rows `--connection-only` leaves out, in the order they sit in a full run.
+     *
+     * WHY A TABLE AND NOT A FLAG PER CALL
+     *   A row that cannot be answered does not print silence: it reports the prerequisite it is
+     *   missing as a fault of the installation, so dropping one is a decision that has to be
+     *   made once and read once. Declaring the four here — and asking `asks()` rather than
+     *   remembering to skip a call — is what stops the bounded mode drifting into a *quieter*
+     *   doctor, which is the shape of this mistake: a mode that judged a store it cannot reach
+     *   would fail image builds for the container that was always going to run it.
+     *
+     *   Each one's subject is outside the process, and that is the rule:
+     *
+     *     `pgcat supervisor`  a supervisor — it runs supervisorctl, which needs the binary on
+     *                         PATH and a control socket to answer
+     *     `pool probe`        the pooler — it opens a PostgreSQL startup packet to the address
+     *                         the probe is named for
+     *     `store probe`       the store — the row exists to keep an eye on the throttled PING,
+     *                         and a run that does not send one has nothing to keep an eye on.
+     *                         The closest call of the four, and the reason the reasons are
+     *                         written down: the row's own reading is a config value and a
+     *                         file's mode, both of which a container has — but the file is a
+     *                         state directory a container usually mounts at run time, so
+     *                         judging it at build time would fail an image over a directory
+     *                         the image does not own
+     *     `store reachability` the store — it is the PING, over a network the container may not
+     *                         have yet
+     *
+     * A full run asks every one of them, which is what every existing caller reads and what the
+     * README's table lists.
+     *
+     * @var list<string>
+     */
+    private const REACHES_OUT = [
+        'pgcat supervisor',
+        'pool probe',
+        'read caps',
+        'standby feedback',
+        'store probe',
+        'store reachability',
+    ];
+
     protected $signature = 'db:doctor
                             {connection=pgsql : Connection whose weighted replicas are inspected}
                             {--strict : Treat warnings as failures, for a deploy gate}
                             {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
-                            {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}';
+                            {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}
+                            {--connection-only : Bound the run to what a build container can answer: leave out the four rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}';
 
-    protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — or vet one config file without the installation, with --config-file';
+    protected $description = 'Check an installation end to end: provider swap, weighted factory, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, or ask only the rows a build container can answer, with --connection-only';
 
     public function handle(): int
     {
@@ -290,32 +401,59 @@ class DbDoctor extends Command
 
         [$manager, $resolutionError] = $this->weightedManager();
 
+        // The rows that are about this boot, this configuration and these files — every one of
+        // them reachable from a container with no store, no supervisor and no database, which is
+        // the whole of what a candidate image has.
         $rows = [
+            $this->bootEnvironment(),
             $this->providerSwap($manager, $resolutionError),
             $this->weightedFactory(),
             $this->publishedConfig(),
             $this->pgcatGate(),
             $this->pgcatFiles(),
-            $this->pgcatSupervisor(),
         ];
+
+        // `asks()` rather than a conditional in each caller: the rows that need something outside
+        // the process are declared in one table, so which ones a bounded run leaves out is one
+        // decision rather than four that could disagree. See REACHES_OUT.
+        if ($this->asks('pgcat supervisor')) {
+            $rows[] = $this->pgcatSupervisor();
+        }
 
         if ($manager instanceof WeightedDatabaseManager) {
             $rows[] = $this->replicaMetadata($manager, $connection);
+            $rows = array_merge($rows, $this->readPathRows($manager, $connection));
             $rows[] = $this->switchValues();
             $rows[] = $this->readerWindows();
             $rows[] = $this->pgcatMode();
-            $rows[] = $this->poolProbe();
+
+            if ($this->asks('pool probe')) {
+                $rows[] = $this->poolProbe();
+            }
+
             $rows[] = $this->flipSchedule();
             $rows[] = $this->scheduleBeat();
-            $rows[] = $this->storeProbe();
-            $rows[] = $this->storeReachability($manager, $connection);
+
+            if ($this->asks('store probe')) {
+                $rows[] = $this->storeProbe();
+            }
+
+            if ($this->asks('store reachability')) {
+                $rows[] = $this->storeReachability($manager, $connection);
+            }
         }
+
+        $followed = $this->followedConnection();
+        $configured = $this->configuredConnection();
 
         return $this->conclude(
             $rows,
-            ['connection' => $connection, 'default_connection' => $this->followedConnection()],
-            'Connection inspected: <comment>' . $connection . '</comment>, followed connection is <comment>'
-                . $this->followedConnection() . '</comment>',
+            [
+                'connection' => $connection,
+                'swrr_connection' => $configured,
+                'default_connection' => $followed,
+            ],
+            $this->subjectLine($connection, $followed, $configured),
         );
     }
 
@@ -326,14 +464,15 @@ class DbDoctor extends Command
      * depends on has to be one rule: the code is `gateFailed()`'s — a failure, or any warning
      * under `--strict` — and the object carries that same code, so a run cannot be read one way
      * and acted on another. What differs between the two runs is the *subject*, and that is what
-     * the caller passes: the keys that name what was inspected (`connection`, or `config_file`)
-     * and the banner line above the table, which is the prose spelling of the same thing.
+     * the caller passes: the keys that name what was inspected (`connection` with the setting it
+     * was read from and the connection it followed, or `config_file`) and the banner line above
+     * the table, which is the prose spelling of the same thing.
      *
      * The subject keys are the only ones that vary. Everything a gate selects on — `verdict`,
      * `exit_code`, `counts`, `checks` — is present, in that order, in both shapes.
      *
      * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
-     * @param array<string, string> $subject
+     * @param array<string, string|null> $subject
      */
     private function conclude(array $rows, array $subject, string $banner): int
     {
@@ -931,6 +1070,102 @@ class DbDoctor extends Command
         }
 
         return [$manager instanceof WeightedDatabaseManager ? $manager : null, null];
+    }
+
+    /**
+     * The two facts about a boot that no other row can state: which file it read its settings from,
+     * and whether the values it read came from the config files or from a cache built earlier.
+     *
+     * WHY THIS ROW EXISTS
+     *   Every row below reads the *running* configuration, and the running configuration is not
+     *   always the one an operator is editing. `php artisan config:cache` freezes the arrays the
+     *   config files returned — `env()` calls included — into `bootstrap/cache/config.php`, and from
+     *   then on a change to `.env` reaches nothing: the loader still reads that file for the
+     *   environment, and reads the cached arrays for everything else. Container images make it
+     *   routine — cache at build time, mount a real `.env` at run time — and no other row can see
+     *   it, because a cached config is a perfectly readable config. This row is about the *pair*: the
+     *   file this boot read, and whether that cache is older than it.
+     *
+     * WHAT EACH VERDICT MEANS
+     *   - not cached — a fact, with the file named (`no .env file at all` is a shape, not a fault:
+     *     an installation can keep every setting in the process environment);
+     *   - cached, and the settings file is not newer than it — a fact again, and the order
+     *     `config:cache` documents: the deploy cached after it wrote its settings, so the values the
+     *     rows below read are the ones the files spell;
+     *   - cached, and the settings file *is* newer — a **warning**, and the one state this row can
+     *     fail a release on. The rows below read the cached values, so the setting the operator
+     *     changed has not arrived, and `--strict` is how a deploy refuses to ship that.
+     *
+     *   A cache file that cannot be stat'ed compares with nothing, so it falls to the middle state
+     *   rather than to the warning: this row reports what it read and invents no ordering it could
+     *   not measure.
+     *
+     * WHERE THE TWO FACTS COME FROM
+     *   The framework's own methods, not a convention re-derived here. `environmentFilePath()` is the
+     *   file this boot's environment loader was pointed at — `.env`, or whichever file
+     *   `loadEnvironmentFrom()` named, which is the case a hardcoded `.env` would report wrongly — and
+     *   `configurationIsCached()` is the same answer the framework's own `config:cache` and
+     *   `config:clear` consult. Both live on `Foundation\Application` rather than on the contract
+     *   `$this->laravel` is typed as, which is why this row — and only this row — asks whether it is
+     *   looking at a Laravel application before it asks them; an application that is not one says so
+     *   instead of failing, and the two facts are simply not readable there.
+     *
+     * No finding key: the audit remembers nothing about a boot's environment, so there is nothing a
+     * cached configuration could be dated from. The row states this run's two facts as they are.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function bootEnvironment(): array
+    {
+        $name = 'boot environment';
+        $app = $this->laravel;
+
+        if (!$app instanceof Application) {
+            return $this->row($name, self::PASS, sprintf(
+                'this application (%s) is not a Laravel application, so the file this boot read settings '
+                . 'from and whether its configuration is cached cannot be named here',
+                get_debug_type($app),
+            ));
+        }
+
+        $file = $app->environmentFilePath();
+
+        $reads = is_file($file)
+            ? sprintf('this boot read settings from %s', $file)
+            : sprintf(
+                '%s is not there, so this boot read no settings file at all: every value came from the process environment',
+                $file,
+            );
+
+        if (!$app->configurationIsCached()) {
+            return $this->row($name, self::PASS, sprintf(
+                '%s, and the configuration is not cached, so every value the rows below read is the one '
+                . 'the files in config/ spell at this boot',
+                $reads,
+            ));
+        }
+
+        $cache = $app->getCachedConfigPath();
+        $cachedAt = @filemtime($cache);
+        $writtenAt = @filemtime($file);
+
+        if ($cachedAt === false || $writtenAt === false || $writtenAt <= $cachedAt) {
+            return $this->row($name, self::PASS, sprintf(
+                '%s, and the configuration is cached at %s — not older than that file, so the values the '
+                . 'rows below read are the ones these files spell',
+                $reads,
+                $cache,
+            ));
+        }
+
+        return $this->row($name, self::WARN, sprintf(
+            '%s, and the configuration cached at %s was built before it: the rows below read the cached '
+            . 'values, so a setting this file changed since has not arrived. `php artisan config:clear` '
+            . '(or a fresh `config:cache`) re-reads the files, and until it runs this installation does '
+            . 'not obey them',
+            $reads,
+            $cache,
+        ));
     }
 
     /**
@@ -1577,6 +1812,113 @@ class DbDoctor extends Command
             'replica metadata',
             self::PASS,
             sprintf('%d replicas on [%s], total weight %d', count($rows), $connection, $total),
+        );
+    }
+
+    /**
+     * The read path's three readings: what the connection's endpoints are capped at, whether the
+     * standbys among them keep `hot_standby_feedback` on, and what a statement pinned to the writer
+     * reaches.
+     *
+     * WHY THESE ROWS EXIST
+     *   This package chooses the endpoint a read lands on, and two of the things that endpoint can do
+     *   to the read are its own settings: it can cut a statement at a `statement_timeout` the writer
+     *   was configured not to cut at, and a standby that does not keep `hot_standby_feedback` on can
+     *   have a read cancelled by a conflict with recovery at any moment. Neither is a value in any
+     *   file this package reads — both live in a parameter group — so a preflight that judged only
+     *   the configuration described a read path it had never asked about. `docs/read-path-cancellations.md`
+     *   is the recording: the two SQLSTATEs, why a re-run is the conflict's answer and the writer's
+     *   longer cap is the timeout's, where the package stops (it chooses the endpoint and does not
+     *   re-run a statement the application may have wrapped in a transaction), and the log-alarm
+     *   filter names an installation can install for itself.
+     *
+     * ONE SWEEP, TWO ROWS, AND ONE READING THAT ASKS NOTHING
+     *   {@see EndpointReadings} is built once and answers all three, because the first two are read
+     *   off one connection per endpoint and three rows each opening their own connection would be
+     *   three sweeps of the same read list. The third — the `read`/`write` pair — reads the
+     *   connection's config, so it is answered whatever the switch says, and it is deliberately a
+     *   reading rather than a verdict: a single-host connection is a documented installation and
+     *   whether an application pins reads to the writer is that application's own setting, which this
+     *   package cannot read.
+     *
+     * ARMED BY ITS OWN SWITCH, AND WHY IT DEFAULTS OFF
+     *   The two probing rows open one connection per endpoint — the writer included — so they are
+     *   behind `db-manager.swrr.read_path.enabled`, read as a switch and off in the shipped config.
+     *   An installation opts into that, which is the same rule the pool probe follows for a socket on
+     *   the poll path, and the rows say the probe is not armed rather than reporting silence as if the
+     *   endpoints had been asked: "nothing to report" and "not asked" must not be the same sentence.
+     *   A value that is not a switch is refused — with the spellings, the way every other switch row
+     *   refuses one — and resolves to the documented default, so a typo cannot arm a connection per
+     *   endpoint; no suggestion is printed for it, because a value that is not a switch cannot be
+     *   re-spelled without guessing at what was meant.
+     *
+     * WHAT AN ENDPOINT THAT DID NOT ANSWER IS
+     *   A reading, not a failure. An endpoint that refused, timed out or answered without the
+     *   settings is named with what it said, beside the endpoints that did answer, and the row stays
+     *   `PASS`: reachability is the health monitor's question and `store reachability`'s, and a second
+     *   row failing over the same moment would be one fact reported twice in two vocabularies.
+     *
+     * `--connection-only` leaves the two probing rows out entirely (see {@see REACHES_OUT}): a build
+     * container has no endpoint to ask, and a row that judged one would fail an image over the
+     * network the image was always going to have at run time. The pair reading is not left out — it
+     * opens nothing.
+     *
+     * @return list<array{status: string, name: string, detail: string, suggestions: list<string>}>
+     */
+    private function readPathRows(WeightedDatabaseManager $manager, string $connection): array
+    {
+        $config = $this->laravel->make(Repository::class);
+
+        // The documented default is off: the reading is one connection per endpoint, and an
+        // installation opts into that rather than discovering it in a preflight. Read through
+        // `SwitchValue` for the reason every other switch is — `(bool) 'false'` is true, and this
+        // setting decides whether sockets are opened.
+        $switch = SwitchValue::read($config->get('db-manager.swrr.read_path.enabled'), false);
+        $timeout = ConfigValue::int($config->get('db-manager.swrr.read_path.timeout_ms'), EndpointReadings::DEFAULT_TIMEOUT_MS);
+
+        $readings = EndpointReadings::of($manager, $connection, $switch['on'], $timeout);
+
+        // One spelling of the refusal, on the rows it decides. The pair reading reads a config and
+        // is asked either way, so a refusal does not change what it says and the clause would be a
+        // sentence about a setting that did not decide anything here.
+        $refused = $switch['refused'] === null ? '' : ' — '.SwitchValue::describeRefused([
+            'db-manager.swrr.read_path.enabled' => $switch['refused'],
+        ]).' — '.SwitchValue::ACCEPTED.'. Refused: neither row asks an endpoint, which is the value this '
+            .'setting documents, so a typo here cannot open a connection per endpoint.';
+
+        $rows = [];
+
+        if ($this->asks('read caps')) {
+            $rows[] = $this->readingRow('read caps', $readings->caps(), $refused);
+        }
+
+        if ($this->asks('standby feedback')) {
+            $rows[] = $this->readingRow('standby feedback', $readings->feedback(), $refused);
+        }
+
+        $rows[] = $this->readingRow('read/write pair', $readings->pair(), '');
+
+        return $rows;
+    }
+
+    /**
+     * A reading as a row: the level it reached decides the verdict, and the sentence is the reading's
+     * own — so the row and `/health/db` cannot describe one endpoint two ways.
+     *
+     * The mapping is the whole of what this command adds to a reading, which is why a reading is not
+     * a row: what is *wrong* is a judgement that belongs where the evidence is (a cap far below the
+     * writer's, a standby without the feedback setting), and what a verdict is called is this
+     * command's vocabulary (`PASS`/`WARN`/`FAIL`, and `--strict` failing the warnings).
+     *
+     * @param array{level: string, sentence: string} $reading
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function readingRow(string $name, array $reading, string $suffix): array
+    {
+        return $this->row(
+            $name,
+            $reading['level'] === EndpointReadings::LEVEL_WARN ? self::WARN : self::PASS,
+            $reading['sentence'].$suffix,
         );
     }
 
@@ -2430,9 +2772,21 @@ class DbDoctor extends Command
      *     measure one from. A container that has not finished starting is not a stopped schedule, and
      *     one nobody stamped must not be failed for the absence of a file the package did not write.
      *
+     * THE THREE CAUSES THE VERDICT CANNOT SEE
+     *   A stopped schedule has three other causes that leave the same state file behind — a store the
+     *   runs' mutexes cannot be taken in, two entries running the same command, a boot stamp nothing
+     *   can read — and each is reported beside the verdict rather than folded into it: they are
+     *   readings, not verdicts, so the row's status and the exit code stay the beat's. They are read
+     *   from the entry's own settings and the window the flipper was built with, and an installation
+     *   whose entry is not scheduled reads nothing at all — see {@see ScheduleCauses}, which is also
+     *   where the sentences come from, so this row and `db:doctor`'s sibling surfaces describe one
+     *   reading the same way.
+     *
      * No finding key: the boot record is one file per *installation* and this verdict is about one
      * container's schedule, so there is no key for a date to be remembered under — the age is in the
-     * row's own sentence, which is the fact an operator acts on.
+     * row's own sentence, which is the fact an operator acts on. The causes are not filed either,
+     * for a second reason: they are this moment's readings and none of them is a state a boot could
+     * close out.
      *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
@@ -2462,8 +2816,32 @@ class DbDoctor extends Command
         $missed = ScheduleBeat::missedRuns($config->get('db-manager.swrr.pgcat.schedule'));
         $verdict = $flipper->scheduleStatus();
 
+        // The three causes a stopped schedule has that the verdict cannot see — the store the runs'
+        // mutexes live in, the entries that would run the command, the file the window is measured
+        // from — read off the *flipper's* window rather than off this file's own reading of the
+        // configuration, so the row reports the boot stamp the verdict was actually judged against.
+        // Empty, and nothing read, when the entry is not scheduled.
+        $causes = ScheduleCauses::fromContainer(
+            $this->laravel,
+            $entry['enabled'],
+            $entry['name'],
+            $flipper->window()->bootFile(),
+            // The bounded run is the one mode that may not ask it: being answerable where the store
+            // is not there is what the mode is for, so the reading says it did not ask rather than
+            // leaving the store's reachability looking unremarkable.
+            $this->connectionOnly()
+                ? 'this run is bounded to what a build container can answer, and reaching the store is '
+                    .'one of the things it leaves out'
+                : null,
+        );
+
+        // Written once as an appendix: every sentence below is the flipper's and none of them ends in
+        // a full stop, so a string that starts with a space is what keeps the two readable together.
+        $readings = $causes->sentence();
+        $appendix = $readings === '' ? '' : ' '.$readings;
+
         if ($verdict['stale'] === true) {
-            return $this->row('schedule beat', self::FAIL, (string) $verdict['reason']);
+            return $this->row('schedule beat', self::FAIL, (string) $verdict['reason'].$appendix);
         }
 
         // The switch as a warning, and only where it decides something: an installation whose entry
@@ -2475,12 +2853,12 @@ class DbDoctor extends Command
                 self::WARN,
                 'nothing would notice a schedule that stopped: the watch is switched off '
                 .'(swrr.pgcat.schedule.stale_after_missed_runs = 0), and the beat is still written, so '
-                .'switching it back on reports the age it would have had',
+                .'switching it back on reports the age it would have had'.$appendix,
             );
         }
 
         if ($verdict['stale'] === null) {
-            return $this->row('schedule beat', self::PASS, (string) $verdict['not_judged']);
+            return $this->row('schedule beat', self::PASS, (string) $verdict['not_judged'].$appendix);
         }
 
         return $this->row('schedule beat', self::PASS, sprintf(
@@ -2489,7 +2867,7 @@ class DbDoctor extends Command
             ScheduleBeat::ageText((int) ($verdict['age_seconds'] ?? 0)),
             $missed,
             $entry['interval_minutes'] === 1 ? '1 minute' : $entry['interval_minutes'].' minutes',
-        ));
+        ).$appendix);
     }
 
     /**
@@ -2761,6 +3139,90 @@ class DbDoctor extends Command
     }
 
     /**
+     * What `db-manager.swrr.connection` was written with, or null when the setting says nothing.
+     *
+     * The followed connection alone cannot tell an operator which of two installations they are
+     * looking at: left unset, the package follows `database.default`, and set to that same name it
+     * follows a connection the operator chose — the same routing, and two different things to
+     * change. That is the pair this publishes, one key beside the other, and it is the reason the
+     * value is read through the class that resolves it rather than parsed a second time here:
+     * `ActiveConnection` says whether the name came from the setting at all, so this cannot
+     * disagree with the gate and the flipper about which key is in play.
+     *
+     * Null rather than an empty string for a setting that is not there: a name that is written but
+     * empty is treated as unset by the same class (its own `!== ''` test), so reporting the two
+     * differently would be this key inventing a distinction the package does not make.
+     */
+    private function configuredConnection(): ?string
+    {
+        $resolved = ActiveConnection::resolve($this->laravel->make(Repository::class));
+
+        return $resolved['source'] === ActiveConnection::CONFIGURED_SOURCE
+            ? $resolved['connection']
+            : null;
+    }
+
+    /**
+     * The line above the table: what was inspected, what the package followed, and — in a bounded
+     * run — which rows were not asked at all.
+     *
+     * The setting is named only when the installation wrote one, so the common shape (nothing set,
+     * the default followed) is unchanged and a reader who *did* set it sees where the followed
+     * connection came from without opening the config file.
+     *
+     * The bounded clause is not decoration. `--connection-only` prints short by design, and a
+     * report that is short without saying why reads as a report in which four checks passed —
+     * which is the one thing a bounded run must never be mistaken for. So the rows left out are
+     * named, in the shape the object states them as absent names.
+     *
+     * Rows, and only rows: a *reading* a bounded run leaves untaken — the store the schedule's runs'
+     * mutexes live in, which the `schedule beat` row would otherwise ask — says so in that row's own
+     * sentence, because the row is there and this line is about the ones that are not. A banner that
+     * also enumerated readings would be a second place to keep in step with the rows.
+     */
+    private function subjectLine(string $connection, string $followed, ?string $configured): string
+    {
+        $line = 'Connection inspected: <comment>' . $connection . '</comment>, followed connection is <comment>'
+            . $followed . '</comment>';
+
+        if ($configured !== null) {
+            $line .= ' (named by <comment>' . ActiveConnection::CONFIGURED_SOURCE . '</comment>)';
+        }
+
+        if (!$this->connectionOnly()) {
+            return $line;
+        }
+
+        return $line . ' — <comment>--connection-only</comment>: <comment>'
+            . implode('</comment>, <comment>', self::REACHES_OUT)
+            . '</comment> were not asked, because each one reaches something a build container may not have';
+    }
+
+    /**
+     * Whether this run asks a row at all — the one door the bounded mode goes through.
+     *
+     * `--connection-only` leaves the rows in {@see REACHES_OUT} out of the run entirely: they are
+     * not built, not printed as not-judged, and not in the object. A row that was *built* and then
+     * filtered would have already done the thing it was left out for — a store read, a socket, a
+     * `proc_open` — which is why the decision is a predicate at the call site rather than a filter
+     * over the finished list.
+     */
+    private function asks(string $row): bool
+    {
+        return !$this->connectionOnly() || !in_array($row, self::REACHES_OUT, true);
+    }
+
+    /**
+     * Whether this run is bounded to what a build container can answer. Read from the flag where
+     * it is needed rather than carried as state, so the row list and the report cannot disagree
+     * about which mode they are describing.
+     */
+    private function connectionOnly(): bool
+    {
+        return (bool) $this->option('connection-only');
+    }
+
+    /**
      * The run as one JSON object on stdout, and nothing else — written raw, so a detail that
      * happens to contain angle brackets is not read as a console tag and dropped on the way
      * out of a machine-readable channel.
@@ -2771,11 +3233,18 @@ class DbDoctor extends Command
      * number a deploy step branches on, in the same artefact as the rows that explain it, so a
      * run cannot be read one way and acted on another.
      *
-     * The one exception is the pair of keys that name the *subject*, and it is the exception
-     * rather than a loose end: an installation run names a `connection` and the
-     * `default_connection` it followed, while a config-file run names the `config_file` it
-     * read. Both spellings sit in the same slot, second in the object, in front of `strict` and
-     * everything a gate selects on — see `conclude()`, which is where the two runs meet.
+     * The one exception is the keys that name the *subject*, and it is the exception rather than a
+     * loose end: an installation run names the `connection` it inspected, the `swrr_connection` the
+     * setting was written with (null when it says nothing) and the `default_connection` it followed,
+     * while a config-file run names the `config_file` it read. Both spellings sit in the same slot,
+     * second in the object, in front of the flags and everything a gate selects on — see
+     * `conclude()`, which is where the two runs meet.
+     *
+     * `connection_only` sits beside `strict` because it is the other flag that changes the *run*,
+     * and its claims are the ones a gate cannot make from the rows: a bounded run leaves four rows
+     * out of `checks` entirely, so a job that selects a row by name has to be able to see that this
+     * report was never going to carry it. The rows absent are the ones named in the doctor's own
+     * record, and the rendered run prints them; here the flag is what says they are missing.
      *
      * `checks` is the rows themselves — the same names, the same verdicts and the same
      * suggestions the table prints, including the repairs a row can name — and each key is
@@ -2783,7 +3252,7 @@ class DbDoctor extends Command
      * published as `verdict`, which is what the table calls it and what decides the run.
      *
      * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
-     * @param array<string, string> $subject the keys naming what was inspected
+     * @param array<string, string|null> $subject the keys naming what was inspected
      * @param array{checks: int, passed: int, warnings: int, failed: int} $counts
      */
     private function report(array $rows, array $subject, bool $strict, array $counts, int $exitCode): int
@@ -2794,6 +3263,7 @@ class DbDoctor extends Command
                     'command' => 'db:doctor',
                     ...$subject,
                     'strict' => $strict,
+                    'connection_only' => $this->connectionOnly(),
                     'verdict' => $this->runVerdict($rows),
                     'exit_code' => $exitCode,
                     'counts' => $counts,

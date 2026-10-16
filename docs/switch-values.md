@@ -299,10 +299,13 @@ asserting.
   becoming a setting with a finding and no row, or a row with a key that is never written.
   Before that guard existed, `DbDoctorTest` would have caught the second case only if a test
   happened to refuse that switch. Not covered by either, and worth
-  stating where the four switches are counted: `swrr.health.pinned_query` is read by
-  `SwitchValue` too, and its refusal is surfaced in the `/health/db` payload as
-  `pinned.refused` — but it has no finding key and no row, so a config-file vet that reported
-  it would be reporting a refusal the boot and the doctor do not.
+  stating where the switches are counted: two more are read by `SwitchValue` and reported by
+  the surface that reads them. `swrr.health.pinned_query` is refused into the `/health/db`
+  payload as `pinned.refused`, and `swrr.read_path.enabled` — the switch that arms the two
+  read-path probes — is refused into the `read caps` and `standby feedback` rows, which then
+  report the probe as off. Neither has a finding key and neither is a row of this one's, so a
+  config-file vet that reported them would be reporting a refusal the boot and the doctor do
+  not.
 - **A switch nested deeper is not discovered.** The three are named by hand, not found by
   walking the config block, so a switch inside another block is invisible until someone
   adds it.

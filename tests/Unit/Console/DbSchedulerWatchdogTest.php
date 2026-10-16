@@ -12,6 +12,7 @@ use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
+use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Tests\Support\Readme;
 use Uak35\WeightedDbManager\Tests\TestCase;
 use stdClass;
@@ -354,7 +355,7 @@ final class DbSchedulerWatchdogTest extends TestCase
         $report = $this->report(Artisan::output());
 
         $this->assertSame(
-            [...array_keys(JsonEnvelope::CORE), 'last_beat_at', 'age_seconds', 'stale_after_seconds', 'missed_runs', 'interval_minutes'],
+            [...array_keys(JsonEnvelope::CORE), 'last_beat_at', 'age_seconds', 'stale_after_seconds', 'missed_runs', 'interval_minutes', 'causes'],
             array_keys($report),
             'the envelope\'s keys first, read from the class rather than restated, then this command\'s evidence',
         );
@@ -365,6 +366,73 @@ final class DbSchedulerWatchdogTest extends TestCase
         $this->assertSame(300, $report['stale_after_seconds'], 'five missed runs at a one-minute cadence');
         $this->assertSame(60, $report['age_seconds'], 'the age of the beat, measured rather than assumed');
         $this->assertIsString($report['last_beat_at']);
+    }
+
+    /**
+     * The readings beside the verdict: three, in the order the questions are asked, on a run whose
+     * entry is scheduled — and the store among them named rather than asked, which is the one reading
+     * this surface deliberately leaves half-taken.
+     *
+     * The sentence and the object carry them differently and that is asserted too: the object has
+     * them as `causes`, one entry per reading, and the rendered line has them appended to the verdict
+     * as one sentence, while `reason` stays the verdict's own words. A healthcheck that is paged at
+     * 3 a.m. wants the sentence; a job wants the keys.
+     */
+    public function test_the_readings_beside_the_verdict_name_what_was_read(): void
+    {
+        $this->installation(true, true, 5, 1, 'closed', 'late');
+
+        $this->assertSame(1, Artisan::call('db:scheduler-watchdog', ['--json' => true]));
+
+        $report = $this->report(Artisan::output());
+        $causes = $report['causes'];
+
+        $this->assertIsArray($causes);
+        $this->assertSame(
+            [ScheduleCauses::KEY_MUTEX_STORE, ScheduleCauses::KEY_ENTRY, ScheduleCauses::KEY_BOOT_STAMP],
+            array_column($causes, 'key'),
+            'the three questions, in the order they are asked',
+        );
+
+        $this->assertStringContainsString('was not asked', $causes[0]['reading'], 'a healthcheck does not open a socket to the store');
+        $this->assertStringContainsString('db:doctor` takes this reading', $causes[0]['reading'], 'and it says which run does');
+        $this->assertStringContainsString('1 entry carries `pgcat_flip`', $causes[1]['reading']);
+        $this->assertStringContainsString('boot.stamp', $causes[2]['reading'], 'the stamp the window was judged against');
+        $this->assertStringContainsString('is readable', $causes[2]['reading']);
+
+        $this->assertStringNotContainsString(
+            'readings',
+            $report['reason'],
+            'the reason is the verdict\'s sentence: a consumer reads the readings from their own key',
+        );
+
+        $this->assertSame(1, Artisan::call('db:scheduler-watchdog'));
+
+        $rendered = Artisan::output();
+
+        $this->assertStringContainsString("The schedule's own readings:", $rendered);
+        $this->assertStringContainsString('1 entry carries `pgcat_flip`', $rendered);
+        $this->assertStringContainsString(self::LINE['the last run is older than the tolerance'], $rendered, 'and the verdict\'s own sentence is still there');
+    }
+
+    /**
+     * An installation that never armed the entry has nothing for the readings to explain, so there
+     * are none — empty in the object rather than absent from it, and nothing appended to the line.
+     */
+    public function test_an_installation_that_never_armed_the_schedule_reports_no_readings(): void
+    {
+        $this->installation(true, false, 5, 1, 'closed', 'recent');
+
+        $this->assertSame(0, Artisan::call('db:scheduler-watchdog', ['--json' => true]));
+
+        $report = $this->report(Artisan::output());
+
+        $this->assertArrayHasKey('causes', $report, 'the key is present, so a job iterating it is never guessing');
+        $this->assertSame([], $report['causes']);
+
+        $this->assertSame(0, Artisan::call('db:scheduler-watchdog'));
+
+        $this->assertStringNotContainsString("The schedule's own readings", Artisan::output());
     }
 
     /**
@@ -390,6 +458,7 @@ final class DbSchedulerWatchdogTest extends TestCase
         $this->assertNull($report['missed_runs']);
         $this->assertNull($report['interval_minutes']);
         $this->assertSame(0, $report['stale_after_seconds']);
+        $this->assertSame([], $report['causes'], 'and the readings a route that read no settings did not take');
     }
 
     /**
@@ -582,6 +651,12 @@ final class DbSchedulerWatchdogTest extends TestCase
             'interval_minutes' => $interval,
             'stale_after_missed_runs' => $missed,
         ]]);
+
+        // And the file the window is measured from, which the readings below report: the beat this
+        // fixture hands the flipper has its own window, so the configuration is what tells the
+        // command where that stamp is — which is the same pairing a real container has, because the
+        // provider builds both from this block.
+        config(['db-manager.swrr.pgcat.boot_file' => $dir.'/boot.stamp']);
 
         $this->stamp($dir, $window);
         $this->write($state, $beat);

@@ -609,18 +609,26 @@ final class Handoff
      *   a renderer whose input is the file it is about to rewrite cannot answer for the file it was
      *   handed instead.
      *
-     * WHY IT IS EMPTY HERE
-     * --------------------
-     *   The six lines that used to be below this described the files this cycle's batches were still
-     *   carrying when the note before this one was taken, and those batches have landed: a declaration
-     *   is words about a *pending* file, so with the pending set empty they would have been prose kept
-     *   beside a table that cannot hold those rows — the stale copy this mechanism exists to refuse.
-     *   The next file the register does not carry asks for its line again, by name, which is the
-     *   refusal doing its work rather than an accident of an empty map.
+     * WHAT IS HERE, AND WHY A LINE LEAVES
+     * -----------------------------------
+     *   A line is words about a *pending* file, so it goes when the file lands: the six lines that
+     *   stood here described the files the note before this one was taken with still carrying, and
+     *   they were removed when those batches were committed, because prose kept beside a table that
+     *   cannot hold its rows is the stale copy this mechanism exists to refuse. What is below is the
+     *   same rule read forwards — the files this note's own batches add, each with the one sentence a
+     *   reader needs in order to know what it is. The next file the register does not carry asks for
+     *   its line again, by name, which is the refusal doing its work rather than an accident.
      *
      * @var array<string, string>
      */
-    private const PENDING_DESCRIPTIONS = [];
+    private const PENDING_DESCRIPTIONS = [
+        'src/Pgcat/ScheduleCauses.php' => 'the three readings beside a silent schedule\'s verdict — the store its runs\' mutexes live in and whether it answered, how many entries run the flip, and the boot stamp with the mode and owner it was found with',
+        'tests/Support/FakeCache.php' => 'the cache binding those readings are driven against: it hands out a repository that answers or refuses to hand out one at all, and it records which store was asked for',
+        'tests/Unit/Pgcat/ScheduleCausesTest.php' => 'the suite for them — an entry on a real schedule, a store that answers and one that does not, and a stamp whose mode the platform either respects or ignores',
+        'src/Database/Weighted/EndpointReadings.php' => 'the three readings a routed read can expect, taken in one sweep: the caps on both sides, whether a standby keeps `hot_standby_feedback` on, and whether the connection declares the `read`/`write` pair a pinned statement needs',
+        'tests/Unit/Weighted/EndpointReadingsTest.php' => 'the suite for them, driven by an injected sweep so no row opens a socket — every shape a cap arrives in (`90s`, `2min`, `600ms`, and `0` as a cap of nothing), a standby with the setting off beside an answer that did not carry it, and the pair read whatever the switch says',
+        'docs/read-path-cancellations.md' => 'the record for them: the two cancellations and the SQLSTATE that tells them apart, where this package stops rather than re-running a statement, the alarm an installation can install for itself, and the measurement the readings came from',
+    ];
 
     /**
      * The blocks the note carries, so a test can ask for each of them by name.

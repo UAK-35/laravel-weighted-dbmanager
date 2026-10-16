@@ -1236,8 +1236,13 @@ final class PgcatConfigFlipper
      * whether the mode is too narrow or the owner is somebody else. A numeric id is used when
      * the platform cannot name the account (no `posix` extension, a container with no passwd
      * entry), because an id an operator can `ls -n` against is a better answer than silence.
+     *
+     * Public because a second reading quotes it: the boot stamp a silent schedule is diagnosed
+     * against has the same question asked of it ({@see ScheduleCauses}), and a container whose
+     * stamp belongs to another account reads as one nobody stamped. One reading of mode and owner,
+     * so the two sentences an operator can see quote the same facts in the same words.
      */
-    private static function facts(string $path): ?string
+    public static function facts(string $path): ?string
     {
         if ($path === '' || !file_exists($path)) {
             return null;

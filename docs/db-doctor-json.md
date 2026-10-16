@@ -36,7 +36,7 @@ That is the same problem `db:pgcat-flip --json` was built for, and the reasoning
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
 here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
-fifteen verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+nineteen verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
 likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
@@ -103,8 +103,10 @@ report:
 {
     "command": "db:doctor",
     "connection": "pgsql",
+    "swrr_connection": null,
     "default_connection": "pgsql",
     "strict": true,
+    "connection_only": false,
     "verdict": "FAIL",
     "exit_code": 1,
     "counts": {
@@ -126,15 +128,30 @@ the health payload's `counts` follows: a rule that has to check whether a field 
 can be written wrong once and stay wrong. `exit_code` is inside the object because the two halves of
 the answer travel together.
 
-### The pair of keys that name the subject
+### The keys that name the subject, and the setting behind the connection
 
-`connection` and `default_connection` are not two more readings of the run: they are what the object
-says it is *about*, and every other key is a fact about that subject. A vet run —
+`connection`, `swrr_connection` and `default_connection` are not three more readings of the run: they
+are what the object says it is *about*, and every other key is a fact about that subject. A vet run —
 `db:doctor --config-file=path` — keeps the same envelope, the same key order and the same rules, and
 names a different subject in the one position: `config_file` where the installation run writes those
-two keys. That is why the pair belongs in the key list rather than beside it, and why a gate reading
+three keys. That is why they belong in the key list rather than beside it, and why a gate reading
 `.checks[]` or `.exit_code` does not have to know which mode produced the object. A file has no
 `default_connection` to report, and an installation has no file it was judged from.
+
+`swrr_connection` is the one of the three that is not a connection at all: it is the value
+`db-manager.swrr.connection` was written with, or `null` when the setting says nothing. Without it the
+object cannot tell two installations apart — left unset the package follows `database.default`, and set
+to that same name it follows a connection the *operator* chose, which is the same routing and a
+different thing to change. The value is read through `Support\ActiveConnection`, the place the gate,
+the flipper and the health endpoint read which connection is in play, so this key cannot disagree with
+them about which config key the name came from.
+
+Beside `strict` sits `connection_only`, the other flag that changes what a run *asks* rather than how
+it is reported: `true` on a `db:doctor --connection-only` run, which leaves the four rows whose
+subject is outside the process out of `checks` entirely (see below). A gate that requires a row has to
+be able to see that this report was never going to carry it, and a boolean is that fact. The two
+flags are the fields a job reads to know what kind of run it is holding; everything a gate selects on
+— `verdict`, `exit_code`, `counts`, `checks` — means the same thing in all four combinations.
 
 ## The chosen mechanism, in full
 
@@ -171,11 +188,12 @@ sentence exists to prevent.
 
 ### The row list is not a fixed length
 
-`checks` is every row the run built. That is fifteen on an installation where `db` resolves to the
-weighted manager and **six** where it does not — the replica rows are only asked when there is a
-manager to ask them of, which is a property of the rendered command that predates this flag. So `name`
-is the row's identity and the thing to select on; the order and the count are the table's, and are
-documented as such.
+`checks` is every row the run built. That is nineteen on an installation where `db` resolves to the
+weighted manager and **seven** where it does not — the replica rows are only asked when there is a
+manager to ask them of, which is a property of the rendered command that predates this flag, and
+`--connection-only` removes six more by design (`connection_only` below). So `name` is the row's
+identity and the thing to select on; the order and the count are the table's, and are documented as
+such.
 
 `name` is the same string the table prints, so the report an operator read and the object a job parses
 name the same row the same way. `suggestions` is the repairs the row offers — the value or the mode to
@@ -223,6 +241,7 @@ about, and which of the two it is:
 
 | Row | What it can be about | Disposition |
 |---|---|---|
+| `boot environment` | the file this boot read its settings from, and whether the values it read came from the config files or from a cache built before one of them was written | **both named, in one sentence** — they are two facts about the same reading, and the second is unreadable without the first. Undated, and no value is refused: nothing about a boot's environment is a finding the audit keeps |
 | `config file` (vet) | the shape the file needs to be judged at all, and the bytes it printed while it was being read | **both named** — the shape is the file's and the bytes are what `config:cache` would write into the cached config |
 | `provider swap` | a `db` that would not resolve, a provider that is not registered, a `db` that is not the weighted manager | one fact in three diagnoses: the last two are the same cause, and both `weighted factory` and `pgcat gate` name the missing provider in the same run |
 | `weighted factory` | `db.factory` that could not be resolved, and one that is not the weighted factory | mutually exclusive — a binding that threw has no class to inspect |
@@ -266,6 +285,18 @@ One thing this table deliberately does *not* have is a per-verdict exit code, wh
 table's second column. There is no such mapping to document (candidate H), and inventing one to make
 the two tables look alike would be a table the matrix could not check.
 
+### A bounded run is the same envelope with fewer rows
+
+`--connection-only` is the one flag that changes *which rows exist*, and a gate has to be able to see
+that: four rows — `pgcat supervisor`, `pool probe`, `store probe`, `store reachability` — are left out
+of a bounded run entirely, because each one's subject is outside the process, and a row that reports
+its own missing prerequisite as the installation's fault is worse than a row that is not printed. The
+object publishes `connection_only: true` for exactly that reason, and `checks` is the full run's list
+less those four, in the order a full run asks them. Nothing else about the envelope moves: the same
+key set, `verdict` from the rows that were asked, and `exit_code` from `gateFailed()` over the same
+rule — which is what lets one gate read a bounded report and a full one without learning a second
+shape.
+
 ## Tests that pin the rules
 
 | Rule | Test |
@@ -304,7 +335,8 @@ it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Six rows when `db` does not resolve, fifteen otherwise. A gate
+- **The row set is not a fixed length.** Seven rows when `db` does not resolve, nineteen otherwise, and
+  six fewer than either in a `--connection-only` run, which is why the object publishes that flag. A gate
   must select by `name` — the row's identity, and the same string the table prints — and nothing in the
   object states how many rows there "should" be, so a gate that expects a particular row to exist has
   to decide what its absence means on its own. The README's deploy gate is the worked example of that

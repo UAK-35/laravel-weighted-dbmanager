@@ -36,6 +36,12 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
 final class SingleHostProbe
 {
     /**
+     * The question `run()` asks, and the only one that has a name of its own: it is what the
+     * replica sweep, the readiness gate and this class's docblock all mean by "a bare `SELECT 1`".
+     */
+    private const SELECT_ONE = 'SELECT 1';
+
+    /**
      * The throwaway connection every probe is opened as.
      *
      * A name rather than a pool entry: it is registered with `connectUsing(..., force: true)` and
@@ -64,13 +70,57 @@ final class SingleHostProbe
      */
     public static function run(WeightedDatabaseManager $manager, array $base, array $host): void
     {
+        self::query($manager, $base, $host, self::SELECT_ONE);
+    }
+
+    /**
+     * Open one connection straight to `$host`, run `$sql`, and answer with the rows it returned.
+     *
+     * The same three properties as {@see self::run()} — a single host, a throwaway connection,
+     * and a purge on the way out whatever happened — because they are properties of *asking one
+     * endpoint a question*, not of the question: a caller that wants what a server says about
+     * itself needs the answer to have come from that server, and needs the connection not to
+     * outlive the reading. `run()` is this call with the rows dropped, so the two cannot drift
+     * apart in the invariants and a probe that reads a setting is not a second implementation of
+     * "connect, ask, purge".
+     *
+     * Throws whatever the connection or the query threw, like `run()`: whether a reading that
+     * could not be taken is a fault, a silence or a warning is the caller's judgement, and the
+     * caller is the one holding the other endpoints' answers.
+     *
+     * One shape for a row whatever the connection's fetch mode is: Laravel hands a `select()`
+     * objects unless the connection asked for `PDO::FETCH_ASSOC`, and a caller that read the
+     * setting out of `$row['statement_timeout']` would be reading whichever of the two its own
+     * installation happened to configure. A row that is neither is dropped rather than folded to
+     * an empty one, so a caller counting rows is not told one came back.
+     *
+     * @param array<string, mixed> $base the connection's own config, read and write lists included
+     * @param array<string, mixed> $host the one host to reach — a replica map, or the writer's
+     * @return list<array<string, mixed>>
+     */
+    public static function query(WeightedDatabaseManager $manager, array $base, array $host, string $sql): array
+    {
         $manager->connectUsing(self::CONNECTION, self::config($base, $host), true);
 
         try {
-            $manager->connection(self::CONNECTION)->select('SELECT 1');
+            $rows = $manager->connection(self::CONNECTION)->select($sql);
         } finally {
             $manager->purge(self::CONNECTION);
         }
+
+        $readings = [];
+
+        foreach ($rows as $row) {
+            if (is_object($row)) {
+                $row = get_object_vars($row);
+            }
+
+            if (is_array($row)) {
+                $readings[] = ConfigValue::assoc($row);
+            }
+        }
+
+        return $readings;
     }
 
     /**

@@ -10,7 +10,8 @@ Every run of the entry stamps a beat in the flip's state file — including the 
 nothing — and one tolerance derived from the cadence says when its silence is a fault. Three
 surfaces report that one verdict: `/health/db`'s `schedule` block (which returns `503`),
 `db:doctor`'s `schedule beat` row, and `php artisan db:scheduler-watchdog`, which exits `1` for a
-container's own healthcheck and does no work to ask.
+container's own healthcheck and reaches nothing to ask: it reads the state file the flip wrote, the
+schedule it builds in memory, and the three readings below.
 
 ## Why this needed deciding at all
 
@@ -99,6 +100,36 @@ scheduled, the window has closed, and nothing has run it — the same fault as a
 one interval earlier. Reporting it as unknown would leave the incident's shape (a schedule that
 never started) as silence, which is the failure this whole mechanism exists to remove.
 
+## What a silence is checked against
+
+`stale` says the entry has stopped, and its sentence names the cause that is nearly always the right
+one: nothing is running the schedule. Three other causes leave the same state file behind, and the
+verdict cannot see any of them, because none of them is about the file it reads. They are read beside
+it — `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` — and each is a **reading** rather than a fourth
+verdict: the status and the exit code stay the beat's, and no reading moves them. "The schedule has
+stopped" and "a store did not answer once" are different claims, and the second already fails a row of
+its own (`db:doctor`'s `store`), so failing this one for it would be one fact reported twice.
+
+| Reading | What it answers | Why the verdict cannot |
+|---|---|---|
+| the store its runs' mutexes live in | the store `withoutOverlapping()` reaches *before* the entry runs, and whether it answered a read | a store that does not answer throws there, so the beat goes stale while the cron is perfectly healthy — and the throw is inside `schedule:run`, so the entries after it in the same run do not run either |
+| how many entries run `db:pgcat-flip` | one carrying the installation's name is this package's entry; one without it is the installation's own; two are two runs a minute | that shape leaves a *fresh* beat — the doubled process is the symptom — and the framework's mutex cannot serialise the pair, because each entry names its own |
+| the file the window is measured from | whether it is there, readable and writable, with the mode and owner it was found with | `FlipWindow::bootedAt()` answers `null` to a stamp that is absent *and* to one it cannot read, so an unreadable stamp is a container nobody stamped: the window is not judged and neither is the beat inside it |
+
+Who asks what, and why the three surfaces differ:
+
+| Surface | The store | The other two |
+|---|---|---|
+| `db:doctor`, the `schedule beat` row | asked, and the answer named | read |
+| `db:doctor --connection-only` | **not** asked — the mode exists to be answerable where the store is not there, and the reading says so rather than leaving reachability looking unremarkable | read |
+| `db:scheduler-watchdog` | **not** asked — a check that runs every minute answers from the state file and asks nothing that can time out, and the reading names the run that does ask | read |
+
+An installation whose per-minute entry is not scheduled reads nothing at all, and its schedule is not
+even resolved: resolving the schedule is what *registers* this package's entry, so a reading taken for
+an installation that never armed it would hand that installation an entry it never asked for. That is
+a property of the object rather than an optimisation, and it is why the empty reading list is asserted
+where the readings themselves are.
+
 ## What was rejected
 
 | Candidate | What it would do | Why it was rejected |
@@ -111,6 +142,8 @@ never started) as silence, which is the failure this whole mechanism exists to r
 | F. Stamp the beat only under `schedule:run` | Tell a scheduled run from a hand run | It would make the beat depend on a Laravel internal rather than on the command having run, and it would report a schedule that is being driven by hand as stopped — while the operator is there, reading the output |
 | G. Judge the schedule from `schedule:list` | Ask whether the entry is registered | That answers what is *configured* to run, which `db:doctor`'s `flip schedule` row already asks, and the failure this exists for is a schedule configured exactly as expected and not firing |
 | H. Report a stale beat from the boot audit | File it as a finding, so the audit carries it | Findings are per key and per scope, and this one is about one container's clock at one moment: it would either be re-filed on every boot or be permanently standing with a date that has to be re-derived. The window's own verdict is not filed there either, for the same reason |
+| I. Ask the store in the healthcheck too | One reading, taken by every surface, so a container's own check could say whether the store answers | It puts a cache's connect timeout on a check that runs every minute and whose whole design is to answer from the state file — a store that hangs would delay the healthcheck, and a container would be restarted for its cache. The name is reported there instead, the reading says which run asks it, and `db:doctor` is where the answer is taken |
+| J. Report the store's reachability from the package's own store probe | Reuse the PING `db:doctor`'s `store` row already takes, rather than reading through the schedule's mutex | The two are not the same store: an installation calls `Schedule::useCache('file')` to keep its scheduled tasks' mutexes somewhere other than the application's default, which is exactly the configuration this reading exists for. Reading the default would name a store the entry never touches |
 
 ## Where it is judged, and where it is not
 
@@ -165,9 +198,11 @@ is wrong.
 |---|---|
 | `src/Pgcat/ScheduleBeat.php` | the tolerance, the four silences and the two sentences — the one place a beat is judged |
 | `src/Pgcat/PgcatConfigFlipper.php` | stamps `beat_at` on every run (`beat()`) and publishes the verdict (`scheduleStatus()`) |
+| `src/Pgcat/ScheduleCauses.php` | the three readings beside the verdict — what a silence is checked against, and which run asks for each |
 | `src/Console/Commands/DbSchedulerWatchdog.php` | the healthcheck: one route table, `--strict`, `--json`, and no work |
 | `src/Http/Controllers/DatabaseHealthController.php` | the `schedule` block, and the third `failed` that reaches `$allHealthy` |
 | `src/Console/Commands/DbDoctor.php` | the `schedule beat` row |
 | `config/db-manager.php` | `swrr.pgcat.schedule.stale_after_missed_runs`, and why it is a count of runs |
-| `tests/Unit/Console/DbSchedulerWatchdogTest.php` | the matrix — routes against the flag and the two channels — and the sentences each route carries |
+| `tests/Unit/Console/DbSchedulerWatchdogTest.php` | the matrix — routes against the flag and the two channels — the sentences each route carries, and the readings beside them |
+| `tests/Unit/Pgcat/ScheduleCausesTest.php` | the three readings as states: an entry on a real schedule, a cache binding that answers or refuses, a stamp with a mode the platform respects |
 | `docs/documented-exit-codes.md` | the command's cells and documented cases, bound the way the other five commands' are |

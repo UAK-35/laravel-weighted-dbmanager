@@ -4,6 +4,82 @@
 
 ### Added
 
+- **The two cancellations a routed read can meet are now read before traffic arrives: `read caps`,
+  `standby feedback` and `read/write pair`.** This package chooses the endpoint a read lands on, and
+  that endpoint can cancel the read in two ways a caller cannot tell apart: `40001`, *canceling
+  statement due to conflict with recovery* — the read ran on a standby that would not delay recovery
+  for the row versions its snapshot needed — and `57014`, *canceling statement due to statement
+  timeout*, which is an endpoint's own cap being reached, and needs a different endpoint rather than
+  another attempt. Neither is visible from Laravel's configuration, because a connection names hosts
+  and a parameter group names what they do: an installation could route every read at an endpoint
+  capped at a fraction of the writer's (`600ms` beside the writer's `120s` is one such group) and every
+  row still read well. `Uak35\WeightedDbManager\Database\Weighted\EndpointReadings` takes one sweep of
+  the connection's `read` list and the writer and answers all three: each endpoint's own
+  `statement_timeout` as a set — unequal caps being the reason a statement a read endpoint cut can be
+  escalated to the writer and finish there, and a read endpoint capped below half the writer's a
+  warning — each read endpoint's `hot_standby_feedback`, off on a standby being the cause of the whole
+  conflict class, and the connection's `read` list and `write` block, which is whether Laravel can
+  honour a pinned `useWritePdo()` read at all. The two probing rows are behind `swrr.read_path.enabled`
+  (`SWRR_READ_PATH_ENABLED`), off in the shipped config because they are one connection per endpoint,
+  and `swrr.read_path.timeout_ms` bounds the connect, so a preflight cannot be made to wait on an
+  endpoint that is not there. An endpoint that refused, timed out or did not answer moves no verdict:
+  it is named with what it said, because reachability is the health monitor's question. They are
+  *readings* — the switch read as a switch, so a typo cannot arm a connection per endpoint — and
+  nothing here re-runs a statement, because a retry inside a connection cannot see whether the
+  caller's transaction is aborted. `--connection-only` leaves the two probing rows out with the store,
+  the supervisor and the pooler, and the contract an application answers these two with, with the
+  measurement it came from, is `docs/read-path-cancellations.md`.
+
+- **A silent schedule now says which of its causes was read: the store its runs' mutexes live in, how
+  many entries run the flip, and the boot stamp.** `stale` answers whether the per-minute entry has
+  stopped, and its sentence names the cause that is nearly always the right one — nothing is running
+  it. Three others leave the same state file behind and are invisible in it, because none of them is
+  about the file the verdict reads. An installation whose shared cache does not answer throws inside
+  `withoutOverlapping()` before the entry runs, and because that throw is inside `schedule:run` the
+  entries after it in the same run do not run either — so the schedule is dead while its cron is
+  perfectly healthy. A second entry for `db:pgcat-flip` (the snippet the README used to hand out,
+  beside the registration the provider adds) is two runs a minute, and the framework's mutex cannot
+  serialise them because each entry names its own. And a boot stamp that cannot be *read* is reported
+  by `FlipWindow::bootedAt()` exactly as one that was never written, so the window is not judged — and
+  neither is the beat inside it. `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` reads all three: the
+  store's name and whether it answered a read, the two counts, and the file's existence with the mode
+  and owner it was found with. `db:doctor`'s `schedule beat` row and `db:scheduler-watchdog`'s report
+  (under `causes`, and as one sentence after the verdict on the rendered line, which is the shape a
+  person reads at 3 a.m.) carry them beside the verdict. They are *readings* rather than verdicts:
+  none of them moves an exit code, and an installation whose entry is not scheduled reads nothing at
+  all — its schedule is not even resolved, because resolving it is what registers this package's
+  entry. The healthcheck leaves one of them half-taken on purpose: a check that runs every minute
+  answers from the state file and asks nothing that can time out, so it names the store and says
+  which run takes the answer — `db:doctor`, which asks it, and does not when `--connection-only` has
+  bounded the run.
+
+- **A preflight a build container can run: `db:doctor --connection-only` asks everything about this
+  boot, this configuration and these files, and asks the store, the supervisor and the pooler
+  nothing.** Four of the doctor's rows are questions about things a build container does not have —
+  `store probe` and `store reachability` (the store), `pgcat supervisor` (a running supervisord) and
+  `pool probe` (the running pooler) — and a row that cannot be answered does not go quiet: it reports
+  the container's own missing prerequisite, so an image whose state directory is mounted at run time
+  failed a build over a directory the image never owned. The flag leaves those four out entirely —
+  not passed, not printed as not-judged — and everything else is unchanged: the same rows in the same
+  order, the same sentences, the same exit rule (`gateFailed()`) and the same envelope, so
+  `db:doctor --connection-only --strict` exits `1` for a pgcat switch armed over a `sqlite`
+  connection with no store, no supervisor and no reachable database. The run says which rows it left
+  out — the banner names them, and the object publishes `connection_only` — because a shorter report
+  read as a complete one is a preflight claiming four questions passed that were never asked.
+
+- **Two facts about the boot, and the trap they make visible: a `boot environment` row, and the
+  connection setting published beside the connection it produced.** The doctor's new first row
+  reports the file this boot read its settings from (`environmentFilePath()`, so a
+  `loadEnvironmentFrom()` name is reported rather than a hardcoded `.env`) and whether the
+  configuration is cached (`configurationIsCached()`), with the cache it compared. A cache built
+  before the environment file was last written *warns* — `php artisan config:clear` is the repair, and
+  `--strict` is how a deploy refuses to ship a configuration nothing obeys — which is the shape an
+  image that caches at build time and mounts its `.env` at run time has, and which no other row can
+  see: a cached config is a perfectly readable config, and every row below it was judging the cached
+  values. The object also publishes `swrr_connection` — the value `db-manager.swrr.connection` was
+  written with, `null` when it says nothing — beside the `default_connection` it followed, because
+  unset and set-to-the-default are the same routing and two different things to change.
+
 - **Two mechanisms armed at once are reported by name, with a finding of their own to date the
   pair.** `swrr.pgcat.schedule.enabled` converges the pool at container start and is a no-op for the
   rest of the container's life; `swrr.pgcat.schedule.windows.enabled` moves it at each reader-window

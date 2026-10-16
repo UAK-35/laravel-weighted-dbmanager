@@ -237,7 +237,7 @@ next to the `read` list being weighted.
 
 | Key                              | Env                            | Sample value                 | Meaning                                                                               |
 |----------------------------------|--------------------------------|------------------------------|---------------------------------------------------------------------------------------|
-| `swrr.connection`                | `SWRR_CONNECTION`              | *(unset)*                    | The connection the pgcat gate, the flipper and `db:doctor` follow; unset ⇒ `database.default`. Set it when the app's real PostgreSQL path is a **non-default** connection — e.g. the one `app.default_api_connection` (`API_DB_CONNECTION`) names while `database.default` stays on SQLite |
+| `swrr.connection`                | `SWRR_CONNECTION`              | *(unset)*                    | The connection the pgcat gate, the flipper and `db:doctor` follow; unset ⇒ `database.default`. Set it when the app's real PostgreSQL path is a **non-default** connection — e.g. the one `app.default_api_connection` (`API_DB_CONNECTION`) names while `database.default` stays on SQLite. `db:doctor --json` publishes the value as `swrr_connection` beside the `default_connection` it followed, because unset and set-to-the-default are the same routing and two different settings to change |
 | `swrr.primary_store`             | `DB_STORE_PRIMARY`             | `redis`                      | `redis` or `local`                                                                    |
 | `swrr.redis_connection`          | `SWRR_REDIS_CONNECTION`        | `default`                    | Connection name used by `RedisAtomicStateStore`                                       |
 | `swrr.state_ttl`                 | `SWRR_STATE_TTL`               | `86400`                      | TTL (s) for the SWRR state key                                                        |
@@ -249,6 +249,8 @@ next to the `read` list being weighted.
 | `swrr.reader_windows`            | —                              | `10:00–14:20`, `17:00–20:30` | List of `['start' => 'HH:MM[:SS]', 'end' => 'HH:MM[:SS]']` where readers **are** used — an entry that is not that shape is refused, never read as a window |
 | `swrr.reader_days`               | —                              | `[1,2,3,4,5]`                | ISO-8601 days readers are allowed on; one day number, or an array of them (`'1,2,3'` as a single string is refused) |
 | `swrr.timezone`                  | —                              | `UTC`                        | Timezone for window evaluation                                                        |
+| `swrr.read_path.enabled`         | `SWRR_READ_PATH_ENABLED`       | `false`                      | Whether `db:doctor` asks each endpoint of the connection's `read` list — and the writer — what it is capped at and whether a standby keeps `hot_standby_feedback` on: the `read caps` and `standby feedback` rows, in [docs/read-path-cancellations.md](docs/read-path-cancellations.md). Read as a **switch**; a value that is not one is refused, with the spellings, and resolves to the documented default — off — so a typo cannot arm a connection per endpoint. On, those two rows are one connection per endpoint, one query each, on a throwaway connection that is purged whatever the query did; off, they say the probe is not armed rather than reporting silence as if the endpoints had been asked. Neither row fails an endpoint that did not answer, and `--connection-only` leaves both out. The third read-path row (`read/write pair`) asks nothing and is answered whatever this says |
+| `swrr.read_path.timeout_ms`      | `SWRR_READ_PATH_TIMEOUT_MS`    | `2000`                       | How long one endpoint's reading may take to connect before it is reported as one that did not answer, in milliseconds — rounded up to whole seconds, because that is the unit the driver takes. It bounds the *connect* and not the statement, so an endpoint that is not there costs this bound rather than the driver's own default, which is what keeps a preflight from being made to wait on it |
 | `swrr.pgcat`                     | `SWRR_PGCAT_*`                 | *(see [Pgcat](#pgcat))*      | Pgcat flipper settings — **PostgreSQL connections only**                              |
 | `swrr.health.pinned_query`       | `SWRR_HEALTH_PINNED_QUERY`     | `true`                       | Whether `GET /health/db` runs one real query — `select 1` — on the connection the package follows before it is allowed to answer `ok` (see [Health endpoint](#health-endpoint)). Read as a **switch**; a value that is not one resolves to the documented default — on — and is reported as `pinned.refused`. Turn it off only where no database exists behind that connection at all — a test fixture, a configuration inspection — because with it off the endpoint's status is the state store's again, and `pinned.checked` is `false` |
 
@@ -1103,7 +1105,7 @@ All six are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path]` | Preflight: check an installation end to end before traffic arrives — or vet one config file before it is installed |
+| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only]` | Preflight: check an installation end to end before traffic arrives — vet one config file, or a container that has no store, supervisor or database, before they are installed |
 | `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL |
@@ -1362,6 +1364,16 @@ of the container:
 php artisan db:scheduler-watchdog --strict   # 0 while the schedule runs, 1 when it stops
 ```
 
+Beside that verdict it names the three causes a stopped schedule has that the state file cannot show
+— the store the runs' overlap mutexes live in, how many entries on the built schedule run
+`db:pgcat-flip`, and the boot stamp with the mode and owner it was found with. They are *readings*
+rather than verdicts: they travel in the object under `causes`, they never move the exit code, and an
+installation whose entry is not scheduled reports none of them. Two cost nothing but memory and this
+filesystem, and the store is deliberately only named, never asked — a check that runs every minute
+answers from the state file, and one that opened a socket to the cache would be waiting on the store
+instead of reporting the schedule. `db:doctor`'s `schedule beat` row takes that third reading, and
+the name here says which run takes it.
+
 | what the watchdog found                                                       | `kind`          | `--strict` off | `--strict` on |
 |-------------------------------------------------------------------------------|-----------------|----------------|---------------|
 | the per-minute entry is producing runs                                        | `running`       | `0`            | `0`           |
@@ -1396,14 +1408,16 @@ come from the flipper's own `scheduleStatus()`, which is the block `/health/db` 
 `schedule` and the block `db:doctor`'s `schedule beat` row prints — so the endpoint, the preflight
 and this command cannot describe one state three ways. `--json` writes the same run as one object,
 in the envelope `db:pgcat-flip` and `db:probe-replicas` write: the verdict, the code, the beat — its
-timestamp, its age and the limit it was compared with — and the two settings the limit came from, so
-a `stale` can be explained without opening a configuration file:
+timestamp, its age and the limit it was compared with — the two settings the limit came from, and
+`causes`, the readings beside the verdict, each with the key it was read under, so a `stale` can be
+explained without opening a configuration file:
 
 ```bash
 php artisan db:scheduler-watchdog --json > beat.json
 jq -e '.kind == "running" and .exit_code == 0' beat.json
 jq -e '.age_seconds < .stale_after_seconds' beat.json
 jq -e '.missed_runs == 5 and .interval_minutes == 1' beat.json
+jq -e '.causes | map(.key) | length == 3' beat.json
 ```
 
 Two other surfaces answer the same question, and neither of them is this one. `/health/db` publishes
@@ -1526,11 +1540,12 @@ details.
 ### Preflight: `db:doctor`
 
 `php artisan db:doctor` answers the question a deploy actually cares about — *will
-this installation do what it is configured to do?* Fifteen things can be wrong while
+this installation do what it is configured to do?* Nineteen things can be wrong while
 the application still boots and answers requests, and each one is a row:
 
 | Row                  | Fails when                                                                                                                                         |
 |----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `boot environment`   | *warns* when the configuration is cached and the environment file this boot read was written **after** that cache was built: the rows below are then reading the cached values, so a setting the operator changed has not arrived, and the row names `php artisan config:clear` as the repair. States both facts in every state — the file the boot read (from `environmentFilePath()`, so a `loadEnvironmentFrom()` name is reported rather than a hardcoded `.env`, and an application that keeps its settings in the process environment says no file was read) and whether `configurationIsCached()` is true, with the cache it compared and the order it found. It reports what it could measure and invents no ordering a missing cache file would not support. No value is refused and nothing is dated: a boot's environment is not a finding the audit keeps. The one row here that fails a *release* rather than an image, and the reason `--strict` is worth running on a deploy |
 | `provider swap`      | the framework's `DatabaseServiceProvider` is still in charge, so `db` is not the weighted manager and reads are unweighted                         |
 | `weighted factory`   | `db.factory` is not `WeightedConnectionFactory` — the replica is chosen there, so weighting is not running either                                  |
 | `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value). *Warns* as well when the file's own `generation` — the key set it was published as — is behind this package's, or is a value that is not a whole number, or is absent because the file predates the key, or is *ahead* of it, and passes when the copy's keys are current, whatever the installer put in them. The policy is the file's own, `Support\ConfigSchema`, and the three cases are in [docs/config-generations.md](docs/config-generations.md) |
@@ -1538,12 +1553,15 @@ the application still boots and answers requests, and each one is a row:
 | `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. Names **every** problem it finds, one sentence each and each dated from its own finding, and prints a `suggestion` per problem where the package can state the repair exactly: `chmod +r` for a source it cannot read, `chmod +w` for a file it cannot write and `chmod +wx` for a directory (a rename has to traverse it), and — for an *empty* `config_path`/`state_file`/`lock_file` — the setting line with the value the published config ships. A path that is not there, and an empty `readers_path`/`no_readers_path`, get no line: those values are this installation's to choose, and a plausible-looking path pasted into configuration replaces the operator's intent with this tool's. It judges the paths a flip *cycle* writes as well as the ones a flip step names — the boot stamp `swrr.pgcat.boot_file` points at (`FAIL` when the container can no longer record when it booted, so the boot window never closes and the entry flips on every run) and the `.lock` companion the audit record is locked on (two boots can write one record at once) — and every sentence carries the mode and owner the path was found with, because "not writable" is one question away from "by whom". The record *file* itself is the `store probe` row's reading rather than a second one here |
 | `pgcat supervisor`   | the flipper is armed and the command it runs *after* the swap cannot work: its executable does not resolve for this user (not an absolute path, not on `PATH`), the program name is an unquoted glob the shell may rewrite, supervisorctl cannot answer, or supervisor does not know the program. The three ways it cannot answer are told apart rather than reported as one `did not answer in time`: `proc_open` is not available to this PHP at all, so no command can be spawned and the sentence names `disable_functions` and the line to change (`FAIL`, and the case an image build is supposed to catch — a container with it disabled passes every other gate and cannot flip); the shell cannot find the binary on `PATH` (exit `127`); or the command genuinely exceeded the step's timeout of a few seconds. Read-only: the flip's own command with `status` in the verb position, plus — only when supervisor does not know the program, the one fault whose repair is a name — the bare `supervisorctl status` that lists what supervisord is running, whose nearest names the row then reports. Prints the setting line to paste as a `suggestion` for the two faults that reduce to a command — an unquoted program name, and a command left empty — and nothing for the rest, which are repaired in a `PATH`, a running supervisord or a `[program:]` section; an unknown program is named in the row's sentence rather than printed as a line, because a near miss is a ranked answer and a `suggestion` is a value a gate may apply without reading it |
 | `replica metadata`   | *fails* when a replica's `weight`/`cpu_cores`/`ram_gb` is a value the resolver does not read as written — not a number, or a number under the floor that key is read at — naming the replica and what the resolver reads instead. A weight it cannot read is read as `0`, and `0` is how a replica is disabled, so that replica leaves the pool: without this the row reports the smaller pool as the installation. Also names a replica disabled with `weight: 0`, which is a choice and does not fail. The pool's own arithmetic comes from the resolver rather than from this row: `replicaStatus()` is the pool, `poolExclusions()` is what it does not hold and why, and the two partition the read list. *Warns* when the replicas carry no metadata at all, so the resolver picks at random while the table still looks weighted |
+| `read caps`          | *warns* when a read endpoint's own `statement_timeout` is far below the writer's — less than half of it — because a read this package routes there is then cut where the writer was configured not to cut it, so a statement the writer would have finished is cancelled instead. Asks each endpoint of the connection's `read` list **and** the writer — one query per endpoint, on a throwaway connection — and only while `swrr.read_path.enabled` (`SWRR_READ_PATH_ENABLED`) arms it: it is one connection per endpoint, so with the probe off the row says so rather than reporting silence as if the endpoints had been asked. Reports unequal caps as the fact they usually are — the pair [docs/read-path-cancellations.md](docs/read-path-cancellations.md) was measured on is 90 s against 120 s, and the whole reason a read a replica cut can be answered by the writer is that the caps differ — and never fails or warns over an endpoint that refused, timed out or answered without the setting: that endpoint is named with what it said, because reachability is the health monitor's question rather than this row's. Prints no `suggestion`: a parameter group's cap is not a value this line can write |
+| `standby feedback`   | *warns* when a standby in the connection's `read` list is in recovery with `hot_standby_feedback` off: it does not ask the primary to hold the row versions a query's snapshot needs, so a read chosen for it can be cancelled by a conflict with recovery — SQLSTATE 40001 — at any moment, and the caller is the one that has to answer it. Read by the same sweep as `read caps` and armed by the same switch, and it passes in each of the other shapes: every standby keeping it on, a read endpoint that is not in recovery at all (reads chosen for it reach a primary, where nothing is cancelled by a conflict with recovery), and an endpoint that did not answer, which is named with what it said. Prints no `suggestion`, for the reason `read caps` prints none |
+| `read/write pair`    | the reading of the three that asks nothing — it is read from the connection's configuration, so it is answered whatever `swrr.read_path.enabled` says — and it states what a statement pinned to the write connection reaches: the connection declares a `read` list **and** a `write` block, so reads are pooled and a pinned statement is answered by the writer; one of the two, so a pin reaches the connection's own host instead of the pooled reads, or reaches the server every read already uses; or neither, in which case one host answers everything and a pin has nothing to escape. Laravel honours `useWritePdo()` only where the two halves are distinct, which is why the shape is worth stating — and it is a **reading** rather than a verdict: a single-host connection is a documented installation, and whether an application pins reads is that application's own setting, so this row passes in every state it can find |
 | `switch values`      | **Fails** when `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` or `swrr.allow_local_fallback` is written as something that is not on or off — `'false'`, `'off'` and `'no'` are how off is written, and a cast reads every one of them as *on*, which on the pgcat switch arms the file swap. The row quotes the value, quotes the accepted spellings, and names the value the setting falls back to. Names **every** switch it refuses rather than the first, and dates each from its own finding in the boot record. Nothing is suggested: re-spelling `'flase'` would be guessing at what was meant |
 | `reader windows`     | `swrr.reader_windows` holds an entry that is not a window — the flat `'10:00-14:20'` is the one everyone writes first — or is not a list of windows at all, or `swrr.reader_days` is not a list of day numbers — `'1,2,3'` written as one string is the same mistake one key over. **Fails** on both, naming the entry and quoting the shape the setting reads: reading a typo as "nothing" is what inverts the setting, so the package refuses it instead. *Warns* on the three ways a well-formed setting still cannot act — an empty day list (permissive), days outside 1…7 (the pool is never used), and windows whose start is not before their end (never entered). When the refused value names its own replacement — the flat string, `'1,2,3'` — the row also prints the setting line to paste as a `suggestion` under it. Names **every** problem it finds rather than the first, and dates each from its own finding in the boot record |
 | `pgcat mode`         | **Fails** when the pooler is on the configuration the reader windows are not asking for, and leads with which way round it is: the writer-only config while a reader window is open, so every read the resolver meant for the replica pool reaches the writer, or the readers config outside every window, so reads keep reaching a replica through the hours the fallback holds them on the writer. Reads pgcat's own *file* rather than the mode the last flip recorded, so a task that booted outside a window, converged to the writer-only config and never flipped again still shows here — that shape is the incident the row exists for. Prints the flipper's own sentence rather than a second copy of it, the same one `/health/db` reports and logs, which names the file in place and the command that moves it; so no `suggestion`, and the verdict is dated from the boot window like the endpoint's. Passes when the flipper is not armed — no file is compared, so the two cannot disagree — and when the file could not be read at all, which is reported as *nothing compared* rather than as a pass, because judging a file is `pgcat files`' row |
 | `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. **Fails** on that refusal, which is the pooler's own sentence rather than this package's reading, and this is the read-only half of the self-heal the per-minute flip performs: one PostgreSQL v3 startup packet per declared pool and the first message back, on the address and the bound `swrr.pgcat.pool_probe.*` names, with no credentials, no `psql` and no connection through the pool. A pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach — but a pooler that authenticates *first*, which is what the deployment this was written against was measured doing, answers *every* name, so there the row reports what the pooler said rather than a proof that each pool is there. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
 | `flip schedule`      | nothing moves the pooler at the boundaries the configuration is written for. *Warns* when the reader-window tasks are on and no boundary is scheduled — every window is unusable, or too short to hold `lead_seconds` + `grace_seconds` — and when the flipper is armed with neither the per-minute entry nor the window tasks on, which leaves pgcat's file where the last write put it while the resolver's mode moves on. **Fails** on either `swrr.pgcat.schedule.enabled` or `swrr.pgcat.schedule.windows.enabled` written as something that is not on or off — the two switches `switch values` does not cover — naming the value, the accepted spellings and the value the setting falls back to, which for these two is *on* for the cadence and *off* for the tasks, each the value its setting documents. On a run that reads cleanly it says which mechanism answers a boundary: the reader-window tasks, named with their boundaries and their lead and grace, or the per-minute entry alone, which converges the pool in the first minutes after a container starts and is then a no-op. *Warns* as well when **both** are armed, naming both keys: one mode with two owners is one mode with two accounts of it. No boundary is contended — the per-minute entry checks the boot window before it takes its lock, so once a container has converged it returns `window_closed` without reading or writing a file — and that is the part neither setting shows on its own: what the tasks apply goes through the flipper's `forceMode()` at the boundary, which records no run, so the readings that describe the entry's convergence describe a mechanism that has stopped acting. It is a warning rather than a failure because an installation may be halfway through the documented migration — disarm this entry in the same change that arms the tasks — so a preflight that failed it would refuse exactly the installation doing the right thing slowly; `--strict` fails it, and it is a boot finding of its own (`swrr.pgcat.schedule.both_armed`), so the row dates the pair while this boot's row describes it. The row prints no `suggestion`, because the repair for either warning is a choice between two settings |
-| `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |
+| `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Beside that verdict the row names the three causes a stopped schedule has that the state file cannot show — the store the runs' mutexes live in and whether it answered, how many entries run `db:pgcat-flip`, and the boot stamp with the mode and owner it was found with — as *readings* rather than verdicts, so the row's status and the exit code stay the beat's and an installation whose entry is not scheduled is told none of them; a bounded run (`--connection-only`) names the store without asking it, because being answerable where the store is not there is what that mode is for. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |
 | `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — except the unwritable record, which is the one state whose own record cannot hold the date it would print |
 | `store reachability` | the primary store cannot serve a read: no usable `redis` binding, or a connection that refuses — workers then fall back to an in-process rotation that is not shared between them |
 
@@ -1859,6 +1877,56 @@ places. The decision behind the read-only derivation, the quoting rule, the four
 step can fail, and what a flip now does about them is written up in
 [docs/pgcat-supervisor-preflight.md](docs/pgcat-supervisor-preflight.md).
 
+### A bounded preflight: db:doctor --connection-only
+
+An image build is the one place the preflight above cannot run. Six of its rows are questions about
+things a build container does not have — the store (`store probe`, `store reachability`), the
+supervisor (`pgcat supervisor`), the running pooler (`pool probe`) and the read path's own endpoints
+(`read caps`, `standby feedback`) — and a row that cannot be answered does not go quiet: it reports
+the container's own missing prerequisite as a fault of the installation being built, so an image
+whose state directory is mounted at deploy time fails a build over a directory the image never owned.
+
+`--connection-only` is the same command with those six left out. What is left is every reading that
+is about *this boot, this configuration and these files*: the environment the boot read from and
+whether its configuration is cached (`boot environment`), the provider swap, the factory, the
+published config's key set, the gate, the files a flip needs, the replica metadata, the read path's
+pair, the three switches, the reader windows, the mode pgcat's file is on, and both schedule rows. One *reading
+inside* a row that is still asked is left out too, and it says so rather than going quiet: the
+`schedule beat` row names the store the runs' mutexes live in and reports that it did not ask
+whether it answers. It runs with no
+store, no supervisor and no reachable database, and it still answers the question an image build is
+asking — `db:doctor --connection-only --strict` exits `1` for a pgcat switch armed over a `sqlite`
+connection, which is a deploy that would serve every read through a pooler that cannot front it:
+
+```
+$ php artisan db:doctor --connection-only --strict
+Connection inspected: pgsql, followed connection is pgsql — --connection-only: pgcat supervisor, pool probe, read caps, standby feedback, store probe, store reachability were not asked, because each one reaches something a build container may not have
+
+PASS  boot environment    this boot read settings from /app/.env, and the configuration is cached at /app/bootstrap/cache/config.php — not older than that file, so the values the rows below read are the ones these files spell
+FAIL  pgcat gate          swrr.pgcat.enabled is true but pgcat will never act: connection "pgsql" uses driver "sqlite", and pgcat only fronts PostgreSQL. …
+      suggestion          swrr.pgcat.enabled = false
+…
+
+13 checks: 11 passed, 1 warning, 1 failed
+This installation will not behave as configured.
+```
+
+The bounded run is not a quieter doctor. The rows it does ask are built by the same code, print the
+same sentences and reach the same verdicts; `gateFailed()` is the same rule; the object is the same
+envelope, and the run *says which rows it left out* — the banner names them and the object carries
+`connection_only: true` — so a gate that requires a row can see that this report was never going to
+contain it. That is the whole contract: `checks` is the full run's list, less those six, in the
+order the full run asks them.
+
+```bash
+php artisan db:doctor --connection-only --strict --json | jq -e '.connection_only == true'
+```
+
+It does not judge the four rows as unreachable, which would be a comment on a container's network
+rather than on the installation, and it does not refuse to run where they are reachable: a row a
+bounded run asks is the row a full run asks, and the two answers are the same. Only the four that
+reach outside the process are missing, and only because a build container cannot answer them.
+
 ### The preflight as data: db:doctor --json
 
 A deploy gate should not parse the table either. `--json` writes one object and nothing
@@ -1873,8 +1941,10 @@ $ php artisan db:doctor --strict --json
 {
     "command": "db:doctor",
     "connection": "pgsql",
+    "swrr_connection": null,
     "default_connection": "pgsql",
     "strict": true,
+    "connection_only": false,
     "verdict": "FAIL",
     "exit_code": 1,
     "counts": {
@@ -1991,7 +2061,8 @@ jq -e '.exit_code == 1 and .verdict == "WARN" and .strict' preflight.json    # .
 ```
 
 Two things to know about the row list. It is not a fixed length: a `db` that does not resolve to the
-weighted manager leaves the six configuration rows and no replica rows at all, so select a row by
+weighted manager leaves the seven configuration rows and no replica rows at all, and a
+`--connection-only` run leaves six more out by design, so select a row by
 `name` — the row's identity, and the same string the table prints — rather than by position. And
 `detail` is prose written for a reader, naming paths and commands and supervisor's own output on the
 platform that ran it; assert on `name`, `verdict` and `exit_code`, which are the contract, and treat
@@ -2037,8 +2108,10 @@ one failure the gate cannot report: it would simply match nothing, and pass.
 computed, and nothing is written either way. It composes with `--strict`, which is how a pipeline will
 pass it, and there is no combination to refuse — a doctor is not a daemon, so a report cannot be
 untrue of the run that produced it. Every key a gate selects on is the same in both modes; the only
-difference is the pair that names the *subject* — `connection` and `default_connection` for a run of an
-installation, `config_file` for a run of a file (see below). The verdicts above are read back out of this table by
+difference is the keys that name the *subject* — `connection`, the `swrr_connection` the setting was
+written with (`null` when it says nothing) and the `default_connection` that followed, for a run of an
+installation; `config_file` for a run of a file (see below) — and the one flag that changes what a run
+*asks*, `connection_only`. The verdicts above are read back out of this table by
 `DbDoctorTest::test_every_json_verdict_is_documented`, the same guard the flip's kind table has, so a
 verdict cannot be introduced without documenting it or documented without something producing it. The
 decision — including the three candidates it shares with the flip's record, and the two that are the

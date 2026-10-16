@@ -1,4 +1,4 @@
-# Handoff — the state of this package, taken 2026-10-15
+# Handoff — the state of this package, taken 2026-10-16
 
 This is a snapshot for whoever opens a thread in **this** repository next: what is written
 but uncommitted, what is committed but unpushed, what is not in any release a consumer can
@@ -28,23 +28,76 @@ php bin/release.php --weigh --branch=dev --dry-run  # what a release would do ri
 
 Every number below that the register holds — sections 2 and 3 — was read off this machine on
 2026-10-15, with the remote asked directly (`git ls-remote`, which named the same commit the local
-ref does) rather than trusted from the local `origin/dev` ref. Section 1 was re-taken on the same day,
+ref does) rather than trusted from the local `origin/dev` ref. Section 1 was re-taken on 2026-10-16,
 the date above, and it is the one part of this file that describes *now* rather than the commit it is
-read against.
+read against — which this time means a batch that is written and green and not yet committed.
 
 ---
 
 ## 1. Pending — written, green, uncommitted
 
-**Nothing is pending.** Every commit this note lands is on `dev` with the commit before it: the
-readings and the port plan (`3f25180`), the schedule watchdog (`af1fddb`), the api page a past tree
-renders (`e06098b`), the published config's generation (`bbfd422`), the paths a flip cycle writes
-(`f782eb0`), the supervisor's three failures (`3c2e61f`) and the two mechanisms that can move the
-pooler being reported by name (`5af2df5`), each with the changelog entry that weighs it. The table
-below is empty
-because the tree holds no file the register does not carry, which is what nothing pending looks like
-— and the schedule watchdog the note before this one called pending is section 3's `### Added` now
-rather than a file here.
+**Three batches are pending, and nothing in any of them is committed: the bounded preflight, the
+causes of a silent schedule, and the read path's two cancellations.** The first is the doctor's
+newest row and its newest mode. `boot environment` reports the file this boot read its settings from
+(`environmentFilePath()`, so a `loadEnvironmentFrom()` name is reported rather than a hardcoded
+`.env`) and whether the configuration is cached — warning when the cache predates the file, which is
+the shape an image that caches at build time and mounts its environment at run time has — and the
+object publishes `swrr_connection` beside the `default_connection` it followed, because unset and
+set-to-the-default are the same routing and two different things to change. `--connection-only`
+then leaves four rows out entirely — the store's two (`store probe`, `store reachability`), the
+supervisor's (`pgcat supervisor`) and the pooler's (`pool probe`) — because a row that cannot be
+answered reports the container's own missing prerequisite, so an image was failed over a directory
+the image never owned.
+
+The second is what a `stale` verdict cannot see. `stale` answers whether the per-minute entry is
+producing runs, and its sentence names the cause that is nearly always the right one — nothing is
+running it — while three others leave the state file it reads unchanged: the store the runs' overlap
+mutexes live in and whether it answered a read, how many entries on the built schedule run
+`db:pgcat-flip`, and the file the boot window is measured from with the mode and owner it was found
+with. All three are read beside the verdict — under `causes` in `db:scheduler-watchdog`, and on
+`db:doctor`'s `schedule beat` row — and none of them moves an exit code, because they are readings
+rather than verdicts.
+
+The third is the read path. This package chooses the endpoint a read lands on, and that endpoint can
+cancel the read as `40001` — a standby cancelling the query rather than delay recovery for the row
+versions its snapshot needed — or `57014`, its own `statement_timeout` being reached. Neither is
+visible from Laravel's configuration, because a connection names hosts and a parameter group names
+what they do, so an installation could route every read at an endpoint capped at a fraction of the
+writer's while every row read well. Three rows read what a routed read can expect — `read caps`,
+`standby feedback` and `read/write pair` — the first two behind `swrr.read_path.enabled`, off in the
+shipped config because they are one connection per endpoint, and the third asking nothing at all;
+and the contract an application answers the two cancellations with, with the measurement it came
+from, is `docs/read-path-cancellations.md`.
+
+**Six files are new** — the six rows of the table below. For the schedule's causes:
+`src/Pgcat/ScheduleCauses.php`, `tests/Support/FakeCache.php` and
+`tests/Unit/Pgcat/ScheduleCausesTest.php`. For the read path:
+`src/Database/Weighted/EndpointReadings.php`, `tests/Unit/Weighted/EndpointReadingsTest.php` and
+`docs/read-path-cancellations.md`. The edits are `src/Console/Commands/DbDoctor.php` (the
+`boot environment` row, the bounded mode's list, the `schedule beat` readings and the three read-path
+rows with the switch that arms them), `src/Database/Weighted/SingleHostProbe.php` (the read path's own
+transport: one query to one host, on a connection purged whatever the query did),
+`src/Pgcat/FlipSchedule.php` (one reading of "how many entries run this command", shared by the
+duplicate guard and the report), `src/Pgcat/PgcatConfigFlipper.php` (its mode-and-owner reading made
+public, so a stamp quotes the same facts the file rows do),
+`src/Console/Commands/DbSchedulerWatchdog.php` (the causes under the verdict and on the rendered line,
+with the store named rather than asked), `config/db-manager.php` (the read path's switch and its
+bound), and the suites and records each of them is read through: `tests/Unit/Console/DbDoctorTest.php`,
+`tests/Unit/Console/DbSchedulerWatchdogTest.php`, `tests/Unit/Pgcat/FlipScheduleTest.php`,
+`tests/Support/Handoff.php` for the words above, `README.md`, `docs/db-doctor-json.md`,
+`docs/documented-exit-codes.md`, `docs/prose-numbers.md`, `docs/scheduler-watchdog.md`,
+`docs/switch-values.md` and three `## Unreleased` entries in `CHANGELOG.md`.
+
+**Nothing in those batches is committed yet.** Every commit this note *lands* is on `dev` with the commit
+before it: the readings and the port plan (`3f25180`), the schedule watchdog (`af1fddb`), the api page
+a past tree renders (`e06098b`), the published config's generation (`bbfd422`), the paths a flip cycle
+writes (`f782eb0`), the supervisor's three failures (`3c2e61f`), the two mechanisms that can move the
+pooler being reported by name (`5af2df5`) and the note that describes them (`fbec6d6`), each with the
+changelog entry that weighs it. The batches above sit on top of all of it, written and green —
+`DbDoctorTest` 179 tests, `DbSchedulerWatchdogTest` 33, `ScheduleCausesTest` 15 with one skip on this
+workstation, `EndpointReadingsTest` 27, `tests/Unit/Docs` green — and waiting for a commit; the schedule
+watchdog the note before this one called pending is section 3's `### Added` now rather than a file
+here.
 
 **The release.** `33afd4e` — *Release v0.2.0-alpha3* — is what `bin/release.php` wrote: the sixteen
 entries under `## Unreleased` promoted into `## 0.2.0-alpha3 - 2026-10-11` (six `### Added`, six
@@ -88,7 +141,7 @@ php bin/inventory.php --check --at=8742456
   --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with this tree — 3, 19 and 18 line(s) stale in files.tsv,
+  --> exit 1: the inventory is out of step with this tree — 5, 30 and 30 line(s) stale in files.tsv,
       methods.tsv and surface.tsv, each naming the row it does not hold
 ```
 
@@ -108,8 +161,8 @@ The table under it is **rendered rather than written**, as are section 2's table
 it. Its rows are the files this checkout has that the register does not carry (`git ls-files --cached
 --others --exclude-standard` minus `git ls-tree -r` of the register), one row apiece, with the prose
 column declared in `tests/Support/Handoff.php` beside the renderer — the one input git cannot answer.
-It has two rows and nothing between them, which is what nothing pending looks like; a row in it is the
-register saying it does not carry that file. `php bin/handoff.php` writes all three blocks from git,
+It carries six rows this time — the files the batches above add, one row apiece — and a row in it is
+the register saying it does not carry that file. `php bin/handoff.php` writes all three blocks from git,
 and the note's own guard renders the same three and asserts the file says what they say, so a re-take
 cannot state a set of files, a count or a listing the tree does not have. A file the register does not
 carry and that has no line declared for it is refused by name rather than rendered blank, which is the
@@ -118,6 +171,12 @@ same sentence the guard gives: name it, or take it out of the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `docs/read-path-cancellations.md` | the record for them: the two cancellations and the SQLSTATE that tells them apart, where this package stops rather than re-running a statement, the alarm an installation can install for itself, and the measurement the readings came from |
+| `src/Database/Weighted/EndpointReadings.php` | the three readings a routed read can expect, taken in one sweep: the caps on both sides, whether a standby keeps `hot_standby_feedback` on, and whether the connection declares the `read`/`write` pair a pinned statement needs |
+| `src/Pgcat/ScheduleCauses.php` | the three readings beside a silent schedule's verdict — the store its runs' mutexes live in and whether it answered, how many entries run the flip, and the boot stamp with the mode and owner it was found with |
+| `tests/Support/FakeCache.php` | the cache binding those readings are driven against: it hands out a repository that answers or refuses to hand out one at all, and it records which store was asked for |
+| `tests/Unit/Pgcat/ScheduleCausesTest.php` | the suite for them — an entry on a real schedule, a store that answers and one that does not, and a stamp whose mode the platform either respects or ignores |
+| `tests/Unit/Weighted/EndpointReadingsTest.php` | the suite for them, driven by an injected sweep so no row opens a socket — every shape a cap arrives in (`90s`, `2min`, `600ms`, and `0` as a cap of nothing), a standby with the setting off beside an answer that did not carry it, and the pair read whatever the switch says |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -433,7 +492,8 @@ names fails with *"This checkout holds 1 file(s) that the commit section 2 names
 carry, and section 1 names 0 of them. A file nothing names is work the next thread cannot see:
 - handoff-control-undeclared.md"*. That is the reading that makes an empty table safe rather than
 blind: a file nobody names fails whether the table has rows or not. Removing the file put the note
-back in step, and the table is the two header rows it is meant to be.
+back in step, and the table was the two header rows it was meant to be while the pending set was
+empty — the rows it carries now are the batch above, which is the first time it has had any since.
 
 ### What the test above cannot ask
 
