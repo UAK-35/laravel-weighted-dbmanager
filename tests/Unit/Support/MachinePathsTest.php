@@ -37,6 +37,15 @@ use Uak35\WeightedDbManager\Tests\Support\MachinePaths;
  */
 final class MachinePathsTest extends TestCase
 {
+    /**
+     * The token form of a machine record that is committed so a fresh clone has one to copy: the
+     * record itself is gitignored, and this is the file a reader of section 2 of `AGENTS.md` copies
+     * from. It is read here as this guard reads every other file — it is in the listing, and it is
+     * silent — and then its own facts are asked, because a sample that had been filled in would be
+     * silent for the same reason a tolerated path is.
+     */
+    private const SAMPLE = '.agents/sample.machine.local.json';
+
     public function test_no_path_in_the_tree_names_the_machine_it_was_written_on(): void
     {
         $scan = MachinePaths::scan(self::root());
@@ -127,6 +136,103 @@ final class MachinePathsTest extends TestCase
             [['line' => 2, 'path' => 'E:\\_F_DRV\\_PHP']],
             MachinePaths::in("first\r\nsecond E:\\_F_DRV\\_PHP\r\n"),
         );
+    }
+
+    /**
+     * A path whose name carries a space, and the tab a git header terminates one with.
+     *
+     * This is the consuming application's own failure asked of this reader instead: there, a `+++`
+     * header's path was keyed with the tab git writes after it, so an allowlist could never excuse a
+     * file whose name contained a space. Here the terminator is not part of what is read — the path
+     * ends at the tab and the tab is not carried — and a spaced directory is read whole where the
+     * path continues past the space, which is the shape `Program Files` is tolerated in. A space in
+     * the *last* segment ends the path there, because that is the only place a space can be told
+     * from the words that follow a path in a sentence; the reading then reports a shorter path,
+     * which is still a finding rather than a silence.
+     */
+    public function test_a_header_terminator_and_a_spaced_name_do_not_hide_a_path(): void
+    {
+        self::assertSame(
+            [['line' => 1, 'path' => 'E:/my workspace/pkg/file.php']],
+            MachinePaths::in("+++ b/E:/my workspace/pkg/file.php\t"),
+            'a header terminator is not part of the path, and a directory name with a space is read whole',
+        );
+
+        self::assertSame(
+            [['line' => 1, 'path' => 'E:/workspace/my']],
+            MachinePaths::in("+++ b/E:/workspace/my file.php\t"),
+            'a space in the last segment ends the path where a sentence could begin, and the path before it is still reported',
+        );
+
+        self::assertSame(
+            [],
+            MachinePaths::in("+++ b/C:/Program Files/Git/etc/gitconfig\t"),
+            'a path whose root is tolerated is still tolerated when a header terminates it',
+        );
+    }
+
+    /**
+     * The one committed machine record is a sample, and it stays one.
+     *
+     * Two readings rather than one, and neither is a second rule: the sample has to be in the listing
+     * this scan read — so the file being judged is the file a clone gets, and not a copy of one —
+     * and the scan has to find nothing in it. The keys are then asked what they hold, because a
+     * silence is also what a filled-in sample produces: the machine-fact keys are the ones a copy
+     * replaces, and each has to hold a token rather than a value.
+     */
+    public function test_the_committed_sample_writes_tokens_where_a_machine_record_writes_paths(): void
+    {
+        $scan = MachinePaths::scan(self::root());
+
+        self::assertContains(
+            self::SAMPLE,
+            $scan['files'],
+            'the sample is not among the files a commit would carry, so nothing here is reading it.',
+        );
+
+        foreach ($scan['found'] as $hit) {
+            self::assertNotSame(self::SAMPLE, $hit['file'], sprintf(
+                'A path in the sample resolves on the machine it was written on — line %d, `%s` — where the sample has to leave a token for whoever copies it.',
+                $hit['line'],
+                $hit['path'],
+            ));
+        }
+
+        // The record is the machine's own, so it is not in the listing the sample is in: two copies
+        // of these facts in one commit is the failure the split exists to prevent.
+        self::assertNotContains(
+            '.agents/machine.local.json',
+            $scan['files'],
+            'the machine record is committed alongside its sample, so the sample is not the only copy of these facts.',
+        );
+
+        $sample = json_decode((string) file_get_contents(self::root().'/'.self::SAMPLE), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($sample, 'The sample does not read as a machine record.');
+
+        // Read by name rather than walked: it is these facts that differ between two machines and
+        // so have to be tokens. The versions, the origin URL and the tarball rows beside them are
+        // the same on every machine of this kind, which is why the record states them in full.
+        $facts = [
+            'php.exe' => $sample['php']['exe'],
+            'php.dir' => $sample['php']['dir'],
+            'pwsh.exe' => $sample['pwsh']['exe'],
+            'package.dir' => $sample['package']['dir'],
+            'package.head' => $sample['package']['head'],
+            'composer.phar' => $sample['composer']['phar'],
+            'search.rgExe' => $sample['search']['rgExe'],
+            'psql.dir' => $sample['psql']['dir'],
+            'git.userSigningKey' => $sample['git']['userSigningKey'],
+        ];
+
+        foreach ($facts as $key => $value) {
+            self::assertIsString($value, "The sample's `{$key}` is not a token at all.");
+            self::assertMatchesRegularExpression(
+                '/^__[A-Z0-9_]+__$/',
+                $value,
+                "The sample's `{$key}` is a value where a token goes, so a clone would inherit it.",
+            );
+        }
     }
 
     /**

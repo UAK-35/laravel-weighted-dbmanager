@@ -1,0 +1,132 @@
+{
+    "php": {
+        "exe": "__PHP_EXE__",
+        "dir": "__PHP_DIR__",
+        "version": "8.4.26",
+        "onPath": false,
+        "requirement": "^8.4"
+    },
+    "pwsh": {
+        "exe": "__PWSH_EXE__",
+        "onPath": true
+    },
+    "package": {
+        "dir": "__PACKAGE_DIR__",
+        "branch": "dev",
+        "head": "__HEAD__",
+        "latestTag": "v0.2.0-alpha3"
+    },
+    "composer": {
+        "phar": "__COMPOSER_PHAR__",
+        "version": "2.10.3",
+        "onPath": false,
+        "gitignored": true
+    },
+    "git": {
+        "origin": "https://github.com/UAK-35/laravel-weighted-dbmanager.git",
+        "commitGpgSign": true,
+        "userSigningKey": "__GIT_SIGNING_KEY__",
+        "hooksPath": null
+    },
+    "search": {
+        "rgExe": "__RG_EXE__",
+        "rgVersion": "15.2.0",
+        "rgOnPath": true
+    },
+    "psql": {
+        "dir": "__PSQL_DIR__"
+    },
+    "skills": {
+        "index": ".agents/README.md",
+        "dirs": [
+            ".agents/skills/pkg-commit",
+            ".agents/skills/pkg-deploy",
+            ".agents/skills/pkg-push"
+        ]
+    },
+    "checks": {
+        "list": "php bin/checks.php --list",
+        "count": 13,
+        "names": [
+            "syntax",
+            "ast",
+            "writeback",
+            "schema",
+            "platform",
+            "interpreter",
+            "tools",
+            "yaml",
+            "counts",
+            "sentences",
+            "phpstan",
+            "pint",
+            "tests"
+        ]
+    },
+    "style": {
+        "command": "php bin/tool.php pint --test",
+        "preset": "psr12"
+    },
+    "staticAnalysis": {
+        "config": "phpstan.neon.dist",
+        "level": "max",
+        "paths": [
+            "src"
+        ],
+        "phpVersion": "80400"
+    },
+    "tarball": {
+        "carries": [
+            "docs/"
+        ],
+        "leavesOut": [
+            "tests/",
+            ".agents/",
+            "git/commit_paths.py",
+            "bin/api.php",
+            "bin/checks.php",
+            "bin/counts.php",
+            "bin/publish-config.php",
+            "bin/release.php",
+            "bin/surface.php",
+            "bin/weighing.php",
+            "bin/inventory.php",
+            "bin/blame.php",
+            "bin/tools.php",
+            "bin/tool.php",
+            "bin/interpreter.php",
+            "bin/handoff.php",
+            "bin/composer-link.cmd",
+            "bin/composer-ca.ps1",
+            "CHANGELOG.md",
+            "RELEASING.md",
+            "PUSHING.md",
+            "STATIC-ANALYSIS.md",
+            "HANDOFF.md",
+            "AGENTS.md",
+            "BEHAVE.mdc",
+            "phpstan.neon.dist",
+            "phpunit.xml.dist",
+            "pint.json",
+            ".gitattributes",
+            ".gitignore",
+            ".editorconfig",
+            ".idea",
+            "files.tsv",
+            "methods.tsv",
+            "surface.tsv"
+        ]
+    },
+    "envVars": {
+        "read": [
+            "COMPOSER_BINARY",
+            "COMPOSER_CAFILE",
+            "COMPOSER_CA_COMPOSER",
+            "COMPOSER_DISABLE_TLS_VERIFICATION",
+            "COMPOSER_LINK_COMPOSER",
+            "COMPOSER_LINK_JQ",
+            "COMPOSER_LINK_PHP"
+        ]
+    },
+    "about": "A sample, not a machine record: copy this file to .agents/machine.local.json — the name .gitignore holds — and replace every __TOKEN__ with this machine's own value. The tokens are the facts that differ between two machines: the interpreter and its directory (__PHP_EXE__, __PHP_DIR__), PowerShell (__PWSH_EXE__), this checkout (__PACKAGE_DIR__), the commit it is on (__HEAD__), the composer program (__COMPOSER_PHAR__), ripgrep (__RG_EXE__), the psql client directory (__PSQL_DIR__) and the signing key git commits with (__GIT_SIGNING_KEY__). The rows that are the same on every machine of this kind — the versions, the origin URL, the checks and the tarball rows — are meant to be read and left alone. bin/interpreter.php reads php.exe out of the real record and skips the whole file when it is absent, so a clone without one runs on whatever php the shell has; tests/Unit/Docs/HandoffTest.php compares HANDOFF.md's environment table with the real record and skips the comparison here for the same reason."
+}

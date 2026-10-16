@@ -56,6 +56,13 @@ namespace Uak35\WeightedDbManager\Tests\Support;
  *   C:\…                        an ellipsis standing for the rest of a path — a writer saying the
  *                               tail is not to be read — leaves nothing after the root, and a root
  *                               is nobody's: `C:\` is the same on every Windows machine
+ *   __PHP_EXE__                 the token form `.agents/sample.machine.local.json` commits a machine
+ *                               record in: a sample writes a token where a machine writes a path,
+ *                               and a token resolves nowhere. It is silent here because it names
+ *                               nobody rather than because a rule excused it, which is why nothing
+ *                               in this file has to know about it — a real path pasted into the
+ *                               sample is a finding like any other, and the sample's own silence is
+ *                               read back by `MachinePathsTest`
  *
  * A path is read a segment at a time, and a segment may carry a space — `Program Files` is
  * one directory — but only where the path continues past it, because that is the only place a

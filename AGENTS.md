@@ -90,7 +90,9 @@ and `publish-config.php`. The published config is `config/db-manager.php` with `
    starts with. Read it before the first command that shells out and use the `php` it names: `php` is
    not on `PATH` in this shell, so a bare one fails rather than resolving, and searching the disk for
    an interpreter is what this rule replaces. The record is gitignored, so the path lives there and
-   never in a rule; `HANDOFF.md` section 5 holds its rows to it.
+   never in a rule; `HANDOFF.md` section 5 holds its rows to it. A fresh clone has nothing to copy
+   from, so the same file in token form is committed at `.agents/sample.machine.local.json`: copy it
+   to the name above and replace each `__TOKEN__` with this machine's own value.
 
 ---
 

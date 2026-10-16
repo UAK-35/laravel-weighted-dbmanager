@@ -47,10 +47,10 @@ use Symfony\Component\Process\Process;
  *   `C:\…` out of it: none of them starts with something this repository has.
  *
  * THE MACHINE RECORD
- * ------------------
- *   Section 5's environment table is held to `.agents/machine.local.json` — the machine's own
- *   copy of those facts, written from `machine.local.json.example` one directory above this
- *   package. It is read as data: JSON, strict about the leaves the table compares against, and
+ * ------------------     *   Section 5's environment table is held to `.agents/machine.local.json` — the machine's own
+     *   copy of those facts, written from the committed sample
+     *   `.agents/sample.machine.local.json`, which is the same file with a `__TOKEN__` in every
+     *   position a machine fills in. It is read as data: JSON, strict about the leaves the table compares against, and
  *   absent in a fresh clone or CI's runner, where there is no machine to record — those
  *   checkouts get null and the comparison skips rather than runs against nothing.
  *
@@ -622,12 +622,10 @@ final class Handoff
      * @var array<string, string>
      */
     private const PENDING_DESCRIPTIONS = [
-        'src/Pgcat/ScheduleCauses.php' => 'the three readings beside a silent schedule\'s verdict — the store its runs\' mutexes live in and whether it answered, how many entries run the flip, and the boot stamp with the mode and owner it was found with',
-        'tests/Support/FakeCache.php' => 'the cache binding those readings are driven against: it hands out a repository that answers or refuses to hand out one at all, and it records which store was asked for',
-        'tests/Unit/Pgcat/ScheduleCausesTest.php' => 'the suite for them — an entry on a real schedule, a store that answers and one that does not, and a stamp whose mode the platform either respects or ignores',
-        'src/Database/Weighted/EndpointReadings.php' => 'the three readings a routed read can expect, taken in one sweep: the caps on both sides, whether a standby keeps `hot_standby_feedback` on, and whether the connection declares the `read`/`write` pair a pinned statement needs',
-        'tests/Unit/Weighted/EndpointReadingsTest.php' => 'the suite for them, driven by an injected sweep so no row opens a socket — every shape a cap arrives in (`90s`, `2min`, `600ms`, and `0` as a cap of nothing), a standby with the setting off beside an answer that did not carry it, and the pair read whatever the switch says',
-        'docs/read-path-cancellations.md' => 'the record for them: the two cancellations and the SQLSTATE that tells them apart, where this package stops rather than re-running a statement, the alarm an installation can install for itself, and the measurement the readings came from',
+        '.agents/sample.machine.local.json' => 'the token form of a machine record, committed so a fresh clone has one to copy: every fact that differs between two machines is a `__TOKEN__` there, and `tests/Unit/Support/MachinePathsTest.php` holds it to that and to the guard reading nothing in it',
+        'src/Pgcat/VariantShape.php' => 'the shape of what a flip would swap in: the three configured variants read for the pools they declare, held against the pool names the pinned connection is written with — a `[pools…]` header no pool name can be read out of, a write pool no variant declares, a read pool a readers variant leaves out, a writer-only variant that still declares one, a file that is half a rendered variant, and the one warning, a pool whose addresses do not resolve from here',
+        'tests/Unit/Pgcat/VariantShapeTest.php' => 'the suite for it — each case a small installation in the temp directory, the resolver injected, and the two readings told apart: what a variant declares, and what this host can resolve',
+        'docs/deployment-contract.md' => 'the record for the deployment itself: the three rendered variants and the prune before pgcat starts, the pinned and compiled pooler, the boot stamp, the per-minute entry with its window and its lock, the writable state directory, a spawnable supervisor, the container health check that asks the pooler, the store and what its absence means, the read caps that need not match the write cap, and the two deploy gates that read this package — each with the row that asks about it',
     ];
 
     /**

@@ -11,6 +11,7 @@
 /git/__pycache__/
 /.freebuff/project-id
 /.agents/*.local.json
+!/.agents/sample.machine.local.json
 /opencode.jsonc
 /oc-session-*.md
 /lpr-git/
