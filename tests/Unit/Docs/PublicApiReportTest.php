@@ -29,6 +29,17 @@ require_once dirname(__DIR__, 3) . '/bin/api.php';
  */
 final class PublicApiReportTest extends TestCase
 {
+    /**
+     * The release whose published page is not what its own tree renders — the control the test
+     * above reads, and the reason a page cannot be checked against itself alone.
+     *
+     * `v0.2.0-alpha2` rewrote the record and left `API.md` describing the release before it; the
+     * re-render landed in a follow-up commit, so the tag holds a page its tree does not. Naming it
+     * is what keeps the control a control: the tag before the newest is a good release now, and
+     * reading it as the broken one made this test fail on a page that was right.
+     */
+    private const STALE_PAGE_TAG = 'v0.2.0-alpha2';
+
     private static function root(): string
     {
         return dirname(__DIR__, 3);
@@ -200,11 +211,16 @@ final class PublicApiReportTest extends TestCase
      *   <tag>:API.md` is the page that release actually shipped, and the run has to produce those
      *   bytes from that tree — the property every release relies on, asserted against the blob
      *   rather than against a second render of the same reader, which would agree with itself while
-     *   both were wrong. The one before it is the control, because its published page is *not* what
-     *   its tree holds: `v0.2.0-alpha2` rewrote the record and left the page describing the release
-     *   before it, and the re-render was a follow-up commit — `PublishedPageTest` says the same in
-     *   its own words. So a reader that printed the checkout's page, or the tag's blob, would pass
-     *   the first assertion and fail this one, which is the whole reason both tags are here.
+     *   both were wrong. The control is the release whose published page is *not* what its tree
+     *   holds: `v0.2.0-alpha2` rewrote the record and left the page describing the release before
+     *   it, and the re-render was a follow-up commit — `PublishedPageTest` says the same in its own
+     *   words. So a reader that printed the checkout's page, or the tag's blob, would pass the first
+     *   assertion and fail this one, which is the whole reason both tags are here.
+     *
+     *   The control is named rather than taken as "the tag before the newest": that reading stops
+     *   being a control the moment a release after it is cut, because the release before a good tag
+     *   is a good one. Naming the tag that is known to have shipped a page its tree does not render
+     *   says which property is under test instead of assuming the newest two have different ones.
      *
      *   Every derived file is hashed before and after, because the mode's promise is that a read is
      *   a read: a refactor that wrote the page — or the record — it rendered would leave the rest of
@@ -212,15 +228,15 @@ final class PublicApiReportTest extends TestCase
      */
     public function test_the_page_a_tag_published_is_the_page_a_run_at_that_tag_renders(): void
     {
-        [$newest, $previous] = self::versionTags();
+        [$newest, $stale] = self::pageTags();
 
         $before = self::digests();
 
         $published = self::api('--at=' . $newest);
-        $older = self::api('--at=' . $previous);
+        $older = self::api('--at=' . $stale);
 
         $this->assertSame(0, $published->getExitCode(), 'php bin/api.php --at=' . $newest . ' refused:' . PHP_EOL . $published->getErrorOutput());
-        $this->assertSame(0, $older->getExitCode(), 'php bin/api.php --at=' . $previous . ' refused:' . PHP_EOL . $older->getErrorOutput());
+        $this->assertSame(0, $older->getExitCode(), 'php bin/api.php --at=' . $stale . ' refused:' . PHP_EOL . $older->getErrorOutput());
 
         // The closed loop: the page printed for the newest tag is the one that tag published, byte
         // for byte. This is the assertion a stale release page fails — as `v0.2.0-alpha2`'s did.
@@ -230,12 +246,12 @@ final class PublicApiReportTest extends TestCase
             "the page printed for {$newest} is not the page that tag published",
         );
 
-        // ...and the control: the tag before it published a page its own tree does not render, so
-        // the two runs cannot have printed one page between them, and neither is the checkout's.
+        // ...and the control: that release published a page its own tree does not render, so the
+        // two runs cannot have printed one page between them, and neither is the checkout's.
         $this->assertNotSame(
-            self::published($previous),
+            self::published($stale),
             self::normalise($older->getOutput()),
-            "the page printed for {$previous} is the blob at that tag, which is the page its release left behind",
+            "the page printed for {$stale} is the blob at that tag, which is the page its release left behind",
         );
         $this->assertNotSame(self::normalise($published->getOutput()), self::normalise($older->getOutput()), 'two tags, one page');
         $this->assertSame(self::published($newest), self::page(), 'the checkout\'s page has moved on from the newest tag, which this test assumes');
@@ -243,36 +259,47 @@ final class PublicApiReportTest extends TestCase
         // Each page says which tree it describes, and the note about where it came from is on the
         // other stream — a note in front of the bytes is a page that does not render.
         $this->assertStringContainsString('describes the tree at **' . $newest . '**', $published->getOutput());
-        $this->assertStringContainsString('describes the tree at **' . $previous . '**', $older->getOutput());
-        $this->assertStringContainsString('reading the tree at ' . $previous . ' out of git', $older->getErrorOutput());
+        $this->assertStringContainsString('describes the tree at **' . $stale . '**', $older->getOutput());
+        $this->assertStringContainsString('reading the tree at ' . $stale . ' out of git', $older->getErrorOutput());
         $this->assertStringNotContainsString('reading the tree at', $older->getOutput());
 
         $this->assertSame($before, self::digests(), 'a read wrote one of the derived files in this checkout');
     }
 
     /**
-     * The two newest version tags, newest first.
+     * The newest version tag, and the tag whose release shipped a page its own tree does not render.
      *
-     * Two, because the test above is about a page that moved on: one tag would let a reader that
-     * printed the tree it was standing in pass. A checkout with fewer than two is not this
-     * repository mid-release, it is a clone that has no history to read — the test says so rather
-     * than asserting on an empty string.
+     * The control is named rather than read off the list beside the newest: a release after it does
+     * not make it a good one, but taking "the tag before the newest" made it look like one, and the
+     * assertion then failed on a page that was correct. Two tags are still needed — one tag would
+     * let a reader that printed the tree it was standing in pass — and a checkout without the named
+     * tag or with it as the newest is a history this test cannot ask about, which is said rather
+     * than asserted on an empty string.
      *
      * @return array{0: string, 1: string}
      */
-    private static function versionTags(): array
+    private static function pageTags(): array
     {
         $process = new Process(['git', 'tag', '--list', 'v*', '--sort=-v:refname'], self::root());
         $process->setTimeout(30);
         $process->run();
 
         $tags = array_values(array_filter(preg_split('/\R/', $process->getOutput()) ?: []));
+        $newest = $tags[0] ?? '';
 
-        if (count($tags) < 2) {
-            self::markTestSkipped('this checkout has fewer than two version tags, so there is no past page to read');
+        if ($newest === '') {
+            self::markTestSkipped('this checkout names no version tag, so there is no page to read');
         }
 
-        return [$tags[0], $tags[1]];
+        if (!in_array(self::STALE_PAGE_TAG, $tags, true)) {
+            self::markTestSkipped(self::STALE_PAGE_TAG . ' is not in this checkout, so the control page this test reads is not here');
+        }
+
+        if ($newest === self::STALE_PAGE_TAG) {
+            self::markTestSkipped('this checkout has no release after ' . self::STALE_PAGE_TAG . ', so there is no newest page to close the loop with');
+        }
+
+        return [$newest, self::STALE_PAGE_TAG];
     }
 
     /** The page a tag published, as git holds it — the only copy of it left, and the ground truth. */

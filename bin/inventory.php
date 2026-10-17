@@ -76,7 +76,10 @@ declare(strict_types=1);
  *
  *   `--check` answers "is the inventory current?". It is deliberately not a CI
  *   check: an inventory kept in step with every commit can never witness a
- *   change, and witnessing one is the only thing it is for.
+ *   change, and witnessing one is the only thing it is for. One stamp is read
+ *   as current besides the latest tag: one naming a release this repository does
+ *   not have yet, which is the tag a release is cutting when it renders the note
+ *   that quotes this check, before there is a tag to compare it with.
  *
  * EXIT CODES
  * ----------
@@ -198,6 +201,29 @@ $stored = [
 // The stamp is what makes the difference visible, and it is read the way `inventorySignal()`
 // reads it, `files.tsv` first. A file that is not there recorded nothing to compare and is
 // passed over, which is what lets a half-written set be completed by any writer.
+// A release reads its own record before the tag it describes exists, and that is the one stamp
+// `--check` cannot derive from git: `syncDerived()` expects the latest tag, while the files on disk
+// name the tag being cut. Rows that reproduce the tree under a stamp this repository does not have
+// are therefore the release's own record and the reading is taken at that stamp. The allowance is
+// narrow on purpose — the stamp has to be newer than the latest tag and absent from the tags —
+// because a stamp naming an older release is the state the rule exists to catch, and a stamp naming
+// one that exists is the ordinary question.
+//
+// Without it a release's own note quotes `exit 1` beside a check that exits 0 as soon as the tag is
+// pushed, since the header line of each record is the one line that moved — the transcript the
+// release block carries, and the reading CI then disagrees with.
+if ($check && $at === null) {
+    $onDisk = $stored['files']['stamp'] ?? $stored['methods']['stamp'] ?? $stored['surface']['stamp'];
+
+    if (is_string($onDisk)
+        && str_starts_with($tag, 'v')
+        && preg_match('/^v\d/', $onDisk) === 1
+        && version_compare(substr($onDisk, 1), substr($tag, 1), '>') === true
+        && git($root, ['rev-parse', '-q', '--verify', 'refs/tags/' . $onDisk])['exit'] !== 0) {
+        $tag = $onDisk;
+    }
+}
+
 $elsewhere = [];
 
 if (!$check && $at !== null && !$force) {

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Fixed
+
+- **A release's own commit is green on the note it writes: the records transcript is read at the stamp
+  the release wrote, and the tag row is read as the branch it names.** Both were claims a release
+  could not make come true in the one commit it is allowed to make them in. `bin/release.php` stamps
+  the three records with the tag it is cutting and then renders the note that quotes
+  `bin/inventory.php --check` — before the tag exists — so the one line the check compared was the
+  stamp, it reported `1 line(s) stale` in each record, and the note committed `exit 1` beside a
+  command that exits 0 the moment the tag is pushed. The commit went red on that block, and cold it
+  also went red on `v0.2.0-alpha4` being named in a row read as "behind the register": the release
+  writes the tag it just cut into its own commit, which is *after* the register a note taken before it
+  names, so the row was true about the branch and false about that commit. `--check` now takes the
+  reading at a stamp this repository does not have yet — newer than the latest tag, and only while
+  every row reproduces the tree, so a stamp naming an older release is still drift and so is a lost
+  row — and the note's guard asks whether each tag it names is reachable from `HEAD`, which is what
+  "on the branch" says. The transcript is therefore byte-identical before and after the tag exists,
+  which is the property a note published in the same commit as the tag needs.
+
+- **The API page's control is the release that shipped a stale page, not "the one before the
+  newest".** `PublicApiReportTest` asserts that the tag it reads as a control published a page its own
+  tree does not render — true of `v0.2.0-alpha2`, and true of the tag before the newest only until a
+  good release followed it. Cutting `v0.2.0-alpha4` moved the control onto `v0.2.0-alpha3`, whose page
+  is correct, so the test failed on a page that was right and would have failed after every future
+  release. The tag is named, and a checkout without it says so rather than asserting on an empty
+  string.
+
 ## 0.2.0-alpha4 - 2026-10-17
 
 ### Added

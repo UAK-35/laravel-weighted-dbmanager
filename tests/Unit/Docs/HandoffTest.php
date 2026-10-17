@@ -910,13 +910,22 @@ final class HandoffTest extends TestCase
         $off = [];
 
         foreach (Handoff::tags() as $tag) {
-            // The tag about to be created has no commit to be behind the register yet — the release
-            // makes it at `HEAD`, which is the commit this run is verifying. What can be asked of it
-            // now is the claim it will have to keep: that the commit it will point at is a descendant
-            // of the register, rather than some other line of history.
+            // The row is read as its own label says it — the tags on the branch — so the question is
+            // whether the tag is reachable from the branch tip, which is `HEAD`, the commit this run
+            // verifies. Reading it as "behind the register" was the stricter claim and one the row
+            // never makes: a release moves these rows in its own commit, which is *after* the commit
+            // a note taken before it names as the register, so the tag it has just cut is on the
+            // branch and not behind the register — and the guard then failed on the note the release
+            // had written. Behind `HEAD` is the row's own words and a claim that stays true as the
+            // branch moves on.
+            //
+            // The tag about to be created has no commit yet — the release makes it at `HEAD`, which
+            // is the commit this run verifies. What can be asked of it now is the claim it will have
+            // to keep: that the commit it will point at is a descendant of the register, rather than
+            // some other line of history.
             $behind = $tag === $pending
                 ? Handoff::git('merge-base', '--is-ancestor', $head, 'HEAD')['exit']
-                : Handoff::git('merge-base', '--is-ancestor', $tag, $head)['exit'];
+                : Handoff::git('merge-base', '--is-ancestor', $tag, 'HEAD')['exit'];
 
             if ($behind !== 0) {
                 $off[] = $tag;
@@ -927,8 +936,8 @@ final class HandoffTest extends TestCase
             [],
             $off,
             sprintf(
-                'HANDOFF.md calls these tags the ones on the branch %s, and they are not behind that commit: %s.',
-                $head,
+                'HANDOFF.md calls these tags the ones on the branch, and these are not reachable from HEAD, '
+                .'the commit this run verifies: %s.',
                 implode(', ', $off),
             ),
         );
