@@ -27,6 +27,8 @@ use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigSchema;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ConnectorInUse;
+use Uak35\WeightedDbManager\Support\DeploymentContract;
+use Uak35\WeightedDbManager\Support\PinnedQuery;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
 use Uak35\WeightedDbManager\Support\RedisAccess;
@@ -35,10 +37,10 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
 
 /**
  * php artisan db:doctor [connection] [--strict] [--json] [--config-file=path]
- * [--connection-only]
+ * [--connection-only] [--contract]
  *
  * One command that answers "will this installation do what it is configured to
- * do", before traffic arrives. Twenty-one things can be wrong while the application
+ * do", before traffic arrives. Twenty-two things can be wrong while the application
  * still boots and answers requests:
  *
  *   boot environment  the settings every row below judged are not the ones this
@@ -68,7 +70,14 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     than restating the framework's map, so it cannot describe a
  *                     factory this installation does not have; where `db.factory`
  *                     cannot be asked (resolving it threw, or it is not a factory)
- *                     the row says so and leaves that binding to `weighted factory`
+ *                     the row says so and leaves that binding to `weighted factory`.
+ *                     It also builds the followed connection and names the class it
+ *                     resolves to, because the connector is only half of what builds
+ *                     one: `Connection::resolverFor($driver, …)` is a second, global
+ *                     replacement point the factory never sees, and a resolver
+ *                     registered after the application built its connection leaves the
+ *                     application on the framework's class — a state only the resolved
+ *                     object shows
  *   published config  the application never published its own config/db-manager.php
  *                     and is running on the sample values
  *   pgcat gate        swrr.pgcat.enabled is on for a connection pgcat cannot
@@ -169,6 +178,13 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     written, so the PING is skipped on every boot in silence
  *   store             the primary store (Redis) is not answering, so workers fall
  *                     back to an in-process rotation that is not shared
+ *   real query        the connection this run follows could not answer one real
+ *                     `select 1` — or the run was not asked to try. It is the one reading
+ *                     here that leaves the process, so it is asked only where `--real-test`
+ *                     asks for it and says so when it was not asked, rather than being left
+ *                     out of the run: a gate that reads a row by name can then tell "the
+ *                     query passed" from "no query was attempted", which is the difference
+ *                     an image that has no database behind it turns on
  *
  * The store is checked with a live PING rather than trusted to the store's own
  * health flag: that flag is only raised after an operation has already failed, so
@@ -222,11 +238,29 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * run says which rows it left out, because a shorter report read as a complete one would be this
  * command telling an operator that six questions passed when they were never asked.
  *
+ * REAL TEST
+ * ---------
+ * `--real-test` asks the connection this run follows for one real query —
+ * `Support\PinnedQuery`'s `select 1`, the same statement `GET /health/db` runs — and the
+ * `real query` row reports what came back and how long it took. It exists because the one question
+ * a gate cannot read out of a configuration is whether a server is *there*: a deploy gate promotes
+ * an image on exactly that proof, and no other row opens a connection at all.
+ *
+ * The flag is what keeps the mode's promise rather than what breaks it. `--connection-only` is
+ * answerable with no reachable database, and that is kept by *not asking* — so the row is built
+ * either way and reports that no query was attempted when the flag is absent, in the same words
+ * the read-path rows use when their probe is not armed. A caller that asks for the query gets it in
+ * either mode, and a caller that does not is never the reason an image build failed. The endpoint's
+ * own `swrr.health.pinned_query` switch is not consulted: it turns the endpoint's query off where
+ * the question is not worth asking, and a flag a gate passed on purpose is that gate's question.
+ *
  * READ ONLY
  * ---------
  * Every check inspects configuration, resolved classes and the store. Nothing is
- * written, no replica is probed with `SELECT 1` and no flip is attempted, so the
- * command is safe in a deploy pipeline and against a live database. The checks that reach
+ * written and no flip is attempted, so the command is safe in a deploy pipeline and
+ * against a live database — and nothing is *queried* either, unless `--real-test` asks
+ * for exactly that: one `select 1` on the connection this run follows, which is the
+ * reading a deploy gate passes the flag for. The checks that reach
  * over the network write nothing either: the store check's PING, where an
  * unreachable store costs one connect timeout; `pool probe`, which is one bounded
  * startup packet per pool; and the two read-path readings, which are one query per
@@ -333,6 +367,37 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * name the subject — `config_file` where an installation run names `connection` and
  * `default_connection` — and the rest of the key set is the same, so a gate written against one
  * mode reads the other.
+ *
+ * CONTRACT MODE
+ * -------------
+ * `--contract` asks the same installation run for a different subject: the requirements of
+ * `docs/deployment-contract.md`, one row each, named by the key the record states them with
+ * (`variants`, `prune`, `pooler`, `boot-stamp`, `mechanism`, `state-dir`, `supervisor`,
+ * `health-check`, `store`, `read-caps`, `health-endpoint`). It exists because the rows are named
+ * after the mechanism they read, not after the thing a deployment has to have, so a pipeline that
+ * wants to fail a deployment was reading a list of row names out of a shell script — a copy of the
+ * contract rather than the contract. The mapping is `Support\DeploymentContract`'s, so the record
+ * and the guard are held to one list.
+ *
+ * No reading is added and no reading changes: a requirement's verdict is the loudest verdict among
+ * the rows behind it — `FAIL` over `WARN` over `PASS`, the same fold a row uses over its problems —
+ * and the detail names each row and its verdict, then the sentences of the ones that did not pass,
+ * and the repairs those rows named are the requirement's `suggestions`. So a deploy fails on
+ * `variants` and is told which of `variant shape` and `pgcat files` refused it, rather than on a
+ * row a reader has to know belongs to the contract.
+ *
+ * A requirement no row can answer — the monitor that reads `/health/db` is the deployment's, and no
+ * reading here sees it — passes and says it was not judged. That is the same
+ * reading the `connector` row gives when `db.factory` cannot be asked: the package cannot fail a
+ * deployment over a fact it never read. `--connection-only` composes: a requirement whose readings
+ * were all left out by that mode says which ones, and one whose readings were asked and passed
+ * says which ones it did not ask, so a bounded contract run is short *and* says why.
+ *
+ * The exit rule is unchanged — the counts are the requirements', and `gateFailed()` still decides —
+ * and so is the object: `checks` holds the requirement rows, under the keys, with the same
+ * `verdict`/`detail`/`suggestions` shape all three modes publish, and `connection_only` still says
+ * whether the run was bounded. `--config-file` is refused beside it rather than half-honoured: a
+ * file is not a deployment, and the contract asks what one has.
  */
 class DbDoctor extends Command
 {
@@ -420,14 +485,27 @@ class DbDoctor extends Command
         'store reachability',
     ];
 
+    /**
+     * The name of the one row that is built in every run and put only when asked.
+     *
+     * It is a constant because three places have to agree about it and a string in each would
+     * drift: the row is named here, the bounded mode's table is deliberately *not* it (the mode
+     * promises no reachable database, which is kept by leaving the flag off rather than by
+     * leaving the row out), and the contract has to read whether the run put it before it folds
+     * the row into a requirement.
+     */
+    private const REAL_QUERY = 'real query';
+
     protected $signature = 'db:doctor
                             {connection=pgsql : Connection whose weighted replicas are inspected}
                             {--strict : Treat warnings as failures, for a deploy gate}
                             {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
                             {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}
-                            {--connection-only : Bound the run to what a build container can answer: leave out the six rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}';
+                            {--connection-only : Bound the run to what a build container can answer: leave out the six rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}
+                            {--real-test : Ask the connection this run follows for one real query — the `select 1` the health endpoint runs — because whether a server answers is the one fact a configuration cannot show; the only reading here that leaves the process, and one no run takes unless it is asked for by name}
+                            {--contract : Judge the deployment contract instead of the installation: one row per requirement of docs/deployment-contract.md, its verdict the loudest among the rows behind it, so a deploy fails on the requirement rather than on the reading}';
 
-    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, or ask only the rows a build container can answer, with --connection-only';
+    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, ask only the rows a build container can answer, with --connection-only, ask the followed connection for one real query, with --real-test, or judge the requirements of the deployment contract, with --contract';
 
     public function handle(): int
     {
@@ -440,6 +518,20 @@ class DbDoctor extends Command
         $candidate = $this->option('config-file');
 
         if (is_string($candidate) && $candidate !== '') {
+            // A file is not a deployment, and the contract asks what one has. Refused rather than
+            // half-honoured, the way the flip refuses a rehearsal that would also watch: a run that
+            // silently ignored one of the two flags would report the contract of the installation
+            // it happens to be running in while the operator believes it judged the candidate.
+            if ($this->contract()) {
+                $this->error(
+                    '--contract and --config-file are mutually exclusive: the contract is a list of what a '
+                    .'deployment has, and a file being vetted is not one. Vet the file with --config-file '
+                    .'alone, or run --contract against the installation that would deploy it.'
+                );
+
+                return self::FAILURE;
+            }
+
             return $this->vetConfigFile($candidate, $connection);
         }
 
@@ -487,10 +579,24 @@ class DbDoctor extends Command
             if ($this->asks('store reachability')) {
                 $rows[] = $this->storeReachability($manager, $connection);
             }
+
+            // Built whether or not it is asked for, and asked only when the flag says so: the
+            // row is the one reading here that leaves the process, so a run that did not ask
+            // has to say that rather than leave a gap a gate cannot tell from a pass. It sits
+            // last because it is the last thing a run does — everything above reads, and this
+            // one connects.
+            $rows[] = $this->realQuery();
         }
 
         $followed = $this->followedConnection();
         $configured = $this->configuredConnection();
+
+        // The last thing that happens to the rows, so the mapping of requirement to reading is one
+        // table (`Support\DeploymentContract`) applied to the run rather than a second way of
+        // producing the readings: every row above was asked exactly as it is in a plain run.
+        if ($this->contract()) {
+            $rows = $this->contractRows($rows);
+        }
 
         return $this->conclude(
             $rows,
@@ -506,11 +612,11 @@ class DbDoctor extends Command
     /**
      * The tally, the exit code and the two ways of printing them, from the rows a run produced.
      *
-     * Shared by the installation run and the config-file vet because the rule a pipeline
-     * depends on has to be one rule: the code is `gateFailed()`'s — a failure, or any warning
-     * under `--strict` — and the object carries that same code, so a run cannot be read one way
-     * and acted on another. What differs between the two runs is the *subject*, and that is what
-     * the caller passes: the keys that name what was inspected (`connection` with the setting it
+     * Shared by the installation run, its contract mode and the config-file vet because the rule a
+     * pipeline depends on has to be one rule: the code is `gateFailed()`'s — a failure, or any
+     * warning under `--strict` — and the object carries that same code, so a run cannot be read one
+     * way and acted on another. What differs between them is the *subject*, and that is what the
+     * caller passes: the keys that name what was inspected (`connection` with the setting it
      * was read from and the connection it followed, or `config_file`) and the banner line above
      * the table, which is the prose spelling of the same thing.
      *
@@ -533,7 +639,7 @@ class DbDoctor extends Command
             return $this->report($rows, $subject, $strict, $counts, $exitCode);
         }
 
-        $this->render($rows, $banner, $counts, $this->vetting());
+        $this->render($rows, $banner, $counts, $this->vetting(), $this->contract(), $subject);
 
         return $exitCode;
     }
@@ -1290,7 +1396,20 @@ class DbDoctor extends Command
      *   It fails where nothing can be built at all: the connection `ActiveConnection` follows is
      *   not declared (no driver), or declares a driver no connector is registered for. Both are
      *   a mistyped name or driver rather than a fault of this package, and neither is reported by
-     *   any other row — the gate only asks what pgcat can front, and only while it is armed.
+     *   any other row — the gate only asks what pgcat can front, and only while it is armed. A
+     *   connection whose connector exists but whose build throws fails here too, with the
+     *   framework's own sentence: the installation cannot build the connection it follows.
+     *
+     *   The connector is only half of what builds a connection. The other half is the class the
+     *   framework constructs around the PDO, and that class has its own replacement point —
+     *   `Connection::resolverFor($driver, …)`, a global registry `createConnection()` consults
+     *   before its own map. A resolver is invisible to the connector and to configuration, so the
+     *   row also names the class the connection resolves to and says whether the installation's
+     *   resolver is registered and whether the connection in use was built through it. A resolver
+     *   registered after the connection was built leaves the app using the framework's class,
+     *   which is a state only the resolved object can show; it is reported rather than failed for
+     *   the same reason a replaced connector is a pass — the replacement is the extension point,
+     *   and what an operator needs is to see which one is in effect.
      *
      *   Where `db.factory` cannot be asked — resolving it threw, or what it resolved to is not a
      *   `ConnectionFactory` — the row passes and says the reading was not taken, the way every
@@ -1324,8 +1443,18 @@ class DbDoctor extends Command
             ));
         }
 
+        if ($reading['connection_error'] !== null) {
+            return $this->row('connector', self::FAIL, sprintf(
+                'connection [%s] (driver %s) is built by %s, but the connection itself could not be built: %s',
+                $reading['connection'],
+                $reading['driver'],
+                (string) $reading['connector'],
+                $reading['connection_error'],
+            ));
+        }
+
         return $this->row('connector', self::PASS, sprintf(
-            'connection [%s] (driver %s) is built by %s — %s',
+            'connection [%s] (driver %s) is built by %s — %s; %s',
             $reading['connection'],
             $reading['driver'],
             (string) $reading['connector'],
@@ -1334,7 +1463,41 @@ class DbDoctor extends Command
                     .ConnectorInUse::BINDING_PREFIX.$reading['driver']
                 : 'resolved from the '.$reading['binding'].' binding, an installation\'s connector in place '
                     .'of the framework\'s own',
+            $this->connectionClass($reading),
         ));
+    }
+
+    /**
+     * The half of the `connector` row the factory cannot answer: the class the connection is.
+     *
+     * Three states, and each names a fact rather than a judgement. With no resolver registered,
+     * the class is the framework's own for the driver and that is all that is true. With one
+     * registered and the connection built through it, the class is the installation's. With one
+     * registered and the connection in use older than it, the class is still the framework's own
+     * and the sentence says the replacement has not reached the connection the application holds —
+     * which is the one state in which "a replacement is registered" and "a replacement is in
+     * effect" are different answers.
+     *
+     * @param array<string, mixed> $reading `ConnectorInUse::resolve()`'s answer
+     */
+    private function connectionClass(array $reading): string
+    {
+        $class = is_string($reading['connection_class'] ?? null) ? $reading['connection_class'] : '';
+        $driver = is_string($reading['driver'] ?? null) ? $reading['driver'] : '';
+
+        if (($reading['resolver'] ?? null) === null) {
+            return 'the connection resolves to '.$class.' — no connection resolver is registered for '
+                .$driver.', so the class is the framework\'s own';
+        }
+
+        if (($reading['resolver_applied'] ?? false) === true) {
+            return 'the connection resolves to '.$class.' — an installation\'s connection resolver for '
+                .$driver.' is registered, and this connection was built through it';
+        }
+
+        return 'the connection in use resolves to '.$class.' — an installation\'s connection resolver for '
+            .$driver.' is registered, but this connection was not built through it, so the class is the '
+            .'framework\'s own';
     }
 
     /**
@@ -3323,6 +3486,43 @@ class DbDoctor extends Command
     }
 
     /**
+     * What this run inspected, as the configuration key the connection was read from and the
+     * connection itself — one line, and which key it carries is the answer to "was it set, or
+     * inherited?".
+     *
+     * WHY A CONFIG KEY RATHER THAN A LABEL OF THIS COMMAND'S OWN
+     * ----------------------------------------------------------
+     *   The banner above names the same fact in prose, and prose is what a shell gate cannot read:
+     *   the deployment's image gates run the bounded mode in a container and log which connection
+     *   the image resolved, grepping the log for the key the setting is *written* with —
+     *   `db-manager.swrr.connection` is this package's spelling of it, the same string the health
+     *   payload reports as its `source` and the same one `ActiveConnection` resolves. So the line is
+     *   spelled as the configuration spells it, and the value is the connection that was followed:
+     *   a name the setting gave prints under the setting's key, and one the package inherited prints
+     *   under `database.default` — the distinction the object publishes as `swrr_connection` beside
+     *   `default_connection`, in the spelling a reader can act on.
+     *
+     *   One line and not two: there is one connection, and which key answered for it is the whole of
+     *   the second fact. Nothing is printed where no connection is named at all — a key with no
+     *   value is not a reading, and the row that judges it says so in its own words.
+     *
+     * @param array<string, string|null> $subject
+     * @return list<array{0: string, 1: string}>
+     */
+    private function subjectFacts(array $subject): array
+    {
+        $followed = $subject['default_connection'] ?? null;
+
+        if (!array_key_exists('connection', $subject) || !is_string($followed) || $followed === '') {
+            return [];
+        }
+
+        $configured = $subject['swrr_connection'] ?? null;
+
+        return [[$configured === null ? 'database.default' : ActiveConnection::CONFIGURED_SOURCE, $followed]];
+    }
+
+    /**
      * The connection the package follows — `db-manager.swrr.connection` when the installation
      * names one, `database.default` otherwise — as the banner and the JSON report both name it
      * (the key stays `default_connection` so a gate that already reads it keeps working). Read
@@ -3385,13 +3585,29 @@ class DbDoctor extends Command
             $line .= ' (named by <comment>' . ActiveConnection::CONFIGURED_SOURCE . '</comment>)';
         }
 
-        if (!$this->connectionOnly()) {
-            return $line;
+        // Said above the table rather than left to the row names, because a contract run's rows are
+        // the keys of a record rather than the doctor's own — a reader who expected `pgcat files`
+        // would otherwise read eleven unfamiliar names as this command having changed its mind.
+        if ($this->contract()) {
+            $line .= ' — <comment>--contract</comment>: ' . count(DeploymentContract::keys())
+                . ' requirements, each answered by the rows behind it';
         }
 
-        return $line . ' — <comment>--connection-only</comment>: <comment>'
-            . implode('</comment>, <comment>', self::REACHES_OUT)
-            . '</comment> were not asked, because each one reaches something a build container may not have';
+        if ($this->connectionOnly()) {
+            $line .= ' — <comment>--connection-only</comment>: <comment>'
+                . implode('</comment>, <comment>', self::REACHES_OUT)
+                . '</comment> were not asked, because each one reaches something a build container may not have';
+        }
+
+        // Named for the same reason the bounded clause is: the `real query` row is built in every
+        // run, so the sentence an operator reads about the mode cannot be what tells them whether a
+        // database was reached — and this is the one reading in the run that reaches one.
+        if ($this->realTest()) {
+            $line .= ' — <comment>--real-test</comment>: the connection this run follows was asked for one '
+                .'real `' . PinnedQuery::QUERY . '`, which is the reading here that leaves the process';
+        }
+
+        return $line;
     }
 
     /**
@@ -3419,6 +3635,205 @@ class DbDoctor extends Command
     }
 
     /**
+     * Whether this run is judging the deployment contract rather than the installation's own list
+     * of rows. Like `connectionOnly()`, read from the flag where it is needed rather than carried
+     * as state, so the subject line, the row list and the closing sentence cannot disagree about
+     * which mode they describe.
+     */
+    private function contract(): bool
+    {
+        return (bool) $this->option('contract');
+    }
+
+    /**
+     * The contract as rows: one per requirement, in the order the record states them, each answered
+     * by the rows this run already built.
+     *
+     * The map is `Support\DeploymentContract`'s and nothing is re-read here — the same run's rows
+     * are folded by name, so a contract run asks exactly the readings a plain run would, in exactly
+     * the same order and with the same sentences. That is the difference between this mode and a
+     * second preflight: there is one set of readings, and the contract is a second way of counting
+     * them.
+     *
+     * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
+     * @return list<array{status: string, name: string, detail: string, suggestions: list<string>}>
+     */
+    private function contractRows(array $rows): array
+    {
+        $built = [];
+
+        foreach ($rows as $row) {
+            $built[$row['name']] = $row;
+        }
+
+        $contract = [];
+
+        foreach (DeploymentContract::requirements() as $key => $requirement) {
+            $contract[] = $this->contractRow($key, $requirement, $built);
+        }
+
+        return $contract;
+    }
+
+    /**
+     * One requirement, assembled from the rows behind it.
+     *
+     * The verdict is the loudest of the readings' — the same fold a row uses over its problems, one
+     * scope up, so a requirement cannot pass above a reading that failed. The detail names every
+     * reading and its verdict first, because the requirement's own status is a claim about a set
+     * and an operator checking it needs to see the members; the readings that did not pass then
+     * bring their own sentences, and their repairs become the requirement's `suggestions`, so the
+     * fix a row could name is not lost one level up. Nothing is re-worded: the sentences are the
+     * rows'.
+     *
+     * Three states ask for a sentence of this method's own, and each one exists so that silence is
+     * never read as a pass:
+     *
+     *   - a requirement no row can answer (`unread`) passes saying it was not judged, and names
+     *     what would have to be read instead — the package cannot fail a deployment over a fact it
+     *     never read, and calling it a failure would be counting the package's own bounded
+     *     surface as the deployment's fault;
+     *   - a requirement whose readings were all left out by `--connection-only` passes saying so,
+     *     naming them: a bounded run is short by design, and a short contract must say which
+     *     requirements it never asked;
+     *   - a requirement that was partly asked names the rows it did not ask beside the ones it did,
+     *     in the same sentence.
+     *
+     * A reading the run built and did not put — `real query` without `--real-test` — is counted
+     * with the ones it did not ask rather than with the ones it did: the row is present and says it
+     * was not asked, and a requirement that listed it among the readings asked would be reporting a
+     * silence as `none of the readings asked failed`, which is the one thing a contract row must
+     * never do.
+     *
+     * @param array{statement: string, readings: list<string>, unread: string|null, note: string|null} $requirement
+     * @param array<string, array{status: string, name: string, detail: string, suggestions: list<string>}> $built
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function contractRow(string $key, array $requirement, array $built): array
+    {
+        $statement = $requirement['statement'];
+        $asked = [];
+        $statuses = [];
+        $failing = [];
+        $suggestions = [];
+        $unasked = [];
+        $unput = [];
+
+        foreach ($requirement['readings'] as $reading) {
+            if (!isset($built[$reading])) {
+                $unasked[] = $reading;
+
+                continue;
+            }
+
+            if (!$this->put($reading)) {
+                $unput[] = $reading;
+
+                continue;
+            }
+
+            $row = $built[$reading];
+            $asked[] = sprintf("'%s' %s", $reading, $row['status']);
+            $statuses[] = $row['status'];
+
+            if ($row['status'] === self::PASS) {
+                continue;
+            }
+
+            $failing[] = sprintf("'%s' — %s", $reading, $row['detail']);
+
+            foreach ($row['suggestions'] as $suggestion) {
+                if (!in_array($suggestion, $suggestions, true)) {
+                    $suggestions[] = $suggestion;
+                }
+            }
+        }
+
+        if ($asked === [] && $requirement['unread'] !== null) {
+            return $this->row($key, self::PASS, $statement . ' — not judged here: ' . $requirement['unread']);
+        }
+
+        if ($asked === []) {
+            return $this->row($key, self::PASS, sprintf(
+                '%s — not asked: %s, so this run does not judge it',
+                $statement,
+                $this->unaskedSentence($unasked, $unput),
+            ));
+        }
+
+        $detail = $statement . '. Readings: ' . implode(', ', $asked);
+
+        if ($failing !== []) {
+            $detail .= ' — ' . implode(' | ', $failing);
+        } elseif ($unasked === [] && $unput === []) {
+            $detail .= ' — every reading behind this requirement was asked and none failed';
+        } else {
+            $detail .= ' — none of the readings asked failed';
+        }
+
+        if ($unasked !== [] || $unput !== []) {
+            $detail .= '; ' . $this->unaskedSentence($unasked, $unput);
+        }
+
+        if ($requirement['note'] !== null) {
+            $detail .= ' — ' . $requirement['note'];
+        }
+
+        return $this->row($key, $this->loudest($statuses), $detail, $suggestions);
+    }
+
+    /**
+     * Why a reading was not in the run, said in the terms of the run that produced neither — without
+     * guessing at the cause.
+     *
+     * Three shapes of "not asked" and none of them is the same fact. `--connection-only` declares
+     * the rows it does not ask; an installation whose `db` is not the weighted manager builds only
+     * the eight rows that do not need it, so the nine that do are absent for a reason no flag on
+     * this run names; and `real query` is built in every run and says in its own sentence that it
+     * was not put unless `--real-test` asked for one. A sentence that assumed the first cause would
+     * report the bounded mode on a run that was never asked for it, so each shape is named only
+     * where it is the cause and the last one is named by the flag that lifts it.
+     *
+     * @param list<string> $absent the readings the requirement names that this run did not build
+     * @param list<string> $unput the readings the requirement names that this run built and did not put
+     */
+    private function unaskedSentence(array $absent, array $unput): string
+    {
+        $parts = [];
+
+        if ($absent !== []) {
+            $names = implode(', ', $absent);
+
+            $parts[] = $this->connectionOnly()
+                ? sprintf('%s left out by --connection-only', $names)
+                : sprintf('no row was built for %s', $names);
+        }
+
+        if ($unput !== []) {
+            $parts[] = sprintf(
+                '%s was built and not put — the row says so, and `--real-test` is what asks it',
+                implode(', ', $unput),
+            );
+        }
+
+        return implode('; ', $parts);
+    }
+
+    /**
+     * Whether the row behind a name was put to its subject at all.
+     *
+     * One row is built in every run and not asked in most of them: `real query` leaves the process,
+     * so it is carried as *not asked* rather than left out unless `--real-test` asks for one. The
+     * contract has to see that distinction — the row is in `checks`, and counting it among a
+     * requirement's asked readings would turn its own "not asked" into a pass one scope up — so the
+     * flag is read here, where the row read it, rather than inferred from a sentence.
+     */
+    private function put(string $row): bool
+    {
+        return $row !== self::REAL_QUERY || $this->realTest();
+    }
+
+    /**
      * The run as one JSON object on stdout, and nothing else — written raw, so a detail that
      * happens to contain angle brackets is not read as a console tag and dropped on the way
      * out of a machine-readable channel.
@@ -3442,6 +3857,11 @@ class DbDoctor extends Command
      * report was never going to carry it. The rows absent are the ones named in the doctor's own
      * record, and the rendered run prints them; here the flag is what says they are missing.
      *
+     * `real_test` is the third of those flags and the one that changes the *installation*: a run
+     * that asked for it opened a connection, and the `real query` row in `checks` is the answer it
+     * got. Published for the reason the two above are — a report that reached a database and one
+     * that only read configuration must not be the same artefact to a job selecting on rows.
+     *
      * `checks` is the rows themselves — the same names, the same verdicts and the same
      * suggestions the table prints, including the repairs a row can name — and each key is
      * renamed only where the table's word is the wrong one for a machine: a row's `status` is
@@ -3460,6 +3880,7 @@ class DbDoctor extends Command
                     ...$subject,
                     'strict' => $strict,
                     'connection_only' => $this->connectionOnly(),
+                    'real_test' => $this->realTest(),
                     'verdict' => $this->runVerdict($rows),
                     'exit_code' => $exitCode,
                     'counts' => $counts,
@@ -3542,6 +3963,74 @@ class DbDoctor extends Command
     }
 
     /**
+     * One real query on the connection this run follows — `Support\PinnedQuery`'s reading, asked
+     * only where `--real-test` asked for it and reporting that it was not asked otherwise.
+     *
+     * WHY THE ROW EXISTS WHEN THE QUERY IS OFF
+     * ---------------------------------------
+     *   A row is a name a gate selects on, and "the query passed" and "no query was run" are two
+     *   different answers to the question this row is — the difference the health endpoint draws
+     *   with `checked`, and the difference an image built with no database behind the connection
+     *   turns on. So the row is built in every run and says which of the two it is, the way the
+     *   read-path rows say their probe is not armed rather than going quiet: a gate that reads
+     *   `real query` by name can never take an absent row for a passing one.
+     *
+     *   It is also why the row is not in {@see REACHES_OUT}. That table is for rows a bounded run
+     *   may not *build*, and this one is built and simply not asked: `--connection-only` promises a
+     *   run with no reachable database, and that promise is kept by the flag being absent rather
+     *   than by a mode, so a caller that asks gets its query in either shape.
+     *
+     * The failure is the driver's own words rather than a sentence of this row's, which is what
+     * makes it the sentence an operator pastes into a search — and for PostgreSQL, the one carrying
+     * the SQLSTATE a deploy gate matches on. No `suggestion`: the repair is a pooler, a host or a
+     * credential, and none of them is a value this line can name.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function realQuery(): array
+    {
+        $connection = $this->followedConnection();
+
+        if (!$this->realTest()) {
+            return $this->row(
+                self::REAL_QUERY,
+                self::PASS,
+                'not asked — a real query leaves this process, and `--real-test` is what asks for one: '
+                .'nothing was connected to, so this row is not a claim about the database',
+            );
+        }
+
+        $probe = PinnedQuery::run($connection);
+
+        if ($probe['ok']) {
+            return $this->row(self::REAL_QUERY, self::PASS, sprintf(
+                '[%s] answered `%s` in %s ms — the connection this run follows, asked through the application\'s '
+                .'own path, so this is a server answering rather than a configuration reading',
+                $connection,
+                PinnedQuery::QUERY,
+                number_format((float) $probe['latency_ms'], 2, '.', ''),
+            ));
+        }
+
+        return $this->row(self::REAL_QUERY, self::FAIL, sprintf(
+            '[%s] could not answer `%s`: %s',
+            $connection === '' ? 'none' : $connection,
+            PinnedQuery::QUERY,
+            (string) $probe['error'],
+        ));
+    }
+
+    /**
+     * Whether this run was asked for one real query. Read from the flag where it is needed, like
+     * `connectionOnly()`, so the row, the banner and the object cannot disagree about whether the
+     * question was put to a database.
+     */
+    private function realTest(): bool
+    {
+        return (bool) $this->option('real-test');
+    }
+
+    /**
      * A `db-manager.swrr.*` value, read the way the provider builds the store so
      * the doctor and the runtime cannot disagree about which store is in use.
      */
@@ -3606,11 +4095,25 @@ class DbDoctor extends Command
      *
      * @param list<array{status: string, name: string, detail: string, suggestions: list<string>}> $rows
      * @param array{checks: int, passed: int, warnings: int, failed: int} $counts
+     * @param array<string, string|null> $subject the keys naming what was inspected
      */
-    private function render(array $rows, string $banner, array $counts, bool $vetting): void
+    private function render(array $rows, string $banner, array $counts, bool $vetting, bool $contract = false, array $subject = []): void
     {
         $this->line($banner);
         $this->newLine();
+
+        // What was inspected, in the configuration's own spelling, under the prose that names it:
+        // the banner is for a reader, and this is the line a shell gate greps. Empty for a vet,
+        // whose subject is a file rather than a connection.
+        $facts = $this->subjectFacts($subject);
+
+        if ($facts !== []) {
+            foreach ($facts as $fact) {
+                $this->line(sprintf('  %s  %s', str_pad($fact[0], 26), $fact[1]));
+            }
+
+            $this->newLine();
+        }
 
         foreach ($rows as $row) {
             if ($row['status'] === self::FAIL) {
@@ -3652,9 +4155,11 @@ class DbDoctor extends Command
         ));
 
         if ($counts['failed'] === 0 && $counts['warnings'] === 0) {
-            $this->line($vetting
-                ? '<fg=green>Nothing in this file would be refused.</>'
-                : '<fg=green>Installation looks healthy.</>');
+            $this->line(match (true) {
+                $vetting => '<fg=green>Nothing in this file would be refused.</>',
+                $contract => '<fg=green>Every requirement of the deployment contract is answered.</>',
+                default => '<fg=green>Installation looks healthy.</>',
+            });
         } elseif ($counts['failed'] === 0) {
             // A warning became a failure on purpose, so the run is not the thing that
             // broke — and the rows above, all PASS and WARN, cannot say that on their own.
@@ -3665,13 +4170,19 @@ class DbDoctor extends Command
                     '<fg=yellow>No failures — but </><fg=red>--strict counts the %d warning%s above as failures: this run exits 1 as a release gate, not because %s.</>',
                     $counts['warnings'],
                     $counts['warnings'] === 1 ? '' : 's',
-                    $vetting ? 'the file is unusable' : 'the installation is broken',
+                    match (true) {
+                        $vetting => 'the file is unusable',
+                        $contract => 'a requirement of the contract is unmet',
+                        default => 'the installation is broken',
+                    },
                 )
                 : '<fg=yellow>No failures — review the warnings above.</>');
         } else {
-            $this->line($vetting
-                ? '<fg=red>A value in this file would be refused: a boot of it runs on the defaults, and logs the refusals above.</>'
-                : '<fg=red>This installation will not behave as configured.</>');
+            $this->line(match (true) {
+                $vetting => '<fg=red>A value in this file would be refused: a boot of it runs on the defaults, and logs the refusals above.</>',
+                $contract => '<fg=red>A requirement of the deployment contract is not met: the rows above name the reading that failed.</>',
+                default => '<fg=red>This installation will not behave as configured.</>',
+            });
         }
     }
 }

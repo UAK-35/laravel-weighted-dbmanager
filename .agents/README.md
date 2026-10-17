@@ -18,6 +18,12 @@ is, and what `bin/release.php` does at each step) and [`PUSHING.md`](../PUSHING.
 remote, what authenticates here, and why MSYS fails). Those two files are the authority; a
 skill here names them rather than restating them, so the two cannot drift.
 
+The other two files here are records rather than instructions. `machine.local.json` is this
+machine's own facts, gitignored and copied from `sample.machine.local.json` in a fresh clone;
+`gate.json` is the last gate run as `php bin/checks.php --record` wrote it — committed, because
+`HANDOFF.md` renders its summary from it instead of a session copying the numbers out of a
+terminal.
+
 The state of the work itself — what is uncommitted, unpushed and in no release a consumer can
 install, as of the day it was taken — is in [`HANDOFF.md`](../HANDOFF.md). It is a snapshot
 rather than a rule, so [`tests/Unit/Docs/HandoffTest.php`](../tests/Unit/Docs/HandoffTest.php)

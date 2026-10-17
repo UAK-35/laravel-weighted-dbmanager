@@ -308,6 +308,73 @@ final class HandoffNoteTest extends TestCase
     }
 
     /**
+     * The note is read at the commit the release makes, and told which tag is pending.
+     *
+     * WHY THE PENDING TAG IS THE THING ASSERTED
+     * -----------------------------------------
+     *   A release moves the note's tag rows *before* it tags, so at the commit it verifies the note
+     *   names a tag this repository does not have yet. Two claims in the guard are about tags existing,
+     *   and without being told which one is pending they would refuse every release there is — so the
+     *   one thing this step passes on is asserted here: the tag the release is about to create, by
+     *   name, to the command that reads the note.
+     */
+    public function test_the_note_is_read_at_the_commit_the_release_tags_and_told_the_pending_tag(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->withNote();
+        $repo->tag('v1.0.0');
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertSame(
+            'HandoffTest at the commit this tags — nothing is tagged if it is red',
+            $run->plan('note guard'),
+            $run->describe(),
+        );
+        $this->assertSame('v1.0.1', $repo->guardAsked(), $run->describe());
+        $this->assertTrue($run->said('handoff note guard — green at'), $run->describe());
+        $this->assertStringContainsString('v1.0.1', $repo->tags(), $run->describe());
+    }
+
+    /**
+     * A note the guard refuses is a version nobody is handed: no tag, and the commit unmade.
+     *
+     * The two halves are one claim. A tag is the thing a consumer pins, so it is the one artefact a
+     * release must not leave behind on a red note; the commit is unmade with a soft reset because it
+     * is a commit whose only reason to exist was the tag above it, and a branch that kept it would be
+     * a release somebody could push by accident. The files stay staged, so what the guard named is in
+     * front of whoever runs it next.
+     */
+    public function test_a_note_the_guard_refuses_is_a_release_that_leaves_no_tag(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->withNote()->withGuard(1);
+        $repo->tag('v1.0.0');
+
+        $before = trim($repo->git('rev-parse', 'HEAD'));
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue($run->refused("The handoff note's guard is red at the commit this release made"), $run->describe());
+        $this->assertTrue($run->refused('nothing was tagged'), $run->describe());
+        $this->assertTrue($run->refused('The commit was unmade'), $run->describe());
+        $this->assertTrue($run->refused('the note describes has been released past'), $run->describe());
+        $this->assertSame("v1.0.0\n", $repo->tags(), $run->describe());
+        $this->assertSame(
+            $before,
+            trim($repo->git('rev-parse', 'HEAD')),
+            'A release that could not verify its note left the commit it made.' . PHP_EOL . $run->describe(),
+        );
+        $this->assertStringContainsString(
+            'CHANGELOG.md',
+            $repo->git('status', '--porcelain'),
+            'The files the release wrote are not staged for the repair.' . PHP_EOL . $run->describe(),
+        );
+    }
+
+    /**
      * The lines the two readings of the note disagree about, 1-based — the reading of what a
      * release moved.
      *

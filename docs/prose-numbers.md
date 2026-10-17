@@ -104,6 +104,19 @@ asserts that these are exactly the claims the guard makes, and that every bolded
 claim is the number the guard derives for it. That is what keeps this record from *becoming* the
 thing it describes — a prose copy of a list that somebody has to remember to update.
 
+The second column is a claim of its own, and it had been the one nobody read. The number in a quote
+was checked; the sentence around it was not, so an example could name a sentence the record had
+since reworded — or one whose count had moved while the example kept the old wording — and still sit
+in the table as evidence. `test_every_example_the_record_quotes_is_a_sentence_of_the_record_it_names`
+now takes each quoted example to the record its claim names and asserts the record still writes it:
+the first table's record comes from the claim's own `record`, the second table's from the path
+written beside the pattern, so the example and the number are claims about one file. An ellipsis in
+an example is "the rest of the sentence", and the fragments around it must appear in the record in
+that order — a quote assembled from two different sentences is not a sentence the record writes.
+Two were stale when the guard was written: `pool-exclusions.md` had capitalised its sentence and
+bolded it whole, and `db-doctor-json.md` had gone from "three rows can offer one" to the four the
+row set now has.
+
 | Claim | The sentence, as the record writes it | What it counts, and what the number is derived from |
 |---|---|---|
 | the commands the provider registers, as README.md counts them | "All **six** are registered by the provider" | the command classes in `src/Console/Commands/` |
@@ -134,11 +147,11 @@ thing it describes — a prose copy of a list that somebody has to remember to u
 | the ways a flip can politely do nothing, as DbFlipPgcatCommandTest counts them | "the **three** ways a flip can politely do nothing are one documented case" | the same cells, stated in the map's own docblock — the copy that had drifted to "two" |
 | the ways a command can be refused, as DbFlipPgcatCommandTest counts them | "the **three** ways a command can be refused are another" | the same cells, stated in the map's own docblock |
 | the doctor's documented cases, as documented-exit-codes.md counts them | "the doctor's **three** documented cases" | the README's `db:doctor` exit table, which the doctor's matrix is written as |
-| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **twenty-one**-row description of what each check judges" | the README's `db:doctor` check table |
-| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **twenty-one** verdicts, one per row" | the README's `db:doctor` check table |
-| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty-one** otherwise" | the README's `db:doctor` check table |
+| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **twenty-two**-row description of what each check judges" | the README's `db:doctor` check table |
+| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **twenty-two** verdicts, one per row" | the README's `db:doctor` check table |
+| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty-two** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **twelve** values a run can reach" | the README's `kind` table |
-| the reasons a replica is excluded, as pool-exclusions.md counts them | "the reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
+| the reasons a replica is excluded, as pool-exclusions.md counts them | "The reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
 | the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **nine** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
 | the keys the envelope writes, as command-json-envelope.md counts them | "writes **five** keys, in the same order, for every report", "holds the **five** keys in the order", "one of the **five** core keys" | `JsonEnvelope::CORE` |
 | the metadata floors, as replica-metadata-refusal.md counts them | "the **three** `*_FLOOR` constants" | the `*_FLOOR` constants on `ReplicaMetadata` |
@@ -151,11 +164,11 @@ record and compared with what the run produced.
 
 | Claim | The sentence | What it counts |
 |---|---|---|
-| `/([\w-]+) things can be wrong/` in `README.md` | "**Twenty-one** things can be wrong" | the rows the command builds, against the README's own table |
-| `/That is ([\w-]+) on an installation where \`db\` resolves/` in `docs/db-doctor-json.md` | "That is **twenty-one** on an installation where …" | the rows the weighted run built |
+| `/([\w-]+) things can be wrong/` in `README.md` | "**Twenty-two** things can be wrong" | the rows the command builds, against the README's own table |
+| `/That is ([\w-]+) on an installation where \`db\` resolves/` in `docs/db-doctor-json.md` | "That is **twenty-two** on an installation where …" | the rows the weighted run built |
 | `/and \*\*([\w-]+)\*\* where it does not/` in `docs/db-doctor-json.md` | "… and **nine** where it does not" | the rows a run built with `db` replaced |
 | `/([\w-]+) configuration rows/` in `README.md` | "leaves the **nine** configuration rows" | the rows a run built with `db` replaced |
-| `/(\w+) rows can offer one/` in `docs/db-doctor-json.md` | "**Three** rows can offer one" | the rows an actual run marks with a non-empty `suggestions` |
+| `/(\w+) rows can offer one/` in `docs/db-doctor-json.md` | "**Four** rows can offer one" | the rows an actual run marks with a non-empty `suggestions` |
 
 Both halves select by name rather than by count, and both compare *lists* before they compare
 lengths, because a count can be right while the list is wrong — and it is the names a reader or a
@@ -189,6 +202,23 @@ records rather than trusting them.
   to name the command, and a count written back into it (*Nine paths differ*) fails, because a number
   nothing can derive is not a claim a committed file can carry. The half of section 1 that *is* bound
   is the list, in the other direction: every file the register does not carry has to be named there.
+  The working-tree counts the section *does* carry are the two that a command answers — how far the
+  three `.tsv` records have fallen behind the tree, and what the last gate run reported — and they are
+  the same rule read the other way: each is the reading of the thing that measured it, `bin/handoff.php`
+  writes what it said, and the note's prose states neither. So a source file added moves the records'
+  count without a session re-typing it, and the gate's summary, timings and suite totals are the
+  recorded run's rather than a re-take's recollection of a terminal.
+- **A number a run produced.** The gate's totals, its per-check seconds, the tests and assertions
+  PHPUnit counted — `HANDOFF.md` section 1 used to state all of them, copied out of the terminal that
+  ran them, and no comparison could hold them: the prose could only be compared with prose, so a
+  re-take that forgot a number left the sentence describing a run that never happened. They are not
+  bound to a derivation either, because there is nothing in the tree to derive them from — the gate is
+  a ten-minute process, and a suite cannot re-run the run it is inside. So the run is *recorded*:
+  `bin/checks.php --record` writes `.agents/gate.json`, `bin/handoff.php` renders the block from it,
+  and `HandoffTest` holds the record to the shape a run leaves rather than to the numbers it produced —
+  every declared check, one verdict apiece, all green, a duration that can hold its rows. It is the
+  `.tsv` records' rule at a different moment: what a record says is evidence, and what the suite can
+  ask of evidence is that it be consistent, not that it be re-performed.
 - **Numbers about a shape rather than a list.** "One accessor, two renderings", "the two halves",
   "three surfaces", "the two names are two readers, not two opinions" — these describe a design.
   There is no list in the code to compare with, and inventing one would be writing the answer down
@@ -245,6 +275,7 @@ written down.
 | Test | Pins |
 |---|---|
 | `ProseNumbersTest::test_the_number_a_record_states_is_the_number_the_code_has` | every claim in the bound table: the sentence still exists, and every statement of it is the number the code has |
+| `ProseNumbersTest::test_every_example_the_record_quotes_is_a_sentence_of_the_record_it_names` | every sentence the bound table quotes, and the examples in the second table: each is still a sentence of the record its claim names, with the fragments around an ellipsis in order |
 | `ProseNumbersTest::test_the_three_switch_tables_list_the_same_settings` | the three tables a switch lives in — the provider's `SWITCHES`, the row's `SWITCH_KEYS`, its `SWITCH_CONSEQUENCES` — name the same settings |
 | `DbDoctorTest::test_the_readme_check_table_is_the_rows_the_command_builds` | the README check table by row name, the two counts stated about it, and that the unweighted rows are a subset |
 | `DbDoctorTest::test_the_record_says_which_rows_can_carry_a_repair` | the rows an actual run marks with a `suggestion`, against the record's count and its named classes |
@@ -259,7 +290,7 @@ a switch to one table only each fail with a message naming the record and the se
 
 | File | What it holds |
 |---|---|
-| `tests/Unit/Docs/ProseNumbersTest.php` | the claim table, the number words, the derivations, and the two records-independent rules |
+| `tests/Unit/Docs/ProseNumbersTest.php` | the claim table, the number words, the derivations, the quoted examples' reader, and the two records-independent rules |
 | `tests/Unit/Console/DbDoctorTest.php` | the two claims that need the command to run, and `numberClaim()` |
 | `tests/Support/Readme.php` | the README read as data — the tables the claims count |
 | `tests/Unit/Docs/DocCitationsTest.php` | the name half: the records' test citations against the classes that declare them |
@@ -283,6 +314,10 @@ a switch to one table only each fail with a message naming the record and the se
   record states twice — once as a claim, once as the history of the claim drifting — so the pattern
   carries the words that follow the number, and the historical sentence is excluded by wording
   rather than by being a second kind of thing.
+- **A quoted example is compared by words, not by markup.** `**` and line breaks are normalised on
+  both sides, because a record bolds some numbers and not others and this record bolds the number it
+  counts. So an example may bold a different word than the record does, or wrap differently, and
+  still pass — the sentence it states is the claim, and the emphasis is a reading aid.
 - **The two claims in `DbDoctorTest` count from fixtures, not from every state a row can reach.**
   The union of rows carrying a suggestion is taken from three states that produce one, so a row that
   could offer a line under a state no test walks would not be counted. That is the same fixture

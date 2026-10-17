@@ -180,9 +180,7 @@ class DbSchedulerWatchdog extends Command
             $entry['enabled'],
             $entry['name'],
             $flipper->window()->bootFile(),
-            'a container healthcheck answers from the state file the flip wrote and asks nothing that '
-            .'can time out — `db:doctor` takes this reading, and that is where a store which does not '
-            .'answer is named',
+            ScheduleCauses::UNASKED_WHERE_ANSWERING_MUST_NOT_WAIT,
         );
 
         // Gathered once, for every route: a route that reported its verdict without the beat would

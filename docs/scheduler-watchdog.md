@@ -116,13 +116,19 @@ its own (`db:doctor`'s `store`), so failing this one for it would be one fact re
 | how many entries run `db:pgcat-flip` | one carrying the installation's name is this package's entry; one without it is the installation's own; two are two runs a minute | that shape leaves a *fresh* beat — the doubled process is the symptom — and the framework's mutex cannot serialise the pair, because each entry names its own |
 | the file the window is measured from | whether it is there, readable and writable, with the mode and owner it was found with | `FlipWindow::bootedAt()` answers `null` to a stamp that is absent *and* to one it cannot read, so an unreadable stamp is a container nobody stamped: the window is not judged and neither is the beat inside it |
 
-Who asks what, and why the three surfaces differ:
+Who asks what, and why the four surfaces differ:
 
 | Surface | The store | The other two |
 |---|---|---|
 | `db:doctor`, the `schedule beat` row | asked, and the answer named | read |
 | `db:doctor --connection-only` | **not** asked — the mode exists to be answerable where the store is not there, and the reading says so rather than leaving reachability looking unremarkable | read |
 | `db:scheduler-watchdog` | **not** asked — a check that runs every minute answers from the state file and asks nothing that can time out, and the reading names the run that does ask | read |
+| `/health/db` | **not** asked — the endpoint answers a monitor on a cadence too, so it takes the same reading and prints the same sentence, naming `db:doctor` as the surface that asks | read |
+
+The endpoint publishes the three under `schedule.causes`; the command publishes them under `causes`.
+Both read them through this class and both print its sentences, and `DatabaseHealthControllerTest`
+compares the two arrays field for field, so a monitor and a healthcheck cannot drift into two
+accounts of one silence.
 
 An installation whose per-minute entry is not scheduled reads nothing at all, and its schedule is not
 even resolved: resolving the schedule is what *registers* this package's entry, so a reading taken for

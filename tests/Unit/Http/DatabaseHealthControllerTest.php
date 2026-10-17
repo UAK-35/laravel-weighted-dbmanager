@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Uak35\WeightedDbManager\Tests\Unit\Http;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
 /**
@@ -656,6 +658,78 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('pgcat.schedule.stale', null);
 
         $this->assertStringContainsString('still inside its boot window', (string) $response->json('schedule.not_judged'));
+    }
+
+    /**
+     * The readings beside the verdict are the command's readings, not a second rendering of them.
+     *
+     * A monitor and a healthcheck answering the same question must not explain one silence with
+     * different evidence. The endpoint publishes `causes` in the shape the command does, both read
+     * through `ScheduleCauses`, and this asserts the two arrays are identical rather than that each
+     * is plausible on its own.
+     */
+    public function test_the_schedule_readings_are_the_ones_the_watchdog_publishes(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'readers');
+
+        // The entry's log directory is the test's own: resolving the schedule registers the event,
+        // and a registration must not write under the testbench skeleton's storage.
+        $dir = sys_get_temp_dir().'/swrr-health-causes-'.bin2hex(random_bytes(4));
+        config()->set('db-manager.swrr.pgcat.schedule.log', $dir.'/pgcat_flip.log');
+        $this->tempDirs[] = $dir;
+
+        $response = $this->getJson('/health/db')->assertOk();
+        $causes = $response->json('schedule.causes');
+
+        $this->assertIsArray($causes);
+        $this->assertSame(
+            [ScheduleCauses::KEY_MUTEX_STORE, ScheduleCauses::KEY_ENTRY, ScheduleCauses::KEY_BOOT_STAMP],
+            array_column($causes, 'key'),
+            'the endpoint asks the same three questions, in the order the command asks them',
+        );
+        $this->assertStringContainsString('was not asked', $causes[0]['reading'], 'a polled endpoint does not wait on the store');
+        $this->assertStringContainsString('`db:doctor` takes this reading', $causes[0]['reading'], 'and the reading names the surface that does ask');
+        $this->assertStringContainsString('1 entry carries `pgcat_flip`', $causes[1]['reading']);
+        $this->assertStringContainsString('is readable', $causes[2]['reading']);
+
+        $this->assertSame(0, Artisan::call('db:scheduler-watchdog', ['--json' => true]));
+
+        $report = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertSame(
+            $report['causes'],
+            $causes,
+            'the endpoint and the command describe one silent schedule with one set of readings',
+        );
+    }
+
+    /**
+     * An installation whose entry is not scheduled has nothing for the readings to explain — the
+     * command reports an empty list, and the endpoint has to report the same emptiness rather than
+     * inventing a store or a stamp for a schedule nobody registered.
+     */
+    public function test_an_entry_that_is_not_scheduled_publishes_no_readings(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        config()->set('db-manager.swrr.pgcat.schedule.enabled', false);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'readers');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('schedule.causes', []);
+
+        $this->assertSame(0, Artisan::call('db:scheduler-watchdog', ['--json' => true]));
+
+        $report = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertSame([], $report['causes']);
     }
 
     /**

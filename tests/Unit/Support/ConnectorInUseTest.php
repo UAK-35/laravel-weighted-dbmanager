@@ -6,10 +6,15 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Support;
 
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\Connectors\PostgresConnector;
 use Illuminate\Database\Connectors\SQLiteConnector;
+use Illuminate\Database\DatabaseManager;
+use Illuminate\Database\PostgresConnection;
+use Illuminate\Database\SQLiteConnection;
 use PHPUnit\Framework\TestCase;
+use ReflectionProperty;
 use RuntimeException;
 use stdClass;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
@@ -47,6 +52,14 @@ final class ConnectorInUseTest extends TestCase
 
         // The factory it asked is the one it was given, named as it reads.
         $this->assertSame(ConnectionFactory::class, $reading['factory']);
+
+        // The other half of what builds a connection: the class it resolves to. Nothing has
+        // replaced it, so the framework's own class for the driver is the whole answer.
+        $this->assertNull($reading['connection_error']);
+        $this->assertSame(PostgresConnection::class, $reading['connection_class']);
+        $this->assertSame('pgsql', $reading['connection_driver']);
+        $this->assertNull($reading['resolver'], 'no connection resolver is registered, and the reading says so');
+        $this->assertNull($reading['resolver_applied'], 'nothing was registered, so nothing failed to apply');
     }
 
     public function test_the_driver_decides_the_connector_so_a_second_connection_is_a_second_class(): void
@@ -56,6 +69,76 @@ final class ConnectorInUseTest extends TestCase
         $this->assertSame('app', $reading['connection']);
         $this->assertSame('sqlite', $reading['driver']);
         $this->assertSame(SQLiteConnector::class, $reading['connector']);
+        $this->assertSame(SQLiteConnection::class, $reading['connection_class']);
+    }
+
+    /**
+     * The class replacement: `Connection::resolverFor()` is consulted by `createConnection()`
+     * before its own map, so an installation that registers one replaces the class every
+     * connection of that driver is built as. The connector reading cannot see it — the connector
+     * only makes the PDO — which is why the connection is built and read here.
+     *
+     * The registry is static and has no unregister, so the test puts back what it found; a suite
+     * that leaked a resolver would make every later class expectation in this file someone else's.
+     */
+    public function test_an_installations_connection_resolver_is_named_and_reported_as_applied(): void
+    {
+        // Any class is a replacement, so the test brings its own: built once to learn the name
+        // PHP gives the anonymous class, which is the name the reading must report.
+        $class = (new class ('', 'database', '', ['driver' => 'pgsql']) extends PostgresConnection {})::class;
+
+        $resolvers = self::resolvers();
+
+        try {
+            Connection::resolverFor('pgsql', static fn ($pdo, $database, $prefix, $config) => new $class($pdo, $database, $prefix, $config));
+
+            $reading = $this->read(['pooler' => 'pgsql']);
+        } finally {
+            self::restoreResolvers($resolvers);
+        }
+
+        $this->assertSame($class, $reading['connection_class']);
+        $this->assertSame('pgsql', $reading['connection_driver']);
+        $this->assertSame('pgsql', $reading['resolver'], 'the driver whose class was replaced travels with the answer');
+        $this->assertTrue($reading['resolver_applied'], 'the connection built here went through the registered resolver');
+        $this->assertSame(PostgresConnector::class, $reading['connector'], 'the connector is a separate answer and stays the framework\'s');
+    }
+
+    /**
+     * A connection built before the resolver was registered: the object the application holds is
+     * the framework's class, and a replacement that arrived later has not reached it. This is the
+     * state the resolved connection exists to show — a registry says a replacement is registered,
+     * and only the object says whether it is in effect.
+     */
+    public function test_a_connection_built_before_the_resolver_is_reported_as_not_applied(): void
+    {
+        $config = $this->config(['pooler' => 'pgsql']);
+        $container = $this->container();
+        $container->instance('config', $config);
+
+        $manager = new DatabaseManager($container, $container->make('db.factory'));
+        $container->instance('db', $manager);
+
+        // The connection the application is using, built while nothing was replaced.
+        $inUse = $manager->connection('pooler');
+
+        $this->assertSame(PostgresConnection::class, $inUse::class);
+
+        $class = (new class ('', 'database', '', ['driver' => 'pgsql']) extends PostgresConnection {})::class;
+
+        $resolvers = self::resolvers();
+
+        try {
+            Connection::resolverFor('pgsql', static fn ($pdo, $database, $prefix, $config) => new $class($pdo, $database, $prefix, $config));
+
+            $reading = ConnectorInUse::resolve($config, $container);
+        } finally {
+            self::restoreResolvers($resolvers);
+        }
+
+        $this->assertSame(PostgresConnection::class, $reading['connection_class'], 'the class reported is the connection in use, not one built for the reading');
+        $this->assertSame('pgsql', $reading['resolver']);
+        $this->assertFalse($reading['resolver_applied'], 'a resolver registered after the build did not build this connection');
     }
 
     /**
@@ -137,6 +220,27 @@ final class ConnectorInUseTest extends TestCase
     }
 
     /**
+     * The registry as it stands, and the way back to it: Laravel offers no unregister, and a
+     * static left behind would describe the next case's installation rather than this one's.
+     *
+     * @return array<string, \Closure>
+     */
+    private static function resolvers(): array
+    {
+        $resolvers = (new ReflectionProperty(Connection::class, 'resolvers'))->getValue();
+
+        return is_array($resolvers) ? $resolvers : [];
+    }
+
+    /**
+     * @param array<string, \Closure> $resolvers
+     */
+    private static function restoreResolvers(array $resolvers): void
+    {
+        (new ReflectionProperty(Connection::class, 'resolvers'))->setValue(null, $resolvers);
+    }
+
+    /**
      * A `db.factory` that is not a factory at all: the binding is the framework's extension
      * point for the class, so a reading that kept going would be describing a factory this
      * installation does not have. It says it was not asked instead.
@@ -170,7 +274,21 @@ final class ConnectorInUseTest extends TestCase
 
     /**
      * @param array<string, string> $drivers connection => driver
-     * @return array{connection: string, source: string, driver: string, binding: string|null, factory: string|null, factory_error: string|null, connector: string|null, error: string|null}
+     * @return array{
+     *     connection: string,
+     *     source: string,
+     *     driver: string,
+     *     binding: string|null,
+     *     factory: string|null,
+     *     factory_error: string|null,
+     *     connector: string|null,
+     *     error: string|null,
+     *     connection_class: string|null,
+     *     connection_driver: string|null,
+     *     connection_error: string|null,
+     *     resolver: string|null,
+     *     resolver_applied: bool|null,
+     * }
      */
     private function read(array $drivers): array
     {
@@ -197,7 +315,9 @@ final class ConnectorInUseTest extends TestCase
         $config = new Repository(['database' => ['default' => $default ?? array_key_first($drivers), 'connections' => []]]);
 
         foreach ($drivers as $connection => $driver) {
-            $config->set("database.connections.{$connection}.driver", $driver);
+            // `database` is not decoration: the class reading builds the connection, and a
+            // connection with no database is not the one an installation declares.
+            $config->set("database.connections.{$connection}", ['driver' => $driver, 'database' => 'app']);
         }
 
         return $config;

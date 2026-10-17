@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace Uak35\WeightedDbManager\Http\Controllers;
 
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
+use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\PinnedQuery;
 use Uak35\WeightedDbManager\Support\SwitchValue;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -54,7 +57,11 @@ use Throwable;
  *     entry is a deliberate no-op afterwards — so a container whose cron died an hour
  *     later reads converged for the rest of its life. A beat that has stopped makes
  *     the payload `degraded`, and a container that has never produced one is reported
- *     the same way rather than as silence — see scheduleVerdict()
+ *     the same way rather than as silence — see scheduleVerdict(). Beside the verdict it
+ *     carries `causes`, the three readings `db:scheduler-watchdog` reports — the mutex
+ *     store (named, not asked), the entry count and the boot stamp — read through
+ *     `ScheduleCauses`, so the monitor and the healthcheck explain one silence with the
+ *     same sentences — see scheduleCauses()
  *   • whether that pooler is still in step with the reader windows that move the
  *     mode every day — `reader_window`, which holds what the windows ask for right
  *     now beside what pgcat's own file actually is. The boot window above can only
@@ -107,13 +114,6 @@ use Throwable;
  */
 class DatabaseHealthController extends \Illuminate\Routing\Controller
 {
-    /**
-     * The one query this endpoint runs. Trivial on purpose: it proves the connection
-     * reaches a server and authenticates, and says nothing about schema, which is the
-     * health claim an endpoint a load balancer polls is allowed to make.
-     */
-    private const PINNED_QUERY = 'select 1';
-
     /**
      * The flipper and the audit are optional so the controller still resolves on an app
      * whose provider is not registered. They are then null, and the payload carries
@@ -327,9 +327,16 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * too: the two answer different questions about one silence — did this container ever converge,
      * and is anything still running — and a container can fail either without the other.
      *
+     * `causes` is the other half of the same answer, and the half the state file cannot show: the
+     * three readings `db:scheduler-watchdog` publishes beside its verdict, read here through the
+     * same object so a monitor and a healthcheck cannot describe one silence two ways. They are
+     * readings rather than verdicts — `failed` and the status stay the beat's — and they are empty
+     * for an installation whose entry is not scheduled, which is also the one case where reading
+     * them resolves no schedule.
+     *
      * @param array<string, mixed>|null $pgcat the summary `index()` already read
      *
-     * @return array{applicable: bool, failed: bool, reason: string|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int}
+     * @return array{applicable: bool, failed: bool, reason: string|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, causes: list<array{key: string, reading: string}>}
      */
     private function scheduleVerdict(?array $pgcat): array
     {
@@ -355,7 +362,48 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'stale_after_seconds' => is_int($schedule['stale_after_seconds'] ?? null)
                 ? $schedule['stale_after_seconds']
                 : 0,
+            'causes' => $this->scheduleCauses(),
         ];
+    }
+
+    /**
+     * The readings beside the schedule verdict — the same three `db:scheduler-watchdog` publishes.
+     *
+     * A silent schedule has causes the state file cannot show: the store `withoutOverlapping()`
+     * reaches *before* the entry runs, how many entries on the built schedule run the flip, and the
+     * boot stamp the window is measured from. The command reports them; until now the endpoint did
+     * not, so a monitor reading `schedule.failed` and an operator reading the command's report could
+     * explain one silence with different evidence — or the monitor could explain it with none. Both
+     * now read the same object, so the sentences are the same ones, not two renderings of one rule.
+     *
+     * The store is **named and not asked**. This endpoint is polled by a monitor, and a surface that
+     * answers on a cadence cannot afford a cache whose connect can hang: the reading says which run
+     * was going to ask it (`db:doctor`'s `schedule beat` row), so the omission is a fact in the
+     * payload rather than a silence in it. The other two readings cost one count of the schedule
+     * this process builds and two filesystem facts.
+     *
+     * The entry count is why the schedule is resolved at all — and only when the entry is armed.
+     * `ScheduleCauses` reads nothing for an installation that never scheduled it, which is also the
+     * property that keeps this endpoint from handing such an installation an entry it did not ask
+     * for: resolving the schedule is what registers one.
+     *
+     * @return list<array{key: string, reading: string}>
+     */
+    private function scheduleCauses(): array
+    {
+        if ($this->pgcat === null) {
+            return [];
+        }
+
+        $entry = FlipSchedule::options(config());
+
+        return ScheduleCauses::fromContainer(
+            app(),
+            $entry['enabled'],
+            $entry['name'],
+            $this->pgcat->window()->bootFile(),
+            ScheduleCauses::UNASKED_WHERE_ANSWERING_MUST_NOT_WAIT,
+        )->readings();
     }
 
     /**
@@ -545,6 +593,11 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * connection) rather than a private probe of its own: the query fails for the reasons
      * an application query fails, which is the whole point of running it.
      *
+     * The statement itself is `Support\PinnedQuery`'s, which `db:doctor --real-test` asks as well:
+     * two surfaces that each claim to have proved the connection run the one query, through the one
+     * path, and report the driver's own words when it fails — so an endpoint answering `ok` and a
+     * preflight refusing the same installation cannot both be right about their own reading.
+     *
      * `swrr.health.pinned_query` turns the query off, and its documented default is on.
      * It exists for the one environment where the probe is not a question worth asking —
      * a suite or a config-less inspection with no database behind the connection at all —
@@ -578,7 +631,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'connection' => $pinned['connection'],
             'driver' => $pinned['driver'],
             'source' => $pinned['source'],
-            'query' => self::PINNED_QUERY,
+            'query' => PinnedQuery::QUERY,
             'checked' => false,
             'refused' => $switch['refused'],
             'ok' => null,
@@ -590,33 +643,12 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             return $probe;
         }
 
-        $probe['checked'] = true;
+        $asked = PinnedQuery::run($pinned['connection']);
 
-        // No connection is named at all. Reported as the failure it is rather than as an
-        // absent check: a name the package cannot resolve is a database nothing can query.
-        if ($probe['connection'] === '') {
-            $probe['ok'] = false;
-            $probe['error'] = 'no connection is pinned: db-manager.swrr.connection is unset and database.default is empty';
-
-            return $probe;
-        }
-
-        $startedAt = hrtime(true);
-
-        try {
-            DB::connection($probe['connection'])->select(self::PINNED_QUERY);
-            $probe['ok'] = true;
-        } catch (Throwable $e) {
-            $probe['ok'] = false;
-
-            // The driver's own words, unedited: the sentence an operator pastes into a search,
-            // and for PostgreSQL the one carrying the SQLSTATE the deploy gate matches on. It
-            // is the only field here that could carry a credential, and it is reported as the
-            // driver wrote it rather than reworded.
-            $probe['error'] = $e->getMessage();
-        }
-
-        $probe['latency_ms'] = round((hrtime(true) - $startedAt) / 1_000_000, 2);
+        $probe['checked'] = $asked['checked'];
+        $probe['ok'] = $asked['ok'];
+        $probe['latency_ms'] = $asked['latency_ms'];
+        $probe['error'] = $asked['error'];
 
         return $probe;
     }

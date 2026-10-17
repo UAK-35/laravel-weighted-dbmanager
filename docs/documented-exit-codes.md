@@ -40,7 +40,7 @@ so its single `1` is two returns to keep in step rather than one.
 
 | Command | The rule, in terms of what it decides from | Pinned by |
 |---|---|---|
-| `db:doctor` | anything failed, anything warned, `--strict` — three inputs into `gateFailed()` | a fourteen-cell matrix (`test_the_exit_code_is_a_function_of_the_rows_and_the_strict_flag`), the closing sentence from the same rule, and this guard. `--connection-only` moves which rows are asked and not the rule: a bounded run reaches `1` from the same three inputs, pinned by `DbDoctorTest::test_the_connection_only_mode_asks_nothing_outside_the_container`, which asks a run whose store, supervisor and pooler are all unreachable to still refuse a pgcat switch armed over a `sqlite` connection |
+| `db:doctor` | anything failed, anything warned, `--strict` — three inputs into `gateFailed()` | a fourteen-cell matrix (`test_the_exit_code_is_a_function_of_the_rows_and_the_strict_flag`), the closing sentence from the same rule, and this guard. `--connection-only` moves which rows are asked and not the rule: a bounded run reaches `1` from the same three inputs, pinned by `DbDoctorTest::test_the_connection_only_mode_asks_nothing_outside_the_container`, which asks a run whose store, supervisor and pooler are all unreachable to still refuse a pgcat switch armed over a `sqlite` connection. `--contract` moves which rows are *counted* — the deployment contract's requirements, each folding the rows behind it — and not the rule: a contract run reaches `1` from a requirement whose reading failed, pinned by `DbDoctorTest::test_a_failing_reading_fails_the_requirement_that_asks_it`, and a requirement no row answers passes rather than failing, so the class of the code is still the installation's |
 | `db:probe-replicas` | whether the read list held a replica at all, versus whether any of them answered — two ways to reach `1` | a nine-cell matrix, and this guard |
 | `db:pgcat-flip` | which branch a run takes: the guard, a refused flag combination, the flipper's kind, armed or not | a eighteen-cell matrix, plus named tests for the rules a row cannot hold — option precedence, that a refused combination never reaches the flipper, and the kind→code mapping at the value objects — and this guard. Its `--json` report documents the same codes a level in, as a table of kinds, bound by the same mechanism ([pgcat-flip-json.md](pgcat-flip-json.md)) |
 | `db:pgcat-window-flip` | which route a firing takes: refused, switched off, unbound, before its window, inside it at the boundary, past its grace, on another day, the mode already applied, the lock held elsewhere, and whether the target answered | the window flip's twelve documented kinds, their numbers, and that every cell of it is an instance of one |
@@ -77,7 +77,7 @@ column, a row with a different number of cells — throws, because a guard that 
 nothing reports agreement with a table it never found.
 
 The heading parameter matters for `db:doctor` in particular: that section's first table is
-the twenty-one-row description of what each check judges, not the exit-code table, so "first table
+the twenty-two-row description of what each check judges, not the exit-code table, so "first table
 under the heading" would bind the wrong thing. Selecting by column is what makes the guard
 say what it is about.
 

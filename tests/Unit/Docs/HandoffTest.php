@@ -153,6 +153,42 @@ final class HandoffTest extends TestCase
     }
 
     /**
+     * `--recorded` renders at the register the note already names, and changes nothing when the note
+     * is there already.
+     *
+     * WHY THIS MODE EXISTS AND WHY IT IS HELD
+     * ---------------------------------------
+     *   `bin/release.php` has to refresh the note's blocks after it restamps the three `.tsv` records —
+     *   section 1 quotes them — but it must not *take* the note: a take records the commit the checkout
+     *   is standing on, so the release commit would be describing itself as the register and section 3's
+     *   table would be read against a changelog that no longer has an `## Unreleased` in it. `--recorded`
+     *   is the render half on its own, and this holds it to that: in a checkout where every block is in
+     *   step it writes nothing at all, so a release that runs it cannot move a row a re-take would have
+     *   moved.
+     */
+    public function test_recorded_writes_nothing_where_a_take_would_move_the_register(): void
+    {
+        $path = Handoff::root().'/HANDOFF.md';
+        $before = (string) file_get_contents($path);
+        $register = Handoff::basis()['head']['sha'];
+
+        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/handoff.php', '--recorded']);
+
+        self::assertSame(0, $run['exit'], sprintf(
+            "bin/handoff.php --recorded reports the note out of step with the register it names:\n%s%s",
+            $run['output'],
+            $run['error'],
+        ));
+        self::assertStringContainsString(
+            'nothing was written',
+            $run['output'],
+            'A recorded render wrote the note in a checkout where every block is already in step.',
+        );
+        self::assertSame($before, (string) file_get_contents($path), 'A recorded render changed the note, and it moves no row: a release runs it before its commit.');
+        self::assertSame($register, Handoff::basis()['head']['sha'], 'A recorded render moved the register row, which is the one thing a take does.');
+    }
+
+    /**
      * The other direction, and the one that rots: every file this checkout has that the register
      * does not carry at all has to be named in section 1.
      *
@@ -192,16 +228,20 @@ final class HandoffTest extends TestCase
     }
 
     /**
-     * The three blocks the note renders rather than writes: section 1's table, section 2's table and
-     * section 2's listing, each compared with what git says at the register the note names.
+     * The five blocks the note renders rather than writes: section 1's gate summary, its records
+     * transcript and its table, and section 2's table and listing — each compared with what its
+     * derivation says at the register the note names: git for three of them, the inventory check
+     * itself for how far its records have fallen behind that tree, and the recorded run for the gate.
      *
      * WHY THE NOTE DOES NOT WRITE THEM ITSELF
      * ---------------------------------------
-     *   Each of those blocks is a set of files or a set of commits, and a number over it — how many
-     *   paths the register does not carry, how many commits no remote has, how they break down, which
-     *   commits the listing shows. Every one is a question git answers, and copying the answer in by
-     *   hand is how a note states a number the tree does not have: the count of uncommitted paths is
-     *   a fact about one working tree, and the register row moves the moment anything is committed.
+     *   Each of those blocks is a set of files, a set of commits, or a recorded run, and a number over
+     *   it — how many paths the register does not carry, how many commits no remote has, how they break
+     *   down, which commits the listing shows, how long each check took and what it reported. The first
+     *   four are questions git answers and the fifth is a question the last gate run answered, and
+     *   copying either answer in by hand is how a note states a number the tree does not have: the count
+     *   of uncommitted paths is a fact about one working tree, and the register row moves the moment
+     *   anything is committed.
      *
      *   So the blocks are derived — `bin/handoff.php` writes them from the same `rendered()` this
      *   reads — and this holds the file to what that derivation says. The reading is taken at the
@@ -217,9 +257,9 @@ final class HandoffTest extends TestCase
                 Handoff::rendered($name),
                 Handoff::block($name),
                 sprintf(
-                    "HANDOFF.md's `%s` block is not what git says it is. The block is an output rather than a claim:\n".
-                    'run `php bin/handoff.php` and it follows the tree, so neither a set of files nor a count in '.
-                    'it can be stated by whoever re-takes the note.',
+                    "HANDOFF.md's `%s` block is not what its derivation says it is. The block is an output rather "
+                    ."than a claim:\nrun `php bin/handoff.php` and it follows the tree and the last recorded run, so "
+                    .'neither a set of files nor a count in it can be stated by whoever re-takes the note.',
                     $name,
                 ),
             );
@@ -243,7 +283,7 @@ final class HandoffTest extends TestCase
             $run['error'],
         ));
 
-        self::assertStringContainsString('all in step with git', $run['output']);
+        self::assertStringContainsString('all in step with their derivations', $run['output']);
     }
 
     /**
@@ -810,9 +850,23 @@ final class HandoffTest extends TestCase
         }
     }
 
+    /**
+     * The tags the note's claims are read against, with the release's own pending tag in them.
+     *
+     * The one thing the guard is told rather than asked, and it is told by `bin/release.php` alone:
+     * between the release's commit and its tag, the note names a tag that does not exist yet, and
+     * without the allowance this claim and the ancestry one below would refuse every release there is.
+     *
+     * @return list<string>
+     */
+    private static function knownTags(): array
+    {
+        return Handoff::tagNames();
+    }
+
     public function test_the_tag_it_calls_latest_is_still_the_newest(): void
     {
-        $known = Handoff::outputLines(Handoff::git('tag', '--list', 'v*')['output']);
+        $known = self::knownTags();
 
         $unknown = array_values(array_diff(Handoff::tags(), $known));
 
@@ -852,10 +906,19 @@ final class HandoffTest extends TestCase
     public function test_each_tag_it_names_is_on_the_branch_it_describes(): void
     {
         $head = Handoff::basis()['head']['sha'];
+        $pending = Handoff::pendingTag();
         $off = [];
 
         foreach (Handoff::tags() as $tag) {
-            if (Handoff::git('merge-base', '--is-ancestor', $tag, $head)['exit'] !== 0) {
+            // The tag about to be created has no commit to be behind the register yet — the release
+            // makes it at `HEAD`, which is the commit this run is verifying. What can be asked of it
+            // now is the claim it will have to keep: that the commit it will point at is a descendant
+            // of the register, rather than some other line of history.
+            $behind = $tag === $pending
+                ? Handoff::git('merge-base', '--is-ancestor', $head, 'HEAD')['exit']
+                : Handoff::git('merge-base', '--is-ancestor', $tag, $head)['exit'];
+
+            if ($behind !== 0) {
                 $off[] = $tag;
             }
         }
@@ -1216,6 +1279,166 @@ final class HandoffTest extends TestCase
                 }
             }
         }
+    }
+
+    /**
+     * The gate record, held to being the run the note quotes: every check the gate declares, one
+     * verdict apiece, all green, and a duration that can hold the rows under it.
+     *
+     * WHAT THE RECORD CAN AND CANNOT BE HELD TO
+     * -----------------------------------------
+     *   A record is evidence of a run, not the run: nothing here re-runs a ten-minute gate inside the
+     *   suite the gate is running, so what is checked is the shape a run leaves rather than that this
+     *   afternoon happened. What that shape can still be wrong about is everything a session could
+     *   have typed by hand, which is the point — a record with fourteen rows and a summary saying
+     *   thirteen, a row whose verdict is neither PASS, FAIL nor SKIP, a run shorter than its longest
+     *   check, an exit code at odds with the rows, or a missing check would each make the block above
+     *   it a claim the gate does not make. The names are compared with `bin/checks.php --list` rather
+     *   than with a list here, so a check added to the gate is a record that has to be taken again.
+     */
+    public function test_the_gate_record_is_a_run_of_every_check_the_gate_declares(): void
+    {
+        $record = Handoff::gate();
+        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/checks.php', '--list']);
+        $declared = [];
+
+        foreach (Handoff::outputLines($run['output']) as $line) {
+            if (preg_match('/^(\S+)\s/', $line, $matches) === 1) {
+                $declared[] = $matches[1];
+            }
+        }
+
+        $recorded = array_column($record['checks'], 'name');
+
+        self::assertSame(
+            $declared,
+            $recorded,
+            sprintf(
+                "HANDOFF.md's gate block is rendered from a run of %s, and the gate declares %s. The record is "
+                .'written by `php bin/checks.php --record`, which records the whole run and refuses `--only` — a '
+                .'block that listed a subset would be claiming the checks it leaves out were not there.',
+                implode(', ', $recorded) ?: '(nothing)',
+                implode(', ', $declared) ?: '(nothing)',
+            ),
+        );
+
+        $failed = array_column(array_filter($record['checks'], static fn (array $check): bool => $check['status'] === 'FAIL'), 'name');
+        $slowest = max(array_column($record['checks'], 'seconds'));
+
+        self::assertSame(
+            [],
+            $failed,
+            sprintf(
+                "HANDOFF.md's gate block quotes `exit %d` and a run with failures in it: %s. Section 1 says the gate "
+                .'is green, so a red record is a note that has to be re-taken on a green run rather than one that '
+                .'quotes the red one.',
+                $record['exit'],
+                implode(', ', $failed),
+            ),
+        );
+
+        self::assertSame(0, $record['exit'], sprintf('A record with no failure in it and an exit code of %d is not the run it describes.', $record['exit']));
+
+        self::assertGreaterThanOrEqual(
+            $slowest,
+            $record['elapsed'],
+            sprintf(
+                'The record says the whole run took %.1fs and its slowest check %.1fs, which is a record no run could have written.',
+                $record['elapsed'],
+                $slowest,
+            ),
+        );
+
+        // A day of slack, because the record is written on a machine whose clock is the record's and
+        // read on whatever machine runs the suite: what is refused is a date no run could have written,
+        // not a timezone. How *old* the run may be is deliberately not held — a note re-taken to fix a
+        // typo should not force a ten-minute gate — so the sentence above the block says the record is
+        // the last one taken rather than claiming the run happened this afternoon.
+        self::assertLessThanOrEqual(
+            strtotime(date('Y-m-d')) + 86400,
+            strtotime($record['taken']),
+            sprintf(
+                'The gate record is dated %s, which is in the future: a run cannot have been taken after the day '
+                .'the note quoting it is being read.',
+                $record['taken'],
+            ),
+        );
+
+        $block = Handoff::block('gate');
+
+        foreach ($record['checks'] as $check) {
+            self::assertStringContainsString(
+                sprintf('%-10s %-5s %6.1fs  %s', $check['name'], $check['status'], $check['seconds'], $check['note']),
+                $block,
+                sprintf(
+                    "HANDOFF.md's gate block does not carry the recorded row for [%s]: the block is rendered from "
+                    .'the record, so a row it lost is one the renderer dropped rather than one the run omitted.',
+                    $check['name'],
+                ),
+            );
+        }
+    }
+
+    /**
+     * The place the record lives, named once in the gate and once in the reader that quotes it.
+     *
+     * WHY TWO FILES ARE HELD TO A STRING
+     * ----------------------------------
+     *   `bin/checks.php` writes `.agents/gate.json` and `tests/Support/Handoff.php` reads it, so the
+     *   same path is spelled twice in a package whose whole habit is that a fact is written down
+     *   once. The two cannot be brought together — a `bin/` script does not read a test support class,
+     *   and the guard has to read the writer's own source to know what it would write — so what is
+     *   held is the pair: the writer has to name the path the reader has. Rename either and this
+     *   fails, which is the failure that would otherwise be silent, because a record written to a
+     *   path nobody reads leaves the note quoting the run before last.
+     */
+    public function test_the_gate_writes_the_record_the_note_reads(): void
+    {
+        $source = @file_get_contents(Handoff::root().'/bin/checks.php');
+        $path = Handoff::gateRecordPath();
+
+        self::assertIsString($source, 'bin/checks.php could not be read, so the path it writes its record to cannot be held to the one the note reads.');
+        self::assertStringContainsString(
+            "'{$path}'",
+            $source,
+            sprintf(
+                'HANDOFF.md is rendered from the record at %s, and bin/checks.php does not name that path — so the '
+                .'run it records is one nothing quotes, and the block would keep describing the run before it.',
+                $path,
+            ),
+        );
+    }
+
+    /**
+     * The sentence that introduces the gate block, held to stating no number at all.
+     *
+     * WHY THE PROSE MAY NOT DO THIS ITSELF
+     * ------------------------------------
+     *   Every number in the block is the record's: the totals, the seconds and the suite's own counts
+     *   come out of `.agents/gate.json` and move when a run is recorded. A number written into the
+     *   sentence above it is the hand-copy this mechanism exists to refuse — and it is the one shape
+     *   that cannot be caught by comparing the prose with a run, because what it states is what some
+     *   *other* run said. So the rule is the shape rather than the value: a digit in that paragraph
+     *   fails, whichever run it came from, and the repair is to name the record the number is in.
+     */
+    public function test_section_1_states_no_gate_number_outside_the_block(): void
+    {
+        $claim = Handoff::gateClaim();
+
+        self::assertSame(
+            [],
+            array_values(array_filter(
+                preg_split('/(\s+)/', $claim['text']) ?: [],
+                static fn (string $word): bool => preg_match('/\d/', $word) === 1,
+            )),
+            sprintf(
+                "HANDOFF.md line %d states a number about the gate — [%s] — and the numbers are the recorded run's: "
+                .'they are rendered into the block below this sentence and move when a run is recorded. Name the '
+                .'record the number is read from instead of writing it down.',
+                $claim['source'],
+                $claim['text'],
+            ),
+        );
     }
 
     /**

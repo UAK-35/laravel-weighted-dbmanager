@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Uak35\WeightedDbManager\Tests\Unit\Console;
 
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Database\Connectors\PostgresConnector;
+use Illuminate\Database\PostgresConnection;
 use InvalidArgumentException;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionProperty;
 use RuntimeException;
 use stdClass;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -27,6 +30,7 @@ use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigSchema;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\DeploymentContract;
 use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
 use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
@@ -67,6 +71,7 @@ class DbDoctorTest extends TestCase
         'default_connection',
         'strict',
         'connection_only',
+        'real_test',
         'verdict',
         'exit_code',
         'counts',
@@ -203,7 +208,9 @@ class DbDoctorTest extends TestCase
         $this->assertSame('PASS', $row['verdict']);
         $this->assertSame(
             'connection ['.self::CONNECTION.'] (driver pgsql) is built by '.PostgresConnector::class
-            .' — the framework\'s own connector for that driver: nothing is bound at db.connector.pgsql',
+            .' — the framework\'s own connector for that driver: nothing is bound at db.connector.pgsql'
+            .'; the connection resolves to '.PostgresConnection::class
+            .' — no connection resolver is registered for pgsql, so the class is the framework\'s own',
             $row['detail'],
         );
         $this->assertSame([], $row['suggestions'], 'the repair is a binding, and a binding is not a config line');
@@ -230,7 +237,92 @@ class DbDoctorTest extends TestCase
         $this->assertSame(
             'connection ['.self::CONNECTION.'] (driver pgsql) is built by '.$replacement::class
             .' — resolved from the db.connector.pgsql binding, an installation\'s connector in place '
-            .'of the framework\'s own',
+            .'of the framework\'s own'
+            .'; the connection resolves to '.PostgresConnection::class
+            .' — no connection resolver is registered for pgsql, so the class is the framework\'s own',
+            $row['detail'],
+        );
+        $this->assertStringStartsWith('PASS  connector', $this->rowContaining($output, 'connector'));
+    }
+
+    /**
+     * The half of a connection the connector cannot answer: the class it is built as.
+     *
+     * `Connection::resolverFor()` is consulted by `createConnection()` before its own map, and it
+     * is a global registry rather than a container binding — the connector makes the PDO, the
+     * resolver makes the object around it. A row that stopped at the factory named the connector
+     * and left the class to whoever opened a repository; this one names the class, says an
+     * installation's resolver is registered and that the connection was built through it.
+     *
+     * Deliberately a pass, like a replaced connector: the registry is the framework's extension
+     * point, and what the row is for is seeing which class is in effect.
+     */
+    public function test_the_connector_row_names_the_connection_class_an_installations_resolver_built(): void
+    {
+        // A connection class of the test's own: a replacement is any class at all, and the row
+        // is read for the name PHP gives it. Built once to learn that name.
+        $class = (new class ('', 'database', '', ['driver' => 'pgsql']) extends PostgresConnection {})::class;
+
+        $resolvers = self::resolvers();
+
+        try {
+            Connection::resolverFor('pgsql', static fn ($pdo, $database, $prefix, $config) => new $class($pdo, $database, $prefix, $config));
+
+            // Both runs happen inside the registry's lifetime: the row is read from the same
+            // installation the table was rendered from, not from a second doctor run after the
+            // resolver has been put back.
+            [$output] = $this->doctor();
+            $row = $this->checkNamed($this->report($this->doctorJson()[0]), 'connector');
+        } finally {
+            self::restoreResolvers($resolvers);
+        }
+
+        $this->assertSame('PASS', $row['verdict']);
+        $this->assertStringContainsString(
+            'the connection resolves to '.$class
+            .' — an installation\'s connection resolver for pgsql is registered, and this connection was built through it',
+            $row['detail'],
+        );
+        $this->assertStringContainsString(PostgresConnector::class, $row['detail'], 'the connector is a separate answer and is still named');
+        $this->assertStringStartsWith('PASS  connector', $this->rowContaining($output, 'connector'));
+    }
+
+    /**
+     * A connection the application built before the resolver was registered. The registry says a
+     * replacement is in place; the object the application holds is still the framework's class,
+     * and only reading the resolved connection can tell the two apart. The row says which it is
+     * rather than failing: the replacement is not missing, it has not reached this connection —
+     * which is what a boot-time build followed by a later registration produces.
+     */
+    public function test_the_connector_row_reports_a_connection_built_before_the_resolver(): void
+    {
+        $this->bindRedis(reachable: true);
+
+        // The connection in use, built while nothing was replaced.
+        $inUse = $this->app['db']->connection(self::CONNECTION);
+
+        $this->assertSame(PostgresConnection::class, $inUse::class);
+
+        // A connection class of the test's own: a replacement is any class at all, and the row
+        // is read for the name PHP gives it.
+        $class = (new class ('', 'database', '', ['driver' => 'pgsql']) extends PostgresConnection {})::class;
+
+        $resolvers = self::resolvers();
+
+        try {
+            Connection::resolverFor('pgsql', static fn ($pdo, $database, $prefix, $config) => new $class($pdo, $database, $prefix, $config));
+
+            [$output] = $this->doctor();
+            $row = $this->checkNamed($this->report($this->doctorJson()[0]), 'connector');
+        } finally {
+            self::restoreResolvers($resolvers);
+        }
+
+        $this->assertSame('PASS', $row['verdict']);
+        $this->assertStringContainsString(
+            'the connection in use resolves to '.PostgresConnection::class
+            .' — an installation\'s connection resolver for pgsql is registered, but this connection was not built through it, '
+            .'so the class is the framework\'s own',
             $row['detail'],
         );
         $this->assertStringStartsWith('PASS  connector', $this->rowContaining($output, 'connector'));
@@ -2902,6 +2994,224 @@ class DbDoctorTest extends TestCase
         $this->assertSame([], $supervisor->ran);
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // --contract: the deployment's requirements as rows
+    // ──────────────────────────────────────────────────────────────
+
+    /**
+     * The mode's whole shape: the rows are the record's keys, in the record's order, and the tally
+     * counts requirements rather than the readings behind them.
+     *
+     * By name and order rather than by count, because the count can be right while the mapping is
+     * wrong — and it is the names a gate selects on. The keys come from `DeploymentContract`
+     * rather than from a literal here, so the table the record states and the table this mode
+     * builds are the same table, which `DeploymentContractTest` holds to the record.
+     */
+    public function test_the_contract_flag_reports_one_row_per_requirement(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcat();
+
+        [$json, $exit] = $this->doctorJson(contract: true);
+        $report = $this->report($json);
+
+        $this->assertSame(
+            DeploymentContract::keys(),
+            array_column($report['checks'], 'name'),
+            'a contract run names its rows with the keys the record states them with, in its order',
+        );
+
+        $this->assertSame(
+            count(DeploymentContract::keys()),
+            $report['counts']['checks'],
+            'the tally counts requirements, not the readings behind them',
+        );
+
+        $this->assertSame($exit, $report['exit_code'], 'the object and the process are one run');
+
+        $variants = $this->checkNamed($report, 'variants');
+
+        $this->assertStringContainsString("'variant shape'", $variants['detail']);
+        $this->assertStringContainsString("'pgcat files'", $variants['detail'], 'the detail names every reading behind the requirement');
+    }
+
+    /**
+     * A reading that fails fails the requirement that asks it, and the requirement brings the
+     * reading's own sentence and its repair one level up.
+     *
+     * This is the point of the mode: the deploy fails on `configuration`, and an operator who has
+     * never read this package's row list is still told it was `pgcat gate`, why, and the line that
+     * repairs it. Nothing is re-worded — the detail and the suggestion are the row's own strings.
+     */
+    public function test_a_failing_reading_fails_the_requirement_that_asks_it(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcat();
+
+        // Armed over a connection pgcat can never front: the gate's own failure, reached in a
+        // bounded run, so the requirement is the only thing under test.
+        config()->set('database.connections.' . self::CONNECTION . '.driver', 'sqlite');
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$json, $exit] = $this->doctorJson(connectionOnly: true, contract: true);
+        $row = $this->checkNamed($this->report($json), 'configuration');
+
+        $this->assertSame('FAIL', $row['verdict']);
+        $this->assertStringContainsString("'pgcat gate' FAIL", $row['detail']);
+        $this->assertStringContainsString('pgcat will never act', $row['detail'], 'the reading\'s own sentence is carried, not paraphrased');
+        $this->assertContains('swrr.pgcat.enabled = false', $row['suggestions']);
+        $this->assertSame(1, $exit);
+
+        [$output] = $this->doctor(connectionOnly: true, contract: true);
+
+        $this->assertStringContainsString('FAIL  configuration', $output);
+        $this->assertStringContainsString('swrr.pgcat.enabled = false', $output, 'the repair the reading named is printed under the requirement');
+        $this->assertStringContainsString(
+            'A requirement of the deployment contract is not met',
+            $output,
+            'the closing sentence names the subject rather than calling the installation broken',
+        );
+    }
+
+    /**
+     * The requirement no reading can answer. It passes and says it was not judged, naming what
+     * would have to be read — the package cannot fail a deployment over a fact it never saw, and a
+     * `PASS` that did not say so would read as a check that ran.
+     */
+    public function test_a_requirement_no_reading_answers_passes_and_says_it_was_not_judged(): void
+    {
+        $this->bindRedis(reachable: true);
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$json] = $this->doctorJson(contract: true);
+        $row = $this->checkNamed($this->report($json), 'health-endpoint');
+
+        $this->assertSame('PASS', $row['verdict']);
+        $this->assertStringContainsString('not judged here', $row['detail']);
+        $this->assertStringContainsString('/health/db', $row['detail'], 'it names the surface it could not read');
+
+        [$output] = $this->doctor(contract: true);
+
+        $this->assertStringContainsString('PASS  health-endpoint', $output);
+    }
+
+    /**
+     * A bounded contract run: the requirements whose readings reach outside the process are short
+     * by design, and each one says which readings it did not ask instead of passing silently.
+     *
+     * The store is asked nothing — that is what bounds the mode — and the two shapes of "not
+     * asked" are told apart: a requirement with no reading asked at all, and one whose readings
+     * would have been asked if this were a full run.
+     */
+    public function test_a_bounded_contract_run_names_the_readings_it_did_not_ask(): void
+    {
+        $redis = $this->bindRedis(reachable: false);
+        $this->armPgcat();
+
+        [$json] = $this->doctorJson(connectionOnly: true, contract: true);
+        $report = $this->report($json);
+
+        $this->assertTrue($report['connection_only'], 'the object still says the run was bounded');
+        $this->assertSame([], $redis->asked, 'a bounded contract run opens no connection to the store');
+
+        $caps = $this->checkNamed($report, 'read-caps');
+        $this->assertSame('PASS', $caps['verdict']);
+        $this->assertStringContainsString(
+            'not asked: read caps, standby feedback left out by --connection-only',
+            $caps['detail'],
+            'a requirement nothing answered says so, and names what went unasked',
+        );
+
+        $check = $this->checkNamed($report, 'health-check');
+        $this->assertSame('PASS', $check['verdict']);
+        $this->assertStringContainsString(
+            'not asked: pool probe left out by --connection-only; real query was built and not put',
+            $check['detail'],
+            'the query row is present and says it was not put, so the requirement counts it as unasked rather than as a pass',
+        );
+        $this->assertStringNotContainsString(
+            'none of the readings asked failed',
+            $check['detail'],
+            'nothing behind this requirement was asked, so it cannot report on what was',
+        );
+    }
+
+    /**
+     * The same requirement in the other direction: with `--real-test` the query is a reading that
+     * was taken, and the pool probe is still the one the mode left out — so the sentence names one
+     * of each rather than treating the run as all-asked or all-unasked.
+     */
+    public function test_a_bounded_contract_run_counts_the_query_it_asked_beside_the_reading_it_left_out(): void
+    {
+        $this->bindRedis(reachable: false);
+        $this->armPgcat();
+        $this->useSqliteConnection();
+
+        [$json] = $this->doctorJson(connectionOnly: true, contract: true, realTest: true);
+        $check = $this->checkNamed($this->report($json), 'health-check');
+
+        $this->assertSame('PASS', $check['verdict']);
+        $this->assertStringContainsString("Readings: 'real query' PASS", $check['detail']);
+        $this->assertStringContainsString('none of the readings asked failed', $check['detail']);
+        $this->assertStringContainsString('pool probe left out by --connection-only', $check['detail']);
+        $this->assertStringNotContainsString('was built and not put', $check['detail']);
+    }
+
+    /**
+     * The other reason a reading is not in the run: no weighted manager, so the nine rows that need
+     * one were never built.
+     *
+     * A contract row must not blame `--connection-only` for that — nobody passed it — so the sentence
+     * says what it can see instead, and the requirement is still reported rather than dropped. The
+     * rows that were built are still judged: `weighted factory` fails `wiring`, which is the fault
+     * that produced the shorter list in the first place.
+     */
+    public function test_a_contract_run_without_the_weighted_manager_names_the_readings_no_row_was_built_for(): void
+    {
+        $this->app->instance('db.factory', new ConnectionFactory($this->app));
+        $this->app->instance('db', new DatabaseManager($this->app, $this->app->make('db.factory')));
+        DB::clearResolvedInstance('db');
+
+        [$json] = $this->doctorJson(contract: true);
+        $report = $this->report($json);
+
+        $this->assertSame('FAIL', $this->checkNamed($report, 'wiring')['verdict'], 'the rows that were built are still judged');
+
+        $configuration = $this->checkNamed($report, 'configuration');
+
+        $this->assertStringContainsString(
+            'no row was built for replica metadata, read/write pair, switch values, reader windows',
+            $configuration['detail'],
+            'the requirement names the readings that were never built',
+        );
+        $this->assertStringNotContainsString(
+            '--connection-only',
+            $configuration['detail'],
+            'a run nobody bounded does not report the bounded mode as the reason',
+        );
+    }
+
+    /**
+     * The pair is refused rather than half-honoured: a config file is not a deployment, and a run
+     * that ignored one of the two flags would report the contract of whichever installation it
+     * happens to be running in while the operator believes it judged the candidate.
+     */
+    public function test_the_contract_and_config_file_flags_are_refused_together(): void
+    {
+        $path = $this->configFile(['pgcat' => ['enabled' => false]]);
+        $buffer = new BufferedOutput();
+
+        $exit = $this->app->make(Kernel::class)->call(
+            'db:doctor',
+            ['connection' => self::CONNECTION, '--config-file' => $path, '--contract' => true],
+            $buffer,
+        );
+
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString('--contract and --config-file are mutually exclusive', $buffer->fetch());
+    }
+
     /**
      * The setting beside the connection it produced. Unset, the package follows `database.default`;
      * set to that same name it follows a connection somebody chose — the same routing and two
@@ -2930,6 +3240,157 @@ class DbDoctorTest extends TestCase
         $this->assertSame(self::CONNECTION, $report['swrr_connection']);
         $this->assertSame(self::CONNECTION, $report['default_connection']);
         $this->assertStringContainsString('named by db-manager.swrr.connection', $output);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The line a container gate greps, in the spelling it greps for.
+     *
+     * The deployment's smoke gate parses the resolved connection out of the doctor's log with a
+     * `sed` that selects a line beginning with two spaces and `db-manager.swrr.connection`, then
+     * strips that much, so the shape of this line — two spaces, the setting's own key, then the
+     * value — is an interface rather than formatting: a banner reflowed into prose would leave the
+     * gate grepping nothing and reading an empty name as a connection. The two spellings are
+     * asserted side by side because which key answers is the answer to "was the setting written, or
+     * did the package inherit the default".
+     */
+    public function test_the_rendered_run_prints_the_setting_a_container_gate_greps(): void
+    {
+        $this->bindRedis(reachable: true);
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$inherited] = $this->doctor();
+
+        $this->assertSame(
+            [self::CONNECTION],
+            $this->settingLines($inherited, 'database.default'),
+            'an installation that names no connection prints the key it followed',
+        );
+        $this->assertSame([], $this->settingLines($inherited, 'db-manager.swrr.connection'), 'and not the setting it never wrote');
+
+        config()->set('db-manager.swrr.connection', self::CONNECTION);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$written] = $this->doctor();
+
+        $this->assertSame(
+            [self::CONNECTION],
+            $this->settingLines($written, 'db-manager.swrr.connection'),
+            'a setting that names the connection prints under its own key, which is what the gate parses',
+        );
+        $this->assertSame([], $this->settingLines($written, 'database.default'), 'one connection, so one line');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // --real-test: the one reading that leaves the process
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The flag's whole point: one real query on the connection this run follows, through the
+     * application's own path, and a row that carries the latency it took.
+     *
+     * A sqlite connection is the smallest thing that can answer `select 1`, which is what makes this
+     * a test of the reading rather than of a PostgreSQL server: the query and the path are
+     * `Support\PinnedQuery`'s, and the health endpoint asks the same one so the two surfaces cannot
+     * prove different things about one installation.
+     */
+    public function test_the_real_test_flag_asks_the_followed_connection_one_query(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->useSqliteConnection();
+
+        [$output, $exit] = $this->doctor(realTest: true);
+        $row = $this->rowContaining($output, 'real query');
+
+        $this->assertStringStartsWith('PASS  real query', $row);
+        $this->assertStringContainsString('answered `select 1` in', $row);
+        $this->assertStringContainsString('[sqlite_probe]', $row, 'the row names the connection that answered');
+        $this->assertStringContainsString(
+            '--real-test: the connection this run follows was asked for one real `select 1`',
+            $output,
+            'the run says a database was reached, because the row is present whether or not one was',
+        );
+        $this->assertSame(0, $exit);
+
+        [$json] = $this->doctorJson(realTest: true);
+        $report = $this->report($json);
+
+        $this->assertTrue($report['real_test'], 'the object says the query was asked, which is the field a gate selects on');
+        $this->assertSame('PASS', $this->checkNamed($report, 'real query')['verdict']);
+    }
+
+    /**
+     * The other half of the row's contract: it is built in every run so that a gate reading it by
+     * name can never take its absence for a pass — and when nobody asked, it says so instead of
+     * reporting a success about a database it never touched.
+     */
+    public function test_the_query_row_says_it_was_not_asked_when_nobody_asked(): void
+    {
+        $this->bindRedis(reachable: true);
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'real query');
+
+        $this->assertStringStartsWith('PASS  real query', $row);
+        $this->assertStringContainsString('not asked', $row);
+        $this->assertStringContainsString('`--real-test` is what asks for one', $row);
+        $this->assertStringNotContainsString('answered `select 1`', $row);
+        $this->assertStringNotContainsString('--real-test:', $output, 'nothing was asked, so the banner does not claim a database was reached');
+
+        [$json] = $this->doctorJson();
+        $report = $this->report($json);
+
+        $this->assertFalse($report['real_test']);
+        $this->assertSame('PASS', $this->checkNamed($report, 'real query')['verdict'], 'the row is present and passing in a run that asked nothing');
+    }
+
+    /**
+     * The failure is the driver's own words, unedited — the sentence an operator pastes into a
+     * search, and for PostgreSQL the one carrying the SQLSTATE a deploy gate matches on. It is a
+     * failure of the run, because a connection nothing can answer on is the fact this flag exists to
+     * establish.
+     */
+    public function test_a_query_the_server_refuses_fails_the_row_with_the_drivers_own_words(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->useRefusedConnection();
+
+        [$output, $exit] = $this->doctor(realTest: true);
+        $row = $this->rowContaining($output, 'real query');
+
+        $this->assertStringStartsWith('FAIL  real query', $row);
+        $this->assertStringContainsString('could not answer `select 1`', $row);
+        $this->assertStringContainsString('SQLSTATE[08006]', $row, 'the driver\'s sentence travels unchanged, SQLSTATE included');
+        $this->assertStringContainsString('This installation will not behave as configured.', $output);
+        $this->assertSame(1, $exit);
+
+        [$json, $jsonExit] = $this->doctorJson(realTest: true);
+        $report = $this->report($json);
+
+        $this->assertSame($exit, $jsonExit);
+        $this->assertSame('FAIL', $this->checkNamed($report, 'real query')['verdict']);
+    }
+
+    /**
+     * The flag and the bounded mode compose, and neither weakens the other: the run leaves the six
+     * rows that reach outside the process out, and asks the connection for its query anyway — which
+     * is the pair a pooler gate runs, because the query is the thing it exists to prove.
+     */
+    public function test_the_real_test_flag_composes_with_the_connection_only_mode(): void
+    {
+        $redis = $this->bindRedis(reachable: true);
+        $supervisor = $this->bindSupervisor();
+        $this->useSqliteConnection();
+
+        [$json, $exit] = $this->doctorJson(connectionOnly: true, realTest: true);
+        $report = $this->report($json);
+
+        $this->assertTrue($report['connection_only']);
+        $this->assertTrue($report['real_test']);
+        $this->assertSame('PASS', $this->checkNamed($report, 'real query')['verdict'], 'the bounded mode does not leave the one reading the gate needs out');
+        $this->assertSame([], $redis->asked, 'nothing was asked of the store');
+        $this->assertSame([], $supervisor->ran, 'nothing was spawned');
         $this->assertSame(0, $exit);
     }
 
@@ -3198,8 +3659,8 @@ class DbDoctorTest extends TestCase
     /**
      * The record's claim about which rows can carry a repair, checked against runs that produce one.
      *
-     * `docs/db-doctor-json.md` states "three rows can offer one" and names the classes each line
-     * comes from. Three states produce one each — a refused reader window, an unquoted supervisor
+     * `docs/db-doctor-json.md` states "four rows can offer one" and names the classes each line
+     * comes from. Three states are walked — a refused reader window, an unquoted supervisor
      * command, and the switch armed where pgcat cannot act — and the union of the rows carrying a
      * non-empty `suggestions` across them is the set that sentence is about. The states accumulate,
      * so a row that stops offering one is still counted from the step that produced it. The limit is
@@ -3633,13 +4094,15 @@ class DbDoctorTest extends TestCase
             // `connector` is a fourth for the same kind of reason: no profile moves the connection
             // or binds `db.connector.pgsql`, so every one of them names the framework's own
             // connector for a pgsql connection and passes.
-            'healthy' => [21, 0, 0],
-            'warned' => [20, 1, 0],
-            'warned-twice' => [19, 2, 0],
-            'failed' => [20, 0, 1],
-            'failed-twice' => [19, 0, 2],
-            'mixed' => [19, 1, 1],
-            'mixed-twice' => [17, 2, 2],
+            // `real query` is a fifth: no profile asks for one, so every one of them reports
+            // the row as not asked rather than as a pass — the +1 is the row's presence.
+            'healthy' => [22, 0, 0],
+            'warned' => [21, 1, 0],
+            'warned-twice' => [20, 2, 0],
+            'failed' => [21, 0, 1],
+            'failed-twice' => [20, 0, 2],
+            'mixed' => [20, 1, 1],
+            'mixed-twice' => [18, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -3927,17 +4390,72 @@ class DbDoctorTest extends TestCase
      *
      * @return array{0: string, 1: int}
      */
-    private function doctor(bool $strict = false, bool $connectionOnly = false): array
+    private function doctor(bool $strict = false, bool $connectionOnly = false, bool $contract = false, bool $realTest = false): array
     {
         $buffer = new BufferedOutput();
 
         $exit = $this->app->make(Kernel::class)->call(
             'db:doctor',
-            ['connection' => self::CONNECTION, '--strict' => $strict, '--connection-only' => $connectionOnly],
+            [
+                'connection' => self::CONNECTION,
+                '--strict' => $strict,
+                '--connection-only' => $connectionOnly,
+                '--contract' => $contract,
+                '--real-test' => $realTest,
+            ],
             $buffer,
         );
 
         return [$buffer->fetch(), $exit];
+    }
+
+    /**
+     * The two-space `key  value` lines the run prints under its banner, read the way the container's
+     * smoke gate reads them: a `sed` for a line that starts with two spaces and the setting's name.
+     *
+     * @return list<string> the values found under that key, in the order printed
+     */
+    private function settingLines(string $output, string $key): array
+    {
+        preg_match_all('/^ {2}' . preg_quote($key, '/') . ' +(.*)$/m', $output, $matches);
+
+        return array_map(static fn (string $value): string => trim($value), $matches[1]);
+    }
+
+    /**
+     * Follow a sqlite connection, so `select 1` can answer without a server — with pgcat disarmed,
+     * because a switch armed over a driver pgcat can never act on is a failure of its own row and
+     * this is not the test for it.
+     */
+    private function useSqliteConnection(): void
+    {
+        config()->set('database.connections.sqlite_probe', ['driver' => 'sqlite', 'database' => ':memory:']);
+        config()->set('db-manager.swrr.connection', 'sqlite_probe');
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+
+        DB::purge('sqlite_probe');
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+    }
+
+    /**
+     * Follow a pgsql connection whose port nothing listens on, so the query fails at connect time
+     * with the driver's own sentence rather than with a stub of the test's.
+     */
+    private function useRefusedConnection(): void
+    {
+        config()->set('database.connections.refused_probe', [
+            'driver' => 'pgsql',
+            'host' => '127.0.0.1',
+            'port' => 1,
+            'database' => 'app',
+            'username' => 'app',
+            'password' => 'app',
+        ]);
+        config()->set('db-manager.swrr.connection', 'refused_probe');
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+
+        DB::purge('refused_probe');
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -4227,7 +4745,7 @@ class DbDoctorTest extends TestCase
         $report = json_decode($output, true);
 
         $this->assertIsArray($report, "The object did not parse:\n" . $output);
-        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'real_test', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
         $this->assertSame($path, $report['config_file']);
         $this->assertSame('FAIL', $report['verdict']);
         $this->assertSame(1, $report['exit_code']);
@@ -4338,7 +4856,7 @@ class DbDoctorTest extends TestCase
         $report = json_decode($output, true);
 
         $this->assertIsArray($report, "The object did not parse:\n" . $output);
-        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'real_test', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
         $this->assertSame($path, $report['config_file']);
         $this->assertSame(['config file', 'replica metadata'], array_column($report['checks'], 'name'));
         $this->assertSame(['checks' => 2, 'passed' => 1, 'warnings' => 0, 'failed' => 1], $report['counts']);
@@ -4410,13 +4928,20 @@ class DbDoctorTest extends TestCase
      *
      * @return array{0: string, 1: int}
      */
-    private function doctorJson(bool $strict = false, bool $connectionOnly = false): array
+    private function doctorJson(bool $strict = false, bool $connectionOnly = false, bool $contract = false, bool $realTest = false): array
     {
         $buffer = new BufferedOutput();
 
         $exit = $this->app->make(Kernel::class)->call(
             'db:doctor',
-            ['connection' => self::CONNECTION, '--strict' => $strict, '--json' => true, '--connection-only' => $connectionOnly],
+            [
+                'connection' => self::CONNECTION,
+                '--strict' => $strict,
+                '--json' => true,
+                '--connection-only' => $connectionOnly,
+                '--contract' => $contract,
+                '--real-test' => $realTest,
+            ],
             $buffer,
         );
 
@@ -4655,6 +5180,31 @@ class DbDoctorTest extends TestCase
         preg_match($pattern, $source, $match);
 
         return NumberWords::toInt($match[1]);
+    }
+
+    /**
+     * The framework's connection resolvers as they stand, and the way back to them.
+     *
+     * `Connection::resolverFor()` is a static registry with no unregister, so a case that
+     * registers one has to put back what it found: a resolver left behind would make every later
+     * case in this file describe an installation that replaced a class, which is exactly the
+     * state the cases are trying to tell apart.
+     *
+     * @return array<string, \Closure>
+     */
+    private static function resolvers(): array
+    {
+        $resolvers = (new ReflectionProperty(Connection::class, 'resolvers'))->getValue();
+
+        return is_array($resolvers) ? $resolvers : [];
+    }
+
+    /**
+     * @param array<string, \Closure> $resolvers
+     */
+    private static function restoreResolvers(array $resolvers): void
+    {
+        (new ReflectionProperty(Connection::class, 'resolvers'))->setValue(null, $resolvers);
     }
 
     /**

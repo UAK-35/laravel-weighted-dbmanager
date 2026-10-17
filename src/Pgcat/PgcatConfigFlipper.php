@@ -1159,17 +1159,20 @@ final class PgcatConfigFlipper
             }
         }
 
-        // Three paths this package has to be able to write that no step of a flip names, judged
+        // Two paths this package has to be able to write that no step of a flip names, judged
         // beside the five above because an unwritable one is the same class of fault as the rest:
-        // the boot stamp the container's entrypoint writes, the audit record every boot writes its
-        // findings into, and the `.lock` companion two boots serialise that write on. They were the
-        // gap the deployment this list came from found — a container that passed every other gate
-        // and could not flip, logging that its target and its record were not writable — so a
-        // preflight that answers "can this installation carry out what it is configured to do?"
-        // answers it about these too, in the row and the record that already list the other five.
+        // the boot stamp the container's entrypoint writes, and the `.lock` companion two boots
+        // serialise the audit record's write on — that second one only while the record itself is
+        // usable, which is writtenPaths()'s rule and the reason the count is at most two. They were
+        // the gap the deployment this list came from found — a container that passed every other
+        // gate and could not flip, logging that its target was not writable — so a preflight that
+        // answers "can this installation carry out what it is configured to do?" answers it about
+        // these too, in the row and the record that already list the other five. The record *file*
+        // is deliberately not among them: `store probe` and the boot audit's own finding judge it,
+        // and a second sentence for it would be one fault reported twice.
         //
-        // Each is judged as a *writer*: all three may legitimately not exist yet (a container an
-        // hour old has a stamp; one being provisioned does not), so what is asked is the directory
+        // Each is judged as a *writer*: both may legitimately not exist yet (a container an hour
+        // old has a stamp; one being provisioned does not), so what is asked is the directory
         // they will be created in, and the file itself only when it is already there and cannot be
         // written. The cost sentence is the reason the path is on the list at all, and the mode and
         // owner travel with it: see fileProblem().
@@ -1200,8 +1203,8 @@ final class PgcatConfigFlipper
 
     /**
      * Whether this package can create or write a path: the file itself when it is already there,
-     * and the directory it will be created in when it is not — which is the normal state of all
-     * three of the paths above on a container that has not booted yet.
+     * and the directory it will be created in when it is not — which is the normal state of both
+     * of the paths above on a container that has not booted yet.
      */
     private static function writable(string $path): bool
     {
@@ -1210,7 +1213,8 @@ final class PgcatConfigFlipper
 
     /**
      * The paths this package must be able to write while a flip is armed, and what an unwritable
-     * one costs — the three that are not a flip step's own path.
+     * one costs — the two that are not a flip step's own path, the second of them only while the
+     * record it guards is usable.
      *
      * The consequences are the ones the faults were observed with rather than a general statement
      * about permissions: an unwritable boot stamp leaves `FlipWindow::closed()` permanently false,
@@ -1260,8 +1264,8 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * The config path each setting above is written at, for the record's context: five of them are
-     * pgcat's and the other three are not.
+     * The config path each setting above is written at, for the record's context: neither is one of
+     * pgcat's own — the boot stamp is the flip's and the lock is the audit record's.
      *
      * @return array<string, string>
      */

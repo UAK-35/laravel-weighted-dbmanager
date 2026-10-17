@@ -37,19 +37,70 @@ citations name a record or a script rather than a line number in one.
 
 ## The requirements
 
-| Requirement | What it costs when it is missing | What asks about it |
-|---|---|---|
-| **Three pooler variants, rendered from one template.** The writer-only file, the readers file, and the one in place — the pair §3.1 holds to one shape and the pair it holds to another | a flip swaps in a file the deployment renders differently from the one this package's reading expects, and the pooler comes back serving a different set of pools than the connection names | `db:doctor`'s `variant shape` row; `db:pgcat-flip --dry-run`'s `variant shape` step |
-| **The prune, before pgcat starts.** Every pool whose addresses do not resolve *in the container* is removed from all three variants at boot, because pgcat validates every server when it starts | a pool pruned at boot and still declared by a variant a flip swaps to puts the failure the prune exists for back — and a parser that reads more or less than the bare pool name makes every address unresolvable and the prune a silent no-op | the same row's warning, which names the pool and the addresses that did not resolve from where it was asked |
-| **A pinned, compiled pooler.** The image clones the pooler's source at a tagged version and compiles it rather than pulling a binary | a pooler upgrade changes this package's runtime: the reload verb a flip sends, the startup packet the pool probe reads, and the file layout the flipper's own reader parses are all that version's | the image build; `pool probe`, which asks the running pooler rather than the file |
-| **A boot stamp.** The container writes the time it started into a file the package is pointed at | the flip's boot window is measured from nothing, so a window that never closes lets the entry re-apply the configuration on every run, and a window that never opens leaves the pooler wherever it was | `db:doctor`'s `pgcat files` (it names the mode and owner the stamp was found with) and `schedule beat` (which reports the reading) |
-| **One mechanism for the mode, a window, and a lock.** The per-minute entry, or the reader-window tasks — one of the two — and the entry's own `flock` so two runs cannot overlap | two mechanisms armed at once own the same mode, and a lock file in a directory that is not writable is a run that takes no lock and says nothing | `flip schedule` and `pgcat files`; `db:scheduler-watchdog` reports whether the entry is producing runs at all |
-| **A writable state directory.** The flip's state file and its `.lock` companion, the boot stamp, the boot audit's record and *its* `.lock` — provisioned before the application starts, owned by the user the schedule runs as | a flip that cannot get its copy into place, a run whose lock cannot be taken, and a probe skipped because its throttle cannot be written: three faults that share one cause and no failing row | `pgcat files`, one sentence per path with the mode and owner it was found with; the boot audit records the same list as a finding so an image is told before a deploy is |
-| **A spawnable supervisor.** `supervisorctl` resolvable for the user the schedule runs as, with the pooler's program declared, and a PHP that may spawn a process at all | a flip that swaps the file and then cannot make the pooler read it: the failure ends as a timeout sentence unless `proc_open` is the cause, which the row tells apart | `pgcat supervisor`, which is read-only and names `disable_functions` when that is the cause |
-| **A container health check that asks the pooler.** Supervisord's state for the pooler plus a TCP accept on its port, and one query when asked deeply | a health check reading a cached route reports a container as healthy while the pooler behind it serves nothing — which is the failure the deploy's own gate exists to catch | the check itself; `pool probe` from this side, which answers whether the running pooler holds a pool for a database the application uses |
-| **A store, and a known answer for its absence.** The weighted state is read out of a cache store, and the same store holds the schedule's overlap mutexes | without the store the weighted state is not shared between processes, and an installation whose store does not answer throws inside the schedule before the entry runs — a dead schedule with a healthy cron | `store reachability` and `store probe`; `db:scheduler-watchdog`'s causes |
-| **Read caps that need not match the write cap.** A read endpoint's `statement_timeout` may be shorter than the writer's, which is what makes an escalated read finish | caps far apart are a fact to state rather than a fault, but a read endpoint capped at a fraction of the writer's cancels statements the writer would have finished — and nothing in Laravel's configuration says so | `read caps` and `standby feedback`, while `swrr.read_path.enabled` arms them; [read-path-cancellations.md](read-path-cancellations.md) is the contract an application answers a cancelled read with |
-| **The health endpoint is a machine's surface.** `/health/db` is read by a monitor or a load balancer, and the container's own health check asks the pooler instead of a route the application has cached | a container that answers 200 with a cached route is not evidence that the pooler behind it is serving, and the deploy's gate would be the only thing that notices | `/health/db` for a monitor; `pooler-healthcheck.sh` for the container. The two are deliberately different questions |
+Each requirement has a key, and the key is the name `db:doctor --contract` prints the requirement
+under — so "a broken deployment is caught by a row" is a claim with a name in it rather than a
+column a reader has to interpret. The last two columns say which of this package's rows answer the
+requirement, and the set of them is exhaustive: every row the preflight documents is behind at least
+one requirement, which is what makes a contract run a complete run rather than a shorter one.
+
+| Requirement | Key | What it costs when it is missing | What asks about it |
+|---|---|---|---|
+| **The package in charge, on the settings this boot read.** The weighted provider and factory bound, a connector that can be built, a published `config/db-manager.php` whose key set is current, and an environment file no older than the configuration cache | `wiring` | every row below then describes a runtime that is not this package's: reads are unweighted, a replaced factory loses the replica choice, and a cached configuration means a setting the deployment changed has not reached the process — so the preflight reports on the incumbent while the operator reads it as the candidate | `boot environment`, `provider swap`, `weighted factory`, `connector` and `published config` |
+| **A configuration the package reads as written.** Every switch, reader window, replica's metadata and read/write pair written the way the package and the resolver read it | `configuration` | a refused value does not fail the boot — it resolves to the documented default, so an armed flipper reads as off and is inert, a window written as a flat string is no window at all, and a replica weighted `'heavy'` leaves the pool. Nothing else looks wrong | `pgcat gate`, `replica metadata`, `read/write pair`, `switch values` and `reader windows` |
+| **Three pooler variants, rendered from one template.** The writer-only file, the readers file, and the one in place — the pair §3.1 holds to one shape and the pair it holds to another | `variants` | a flip swaps in a file the deployment renders differently from the one this package's reading expects, and the pooler comes back serving a different set of pools than the connection names | `variant shape` and `pgcat files`; `db:pgcat-flip --dry-run`'s `variant shape` step |
+| **The prune, before pgcat starts.** Every pool whose addresses do not resolve *in the container* is removed from all three variants at boot, because pgcat validates every server when it starts | `prune` | a pool pruned at boot and still declared by a variant a flip swaps to puts the failure the prune exists for back — and a parser that reads more or less than the bare pool name makes every address unresolvable and the prune a silent no-op | `variant shape`'s warning, which names the pool and the addresses that did not resolve from where it was asked |
+| **A pinned, compiled pooler.** The image clones the pooler's source at a tagged version and compiles it rather than pulling a binary | `pooler` | a pooler upgrade changes this package's runtime: the reload verb a flip sends, the startup packet the pool probe reads, and the file layout the flipper's own reader parses are all that version's | the image build; `pool probe`, which asks the running pooler what it holds rather than which version is answering |
+| **A boot stamp.** The container writes the time it started into a file the package is pointed at | `boot-stamp` | the flip's boot window is measured from nothing, so a window that never closes lets the entry re-apply the configuration on every run, and a window that never opens leaves the pooler wherever it was | `pgcat files` (it names the mode and owner the stamp was found with) and `schedule beat` (which reports the reading) |
+| **One mechanism for the mode, a window, and a lock.** The per-minute entry, or the reader-window tasks — one of the two — and the entry's own `flock` so two runs cannot overlap | `mechanism` | two mechanisms armed at once own the same mode, and a lock file in a directory that is not writable is a run that takes no lock and says nothing | `flip schedule`, `pgcat mode`, `pgcat files` and `schedule beat`; `db:scheduler-watchdog` reports whether the entry is producing runs at all |
+| **A writable state directory.** The flip's state file and its `.lock` companion, the boot stamp, the boot audit's record and *its* `.lock` — provisioned before the application starts, owned by the user the schedule runs as | `state-dir` | a flip that cannot get its copy into place, a run whose lock cannot be taken, and a probe skipped because its throttle cannot be written: three faults that share one cause and no failing row | `pgcat files`, one sentence per path with the mode and owner it was found with; `store probe`, which reads the audit record's own writability; the boot audit records the same list as a finding so an image is told before a deploy is |
+| **A spawnable supervisor.** `supervisorctl` resolvable for the user the schedule runs as, with the pooler's program declared, and a PHP that may spawn a process at all | `supervisor` | a flip that swaps the file and then cannot make the pooler read it: the failure ends as a timeout sentence unless `proc_open` is the cause, which the row tells apart | `pgcat supervisor`, which is read-only and names `disable_functions` when that is the cause |
+| **A container health check that asks the pooler.** Supervisord's state for the pooler plus a TCP accept on its port, and one query when asked deeply | `health-check` | a health check reading a cached route reports a container as healthy while the pooler behind it serves nothing — which is the failure the deploy's own gate exists to catch | the check itself, which no row here runs; `pool probe` from this side, which answers whether the running pooler holds a pool for a database the application uses |
+| **A store, and a known answer for its absence.** The weighted state is read out of a cache store, and the same store holds the schedule's overlap mutexes | `store` | without the store the weighted state is not shared between processes, and an installation whose store does not answer throws inside the schedule before the entry runs — a dead schedule with a healthy cron | `store reachability` and `store probe`; `schedule beat`'s causes; `db:scheduler-watchdog`'s causes |
+| **Read caps that need not match the write cap.** A read endpoint's `statement_timeout` may be shorter than the writer's, which is what makes an escalated read finish | `read-caps` | caps far apart are a fact to state rather than a fault, but a read endpoint capped at a fraction of the writer's cancels statements the writer would have finished — and nothing in Laravel's configuration says so | `read caps` and `standby feedback`, while `swrr.read_path.enabled` arms them; [read-path-cancellations.md](read-path-cancellations.md) is the contract an application answers a cancelled read with |
+| **The health endpoint is a machine's surface.** `/health/db` is read by a monitor or a load balancer, and the container's own health check asks the pooler instead of a route the application has cached | `health-endpoint` | a container that answers 200 with a cached route is not evidence that the pooler behind it is serving, and the deploy's gate would be the only thing that notices | `/health/db` for a monitor; `pooler-healthcheck.sh` for the container. The two are deliberately different questions — and neither is a row here, which is why this is the one requirement a contract run reports as not judged |
+
+## How a deployment runs this
+
+`db:doctor --contract` is the requirements above as rows. It asks the same installation run and the
+same readings a plain preflight asks — nothing is re-read — and folds them: one row per key, in the
+order this table states them, its verdict the loudest verdict among the rows behind it. The detail
+names every reading and its verdict, then the sentences of the ones that did not pass; the repairs
+those rows named become the requirement's `suggestions`, so the fix is not lost one level up.
+
+```
+$ php artisan db:doctor --contract
+Connection inspected: pgsql, followed connection is pgsql — --contract: 13 requirements, each answered by the rows behind it
+
+PASS  wiring             the package in charge of reads, on the settings this boot read. Readings: 'boot environment' PASS, 'provider swap' PASS, 'weighted factory' PASS, 'connector' PASS, 'published config' PASS — every reading behind this requirement was asked and none failed — these are the readings about this boot ...
+FAIL  configuration      a configuration the package reads as written. Readings: 'pgcat gate' FAIL, 'replica metadata' PASS, 'read/write pair' PASS, 'switch values' PASS, 'reader windows' PASS — 'pgcat gate' — swrr.pgcat.enabled is true but pgcat will never act: ...
+      suggestion          swrr.pgcat.enabled = false
+...
+PASS  health-endpoint    the health endpoint as a machine's surface — not judged here: whether a monitor or a load balancer reads /health/db, and what the container's own health check asks, is the deployment's — no row here can see either
+
+13 checks: 11 passed, 1 warning, 1 failed
+A requirement of the deployment contract is not met: the rows above name the reading that failed.
+```
+
+The exit rule is the one the rest of the command uses — `gateFailed()` over the requirements' own
+tally, so `--strict` fails a release on the first warning and the closing sentence names the
+contract rather than calling the installation broken. `--json` publishes the requirement rows in the
+same envelope and the same per-row shape `connection_only` and the plain run publish, so a gate can
+select `configuration` by name instead of reading a table; `--connection-only` composes, and a
+requirement whose readings that mode left out passes saying which ones. `--config-file` is refused
+beside it: a file is not a deployment.
+
+A requirement no row can answer passes saying it was **not judged**, and names what would have to be
+read instead — the contract run cannot fail a deployment over a fact the package never read. That is
+the same reading `connector` gives when `db.factory` cannot be asked, applied one scope up. It is
+why `/health/db`'s monitoring is stated above as a requirement and answered by nothing: the honest
+report is a row that says so, not a row that invents a pass.
+
+The mapping is `Support\DeploymentContract`'s, and it is held to this file by
+`tests/Unit/Docs/DeploymentContractTest.php`, in both directions: every key in the table is a
+requirement the class states, in the same order, and every reading an entry names is a row the
+README documents. The second direction is the one that matters as the command grows: a new row the
+preflight learns has to be placed in a requirement, so no reading can be lost by moving a deploy to
+`--contract`.
 
 ## The two gates that read this package
 
@@ -115,6 +166,9 @@ deployment's decision, and the record of the port is in the plan beside this one
 
 ## Known limitations
 
+- **The mapping is guarded; the citations are not.** What this record says a *row* answers is held
+to the code and to the README's row table by `tests/Unit/Docs/DeploymentContractTest.php`. What the
+cited files in the application's repository *do* is not: see the next point.
 - **The citations are a reading, not a guard.** Every file named in the table above was read in the
   application's repository on a date rather than held by a check: this package's suite reads its own
   tree, and a deployment that stops rendering a variant, stops pruning, or moves its state directory

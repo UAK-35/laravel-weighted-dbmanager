@@ -248,3 +248,58 @@ number, so a package edit silently makes those citations wrong.
   contains a space, because git terminates a `+++` header path with a tab that was kept as part of the
   key. Run the same question against this package's readers of paths in prose and add a test if the
   terminator is not stripped.
+
+---
+
+## Status — where the work stands at `516e1f0`
+
+A reading of the tree rather than a part of the plan: what each phase landed as, and which half of
+this list is still on the other side of the boundary. It is the section a later thread updates,
+because the phases above describe work rather than a state.
+
+| Phase | Landed in | Read it in |
+|---|---|---|
+| 1 | `bbfd422` | `Support\ConfigSchema`, the sample's `generation`, the `published config` row, [docs/config-generations.md](docs/config-generations.md) |
+| 2 | `f782eb0` | `PgcatConfigFlipper::fileProblems()`, the `pgcat files` row, the boot findings |
+| 3 | `3c2e61f` | `Pgcat\SupervisorStep`, the `pgcat supervisor` row |
+| 4 | `5af2df5` | `FlipSchedule::bothArmedSentence()`, the `flipMechanismFindings()` finding, the `flip schedule` row, and the two defaults the sample and `FlipSchedule` now agree on |
+| 5 | `ae0e3e8` | `--connection-only`, the `boot environment` row, `swrr_connection` beside `default_connection` in the report |
+| 6 | `ae0e3e8` | `Pgcat\ScheduleCauses`, the `schedule beat` row, `db:scheduler-watchdog` |
+| 7 | `ae0e3e8` | the `read caps`, `standby feedback` and `read/write pair` rows, [docs/read-path-cancellations.md](docs/read-path-cancellations.md) |
+| 8 | `2e5acd3` | `Pgcat\VariantShape`, the `variant shape` row, the rehearsal step |
+| 9 | `1ce9e2f` | [docs/deployment-contract.md](docs/deployment-contract.md) |
+| 10 | — | no package edit, by design |
+| Small items | `1ce9e2f`, `53d6352` | the token sample and the spaced-name readings; the `connector` row and `Support\ConnectorInUse` |
+
+Phase 5's other half is in the working tree and not in any of those commits: `--real-test`, the
+`real query` row it puts, `Support\PinnedQuery` — which `/health/db` and the flag now share, so a
+bounded run proves the same thing the endpoint claims — and the `key  value` line a container gate
+parses its connection out of. It is what §4.6 of the removal list was waiting for.
+
+### What is still app-side
+
+Phase 10 is the other repository's, and nothing in this tree can carry it: that repository's config,
+its diagnostics command, its two hand-run checks and its line-numbered citations are not readable
+from here.
+
+The interface that removal list needs now exists, and it is this package's rather than a second
+mode: `db:doctor --connection-only --real-test` is the bounded run plus one real query on the
+connection it follows (`--real-test` asks `Support\PinnedQuery` — the `select 1` `/health/db` runs —
+and the row reports *not asked* rather than passing when the flag is absent), and the rendered run
+prints `db-manager.swrr.connection` (or `database.default`, whichever answered) as a two-space
+`key  value` line under its banner, which is the spelling §4.6's `sed` parses. The report publishes
+the same pair as `swrr_connection`/`default_connection`, plus `connection_only` and `real_test` as
+the two flags that change what was asked. With that, §2.1's duplicated command and its four callers
+can be retired — a change in that repository, on a release that carries this.
+
+Nothing here is in a tag yet — the newest is `v0.2.0-alpha3` — so the application's pin cannot move
+until a release carries the phases above.
+
+### Two sentences the tree reads differently
+
+* Phase 1's "a fresh install that has never published is silent": the `published config` row still
+  warns when the sample is in use, which is its documented policy
+  ([docs/config-generations.md](docs/config-generations.md)); the generation reading adds no warning
+  of its own.
+* Phase 2's `audit.file`: the record file is judged by `store probe` and its own boot finding rather
+  than by `pgcat files`, and README says so. The lock companion is on the row.

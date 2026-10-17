@@ -77,6 +77,18 @@ final class Handoff
     private const MACHINE = __DIR__.'/../../.agents/machine.local.json';
 
     /**
+     * The last gate run, as `bin/checks.php --record` wrote it — the file section 1's summary is
+     * rendered from rather than copied out of a terminal.
+     *
+     * It is committed, and it is a record of a run rather than of a commit: the three `.tsv` files
+     * beside it describe a tree, this one describes an afternoon on one machine, which is why the
+     * block it renders carries the date and the interpreter the record names. `bin/checks.php`
+     * declares the same path as `GATE_RECORD`; `HandoffTest` holds the two spellings to each other,
+     * because two files naming one location is a pair that drifts silently.
+     */
+    private const GATE = '.agents/gate.json';
+
+    /**
      * The leaves of that record the table is compared against, as dot paths — the contract
      * between the file and the tests, so a key renamed in one of them names itself.
      *
@@ -582,10 +594,17 @@ final class Handoff
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * The regions of the note that are written from git rather than by hand, in the order the
-     * renderer writes them.
+     * The regions of the note that are written from a derivation rather than by hand, in the order
+     * the renderer writes them.
+     *
+     * Two of them are not git questions at all: `gate` is the last recorded run of the gate, read
+     * out of `.agents/gate.json` and never re-run here — a block cannot ask for a ten-minute suite,
+     * and a suite that rendered its own numbers would be quoting the run it is in the middle of — and
+     * `records` is the transcript of the inventory check itself, run rather than read, because the
+     * numbers in it are the check's reading of this tree and a session that typed them was stating a
+     * count it had not measured.
      */
-    private const BLOCKS = ['pending', 'unpushed', 'log'];
+    private const BLOCKS = ['gate', 'records', 'pending', 'unpushed', 'log'];
 
     /**
      * How many of the unpushed commits the listing under section 2 shows. A ceiling rather than a
@@ -616,12 +635,18 @@ final class Handoff
      *   were removed when those batches were committed, because prose kept beside a table that cannot
      *   hold its rows is the stale copy this mechanism exists to refuse. The rule reads forwards too:
      *   the next file the register does not carry asks for its line again, by name, which is the
-     *   refusal doing its work rather than an accident — and that is where this map stands now, empty
-     *   at a register that carries every file the notes before it described.
+     *   refusal doing its work rather than an accident. What the map holds now is one line apiece for
+     *   the files the note in the tree is taken with: the gate's record and the deployment contract's
+     *   pair.
      *
      * @var array<string, string>
      */
-    private const PENDING_DESCRIPTIONS = [];
+    private const PENDING_DESCRIPTIONS = [
+        '.agents/gate.json' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
+        'src/Support/DeploymentContract.php' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
+        'tests/Unit/Docs/DeploymentContractTest.php' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
+        'src/Support/PinnedQuery.php' => 'the one real query — `select 1`, through the application\'s own connection — with the answer the health endpoint and `db:doctor --real-test` both report',
+    ];
 
     /**
      * The blocks the note carries, so a test can ask for each of them by name.
@@ -704,10 +729,76 @@ final class Handoff
         $snapshot ??= self::recorded();
 
         return match ($name) {
+            'gate' => self::renderedGate(),
+            'records' => self::renderedRecords($snapshot['register']),
             'pending' => self::renderedPending($snapshot['register']),
             'unpushed' => self::renderedUnpushed($snapshot),
             'log' => self::renderedLog($snapshot),
         };
+    }
+
+    /**
+     * The tag a release is about to create, as the environment names it — and nothing on an ordinary
+     * run, because an ordinary run is not creating one.
+     *
+     * WHY A GUARD NEEDS TO BE TOLD
+     * ----------------------------
+     *   `bin/release.php` moves this note's three tag rows into its own commit *before* it tags, so the
+     *   commit it is about to tag names a tag that does not exist yet. Two of the claims here are about
+     *   tags existing: the latest row names the newest tag the repository has, and every tag the note
+     *   lists has to be behind the register. Read against a tree where the release has not happened, a
+     *   note that correctly names the tag under it fails both, and a release that refused on that would
+     *   be refusing every release. So the release says which tag it is about to create, and the two
+     *   readings take it as existing — that is the only thing this allows, and the allowance is taken
+     *   away the moment the environment does not name one.
+     *
+     * A tag that is not shaped like this package's (`v1.2.3`, prerelease suffix and all) is refused
+     * rather than admitted: a name no `git tag` here would accept is not a pending tag, it is a typo,
+     * and a guard that admitted it would be checking the note against a tag that will never exist.
+     *
+     * @throws RuntimeException when the environment names something that is not a tag this package cuts
+     */
+    public static function pendingTag(): ?string
+    {
+        $tag = getenv('HANDOFF_PENDING_TAG');
+
+        if ($tag === false || trim($tag) === '') {
+            return null;
+        }
+
+        $tag = trim($tag);
+
+        if (preg_match('/^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/', $tag) !== 1) {
+            throw new RuntimeException(sprintf(
+                'HANDOFF_PENDING_TAG is [%s], and a release of this package cuts a tag like v1.2.3 or '
+                .'v1.2.3-alpha1 — a guard told about anything else would be checking the note against a tag that '
+                .'will never exist.',
+                $tag,
+            ));
+        }
+
+        return $tag;
+    }
+
+    /**
+     * Every tag the note's claims are read against: what this repository has, plus the one a release is
+     * about to create.
+     *
+     * One reader for the list, so a claim that asks "is this the newest" and the claim that asks "is this
+     * one behind the register" cannot disagree about which tags count.
+     *
+     * @return list<string>
+     */
+    public static function tagNames(): array
+    {
+        $names = self::outputLines(self::git('tag', '--list', 'v*')['output']);
+        $pending = self::pendingTag();
+
+        if ($pending !== null && !in_array($pending, $names, true)) {
+            $names[] = $pending;
+        }
+
+        return $names;
     }
 
     /** The commit a write renders at: the one this checkout is standing on, which is the new register. */
@@ -878,6 +969,305 @@ final class Handoff
         $lines[] = '```';
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * The last recorded gate run, as `.agents/gate.json` holds it: the day it was taken, the
+     * interpreter, the exit code, the whole run's seconds and every check with its verdict, its
+     * seconds and the note the gate printed beside it.
+     *
+     * WHY A RECORD AND NOT A RUN
+     * --------------------------
+     *   The note used to state the gate's numbers — how many checks, tests, assertions and skips the
+     *   last run reported, what it took, and how long the suite was — copied out of a terminal by
+     *   whoever re-took the note. Every one of them is a number a command already answered, and none
+     *   of them could be held: a re-take that forgot one left the sentence describing a run that no
+     *   longer happened, and the guard could only compare prose with prose. Running the gate here is
+     *   the other way to be wrong — it is ten minutes inside the suite that is measuring it, and the
+     *   run being rendered is the run doing the rendering.
+     *
+     *   So the run is recorded instead: `bin/checks.php --record` writes what it printed, once, and
+     *   this reads it. What the guard can hold is what the record has to be — internally consistent,
+     *   all green, and a run of every check the gate declares — and what it cannot hold is that the
+     *   record is *true*, which is the same thing that cannot be held about the three `.tsv` files
+     *   and for the same reason: a record is evidence of a moment, and the moment is not the suite's
+     *   to re-live.
+     *
+     * @return array{taken: string, php: string, exit: int, elapsed: float, checks: list<array{name: string, status: string, seconds: float, note: string}>}
+     *
+     * @throws RuntimeException when the record is absent, unreadable, or not one a gate run wrote
+     */
+    public static function gate(): array
+    {
+        $path = self::ROOT.'/'.self::GATE;
+        $raw = is_file($path) ? @file_get_contents($path) : false;
+
+        if ($raw === false) {
+            throw new RuntimeException(sprintf(
+                'This checkout has no gate record at %s, and HANDOFF.md section 1 quotes one. Run '
+                .'`php bin/checks.php --record` (the whole gate, ten minutes of it), then `php bin/handoff.php`.',
+                self::GATE,
+            ));
+        }
+
+        $record = json_decode($raw, true);
+
+        if (! is_array($record)) {
+            throw new RuntimeException(sprintf('%s is not JSON this can read, so the run it records cannot be quoted.', self::GATE));
+        }
+
+        foreach (['taken', 'php', 'exit', 'elapsed', 'checks'] as $key) {
+            if (! array_key_exists($key, $record)) {
+                throw new RuntimeException(sprintf(
+                    '%s records no [%s], so the block rendered from it would be missing a claim rather than '
+                    .'stating one. `php bin/checks.php --record` writes every key.',
+                    self::GATE,
+                    $key,
+                ));
+            }
+        }
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $record['taken']) !== 1) {
+            throw new RuntimeException(sprintf('%s records [%s] as the day it was taken, which is not a date.', self::GATE, (string) $record['taken']));
+        }
+
+        if (! is_int($record['exit']) || ! is_numeric($record['elapsed']) || ! is_array($record['checks'])) {
+            throw new RuntimeException(sprintf('%s does not hold a run: the exit code, the seconds and the checks have to be an int, a number and a list.', self::GATE));
+        }
+
+        $checks = [];
+
+        foreach ($record['checks'] as $check) {
+            if (! is_array($check) || ! in_array($check['status'] ?? null, ['PASS', 'FAIL', 'SKIP'], true)
+                || ! is_string($check['name'] ?? null) || ! is_numeric($check['seconds'] ?? null) || ! is_string($check['note'] ?? null)) {
+                throw new RuntimeException(sprintf(
+                    "%s holds a check that is not one a run writes: a record's rows are a name, one of PASS, "
+                    .'FAIL and SKIP, the seconds it took and the note the gate printed.',
+                    self::GATE,
+                ));
+            }
+
+            $checks[] = [
+                'name' => $check['name'],
+                'status' => $check['status'],
+                'seconds' => (float) $check['seconds'],
+                'note' => $check['note'],
+            ];
+        }
+
+        if ($checks === []) {
+            throw new RuntimeException(sprintf('%s records a run of no checks, which is not a gate run.', self::GATE));
+        }
+
+        return [
+            'taken' => (string) $record['taken'],
+            'php' => (string) $record['php'],
+            'exit' => $record['exit'],
+            'elapsed' => (float) $record['elapsed'],
+            'checks' => $checks,
+        ];
+    }
+
+    /** Where that record lives, so a test can hold `bin/checks.php`'s own spelling of it. */
+    public static function gateRecordPath(): string
+    {
+        return self::GATE;
+    }
+
+    /**
+     * The sentence section 1 makes the gate's claim in: the paragraph the block under it belongs to.
+     *
+     * A paragraph rather than a section, because section 1 is mostly other business — commits, the
+     * release, the records — and what this is for is one sentence: the one that says the gate is
+     * green. It is read by the marker rather than by its words, so the sentence can be reworded
+     * without the guard losing it, and what the guard then asks of it is the thing the sentence may
+     * not do: state a number. Every number in the block is the record's; a count written back into
+     * the prose is the hand-copy this mechanism exists to refuse, and it is refused by the shape of
+     * the sentence rather than by a comparison with a run nothing can re-read.
+     *
+     * @return array{text: string, source: int}
+     *
+     * @throws RuntimeException when the block is gone, or nothing introduces it
+     */
+    public static function gateClaim(): array
+    {
+        $paragraphs = self::paragraphs(self::PENDING);
+        $at = null;
+
+        foreach ($paragraphs as $index => $paragraph) {
+            if (str_contains(trim($paragraph['text']), self::marker('gate'))) {
+                $at = $index;
+
+                break;
+            }
+        }
+
+        if ($at === null) {
+            throw new RuntimeException(
+                'HANDOFF.md section 1 carries no `gate` block, so the numbers it used to state by hand have no '
+                .'rendered answer and the sentence above them cannot be read.',
+            );
+        }
+
+        if ($at === 0) {
+            throw new RuntimeException(sprintf(
+                'HANDOFF.md line %d is the `gate` block with no paragraph above it: the block has to be '
+                .'introduced by the sentence that claims the run is green.',
+                $paragraphs[0]['source'],
+            ));
+        }
+
+        return ['text' => trim($paragraphs[$at - 1]['text']), 'source' => $paragraphs[$at - 1]['source']];
+    }
+
+    /**
+     * Section 1's gate summary: the recorded run's totals, then its rows, as the gate printed them.
+     *
+     * The numbers are the record's and the shape is the gate's — the rows are rebuilt with the same
+     * format string `bin/checks.php` prints them with, and the summary line is built from the rows
+     * rather than stored beside them, so a record cannot say thirteen checks over fourteen rows. What
+     * is added to the run is the provenance the run itself does not print: the day it was taken and
+     * the interpreter, because a record that describes an afternoon on one machine has to say which
+     * one to a reader who was not there.
+     */
+    private static function renderedGate(): string
+    {
+        $record = self::gate();
+
+        $lines = [
+            '```',
+            'php bin/checks.php --record',
+            sprintf('  --> exit %d: %s', $record['exit'], self::gateSummary($record['checks'], $record['elapsed'])),
+            sprintf('      recorded %s, PHP %s', $record['taken'], $record['php']),
+        ];
+
+        foreach ($record['checks'] as $check) {
+            $lines[] = sprintf('      %-10s %-5s %6.1fs  %s', $check['name'], $check['status'], $check['seconds'], $check['note']);
+        }
+
+        $lines[] = '```';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * The gate's own summary line, built from the rows it sums — `13 checks: 13 passed, 0 failed, 0
+     * skipped — 646.5s`, as `bin/checks.php` writes it after its last check.
+     *
+     * @param list<array{name: string, status: string, seconds: float, note: string}> $checks
+     */
+    private static function gateSummary(array $checks, float $elapsed): string
+    {
+        $count = static fn (string $status): int => count(array_filter($checks, static fn (array $check): bool => $check['status'] === $status));
+        $total = count($checks);
+
+        return sprintf(
+            '%d check%s: %d passed, %d failed, %d skipped — %.1fs',
+            $total,
+            $total === 1 ? '' : 's',
+            $count('PASS'),
+            $count('FAIL'),
+            $count('SKIP'),
+            $elapsed,
+        );
+    }
+
+    /**
+     * Section 1's transcript: `bin/inventory.php --check` run twice, and the reading it gives.
+     *
+     * WHY THE BLOCK IS RUN RATHER THAN WRITTEN
+     * ----------------------------------------
+     *   The two runs are the state of the three `.tsv` records — against the register the note names,
+     *   and against this checkout — and every number in them is the check's own: how many lines of
+     *   each record the tree has moved past. Those numbers were quoted in the note by hand, so adding
+     *   one source file made the note state a count the tree did not have, and the repair was a
+     *   session reading the command's output and typing it back. A number a command measures is the
+     *   command's to state; the renderer runs it and writes what it said, and the guard runs the
+     *   commands the block quotes rather than trusting the summary beside them.
+     *
+     *   The register run is rendered at the note's own register, like the other blocks: a check
+     *   compares the note with itself, while a take re-reads the checkout. The checkout run cannot
+     *   be anything but this tree's reading — that is what the run is — so a working tree whose
+     *   pending set has moved since the note was taken is a block `bin/handoff.php` rewrites rather
+     *   than one a reader edits, which is the same rule the `pending` table follows.
+     *
+     *   Only the verdict and each record's count are carried, not the drifted rows the tool names:
+     *   those change with every file added, and the note's prose says where to read them. A run that
+     *   found the records current is quoted as the tool says it, so a note taken at a release's own
+     *   commit reads `exit 0` rather than claiming a disagreement that is not there.
+     */
+    private static function renderedRecords(string $register): string
+    {
+        $lines = ['```'];
+
+        foreach (['--check --at='.self::short(self::full($register)), '--check'] as $arguments) {
+            $run = self::run([PHP_BINARY, self::ROOT.'/bin/inventory.php', ...explode(' ', $arguments)]);
+
+            $lines[] = 'php bin/inventory.php '.$arguments;
+            $lines = array_merge($lines, self::recordLines($run));
+            $lines[] = '';
+        }
+
+        // The blank after the last run separates commands rather than closing the fence, which the
+        // note writes on the line after it — a trailing blank inside the block would be a diff every
+        // render.
+        array_pop($lines);
+        $lines[] = '```';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * One inventory run as the note quotes it: the exit code and verdict on the `-->` line, then the
+     * records it found out of step, one apiece, with the count the tool gave for each.
+     *
+     * The words are the tool's, so a line here cannot disagree with the run: a failure is quoted with
+     * the sentence the command itself printed (minus the `✗` it leads with), and a current record with
+     * the success note's own phrase. Row counts are the sum-free reading — `N line(s) stale`, exactly
+     * as `describeDrift()` writes it — and the rows themselves are left out because the tool truncates
+     * them and the note's prose already says what they are.
+     *
+     * @param array{exit: int, output: string, error: string} $run
+     * @return list<string>
+     */
+    private static function recordLines(array $run): array
+    {
+        $said = array_merge(self::outputLines($run['error']), self::outputLines($run['output']));
+        $verdict = '';
+        $stale = [];
+
+        foreach ($said as $line) {
+            if ($verdict === '' && preg_match('/^✗\s*(.+)$/u', $line, $matches) === 1) {
+                $verdict = rtrim(lcfirst($matches[1]), ':.');
+
+                continue;
+            }
+
+            if (preg_match('/^(\S+\.tsv): (\d+) line\(s\) stale\b/u', ltrim($line), $matches) === 1) {
+                $stale[] = $matches[1].': '.$matches[2].' line(s) stale';
+            }
+        }
+
+        if ($verdict === '') {
+            foreach ($said as $line) {
+                if (str_starts_with($line, '•')) {
+                    $verdict = trim(ltrim($line, '•'));
+                }
+            }
+        }
+
+        if ($verdict === '') {
+            throw new RuntimeException(sprintf(
+                'bin/inventory.php --check exited %d without saying anything a transcript can quote, so the '
+                .'records block would be a line with no reading in it.',
+                $run['exit'],
+            ));
+        }
+
+        return array_merge(
+            [sprintf('  --> exit %d: %s', $run['exit'], $verdict)],
+            array_map(static fn (string $record): string => '      '.$record, $stale),
+        );
     }
 
     /**

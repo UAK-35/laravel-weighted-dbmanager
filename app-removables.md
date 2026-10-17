@@ -348,9 +348,9 @@ deployment retired reports a failure that does not exist, and the next person to
 ### 4.6 `docker-files/production/laravel/pgcat-health-gate.sh` and `smoke-test-image.sh` — the two gate callers
 
 The package's light mode must carry a real query, because this is what the pooler gate exists to
-prove. The alternate lines below assume `db:doctor --connection-only --real-test`, which is the flag
-this package's plan phase 5 has to provide — the same option name, so the gate's two sentences stay
-true.
+prove. The alternate lines below assume `db:doctor --connection-only --real-test`, which the package
+now has — the same option name the retired command used, so the gate's two sentences stay true —
+and the bounded run asks the query even though it leaves the store and the supervisor out.
 
 ```bash
 # pgcat-health-gate.sh:221

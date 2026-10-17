@@ -36,7 +36,7 @@ That is the same problem `db:pgcat-flip --json` was built for, and the reasoning
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
 here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
-twenty-one verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+twenty-two verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
 likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
@@ -107,6 +107,7 @@ report:
     "default_connection": "pgsql",
     "strict": true,
     "connection_only": false,
+    "real_test": false,
     "verdict": "FAIL",
     "exit_code": 1,
     "counts": {
@@ -149,9 +150,24 @@ them about which config key the name came from.
 Beside `strict` sits `connection_only`, the other flag that changes what a run *asks* rather than how
 it is reported: `true` on a `db:doctor --connection-only` run, which leaves the six rows whose
 subject is outside the process out of `checks` entirely (see below). A gate that requires a row has to
-be able to see that this report was never going to carry it, and a boolean is that fact. The two
-flags are the fields a job reads to know what kind of run it is holding; everything a gate selects on
-— `verdict`, `exit_code`, `counts`, `checks` — means the same thing in all four combinations.
+be able to see that this report was never going to carry it, and a boolean is that fact.
+
+`real_test` is the third flag of that kind, and it changes what a run asks in the other direction:
+`true` on a `db:doctor --real-test` run, which puts one real query to the connection the run follows
+and reports the answer in the `real query` row. It is published for the same reason the other two are
+— a report that opened a connection and one that only read configuration must not be the same artefact
+to a job selecting on rows — and it is a *flag* rather than a row's presence, because the row is in
+every run: without the flag it passes saying no query was attempted, which is the difference between
+"the query passed" and "nothing was asked" that an image with no database behind it turns on.
+
+The three flags are the fields a job reads to know what kind of run it is holding; everything a gate
+selects on — `verdict`, `exit_code`, `counts`, `checks` — means the same thing in all the combinations.
+
+The rendered run publishes the subject too, and in the configuration's own spelling: one line under
+the banner, `db-manager.swrr.connection` when the setting named the connection and `database.default`
+when the package fell back to it, with the connection it followed as the value — the pair above, in the
+spelling a shell gate can grep for and a reader can act on. The object is the whole of the machine
+contract; the line exists because a deploy's gates read the log.
 
 ## The chosen mechanism, in full
 
@@ -188,12 +204,13 @@ sentence exists to prevent.
 
 ### The row list is not a fixed length
 
-`checks` is every row the run built. That is twenty-one on an installation where `db` resolves to the
+`checks` is every row the run built. That is twenty-two on an installation where `db` resolves to the
 weighted manager and **nine** where it does not — the replica rows are only asked when there is a
 manager to ask them of, which is a property of the rendered command that predates this flag, and
 `--connection-only` removes six more by design (`connection_only` below). So `name` is the row's
 identity and the thing to select on; the order and the count are the table's, and are documented as
-such.
+such. `--real-test` adds no row to any of those lists: `real query` is built in every run, and the
+flag decides what that row says rather than whether it exists.
 
 `name` is the same string the table prints, so the report an operator read and the object a job parses
 name the same row the same way. `suggestions` is the repairs the row offers — the value or the mode to
@@ -245,7 +262,7 @@ about, and which of the two it is:
 | `config file` (vet) | the shape the file needs to be judged at all, and the bytes it printed while it was being read | **both named** — the shape is the file's and the bytes are what `config:cache` would write into the cached config |
 | `provider swap` | a `db` that would not resolve, a provider that is not registered, a `db` that is not the weighted manager | one fact in three diagnoses: the last two are the same cause, and both `weighted factory` and `pgcat gate` name the missing provider in the same run |
 | `weighted factory` | `db.factory` that could not be resolved, and one that is not the weighted factory | mutually exclusive — a binding that threw has no class to inspect |
-| `connector` | the class the connection is built through with the binding that answered it, a connection nothing can build, and a `db.factory` that cannot be asked at all | one answer per state, and the three are mutually exclusive: a connector that could be built has no error, one that could not has no class, and a factory that cannot be asked reports neither — and it is *one* sentence in each, because the class and where it came from are halves of a single fact (the framework's own, with nothing bound at `db.connector.<driver>`, against the installation's, resolved from that binding) |
+| `connector` | the class the connection is built through with the binding that answered it, a connection nothing can build, a `db.factory` that cannot be asked at all, and — in the same sentence — the class the connection resolves to with whether an installation's `Connection::resolverFor()` replacement built it | one answer per state, and the three connector states are mutually exclusive: a connector that could be built has no error, one that could not has no class, and a factory that cannot be asked reports neither — and it is *one* sentence in each, because the class and where it came from are halves of a single fact (the framework's own, with nothing bound at `db.connector.<driver>`, against the installation's, resolved from that binding). The resolved connection is the second half of the same sentence and one of three readings: no resolver registered, so the class is the framework's own; a resolver registered and the connection built through it; or a resolver registered and the connection in use older than it, which is the only state that says a replacement is registered and *not* in effect. Where no connection could be built the conditions are absent rather than empty, and a connection build that threw is the row's fourth failing state |
 | `published config` | no published file at all, one byte-identical to the sample, and one whose own `generation` — the key set it was published as — is behind this package's, ahead of it, absent, or a value that is not a whole number | mutually exclusive — a file that is not there cannot be identical to anything, and a byte-identical copy declares the sample's own generation: the row prints one sentence per run, and [config-generations.md](config-generations.md) is what each of them means |
 | `pgcat gate` | the driver mismatch, and an armed flipper whose paths are unset | mutually exclusive by construction (`isMismatched()` and `isEnabled()` cannot both hold), and `pgcat files` names the paths |
 | `pgcat files` | every file precondition a flip needs | **several, named all** — the register |
@@ -257,6 +274,7 @@ about, and which of the two it is:
 | `pool probe` | the pooler refused to serve a pool the configuration declares, and the pooler that answered nothing at all | **one store of answers, read as one**: what the pooler said is a single reading with a single verdict, so the pools that did not answer are named in one sentence rather than one per pool — `missing` is judged (it is the pool the flip re-applies the file for), `silent` is only reported, and neither is judged while the boot window is still open. Its two answers are told apart by the verdict rather than by two sentences, which is why nothing here is dated |
 | `store probe` | a probe switched off, a record that cannot be written, an in-process store | **several, named all** — the register |
 | `store reachability` | a primary store that failed in this process, a process already degraded, an in-process store, a store that would not answer a PING | one store, one state: a store that failed is *why* the process is degraded |
+| `real query` | the query that was asked and how it answered, and the state where no query was asked at all | **two mutually exclusive states in one sentence each** — either the query was put to the connection and the driver's own words came back, or nothing was connected to. Neither is dated: a database that refused a moment ago is not a finding the audit keeps, and the state that was not asked is not a finding at all |
 
 The vet's other three rows are the installation's, by name and by sentence: a candidate's refused
 replica metadata, switches and reader settings are the same problems, read from a file, and they are
@@ -300,6 +318,35 @@ key set, `verdict` from the rows that were asked, and `exit_code` from `gateFail
 rule — which is what lets one gate read a bounded report and a full one without learning a second
 shape.
 
+The `real query` row is the one reading a bounded run keeps that is about the outside world, and it is
+kept precisely because it does not take it: unless `--real-test` asks, the row passes saying nothing
+was connected to, so the mode's promise stands and a gate can still select the row by name. With the
+flag, the query is the run's own request and the mode's banner says so — a bounded run that reached a
+database without saying it had would be the same failure as a bounded report read as a complete one.
+
+### A contract run is the same envelope with the requirements as rows
+
+`--contract` is the other flag that changes *which rows exist*, and it does it the other way round from
+`--connection-only`: nothing is left out — the list is replaced. The rows become the requirements of
+[docs/deployment-contract.md](deployment-contract.md), one per key, each named exactly as the record
+states it (`wiring`, `configuration`, `variants`, …, `health-endpoint`), with its verdict the loudest
+verdict among the rows behind it. The detail names those rows and their verdicts and then carries the
+failing ones' sentences; their repairs become the requirement's `suggestions`. Nothing is re-read, so
+the object is the same object: the fixed key set, `verdict` from the requirement rows, `counts` over
+the same list, and `exit_code` from `gateFailed()` — a gate that reads `jq -e '.checks[] | select(.name
+== "configuration") | .verdict == "PASS"'` is asserting about a deployment fact rather than about a
+mechanism.
+
+Two of the requirement's states are worth a gate knowing. A requirement whose readings were left out by
+`--connection-only` passes saying which ones, in the row's own words — the mode composes, so the object
+still carries `connection_only: true`. And a requirement no row can answer passes saying it was **not
+judged**: `health-endpoint` is the only one today, and it is fixed in the class rather than decided by
+a run, so a gate can treat that key's `PASS` as "not judged by design" without parsing prose. Because
+every row the README documents is behind at least one requirement, the contract run is not a shorter
+run: no reading is lost by a pipeline moving to it, which `DeploymentContractTest` holds in both
+directions. `--config-file` is refused beside `--contract`, with exit `1` and a sentence rather than a
+half-honoured pair — a file is not a deployment.
+
 ## Tests that pin the rules
 
 | Rule | Test |
@@ -318,6 +365,9 @@ shape.
 | ...and refuses a named row that is not `PASS`, naming it | `DoctorGateTest::test_the_gate_refuses_a_named_row_that_is_not_pass` |
 | ...and refuses a run whose unnamed row failed, naming the rows | `DoctorGateTest::test_the_gate_refuses_a_run_whose_unnamed_row_failed` |
 | every row the gate blocks on is a row a real report carries | `DoctorGateTest::test_every_row_the_gate_names_is_a_row_a_run_produces` |
+| a contract run's rows are the record's keys in its order, its tally counts requirements, and a failing reading fails the requirement that asked it — carrying that row's sentence and repair up | `DbDoctorTest::test_the_contract_flag_reports_one_row_per_requirement`, `DbDoctorTest::test_a_failing_reading_fails_the_requirement_that_asks_it` |
+| a requirement no row answers passes saying it was not judged; a bounded contract run names the readings it did not ask; and the file mode is refused beside it | `DbDoctorTest::test_a_requirement_no_reading_answers_passes_and_says_it_was_not_judged`, `DbDoctorTest::test_a_bounded_contract_run_names_the_readings_it_did_not_ask`, `DbDoctorTest::test_the_contract_and_config_file_flags_are_refused_together` |
+| the record's `Key` column is the class's key list, every reading is a row the README documents, and every documented row is behind a requirement | `DeploymentContractTest` (four tests) |
 
 Mutations this decision has been checked against, run against the matrix test unless noted: the
 envelope's `checks` renamed to `rows` (14 of 14 cells fail on the key list), the row's `verdict`
@@ -338,7 +388,7 @@ it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Nine rows when `db` does not resolve, twenty-one otherwise, and
+- **The row set is not a fixed length.** Nine rows when `db` does not resolve, twenty-two otherwise, and
   six fewer than either in a `--connection-only` run, which is why the object publishes that flag. A gate
   must select by `name` — the row's identity, and the same string the table prints — and nothing in the
   object states how many rows there "should" be, so a gate that expects a particular row to exist has
@@ -350,11 +400,14 @@ it reports is a row the same rule can bind, and one the set test can measure.
   own output, with the separators of the platform that ran it. Assert on `name`, `verdict` and
   `exit_code`, which are the contract; `suggestions` is the one string-shaped value meant to be acted
   on, and it is the package's own spelling of a setting.
-- **`--strict` is the only flag that moves the verdict, so the object does not record that a run was
-  a gate.** `--json` produces the object and `--config-file` swaps the subject it is about; neither
-  changes a verdict. A report saved from a non-strict run and one from a strict run of the same
-  installation differ in `strict` and `exit_code` and nowhere else, which is intended — but a gate that
-  stores one and compares it to the other has to say which it ran.
+- **`--strict` is the only flag that changes what a *verdict means*, so the object does not record
+  that a run was a gate.** `--json` produces the object, `--config-file` swaps the subject it is about,
+  and `--real-test` is what the `real query` row's verdict is *about* — the one flag that can turn that
+  row from "not asked" into a query's answer, and the one a reader has to match between two stored
+  reports before comparing them. A report saved from a non-strict run and one from a strict run of the
+  same installation differ in `strict` and `exit_code` and nowhere else, which is intended — but a gate
+  that stores one and compares it to the other has to say which it ran, and whether it asked for a
+  query.
 - **The envelope is not versioned.** Keys are added deliberately (the test states the list), but a
   consumer that rejects unknown keys would break on an addition rather than ignore it.
 - **`verdict` is upper case and the health payload's `status` is not.** The doctor's three strings are

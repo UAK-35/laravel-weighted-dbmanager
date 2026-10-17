@@ -1,0 +1,86 @@
+{
+    "taken": "2026-10-17",
+    "php": "8.4.26",
+    "exit": 0,
+    "elapsed": 731.6,
+    "checks": [
+        {
+            "name": "syntax",
+            "status": "PASS",
+            "seconds": 19.1,
+            "note": "152 files, no syntax errors"
+        },
+        {
+            "name": "ast",
+            "status": "PASS",
+            "seconds": 3.5,
+            "note": "152 files parsed"
+        },
+        {
+            "name": "writeback",
+            "status": "PASS",
+            "seconds": 0.9,
+            "note": "3 write-back(s) in the shipped tree, every one declared; the detector agreed …"
+        },
+        {
+            "name": "schema",
+            "status": "PASS",
+            "seconds": 4.8,
+            "note": "composer.json is valid; composer.lock is not part of this repository, so it is not checked"
+        },
+        {
+            "name": "platform",
+            "status": "PASS",
+            "seconds": 4.2,
+            "note": "20 platform requirements satisfied"
+        },
+        {
+            "name": "interpreter",
+            "status": "PASS",
+            "seconds": 0.1,
+            "note": "PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4"
+        },
+        {
+            "name": "tools",
+            "status": "PASS",
+            "seconds": 0,
+            "note": "4 installed: pint v1.30.4, phpstan 2.2.14, phpunit 11.5.56, yaml-lint v7.4.18"
+        },
+        {
+            "name": "yaml",
+            "status": "PASS",
+            "seconds": 2.2,
+            "note": "[OK] All 1 YAML files contain valid syntax."
+        },
+        {
+            "name": "counts",
+            "status": "PASS",
+            "seconds": 1,
+            "note": "54 count(s) across 12 record(s), all in step with their derivations."
+        },
+        {
+            "name": "sentences",
+            "status": "PASS",
+            "seconds": 0.1,
+            "note": "8555 prose line(s) in 28 record(s), no fused sentence; the detector agreed wi…"
+        },
+        {
+            "name": "phpstan",
+            "status": "PASS",
+            "seconds": 10.9,
+            "note": "[OK] No errors"
+        },
+        {
+            "name": "pint",
+            "status": "PASS",
+            "seconds": 8,
+            "note": "PASS … 153 files"
+        },
+        {
+            "name": "tests",
+            "status": "PASS",
+            "seconds": 676.8,
+            "note": "Tests: 1440, Assertions: 9538, Skipped: 5."
+        }
+    ]
+}

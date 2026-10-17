@@ -90,6 +90,17 @@ final class ScheduleCauses
     public const KEY_BOOT_STAMP = 'boot_stamp';
 
     /**
+     * Why a surface that must answer without waiting does not ask the store.
+     *
+     * `db:scheduler-watchdog` and `/health/db` publish the same three readings, and this is the one
+     * sentence in them that is about the *asking* rather than about what was found. Sharing it
+     * rather than writing it twice is what keeps a monitor and a healthcheck from describing one
+     * omission two ways: a surface that answers on a schedule cannot afford a store whose connect
+     * can hang, and `db:doctor` is the surface that asks.
+     */
+    public const UNASKED_WHERE_ANSWERING_MUST_NOT_WAIT = 'the reading comes from the state file the flip wrote and asks nothing that can time out — `db:doctor` takes this reading, and that is where a store which does not answer is named';
+
+    /**
      * The key the mutex store is asked for.
      *
      * A name no run can hold — {@see FlipSchedule::mutexName()} completes a run's own name with the

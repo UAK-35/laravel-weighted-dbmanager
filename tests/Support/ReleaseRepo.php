@@ -288,7 +288,51 @@ final class ReleaseRepo
         $this->write('HANDOFF.md', $note ?? self::note());
         $this->commit('docs: the note a release moves');
 
-        return $this;
+        // A release reads its own note before it tags, so a fixture with a note and no suite has to
+        // answer that step or every one of these tests would be about the missing vendor directory.
+        // The answer is green unless a test asks for the refusal, which is what `withGuard(1)` does.
+        return $this->withGuard();
+    }
+
+    /**
+     * Answer the note-guard step without an installed suite — the same seam `withCiAnswer()` is for
+     * the CI rail, one step later in the release.
+     *
+     * The guard a real release runs is `HandoffTest`, and this fixture is a package with a note and no
+     * `vendor/` at all: installing composer here to test the release would be a release test about
+     * composer. So the fixture hands the release a script of its own, which records the pending tag it
+     * was told and exits with the verdict the test asked for.
+     *
+     * @param int $exit 0 for a note the guard reads green, non-zero for the refusal
+     */
+    public function withGuard(int $exit = 0): self
+    {
+        $script = $this->root . '.guard.php';
+        $asked = $this->root . '.guard-asked';
+
+        $stub = "<?php\n\ndeclare(strict_types=1);\n\n"
+            . 'file_put_contents(' . var_export($asked, true) . ', (string) getenv(\'HANDOFF_PENDING_TAG\'));' . "\n\n"
+            . ($exit === 0
+                ? ''
+                : 'fwrite(STDERR, "HANDOFF.md says v1.0.0 is the latest tag, and v1.0.1 is — so the lane " . PHP_EOL '
+                    . '. "the note describes has been released past." . PHP_EOL);' . "\n\n")
+            . 'exit(' . $exit . ");\n";
+
+        if (file_put_contents($script, $stub) === false) {
+            throw new RuntimeException("Could not write {$script}");
+        }
+
+        self::sweep([$script, $asked]);
+
+        return $this->withEnv(['HANDOFF_GUARD' => $script]);
+    }
+
+    /** The tag the guard was last told was pending — what the release called it, or nothing. */
+    public function guardAsked(): string
+    {
+        $contents = @file_get_contents($this->root . '.guard-asked');
+
+        return $contents === false ? '' : trim($contents);
     }
 
     /** This package's own note, as the bytes on disk: what `withNote()` copies. */

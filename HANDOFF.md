@@ -33,18 +33,25 @@ note was re-taken, on 2026-10-16, from the refs this checkout holds; the take be
 asked the remote directly (`git ls-remote`, which named the same commit the local `origin/dev` ref
 does) rather than trusting the local ref. Section 1 was re-taken on 2026-10-16,
 the date above, and it is the one part of this file that describes *now* rather than the commit it is
-read against — which this time means nothing is pending: the batches the notes before this one
-carried are committed, and this note is the commit after the register.
+read against — which this time means the batches the notes before this one carried are committed, and
+the two section 1 describes are the ones this working tree still holds.
 
 ---
 
 ## 1. Pending — written, green, uncommitted
 
-**Nothing is pending: every batch the notes before this one carried is committed on `dev` and
-unpushed.** Section 2 lists the seventeen commits, and section 3's `### Added` is where the prose that
-used to stand here belongs — a batch that has landed is a capability a consumer can install rather
-than a file somebody has to be told about. Three of them are worth naming anyway, because the cycle
-ended on them.
+**Two batches are pending: the schedule's causes on `/health/db`, and the deployment contract as a
+preflight mode.** Neither is committed. The first is the changelog's newest entry of the two — the
+endpoint carries the watchdog's three causes under `schedule.causes`, read from `Pgcat\ScheduleCauses`
+so the report and the healthcheck cannot explain one silence with different evidence. The second is
+`db:doctor --contract`: the requirements `docs/deployment-contract.md` states as rows named by their
+keys, folded from the same readings a plain run asks, with the mapping in
+`Support\DeploymentContract` and its record held to the class by `DeploymentContractTest`. That batch
+is why section 1's table below carries two rows: the two files no commit has yet. Everything the notes
+before this one carried is committed on `dev` and unpushed, and section 2 lists those commits. Section
+3's `### Added` is where the prose of a landed batch belongs — a capability a consumer can install
+rather than a file somebody has to be told about. Three of them are worth naming anyway, because the
+cycle ended on them.
 
 The first is the shape of the file a flip would swap in. `pgcat files` judged whether a flip can
 *read and write* the files, and nothing judged what the file it writes *is* — which matters because
@@ -102,12 +109,37 @@ note that describes them (`fbec6d6`), the read path with a silent schedule's cau
 preflight that carries them (`ae0e3e8`), the shape of what a flip would swap in (`2e5acd3`), the
 deployment's contract with the machine-record sample and the two prose-path readings beside it
 (`1ce9e2f`), the connector a connection is built through (`53d6352`), and the tag rows a release moves
-(`44a33da`) — each with the changelog entry that weighs it. The gate is green with this note in the tree: 13
-checks, 1411 tests, 9130 assertions, 5 skipped, 0 failures, 861.9s — the `tests` check itself 752.6s —
-with `DbDoctorTest` 183 tests, `VariantShapeTest` 12, `DbFlipPgcatDryRunTest` 6, `PgcatConfigFlipperTest`
-123 (one skip on this workstation), `MachinePathsTest` 34, `ConnectorInUseTest` 9, `HandoffNoteTest` 8
-and `tests/Unit/Docs` 111 among them. The batches the notes before this one called pending are section
-3's `### Added` now rather than files here.
+(`44a33da`) — each with the changelog entry that weighs it.
+
+The gate is green with this note in the tree, and the run that says so is the one recorded under
+`.agents/gate.json`: the summary and the per-check timings below are that run's, written by
+`php bin/checks.php --record` and rendered here by `php bin/handoff.php`, so a re-take moves them
+rather than restating them. The suite's own totals are in its row — tests, assertions and skips, read
+off PHPUnit's line — and the day and the interpreter are the record's rather than this sentence's.
+
+<!-- handoff:gate -->
+```
+php bin/checks.php --record
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 731.6s
+      recorded 2026-10-17, PHP 8.4.26
+      syntax     PASS    19.1s  152 files, no syntax errors
+      ast        PASS     3.5s  152 files parsed
+      writeback  PASS     0.9s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     4.8s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     4.2s  20 platform requirements satisfied
+      interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
+      tools      PASS     0.0s  4 installed: pint v1.30.4, phpstan 2.2.14, phpunit 11.5.56, yaml-lint v7.4.18
+      yaml       PASS     2.2s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     1.0s  54 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.1s  8555 prose line(s) in 28 record(s), no fused sentence; the detector agreed wi…
+      phpstan    PASS    10.9s  [OK] No errors
+      pint       PASS     8.0s  PASS … 153 files
+      tests      PASS   676.8s  Tests: 1440, Assertions: 9538, Skipped: 5.
+```
+<!-- /handoff:gate -->
+
+The batches the notes before this one called pending are section 3's `### Added` now rather than files
+here.
 
 **The release.** `33afd4e` — *Release v0.2.0-alpha3* — is what `bin/release.php` wrote: the sixteen
 entries under `## Unreleased` promoted into `## 0.2.0-alpha3 - 2026-10-11` (six `### Added`, six
@@ -137,28 +169,43 @@ wrote back to the writer. Under that register sits the batch the note before thi
 `53d6352`'s `connector` row and `Support\ConnectorInUse` — with the deployment contract, the variant
 shape, the bounded `--connection-only` preflight and the boot environment beside it, the read path's
 caps, standby feedback and pinned pair, and the schedule that can be watched.
-The note itself is prose only, which is what a re-take is: the rendered blocks come out of git and
-nothing else in it claims a fact a command could not answer.
+The note itself is prose only, which is what a re-take is: the rendered blocks come out of git, the
+inventory check and the last recorded gate run, and nothing else in it claims a fact a command could
+not answer. A release reads it too now: `bin/release.php` refreshes the five blocks at the register
+this note names — `bin/handoff.php --recorded`, which is a render and not a re-take — and then runs
+`HandoffTest` against the commit it just made, with the tag being created passed to it as the one
+pending tag. A red guard is refused before the tag exists, the release unmakes its own commit with
+`git reset --soft` and leaves the files staged, so a note that would be red at a release commit is a
+version nobody is handed rather than a runner finding out after the push.
 
 ### The records carry the stamp of the tag they were written at
 
 The three `.tsv` records describe the tree `v0.2.0-alpha3` was cut from, and they say so in their
-header line — the release rewrites them, which is why the tree at the register is current and the
-tree the release was cut on is not. That is the check reading the stamp rather than the rows: against
-the commit the release was cut on it exits 1 and names all three, one stale line each — and against
-this checkout, which carries work no tag has, it exits 1 as well, naming the source files and the
-settings this cycle added, which the release's own records do not carry yet:
+header line — the release rewrites them, which is why the record of one tag is the record of no later
+tree. That is the check reading the stamp and the rows: against the register this note names it exits
+1, naming each record and how far the tree it describes has moved past the alpha3 rows, and against
+this checkout, which carries work no commit has, it exits 1 with that same reading plus this cycle's
+work, which the release's own records do not carry yet:
 
+<!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=8742456
-  --> exit 1: files.tsv, methods.tsv and surface.tsv, 1 line(s) stale each — the stamp
+php bin/inventory.php --check --at=516e1f0
+  --> exit 1: the inventory is out of step with the tree at 516e1f0
+      files.tsv: 8 line(s) stale
+      methods.tsv: 42 line(s) stale
+      surface.tsv: 40 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with this tree — 7, 41 and 39 line(s) stale in files.tsv,
-      methods.tsv and surface.tsv, each naming the row it does not hold
+  --> exit 1: the inventory is out of step with the tree
+      files.tsv: 9 line(s) stale
+      methods.tsv: 44 line(s) stale
+      surface.tsv: 41 line(s) stale
 ```
+<!-- /handoff:records -->
 
-Both lines are run by the guard rather than trusted, which is the change above. The split is the
+Both lines are rendered by `php bin/handoff.php` and run by the guard rather than trusted, so the
+counts in them are the check's own reading of this tree rather than a session's: a source file added
+moves them the next time the note is taken, and nothing here has to be re-typed. The split is the
 intended state rather than a finding: those three files describe the tree **at a tag**, the next
 release rewrites them and commits them, and the check's own message offers exactly those two answers
 (*"Run php bin/inventory.php to write them and commit them, or leave them alone and let the next
@@ -170,21 +217,28 @@ the whole of it against the commit section 2 names as `HEAD` — the tracked pat
 files no commit carries — because a count of uncommitted paths is a fact about one working tree, and
 a committed file cannot be asked for it.
 
-The table under it is **rendered rather than written**, as are section 2's table and the listing under
-it. Its rows are the files this checkout has that the register does not carry (`git ls-files --cached
---others --exclude-standard` minus `git ls-tree -r` of the register), one row apiece, with the prose
-column declared in `tests/Support/Handoff.php` beside the renderer — the one input git cannot answer.
-It carries no rows this time — the register is the commit that landed the last of the batches above, so
-there is nothing this checkout has that it does not carry — and a row in it is the register saying it
-does not carry that file. `php bin/handoff.php` writes all three blocks from git,
-and the note's own guard renders the same three and asserts the file says what they say, so a re-take
-cannot state a set of files, a count or a listing the tree does not have. A file the register does not
-carry and that has no line declared for it is refused by name rather than rendered blank, which is the
-same sentence the guard gives: name it, or take it out of the tree.
+The table under it is **rendered rather than written**, as are the gate summary above it, the
+transcript of the records and section 2's table and the listing under it. Its rows are the files this
+checkout has that the register does not carry (`git ls-files --cached --others --exclude-standard`
+minus `git ls-tree -r` of the register), one row apiece, with the prose column declared in
+`tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. It carries the
+three rows this note's own batch added and no others: the schedule-causes work was carried by the
+register, while these files are the ones no commit has yet — a row in it is the register saying it
+does not carry that file, and the gate's record is one of them because the run it holds was taken for
+this note. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
+and one from the recorded run — and the note's own guard renders the same five and asserts the file
+says what they say, so a re-take cannot state a set of files, a count or a listing the tree does not
+have. A file the register does not carry and that has no line declared for it is refused by name
+rather than rendered blank, which is the same sentence the guard gives: name it, or take it out of
+the tree.
 
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `.agents/gate.json` | the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1's `gate` block is rendered from |
+| `src/Support/DeploymentContract.php` | the deployment contract as data: each requirement's key, its statement, and the `db:doctor` rows that answer it |
+| `src/Support/PinnedQuery.php` | the one real query — `select 1`, through the application's own connection — with the answer the health endpoint and `db:doctor --real-test` both report |
+| `tests/Unit/Docs/DeploymentContractTest.php` | the guard that holds the record's `Key` column and the README's row table to that map, in both directions |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -201,10 +255,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `44a33da` — *fix: a release moves the handoff note's tag rows into its own commit* |
+| HEAD | `516e1f0` — *docs: the handoff note is re-taken at the release that moves its own tag rows* |
 | `origin/dev` | `2744a13` — *docs: the handoff note is re-taken at the release commit, and its records reading is its transcript* |
-| Unpushed | 20 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 9, feat 9, fix 2 |
+| Unpushed | 21 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 10, feat 9, fix 2 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -233,6 +287,7 @@ travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+516e1f0  docs: the handoff note is re-taken at the release that moves its own tag rows
 44a33da  fix: a release moves the handoff note's tag rows into its own commit
 2fc0449  docs: the note's gate timing is the gate's own reading
 55dea77  docs: the handoff note is re-taken at the connector a connection is built through
@@ -242,7 +297,6 @@ The ten most recent are the ones a reader is most likely to be standing in the m
 2e5acd3  feat: the file a flip would swap in is judged by its shape, on both surfaces
 ae0e3e8  feat: the read path, a silent schedule's causes, and a preflight a build can run
 fbec6d6  docs: the handoff note is re-taken at the mechanisms-contend finding
-5af2df5  feat: two mechanisms armed at once are reported by name, not passed over
 ```
 <!-- /handoff:log -->
 

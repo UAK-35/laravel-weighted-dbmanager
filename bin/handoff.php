@@ -4,7 +4,7 @@
 declare(strict_types=1);
 
 /**
- * bin/handoff.php — write the handoff note's pending set and commit listing from git.
+ * bin/handoff.php — write the handoff note's pending set, records transcript and commit listing.
  *
  * WHAT THIS IS FOR
  * ----------------
@@ -13,7 +13,10 @@ declare(strict_types=1);
  *   type, and the most recent of them by id and subject. Every one of those is a question git
  *   answers, and until now the answer was copied in by hand — which is why the note's own words
  *   call a count of uncommitted paths a fact about one working tree, and why its guard had to be
- *   told not to bind that number to anything.
+ *   told not to bind that number to anything. The one block git does not answer is the inventory
+ *   check's transcript, and it is the same problem one step along: how far the three `.tsv` records
+ *   have fallen behind the tree is a number the check measures, so the renderer runs it and writes
+ *   what it said rather than leaving a session to copy the counts.
  *
  *   So the numbers have one home — git, read through `tests/Support/Handoff` — and this command
  *   writes them into the note. A re-take runs it and the blocks follow the tree; whether a human
@@ -21,8 +24,15 @@ declare(strict_types=1);
  *
  * WHAT IT WRITES, AND WHAT IT LEAVES ALONE
  * ----------------------------------------
- *   Three blocks, each delimited in the note by `<!-- handoff:NAME -->` and `<!-- /handoff:NAME -->`:
+ *   Five blocks, each delimited in the note by `<!-- handoff:NAME -->` and `<!-- /handoff:NAME -->`:
  *
+ *     gate       section 1's summary — the last recorded gate run, read out of `.agents/gate.json`:
+ *                its totals, its exit code, the day and interpreter it was taken on, and every
+ *                check with its verdict, seconds and note. Written by `bin/checks.php --record`
+ *                rather than run here: the suite that reads this block cannot run the gate it is
+ *                inside, and a note that stated those numbers by hand was restating a run.
+ *     records    section 1's transcript — `bin/inventory.php --check` run at the register and at
+ *                this checkout, with each run's exit code, verdict and per-record stale count
  *     pending    section 1's table — the files this checkout has that the register does not carry,
  *                with the words `Handoff::PENDING_DESCRIPTIONS` declares for each
  *     unpushed   section 2's table — the branch, the register, the remote tip, the count and the
@@ -36,7 +46,7 @@ declare(strict_types=1);
  *
  * WHY A GENERATOR IS SAFE HERE
  * ----------------------------
- *   The note's guard renders the same three blocks from the same derivations and asserts the file
+ *   The note's guard renders the same five blocks from the same derivations and asserts the file
  *   says what they say, so a hand-edited block is red in the suite rather than silently believed —
  *   and the register a *check* renders at is the one the note already names, not `HEAD`, because a
  *   note describes a register older than the commit that lands it. That is also why nothing is
@@ -49,6 +59,7 @@ declare(strict_types=1);
  * USAGE
  * -----
  *   php bin/handoff.php                     write the blocks at the commit this checkout is on
+ *   php bin/handoff.php --recorded          write them at the register the note already names
  *   php bin/handoff.php --register=<commit> write them at another commit
  *   php bin/handoff.php --check             compare, write nothing, exit 1 when a block is stale
  *   php bin/handoff.php --help
@@ -63,6 +74,7 @@ use Uak35\WeightedDbManager\Tests\Support\Handoff;
 
 $root = str_replace('\\', '/', dirname(__DIR__));
 $check = false;
+$recorded = false;
 $register = null;
 
 foreach (array_slice($argv, 1) as $argument) {
@@ -73,6 +85,11 @@ foreach (array_slice($argv, 1) as $argument) {
 
     if ($argument === '--check') {
         $check = true;
+        continue;
+    }
+
+    if ($argument === '--recorded') {
+        $recorded = true;
         continue;
     }
 
@@ -107,12 +124,17 @@ if (!is_file($root . '/HANDOFF.md')) {
 // compares the note with itself, so it renders the snapshot the note already records, and a note
 // committed at one commit is not reported stale by every commit made after it — nor by a push,
 // which moves `origin/dev` and leaves the pair the note names where it was.
+//
+// `--recorded` is the third case, and the one `bin/release.php` needs: it writes the blocks at the
+// register the note already names, so a release can refresh what its own rewrites moved — the records
+// in section 1 — without re-taking the note. A release that re-took the register would be describing
+// the commit before itself as the thing a reader is behind, which is the opposite of what a release is.
 try {
     $blocks = Handoff::blocks();
     $rendered = [];
 
     foreach ($blocks as $name) {
-        $rendered[$name] = Handoff::rendered($name, $check ? null : Handoff::take($register));
+        $rendered[$name] = Handoff::rendered($name, $check || $recorded ? null : Handoff::take($register));
     }
 } catch (Throwable $e) {
     fwrite(STDERR, 'The blocks could not be rendered: ' . $e->getMessage() . PHP_EOL);
@@ -163,7 +185,7 @@ echo implode(PHP_EOL, $report) . PHP_EOL;
 
 if ($check) {
     echo $outOfStep === []
-        ? sprintf('%d block(s) in HANDOFF.md, all in step with git.', count($rendered)) . PHP_EOL
+        ? sprintf('%d block(s) in HANDOFF.md, all in step with their derivations.', count($rendered)) . PHP_EOL
         : sprintf('%d block(s) out of step — run `php bin/handoff.php` to render them.', count($outOfStep)) . PHP_EOL;
 
     exit($outOfStep === [] ? 0 : 1);
@@ -218,13 +240,16 @@ function usage(): void
 
     Usage:
       php bin/handoff.php                     write the blocks at the commit this checkout is on
+      php bin/handoff.php --recorded          write them at the register the note already names
       php bin/handoff.php --register=<commit> write them at another commit
       php bin/handoff.php --check             compare, write nothing, exit 1 when a block is stale
       php bin/handoff.php --help
 
-    The blocks are the `pending`, `unpushed` and `log` regions of HANDOFF.md, each delimited by
-    `<!-- handoff:NAME -->` … `<!-- /handoff:NAME -->`. The derivations are in tests/Support/Handoff,
-    which is also what the note's guard reads, so a block this writes is a block the suite checks.
+    The blocks are the `gate`, `records`, `pending`, `unpushed` and `log` regions of HANDOFF.md,
+    each delimited by `<!-- handoff:NAME -->` … `<!-- /handoff:NAME -->`. The derivations are in
+    tests/Support/Handoff, which is also what the note's guard reads, so a block this writes is a
+    block the suite checks. The gate block needs a recorded run to read: `php bin/checks.php
+    --record` writes one, and this refuses rather than renders from a record that is not there.
 
     Exit codes: 0 written or in step, 1 stale or unrenderable, 2 usage error.
     TEXT;

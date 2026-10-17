@@ -144,6 +144,16 @@ declare(strict_types=1);
  *   have a run of its own yet, because the push that puts it on the remote comes last; the
  *   workflow's `v*` tag trigger is what records it, after the fact.
  *
+ *   What that leaves is the tree a tag points at, which is this release's own commit. So the
+ *   release reads it: the handoff note's blocks are rendered at the register the note names
+ *   (`bin/handoff.php --recorded` — a render, not a re-take), and once the commit exists the
+ *   note's guard (`HandoffTest`) is run against it, with the tag being created passed as the
+ *   one pending tag, before anything is tagged. A red guard refuses, the commit is unmade with
+ *   `git reset --soft` and its files stay staged, and no tag is created: a note that would be
+ *   red at a release commit is a version nobody is handed, rather than a runner finding out
+ *   after the push. A tree with a note and no installed suite refuses rather than skipping the
+ *   check, and `HANDOFF_GUARD` names the command for a fixture that has one and no vendor.
+ *
  * USAGE
  * -----
  *   php bin/release.php --weigh --dry-run      show the plan, change nothing
@@ -812,6 +822,22 @@ printf(
     },
     PHP_EOL,
 );
+// The step between the commit and the tag: the note's own guard, read at the commit this release
+// is about to freeze into a version. It is planned here rather than described in prose because a
+// dry run is where a reader decides whether to let the release run at all, and a check that can
+// only refuse after the commit is one they should see before it.
+$guard = noteGuardCommand($root);
+
+printf(
+    "  %-13s %s%s",
+    'note guard',
+    match (true) {
+        !is_file($root . '/HANDOFF.md') => 'no HANDOFF.md in this package — nothing to guard',
+        $guard === null => 'cannot run here — no vendor/bin/phpunit and no HANDOFF_GUARD',
+        default => "HandoffTest at the commit this tags — nothing is tagged if it is red",
+    },
+    PHP_EOL,
+);
 printf("  commit        %s%s", commitMessage($version), PHP_EOL);
 printf("  tag           git tag -a %s -m \"%s\"%s", $tag, $tag, PHP_EOL);
 printf("  push          git push %s %s --follow-tags%s", $options['remote'], $branch, PHP_EOL);
@@ -955,9 +981,27 @@ if ($handoff['moved'] !== []) {
     note('handoff note moved to ' . $tag . ' — ' . implode(', ', $handoff['moved']));
 }
 
+// The blocks the rows sit among, written from their own derivations before anything is committed:
+// the records this release just restamped are quoted in one of them, so a note committed without
+// this is a note the guard it is about to meet would refuse. A refusal here is the renderer's own
+// sentence, and it stops the release before the commit rather than after it.
+$renderedNote = renderHandoffNote($root);
+
+if ($renderedNote['ran'] && $renderedNote['exit'] !== 0) {
+    fail(sprintf(
+        "The handoff note's blocks could not be rendered, so nothing was committed or tagged:%s%s",
+        PHP_EOL . PHP_EOL . trim($renderedNote['output'] . $renderedNote['error']),
+        PHP_EOL,
+    ));
+}
+
+if ($renderedNote['changed']) {
+    note('handoff note — the rendered blocks moved with the records this release rewrote');
+}
+
 $staged = ['CHANGELOG.md'];
 
-if ($handoff['moved'] !== []) {
+if ($handoff['moved'] !== [] || $renderedNote['changed']) {
     $staged[] = 'HANDOFF.md';
 }
 
@@ -981,6 +1025,47 @@ $commit = git($root, ['commit', '-m', commitMessage($version), '--', ...$staged]
 
 if ($commit['exit'] !== 0) {
     fail('git commit failed: ' . trim($commit['output']));
+}
+
+// The commit exists and its tag does not: the one moment the note can be read at the tree a version
+// would freeze. Read after the commit rather than before it because the commit is what the tag will
+// point at — a guard run on the working tree would be checking a tree nobody is about to tag — and
+// read before the tag because a red note behind a published tag is a version a consumer can already
+// hold, which is the state `RELEASING.md` calls unfixable.
+//
+// The tag being absent is the one thing the guard cannot know for itself, so it is told: the note
+// names this version in its three tag rows, and `HANDOFF_PENDING_TAG` is how a note is read against a
+// tag that is about to exist. Nothing else is excused.
+$made = trim(git($root, ['rev-parse', 'HEAD'])['output']);
+
+if (is_file($root . '/HANDOFF.md')) {
+    if ($guard === null) {
+        fail(
+            'This package has a handoff note and no guard to read it: there is no vendor/bin/phpunit here and '
+            . 'HANDOFF_GUARD names none. A release does not tag a note it cannot verify — run composer install, '
+            . 'or point HANDOFF_GUARD at the suite.'
+        );
+    }
+
+    $verdict = runCommand($guard, $root, ['HANDOFF_PENDING_TAG' => $tag]);
+
+    if ($verdict['exit'] !== 0) {
+        $headNow = trim(git($root, ['rev-parse', 'HEAD'])['output']);
+        $unmade = $headNow === $made && git($root, ['reset', '--soft', 'HEAD~1'])['exit'] === 0;
+
+        fail(sprintf(
+            "The handoff note's guard is red at the commit this release made, so nothing was tagged:%s%s%s%s",
+            PHP_EOL . PHP_EOL . trim($verdict['output'] . $verdict['error']),
+            PHP_EOL,
+            $unmade
+                ? PHP_EOL . 'The commit was unmade (git reset --soft HEAD~1) and its files are staged as the '
+                    . 'release wrote them: repair what the guard names, then run the release again.'
+                : PHP_EOL . 'The commit was left in place because HEAD has moved since it was made.',
+            PHP_EOL,
+        ));
+    }
+
+    note('handoff note guard — green at ' . shortSha($made));
 }
 
 $tagResult = git($root, ['tag', '-a', $tag, '-m', $tag]);
@@ -1320,8 +1405,82 @@ function nextPrerelease(string $root, string $version): ?string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The handoff note
+// The handoff note — its rendered blocks, its tag rows, and the guard a release runs on it
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The note's five rendered blocks, written before the release commit — the half of a re-take a
+ * command can do.
+ *
+ * WHY THE RELEASE RENDERS THE NOTE AT ALL
+ * ---------------------------------------
+ *   A release falsifies more of the note than its three tag rows. `syncDerived()` rewrites the three
+ *   `.tsv` records with the stamp of the tag being cut, and section 1's transcript quotes a
+ *   `bin/inventory.php --check` that then exits 0 where the note says it exits 1 — so the release
+ *   commit has always been red on that block too, and nothing noticed because no run ever read the
+ *   note at the commit a tag points at. `bin/handoff.php` is the one thing that can write those
+ *   blocks: it derives them from git, the inventory check and the recorded gate run, and none of
+ *   those is prose. The prose is left exactly as the note was written — which is what the tag rows
+ *   already do, and why `HandoffNoteTest` asserts the shape rather than the bytes.
+ *
+ *   A tree with no reader (`tests/Support/Handoff.php`) has nothing to render against, and a
+ *   fixture is exactly that: a package with a note and no suite. There the note is left as the rows
+ *   were moved, which is the state the fixture is about.
+ *
+ * @return array{ran: bool, changed: bool, exit: int, output: string, error: string}
+ */
+function renderHandoffNote(string $root): array
+{
+    $script = $root . '/bin/handoff.php';
+
+    if (!is_file($root . '/HANDOFF.md') || !is_file($script) || !is_file($root . '/tests/Support/Handoff.php')) {
+        return ['ran' => false, 'changed' => false, 'exit' => 0, 'output' => '', 'error' => ''];
+    }
+
+    // `--recorded`, not a plain run: a plain run takes the note, and the register it would record is
+    // the commit this release is standing on — a release does not re-take, it refreshes the blocks its
+    // own rewrites moved, against the register the note already names.
+    $before = (string) @file_get_contents($root . '/HANDOFF.md');
+    $run = runCommand([PHP_BINARY, $script, '--recorded'], $root);
+    $after = (string) @file_get_contents($root . '/HANDOFF.md');
+
+    return [
+        'ran' => true,
+        'changed' => $run['exit'] === 0 && $before !== $after,
+        'exit' => $run['exit'],
+        'output' => $run['output'],
+        'error' => $run['error'],
+    ];
+}
+
+/**
+ * The command that reads the note at the commit a release makes, or null where this tree has none.
+ *
+ * The guard is the package's own suite (`HandoffTest`), run from the package root against the tree
+ * the release is about to tag: a second reading of the note written here would be a check that
+ * agrees with this file rather than with CI, which is the failure the guard exists to prevent.
+ *
+ * `HANDOFF_GUARD` is the seam a fixture needs — a package with a note and no installed suite is a
+ * state `ReleaseRepo` produces on purpose, and a release test that installed composer there would be
+ * a release test about composer. A real checkout takes the vendor path, and the pending tag is handed
+ * to whichever one runs.
+ *
+ * @return list<string>|null
+ */
+function noteGuardCommand(string $root): ?array
+{
+    $configured = getenv('HANDOFF_GUARD');
+
+    if ($configured !== false && trim($configured) !== '') {
+        return [PHP_BINARY, trim($configured)];
+    }
+
+    if (is_file($root . '/vendor/bin/phpunit')) {
+        return [PHP_BINARY, $root . '/vendor/bin/phpunit', '--filter', 'HandoffTest'];
+    }
+
+    return null;
+}
 
 /**
  * The three tag rows of HANDOFF.md's section 3, moved to the version being cut — or the note
@@ -1901,13 +2060,17 @@ function tokens(string $line): array
  * @param list<string> $command
  * @return array{exit: int, output: string, error: string}
  */
-function runCommand(array $command, string $root): array
+function runCommand(array $command, string $root, array $env = []): array
 {
     $process = @proc_open(
         $command,
         [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
         $root,
+        // A complete environment, because `proc_open()` replaces rather than merges when it is given
+        // one: the guard is told which tag is pending and still has to see PATH, HOME and whatever
+        // else a child needs to start. Nothing is passed unless a caller asks for something.
+        $env === [] ? null : array_merge(getenv(), $env),
     );
 
     if (!is_resource($process)) {

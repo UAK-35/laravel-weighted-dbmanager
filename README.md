@@ -252,7 +252,7 @@ next to the `read` list being weighted.
 | `swrr.read_path.enabled`         | `SWRR_READ_PATH_ENABLED`       | `false`                      | Whether `db:doctor` asks each endpoint of the connection's `read` list — and the writer — what it is capped at and whether a standby keeps `hot_standby_feedback` on: the `read caps` and `standby feedback` rows, in [docs/read-path-cancellations.md](docs/read-path-cancellations.md). Read as a **switch**; a value that is not one is refused, with the spellings, and resolves to the documented default — off — so a typo cannot arm a connection per endpoint. On, those two rows are one connection per endpoint, one query each, on a throwaway connection that is purged whatever the query did; off, they say the probe is not armed rather than reporting silence as if the endpoints had been asked. Neither row fails an endpoint that did not answer, and `--connection-only` leaves both out. The third read-path row (`read/write pair`) asks nothing and is answered whatever this says |
 | `swrr.read_path.timeout_ms`      | `SWRR_READ_PATH_TIMEOUT_MS`    | `2000`                       | How long one endpoint's reading may take to connect before it is reported as one that did not answer, in milliseconds — rounded up to whole seconds, because that is the unit the driver takes. It bounds the *connect* and not the statement, so an endpoint that is not there costs this bound rather than the driver's own default, which is what keeps a preflight from being made to wait on it |
 | `swrr.pgcat`                     | `SWRR_PGCAT_*`                 | *(see [Pgcat](#pgcat))*      | Pgcat flipper settings — **PostgreSQL connections only**                              |
-| `swrr.health.pinned_query`       | `SWRR_HEALTH_PINNED_QUERY`     | `true`                       | Whether `GET /health/db` runs one real query — `select 1` — on the connection the package follows before it is allowed to answer `ok` (see [Health endpoint](#health-endpoint)). Read as a **switch**; a value that is not one resolves to the documented default — on — and is reported as `pinned.refused`. Turn it off only where no database exists behind that connection at all — a test fixture, a configuration inspection — because with it off the endpoint's status is the state store's again, and `pinned.checked` is `false` |
+| `swrr.health.pinned_query`       | `SWRR_HEALTH_PINNED_QUERY`     | `true`                       | Whether `GET /health/db` runs one real query — `select 1` — on the connection the package follows before it is allowed to answer `ok` (see [Health endpoint](#health-endpoint)). Read as a **switch**; a value that is not one resolves to the documented default — on — and is reported as `pinned.refused`. Turn it off only where no database exists behind that connection at all — a test fixture, a configuration inspection — because with it off the endpoint's status is the state store's again, and `pinned.checked` is `false`. It is the *endpoint's* switch and reaches nothing else: `db:doctor --real-test` asks the same statement on purpose, and a run a gate passes that flag to is asking its own question |
 
 The sample sets two weekday windows — `10:00–14:20` and `17:00–20:30`, read
 in `swrr.timezone` (UTC) — so reads are served by the weighted replica pool
@@ -1112,7 +1112,7 @@ All six are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only]` | Preflight: check an installation end to end before traffic arrives — vet one config file, or a container that has no store, supervisor or database, before they are installed |
+| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only] [--real-test] [--contract]` | Preflight: check an installation end to end before traffic arrives — vet one config file, a container that has no store, supervisor or database, before they are installed, ask the followed connection for one real query, or judge the deployment contract's requirements as rows |
 | `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL |
@@ -1374,7 +1374,8 @@ php artisan db:scheduler-watchdog --strict   # 0 while the schedule runs, 1 when
 Beside that verdict it names the three causes a stopped schedule has that the state file cannot show
 — the store the runs' overlap mutexes live in, how many entries on the built schedule run
 `db:pgcat-flip`, and the boot stamp with the mode and owner it was found with. They are *readings*
-rather than verdicts: they travel in the object under `causes`, they never move the exit code, and an
+rather than verdicts: they travel in the object under `causes` — here, and under `schedule.causes`
+in `/health/db`, from the same class and in the same words — they never move the exit code, and an
 installation whose entry is not scheduled reports none of them. Two cost nothing but memory and this
 filesystem, and the store is deliberately only named, never asked — a check that runs every minute
 answers from the state file, and one that opened a socket to the cache would be waiting on the store
@@ -1428,8 +1429,8 @@ jq -e '.causes | map(.key) | length == 3' beat.json
 ```
 
 Two other surfaces answer the same question, and neither of them is this one. `/health/db` publishes
-the block under `schedule` and returns `503` when the beat has stopped, for the monitor *outside* the
-container; `db:doctor`'s `schedule beat` row fails, and `--strict` fails a release, for the preflight
+the block under `schedule` — the beat, the tolerance and these three readings under `causes` — and
+returns `503` when the beat has stopped, for the monitor *outside* the container; `db:doctor`'s `schedule beat` row fails, and `--strict` fails a release, for the preflight
 *before* one. This command is for the healthcheck *inside* the container, which has no HTTP client to
 call the endpoint with and no preflight to run: `CMD php artisan db:scheduler-watchdog --strict` is
 the whole of it.
@@ -1547,7 +1548,7 @@ details.
 ### Preflight: `db:doctor`
 
 `php artisan db:doctor` answers the question a deploy actually cares about — *will
-this installation do what it is configured to do?* Twenty-one things can be wrong while
+this installation do what it is configured to do?* Twenty-two things can be wrong while
 the application still boots and answers requests, and each one is a row:
 
 | Row                  | Fails when                                                                                                                                         |
@@ -1555,7 +1556,7 @@ the application still boots and answers requests, and each one is a row:
 | `boot environment`   | *warns* when the configuration is cached and the environment file this boot read was written **after** that cache was built: the rows below are then reading the cached values, so a setting the operator changed has not arrived, and the row names `php artisan config:clear` as the repair. States both facts in every state — the file the boot read (from `environmentFilePath()`, so a `loadEnvironmentFrom()` name is reported rather than a hardcoded `.env`, and an application that keeps its settings in the process environment says no file was read) and whether `configurationIsCached()` is true, with the cache it compared and the order it found. It reports what it could measure and invents no ordering a missing cache file would not support. No value is refused and nothing is dated: a boot's environment is not a finding the audit keeps. The one row here that fails a *release* rather than an image, and the reason `--strict` is worth running on a deploy |
 | `provider swap`      | the framework's `DatabaseServiceProvider` is still in charge, so `db` is not the weighted manager and reads are unweighted                         |
 | `weighted factory`   | `db.factory` is not `WeightedConnectionFactory` — the replica is chosen there, so weighting is not running either                                  |
-| `connector`          | the class that actually builds the connection, and where that answer came from. Laravel's own `createConnector()` takes a `db.connector.<driver>` binding **before** its own map, so an application that replaces the framework's PostgreSQL connector replaces it for every connection of that driver — and on a PostgreSQL connection that class is usually load-bearing, because it is where the option path the application's own connection config is written with is added. Nothing in configuration shows that, so the row names the class and says whether it is the framework's own or the installation's, naming the binding that answered when it is one. **Passes** in both non-failing states, deliberately: a replaced connector is the framework's own extension point and the ordinary way an application adds to it. **Fails** when nothing can be built at all — the connection `ActiveConnection` follows is not declared (the framework's own `A driver must be specified.`) or declares a driver no connector is registered for (`Unsupported driver [x].`), which is a mistyped name or driver and is reported by no other row, since the gate only asks what pgcat can front and only while it is armed. Where `db.factory` cannot be asked at all — resolving it threw, or it resolved to something that is not a `ConnectionFactory` — the row passes and says the reading was not taken, leaving that binding to `weighted factory`: one cause reported twice reads as two problems. Prints no `suggestion`, because the repair is a binding rather than a config line |
+| `connector`          | the class that actually builds the connection, and where that answer came from. Laravel's own `createConnector()` takes a `db.connector.<driver>` binding **before** its own map, so an application that replaces the framework's PostgreSQL connector replaces it for every connection of that driver — and on a PostgreSQL connection that class is usually load-bearing, because it is where the option path the application's own connection config is written with is added. Nothing in configuration shows that, so the row names the class and says whether it is the framework's own or the installation's, naming the binding that answered when it is one. The other half of what builds a connection is the class the framework constructs around the PDO, and that has its own replacement point: `Connection::resolverFor($driver, …)` is a global registry `createConnection()` consults **before** its own map, invisible to the connector and to configuration both. So the row also builds the connection `ActiveConnection` follows — from its config with the read list removed, because the class does not depend on the replica choice and asking the factory for the read/write pair would read the store — and names the class it resolves to, saying whether an installation's resolver is registered and whether the connection in use was built through it. That second half is the state nothing else can show: a resolver registered after the application built its connection leaves the application on the framework's class, and a row reading the registry alone would report the replacement as in place. **Passes** in every state that is not a fault, deliberately: a replaced connector and a replaced connection class are the framework's own extension points and the ordinary way an application adds to it. **Fails** when nothing can be built at all — the connection `ActiveConnection` follows is not declared (the framework's own `A driver must be specified.`) or declares a driver no connector is registered for (`Unsupported driver [x].`), which is a mistyped name or driver and is reported by no other row, since the gate only asks what pgcat can front and only while it is armed. It fails as well when the connector exists but the connection's own build throws — a config the framework cannot turn into a connection object is one the installation cannot use — carrying the framework's sentence for it. Where `db.factory` cannot be asked at all — resolving it threw, or it resolved to something that is not a `ConnectionFactory` — the row passes and says the reading was not taken, leaving that binding to `weighted factory`: one cause reported twice reads as two problems. Prints no `suggestion`, because the repair is a binding rather than a config line |
 | `published config`   | *warns* when `config/db-manager.php` is missing (the package sample is in use) or still byte-identical to the sample (nobody has reviewed a value). *Warns* as well when the file's own `generation` — the key set it was published as — is behind this package's, or is a value that is not a whole number, or is absent because the file predates the key, or is *ahead* of it, and passes when the copy's keys are current, whatever the installer put in them. The policy is the file's own, `Support\ConfigSchema`, and the three cases are in [docs/config-generations.md](docs/config-generations.md) |
 | `pgcat gate`         | `swrr.pgcat.enabled` is on where pgcat cannot act, or armed while a path a flip needs is unset. Reads the boot record as well as this boot's verdict, so it also fails with the age of a mismatch an earlier boot recorded, and warns when one is on record for a connection this run does not inspect. Prints `swrr.pgcat.enabled = false` as a `suggestion` for the switch armed where pgcat cannot act, and nothing for the other two failures: the paths it names are this installation's to choose |
 | `pgcat files`        | the flipper is armed and a file a flip needs is missing, unreadable or unwritable — including the target's directory, where the atomic swap writes `{target}.tmp.{pid}`, and the state/lock directory. Names **every** problem it finds, one sentence each and each dated from its own finding, and prints a `suggestion` per problem where the package can state the repair exactly: `chmod +r` for a source it cannot read, `chmod +w` for a file it cannot write and `chmod +wx` for a directory (a rename has to traverse it), and — for an *empty* `config_path`/`state_file`/`lock_file` — the setting line with the value the published config ships. A path that is not there, and an empty `readers_path`/`no_readers_path`, get no line: those values are this installation's to choose, and a plausible-looking path pasted into configuration replaces the operator's intent with this tool's. It judges the paths a flip *cycle* writes as well as the ones a flip step names — the boot stamp `swrr.pgcat.boot_file` points at (`FAIL` when the container can no longer record when it booted, so the boot window never closes and the entry flips on every run) and the `.lock` companion the audit record is locked on (two boots can write one record at once) — and every sentence carries the mode and owner the path was found with, because "not writable" is one question away from "by whom". The record *file* itself is the `store probe` row's reading rather than a second one here |
@@ -1573,6 +1574,7 @@ the application still boots and answers requests, and each one is a row:
 | `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Beside that verdict the row names the three causes a stopped schedule has that the state file cannot show — the store the runs' mutexes live in and whether it answered, how many entries run `db:pgcat-flip`, and the boot stamp with the mode and owner it was found with — as *readings* rather than verdicts, so the row's status and the exit code stay the beat's and an installation whose entry is not scheduled is told none of them; a bounded run (`--connection-only`) names the store without asking it, because being answerable where the store is not there is what that mode is for. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |
 | `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — except the unwritable record, which is the one state whose own record cannot hold the date it would print |
 | `store reachability` | the primary store cannot serve a read: no usable `redis` binding, or a connection that refuses — workers then fall back to an in-process rotation that is not shared between them |
+| `real query`         | the connection this run follows could not answer one real query — `select 1`, the same statement `/health/db` runs — and the row is also how a run says it never asked. A query is the one reading here that leaves the process, so it is put to a database only where `--real-test` asks for it: without the flag the row **passes** saying nothing was connected to, which is what keeps `--connection-only`'s promise of a run with no reachable database, and it is a row rather than an omission so a gate selecting it by name can never take its absence for a pass. With the flag the connection is the one `ActiveConnection` resolves (`db-manager.swrr.connection`, else `database.default`), asked through `DB::connection()` — the application's own path, so a read/write connection goes through the weighted factory exactly as a request would. **Fails** when the driver refused, carrying the driver's own words — the sentence an operator pastes into a search, and for PostgreSQL the one with the SQLSTATE a deploy gate matches on — and when no connection is named at all, where there is no database to ask. **Passes** naming the connection and the milliseconds it took, which is the proof a deploy gate promotes an image on: no other row opens a connection, so an installation can read exactly as documented while nothing behind it answers. Prints no `suggestion`: the repair is a pooler, a host or a credential, and none of them is a value this line can name. The endpoint's own `swrr.health.pinned_query` switch is not consulted — it turns the *endpoint's* query off where the question is not worth asking, and a flag a gate passed on purpose is that gate's to ask |
 
 Read-only, so it is safe in a deploy pipeline: nothing is written, no replica is
 queried and no flip is attempted. Two checks reach outside the process: the store
@@ -1900,7 +1902,8 @@ is about *this boot, this configuration and these files*: the environment the bo
 whether its configuration is cached (`boot environment`), the provider swap, the factory and the
 connector it would build, the published config's key set, the gate, the files a flip needs, the
 replica metadata, the read path's pair, the three switches, the reader windows, the mode pgcat's file
-is on, and both schedule rows. One *reading
+is on, both schedule rows, and the `real query` row — which is there in every run and reports that no
+query was attempted, unless `--real-test` asks for one. One *reading
 inside* a row that is still asked is left out too, and it says so rather than going quiet: the
 `schedule beat` row names the store the runs' mutexes live in and reports that it did not ask
 whether it answers. It runs with no
@@ -1912,6 +1915,8 @@ connection, which is a deploy that would serve every read through a pooler that 
 $ php artisan db:doctor --connection-only --strict
 Connection inspected: pgsql, followed connection is pgsql — --connection-only: pgcat supervisor, pool probe, read caps, standby feedback, store probe, store reachability were not asked, because each one reaches something a build container may not have
 
+  database.default  pgsql
+
 PASS  boot environment    this boot read settings from /app/.env, and the configuration is cached at /app/bootstrap/cache/config.php — not older than that file, so the values the rows below read are the ones these files spell
 FAIL  pgcat gate          swrr.pgcat.enabled is true but pgcat will never act: connection "pgsql" uses driver "sqlite", and pgcat only fronts PostgreSQL. …
       suggestion          swrr.pgcat.enabled = false
@@ -1919,6 +1924,25 @@ FAIL  pgcat gate          swrr.pgcat.enabled is true but pgcat will never act: c
 
 13 checks: 11 passed, 1 warning, 1 failed
 This installation will not behave as configured.
+```
+
+The line under the banner is the connection this run followed, spelled as the key it was read from —
+`db-manager.swrr.connection` when the installation set it, `database.default` when the package fell
+back — which is the fact an image gate logs and the reason *unset* and *set to the default* are not
+the same line. The object publishes the same pair as `swrr_connection` beside `default_connection`.
+
+One reading is still a question about the outside world, and a gate that has to prove a server is
+there can ask for it: `--real-test` puts one real query — `select 1`, the statement `/health/db`
+runs — to that same connection, and `real query` reports the answer and the milliseconds it took.
+No other row opens a connection, which is why an installation can read exactly as documented while
+nothing behind it answers, and why the deploy's own pooler gate runs exactly this. The flag is what
+keeps the mode's promise rather than what breaks it: without it the row passes saying nothing was
+connected to, so a bounded run asked nothing of a database — and a gate selecting the row by name
+can tell that from a query that passed.
+
+```bash
+php artisan db:doctor --connection-only --real-test --strict     # and prove the pooler answers
+php artisan db:doctor --connection-only --real-test --json | jq -e '.real_test and .exit_code == 0'
 ```
 
 The bounded run is not a quieter doctor. The rows it does ask are built by the same code, print the
@@ -1932,10 +1956,61 @@ order the full run asks them.
 php artisan db:doctor --connection-only --strict --json | jq -e '.connection_only == true'
 ```
 
-It does not judge the four rows as unreachable, which would be a comment on a container's network
+It does not judge the six rows as unreachable, which would be a comment on a container's network
 rather than on the installation, and it does not refuse to run where they are reachable: a row a
-bounded run asks is the row a full run asks, and the two answers are the same. Only the four that
+bounded run asks is the row a full run asks, and the two answers are the same. Only the six that
 reach outside the process are missing, and only because a build container cannot answer them.
+
+### The deployment contract as a gate: db:doctor --contract
+
+The rows above are named after the mechanism each one reads — `variant shape`, `pgcat supervisor`,
+`store reachability` — which is the right name for a reading and the wrong one for an obligation. A
+deployment has to have a pinned pooler, a writable state directory and a supervisor that can be
+spawned, and those are stated in
+[docs/deployment-contract.md](docs/deployment-contract.md) as requirements. Until now a pipeline
+that wanted to fail a deployment over them carried a list of row names in its own script, which is a
+copy of that record rather than the record.
+
+`--contract` asks for the same run and reports those requirements instead: one row per requirement,
+named by the key the record states it with, its verdict the loudest verdict among the rows behind
+it. Nothing is read twice and nothing new is judged — `Support\DeploymentContract` maps requirement
+to rows, and every row the table above documents is behind at least one requirement, so a contract
+run asks every question a plain one asks:
+
+```
+$ php artisan db:doctor --contract
+Connection inspected: pgsql, followed connection is pgsql — --contract: 13 requirements, each answered by the rows behind it
+
+PASS  wiring             the package in charge of reads, on the settings this boot read. Readings: 'boot environment' PASS, 'provider swap' PASS, … — every reading behind this requirement was asked and none failed
+FAIL  configuration      a configuration the package reads as written. Readings: 'pgcat gate' FAIL, 'replica metadata' PASS, … — 'pgcat gate' — swrr.pgcat.enabled is true but pgcat will never act: …
+      suggestion          swrr.pgcat.enabled = false
+…
+PASS  health-endpoint    the health endpoint as a machine's surface — not judged here: whether a monitor or a load balancer reads /health/db, and what the container's own health check asks, is the deployment's — no row here can see either
+
+13 checks: 11 passed, 1 warning, 1 failed
+A requirement of the deployment contract is not met: the rows above name the reading that failed.
+```
+
+The detail names every reading and its verdict before it names the problem, so a reader who has never
+seen the row list still learns which one refused; the sentences and repairs are the rows' own strings,
+carried up rather than re-worded. A requirement no row can answer — the health endpoint's monitoring is
+the one — passes with a detail that says it was **not judged**, because the package cannot fail a
+deployment over a fact it never read, and a `PASS` that did not say so would read as a check that ran.
+The exit rule is `gateFailed()` over the requirements' tally, so `--strict` still fails on the first
+warning, and `--json` publishes the requirement rows in the same envelope and shape as any other run:
+
+```bash
+jq -e '.checks[] | select(.name == "configuration") | .verdict == "PASS"' contract.json
+jq -e '[.checks[] | select(.verdict == "FAIL") | .name] | length == 0' contract.json
+```
+
+`--connection-only` composes, and a requirement whose readings that mode left out says which ones it
+did not ask — a short contract run is short *and* says why. `--config-file` is refused beside it: a
+file is not a deployment. The mapping is held to the record by
+`tests/Unit/Docs/DeploymentContractTest.php`, in both directions — every key in the record's table is
+a requirement, and every row the table above documents is behind one — so a new reading has to be
+placed in the contract before a deploy can move to `--contract`, and a requirement cannot survive in
+the record after the row that answered it is gone.
 
 ### The preflight as data: db:doctor --json
 
@@ -1955,6 +2030,7 @@ $ php artisan db:doctor --strict --json
     "default_connection": "pgsql",
     "strict": true,
     "connection_only": false,
+    "real_test": false,
     "verdict": "FAIL",
     "exit_code": 1,
     "counts": {
@@ -2073,7 +2149,9 @@ jq -e '.exit_code == 1 and .verdict == "WARN" and .strict' preflight.json    # .
 Two things to know about the row list. It is not a fixed length: a `db` that does not resolve to the
 weighted manager leaves the nine configuration rows and no replica rows at all, and a
 `--connection-only` run leaves six more out by design, so select a row by
-`name` — the row's identity, and the same string the table prints — rather than by position. And
+`name` — the row's identity, and the same string the table prints — rather than by position. Nor is a
+row's presence the same claim as its verdict: `real query` is in every run and passes saying it was
+not asked unless `--real-test` asked, which the object states as `real_test`. And
 `detail` is prose written for a reader, naming paths and commands and supervisor's own output on the
 platform that ran it; assert on `name`, `verdict` and `exit_code`, which are the contract, and treat
 `suggestions` as the repairs a row offers rather than as a substitute for reading the row.
@@ -2496,7 +2574,12 @@ the gate red over a file no clone has, which is the same question CI answers aft
 writing its own. It prints only failures by default (`--verbose` streams everything), takes
 `--only=syntax,tests` to narrow, reports
 a missing tool as a skip rather than crashing on it (`--require-all` turns that
-into a failure), and can add `composer audit` with `--audit`.
+into a failure), and can add `composer audit` with `--audit`. `--record` writes
+the run it just printed to `.agents/gate.json` — the totals, the exit code, the
+day and interpreter, and one row per check with its verdict, seconds and note —
+which is the record `HANDOFF.md` renders its own summary from; it refuses
+`--only`, because a note quoting a subset of the gate would be claiming the
+checks it leaves out were not there.
 
 The write-back scan is the one check whose subject is the shape of the code rather
 than the code itself: a class that reads a file and writes that same file back is a

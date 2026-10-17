@@ -346,6 +346,70 @@ final class ProseNumbersTest extends TestCase
     }
 
     /**
+     * Every sentence `docs/prose-numbers.md` quotes is a sentence the record it names still writes.
+     *
+     * The bound table's second column is titled "The sentence, as the record writes it", and until
+     * this test nothing read it as a claim: the guard beside it compares the *number* in the
+     * sentence, so a quote whose number was right and whose words had moved — a sentence the record
+     * had since reworded, a count the record had raised while the example still showed the old
+     * wording — passed as evidence of a sentence nobody could find. Two were in that state when this
+     * test was written: `pool-exclusions.md` had capitalised the sentence and bolded it whole, and
+     * `db-doctor-json.md` had gone from "three rows can offer one" to the four the row set now has.
+     *
+     * So the example is held to the record the claim names, which is the same pairing the guards
+     * themselves use: the first table's record is the claim's own `record` in `proseNumbers()`, and
+     * the second table's is the path written beside the pattern. Both sides lose their `**` rather
+     * than the example alone: emphasis is markup and not a word of the sentence, the records bold a
+     * number in some places (`and **nine** where it does not`) and not in others, and this record
+     * bolds the number it counts so a reader can see which word the claim is about. Whitespace is
+     * collapsed for the same reason — a record wraps its sentences, and a quote that wrapped with it
+     * is the same sentence.
+     *
+     * An ellipsis in an example means "the rest of the sentence", so the fragments around it must
+     * appear in the record *in that order*. That is the one shape a substring test would get wrong:
+     * a quote assembled from two different sentences would satisfy a set of fragments, and it is not
+     * a sentence the record writes.
+     */
+    public function test_every_example_the_record_quotes_is_a_sentence_of_the_record_it_names(): void
+    {
+        $examples = self::quotedExamples();
+
+        $this->assertNotSame([], $examples, 'docs/prose-numbers.md quotes the sentences its claims are written in, and a guard reads them');
+
+        foreach ($examples as $example) {
+            $source = self::normalise(str_replace('**', '', self::read($example['record'])));
+            $fragments = self::quoteFragments($example['quote']);
+
+            $this->assertNotSame(
+                [],
+                $fragments,
+                sprintf('docs/prose-numbers.md quotes [%s] for "%s", which is not a sentence.', $example['quote'], $example['claim']),
+            );
+
+            $at = 0;
+
+            foreach ($fragments as $fragment) {
+                $found = strpos($source, $fragment, $at);
+
+                $this->assertNotFalse(
+                    $found,
+                    sprintf(
+                        'docs/prose-numbers.md quotes [%s] as the sentence behind "%s", and %s does not write [%s]%s. '
+                        .'The example is stale: quote the sentence the record has, or repair the record if the example is what it should say.',
+                        $example['quote'],
+                        $example['claim'],
+                        $example['record'],
+                        $fragment,
+                        $at === 0 ? '' : ' after the part before the ellipsis',
+                    ),
+                );
+
+                $at = $found + strlen($fragment);
+            }
+        }
+    }
+
+    /**
      * The three tables that know what a switch refusal is agree about which switches there are.
      *
      * `docs/switch-values.md` named this as an unchecked restatement: the provider files a finding
@@ -541,6 +605,142 @@ final class ProseNumbersTest extends TestCase
         }
 
         return $claims;
+    }
+
+    /**
+     * The sentences `docs/prose-numbers.md` quotes, and the record each one was read from.
+     *
+     * Both tables in the record carry an example per row — the bound table's second column, and
+     * the table of claims that need the command to have run — so both are read from one place. The
+     * record a quote came from is not inferred from the quote or from its prose: for the first
+     * table it is the claim's own `record` in `proseNumbers()`, and for the second it is the path
+     * written in backticks beside the pattern. Those are the two places the guards themselves read,
+     * which is what keeps the quote and the number a claim about the same file.
+     *
+     * A row whose claim name the guard does not make, or a row with no quoted example, raises rather
+     * than being skipped: a silently unread row would be an example nothing holds, which is the
+     * state this reader exists to end.
+     *
+     * @return list<array{record: string, claim: string, quote: string}>
+     */
+    private static function quotedExamples(): array
+    {
+        $known = self::proseNumbers();
+        $inside = false;
+        $second = false;
+        $examples = [];
+
+        foreach (explode("\n", self::read('docs/prose-numbers.md')) as $line) {
+            $line = trim($line);
+
+            if (str_starts_with($line, '## The claims that are bound')) {
+                $inside = true;
+
+                continue;
+            }
+
+            if (! $inside) {
+                continue;
+            }
+
+            if (str_starts_with($line, 'The claims that need the command to have run')) {
+                $second = true;
+
+                continue;
+            }
+
+            if (str_starts_with($line, 'Both halves select by name')) {
+                break;
+            }
+
+            if (! str_starts_with($line, '|') || str_starts_with($line, '| Claim') || str_starts_with($line, '|---')) {
+                continue;
+            }
+
+            $cells = array_map(
+                static fn (string $cell): string => trim($cell),
+                explode('|', trim($line, '| ')),
+            );
+
+            if (count($cells) !== 3) {
+                throw new RuntimeException(
+                    'a claim row in docs/prose-numbers.md has '.count($cells).' cells where its header has three: '.$line,
+                );
+            }
+
+            if ($second) {
+                preg_match_all('/`([^`]+)`/', $cells[0], $spans);
+
+                $record = end($spans[1]) ?: '';
+
+                if (! str_contains($record, '/') && ! str_ends_with($record, '.md')) {
+                    throw new RuntimeException(sprintf(
+                        'docs/prose-numbers.md\'s second table names no record beside [%s], so an example cannot be held to one.',
+                        $cells[0],
+                    ));
+                }
+
+                $claim = $spans[1][0] ?? $cells[0];
+            } else {
+                $claim = $cells[0];
+
+                if (! isset($known[$claim])) {
+                    throw new RuntimeException(sprintf(
+                        'docs/prose-numbers.md states a claim [%s] that ProseNumbersTest does not make, so the example beside it is about nothing.',
+                        $claim,
+                    ));
+                }
+
+                $record = $known[$claim]['record'];
+            }
+
+            preg_match_all('/"([^"]+)"/u', $cells[1], $quotes);
+
+            if ($quotes[1] === []) {
+                throw new RuntimeException(sprintf(
+                    'docs/prose-numbers.md\'s row for [%s] quotes no example, and the column is the sentence the record writes.',
+                    $claim,
+                ));
+            }
+
+            foreach ($quotes[1] as $quote) {
+                $examples[] = ['record' => $record, 'claim' => $claim, 'quote' => $quote];
+            }
+        }
+
+        if ($examples === []) {
+            throw new RuntimeException('docs/prose-numbers.md has no quoted examples under the bound claims, and a guard reads them.');
+        }
+
+        return $examples;
+    }
+
+    /**
+     * One quoted example as the fragments a record has to state, in order.
+     *
+     * `**` goes rather than being matched: the records bold some numbers and not others, and this
+     * record bolds the number a claim counts, so the markup is not part of the sentence either way.
+     * An ellipsis is the quote's way of saying "the rest of the sentence", so it becomes a boundary
+     * between fragments rather than a character to find — a record never writes one.
+     *
+     * @return list<string>
+     */
+    private static function quoteFragments(string $quote): array
+    {
+        $fragments = array_map(
+            static fn (string $fragment): string => self::normalise(str_replace('**', '', $fragment)),
+            preg_split('/\s*(?:…|\.\.\.)\s*/u', $quote) ?: [],
+        );
+
+        return array_values(array_filter($fragments, static fn (string $fragment): bool => $fragment !== ''));
+    }
+
+    /**
+     * A record as one stream of prose: its line breaks were the file's, not the sentence's.
+     */
+    private static function normalise(string $text): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', str_replace("\r\n", "\n", $text)) ?? $text);
     }
 
     /**

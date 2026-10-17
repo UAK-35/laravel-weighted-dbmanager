@@ -6,7 +6,9 @@ namespace Uak35\WeightedDbManager\Support;
 
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Connectors\ConnectionFactory;
+use Illuminate\Database\DatabaseManager;
 use Throwable;
 
 /**
@@ -32,6 +34,23 @@ use Throwable;
  *   a *connection* rather than about a report: `ActiveConnection` names the connection this
  *   package follows, and this names what will build it.
  *
+ *   The factory is only half the answer. Laravel's `createConnection()` consults a second,
+ *   global registry before its own class map — a host application that calls
+ *   `Connection::resolverFor('pgsql', …)` replaces the class every pgsql connection is built
+ *   as, and that replacement is invisible to `createConnector()`: the connector only makes the
+ *   PDO the connection is constructed with. So the reading also *builds* the followed connection
+ *   and names the class it resolves to, then says whether an installation's resolver is
+ *   registered and whether the connection in use was built through it. A class that has been
+ *   replaced while the object in use is the framework's own is the state a boot-time cache
+ *   produces, and nothing else reports it.
+ *
+ *   The connection is built from the followed connection's config with the read list removed.
+ *   That is not a convenience: building the read/write pair makes the weighted factory choose a
+ *   replica, which reads the store, and a preflight that opened a socket to answer a question
+ *   about a class would stop being the reading `--connection-only` promises. The class does not
+ *   depend on that choice — `createConnection()` receives the driver and the registry and
+ *   nothing else — so the connection built here is the class the real one would be.
+ *
  * THE ONE THING IT TOUCHES, AND WHY THAT IS THE FRAMEWORK'S OWN
  * ------------------------------------------------------------
  *   `createConnector()` constructs the connector it names, so this reading does too — there
@@ -40,8 +59,26 @@ use Throwable;
  *   change, which is how a reading drifts from the thing it describes. The framework's own
  *   connectors construct nothing and open nothing; a replacement's constructor belongs to
  *   the application that wrote it, and that is the price of the question being answerable
- *   at all. Nothing else here touches an installation: no connection is made, no socket is
- *   opened and nothing is written.
+ *   at all. The connection object is constructed for the same reason and with the same
+ *   limit: `make()` builds the object and the lazy PDO closure, and resolving that closure
+ *   — the one step that would open a socket — is left to whoever asks for a query. Nothing
+ *   else here touches an installation: no connection is made and nothing is written.
+ *
+ * @phpstan-type Reading array{
+ *     connection: string,
+ *     source: string,
+ *     driver: string,
+ *     binding: string|null,
+ *     factory: string|null,
+ *     factory_error: string|null,
+ *     connector: string|null,
+ *     error: string|null,
+ *     connection_class: string|null,
+ *     connection_driver: string|null,
+ *     connection_error: string|null,
+ *     resolver: string|null,
+ *     resolver_applied: bool|null,
+ * }
  */
 final class ConnectorInUse
 {
@@ -89,16 +126,16 @@ final class ConnectorInUse
      * map — the row's sentence says which of the two it found rather than leaving a class name
      * to be interpreted.
      *
-     * @return array{
-     *     connection: string,
-     *     source: string,
-     *     driver: string,
-     *     binding: string|null,
-     *     factory: string|null,
-     *     factory_error: string|null,
-     *     connector: string|null,
-     *     error: string|null,
-     * }
+     * @return Reading
+     *
+     * The last five are the resolved connection and are null in the states where no connection was
+     * built: a factory that could not be asked, a connector that could not be built, or a build
+     * that threw. `resolver` is the driver whose class an installation replaced (null when none
+     * is registered), and `resolver_applied` is null with it — a replacement that was never
+     * registered is not a replacement that failed to apply. Where a connection had already been
+     * built in this process, its class is the one reported and `resolver_applied` compares it with
+     * what a connection built now resolves to: a class that differs means the connection in use
+     * predates the resolver, which is the only state in which the answer is `false`.
      */
     public static function resolve(Repository $config, Container $container): array
     {
@@ -115,6 +152,11 @@ final class ConnectorInUse
             'factory_error' => null,
             'connector' => null,
             'error' => null,
+            'connection_class' => null,
+            'connection_driver' => null,
+            'connection_error' => null,
+            'resolver' => null,
+            'resolver_applied' => null,
         ];
 
         try {
@@ -150,6 +192,79 @@ final class ConnectorInUse
 
         $reading['connector'] = $connector::class;
 
+        return self::connection($reading, $config, $container, $factory);
+    }
+
+    /**
+     * The class the followed connection resolves to, and whether an installation's resolver built it.
+     *
+     * The connection is built with the read list removed so the weighted factory does not choose a
+     * replica for a question about a class — see the class docblock. Where a connection of that
+     * name has already been built in this process, that object is the one reported, because it is
+     * the connection the application is actually using; a connection built now is the comparison
+     * that says whether the installation's resolver reached it.
+     *
+     * @param Reading $reading
+     * @return Reading
+     */
+    private static function connection(array $reading, Repository $config, Container $container, ConnectionFactory $factory): array
+    {
+        $name = $reading['connection'];
+        $driver = $reading['driver'];
+        $declared = $config->get('database.connections.'.$name);
+        $declared = is_array($declared) ? $declared : [];
+
+        // The read and write lists are a replica choice rather than part of the class: dropping
+        // them keeps `make()` on its single-connection path, which is the path that consults the
+        // connection resolver and never the read picker.
+        unset($declared['read'], $declared['write']);
+
+        try {
+            $built = $factory->make($declared, $name);
+        } catch (Throwable $e) {
+            $reading['connection_error'] = $e->getMessage();
+
+            return $reading;
+        }
+
+        $inUse = self::inUse($container, $name);
+        $connection = $inUse ?? $built;
+
+        $reading['connection_class'] = $connection::class;
+        $reading['connection_driver'] = $connection->getDriverName();
+
+        if (Connection::getResolver($driver) === null) {
+            return $reading;
+        }
+
+        $reading['resolver'] = $driver;
+        $reading['resolver_applied'] = $inUse === null || $inUse::class === $built::class;
+
         return $reading;
+    }
+
+    /**
+     * The connection of that name the application has already built, if there is one.
+     *
+     * Read out of the manager rather than built, because a built connection is the one in use and
+     * its class is the fact a resolver registered after it was built would be invisible to. A
+     * `db` that is not bound, or not a manager, is not this reading's fault to report — `provider
+     * swap` is the row for the `db` binding — so it is simply no cached connection.
+     */
+    private static function inUse(Container $container, string $name): ?Connection
+    {
+        try {
+            $manager = $container->make('db');
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (! $manager instanceof DatabaseManager) {
+            return null;
+        }
+
+        $connection = $manager->getConnections()[$name] ?? null;
+
+        return $connection instanceof Connection ? $connection : null;
     }
 }

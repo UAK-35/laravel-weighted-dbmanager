@@ -669,8 +669,9 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             //
             // Registered *against* the schedule, not at boot: the configuration is read the
             // moment the framework builds its schedule (`schedule:run`, `schedule:list`), and a
-            // boot that never resolves one — every HTTP request — pays nothing for this. Null
-            // when the entry is already there, so a second boot cannot make a second run.
+            // boot that never resolves one — every HTTP request that does not ask `/health/db`'s
+            // `schedule` block, which reads the entry count — pays nothing for this. Null when
+            // the entry is already there, so a second boot cannot make a second run.
             $this->app->afterResolving(Schedule::class, function (Schedule $schedule): void {
                 $config = $this->app->make(Repository::class);
 

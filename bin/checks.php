@@ -31,7 +31,18 @@ declare(strict_types=1);
  *   php bin/checks.php --audit          add `composer audit` (needs the network)
  *   php bin/checks.php --require-all    fail instead of skipping when a tool is missing
  *   php bin/checks.php --list           list the checks without running anything
+ *   php bin/checks.php --record         also write the summary to .agents/gate.json
  *   php bin/checks.php --help
+ *
+ * THE RECORD
+ * ----------
+ *   `--record` writes the summary this run printed — the totals, each check's verdict and
+ *   seconds, and the run's date and interpreter — to `.agents/gate.json`, which is committed.
+ *   The handoff note renders its summary from it, rather than a session copying the totals and the
+ *   seconds out of a terminal, so a re-take moves those numbers instead of restating them. It is opt-in for
+ *   the same reason a release is: an ordinary gate run is not a claim about anything, and a
+ *   record rewritten by every run would make the note stale on the first green check somebody
+ *   looked at.
  *
  * Exit code is 0 when every check passed, 1 when any failed (or was skipped
  * under --require-all), 2 for a usage error.
@@ -112,6 +123,15 @@ const STRUCTURE_WRITE_BACKS = [
 const VALUE_ENCODERS = ['json_encode', 'var_export', 'serialize', 'yaml_emit'];
 
 /**
+ * Where `--record` writes the run the handoff note quotes, relative to the package root.
+ *
+ * The path is read back by `tests/Support/Handoff.php`, which renders the note's block from it —
+ * so it is one location named in two files, and `HandoffTest` holds the two spellings to each
+ * other rather than trusting the pair to stay in step.
+ */
+const GATE_RECORD = '.agents/gate.json';
+
+/**
  * The shape a sentence boundary makes when its space is eaten: a terminator — `.`, `?`, `!` —
  * with the capitalised word that begins the next sentence against it.
  *
@@ -137,6 +157,7 @@ $options = [
     'audit' => false,
     'require-all' => false,
     'list' => false,
+    'record' => false,
     'only' => [],
 ];
 
@@ -163,6 +184,11 @@ foreach (array_slice($argv, 1) as $argument) {
 
     if ($argument === '--list') {
         $options['list'] = true;
+        continue;
+    }
+
+    if ($argument === '--record') {
+        $options['record'] = true;
         continue;
     }
 
@@ -385,6 +411,13 @@ if ($options['audit']) {
     ];
 }
 
+// The record is what the handoff note quotes as *the* gate, so a subset is not a run it can
+// describe: a note whose block listed three checks would be claiming the others were not there.
+if ($options['record'] && $options['only'] !== []) {
+    fwrite(STDERR, '--record writes the whole gate, and --only asks for a subset: run it without --only.' . PHP_EOL);
+    exit(2);
+}
+
 if ($options['only'] !== []) {
     $unknown = array_diff($options['only'], array_keys($checks));
 
@@ -459,6 +492,17 @@ foreach ($checks as $key => $check) {
 
 $elapsed = microtime(true) - $startedAt;
 
+// Written before the summary is printed rather than after the failure block, because the run it
+// records is the one whose rows are about to be read — and a red run is a run the note may have
+// to quote too, so the record is not conditional on the verdict.
+if ($options['record'] && @file_put_contents(
+    $root . '/' . GATE_RECORD,
+    gateRecord($results, $elapsed) . PHP_EOL,
+) === false) {
+    fwrite(STDERR, 'The gate record could not be written to ' . GATE_RECORD . '.' . PHP_EOL);
+    exit(1);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
@@ -490,6 +534,10 @@ foreach ($results as $key => $result) {
     );
 }
 
+if ($options['record']) {
+    echo PHP_EOL . 'recorded ' . GATE_RECORD . PHP_EOL;
+}
+
 if ($failed !== []) {
     foreach ($failed as $key) {
         $output = rtrim(stripAnsi($results[$key]['output']));
@@ -514,6 +562,43 @@ echo PHP_EOL . 'All checks passed.' . PHP_EOL;
 exit(0);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helpers — the record
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The summary this run printed, as the record a note quotes.
+ *
+ * Storage is the run's own verdicts and seconds, not the totals: the "N checks: N passed" line is
+ * built from the rows every time it is read, so a record cannot say thirteen checks over fourteen
+ * rows. The exit code is the exception, because it is not derivable from the rows alone — a run
+ * skipped-under-`--require-all` fails a check that did not fail — and it is the one thing the note's
+ * prose claims ("the gate is green") rather than renders.
+ *
+ * @param array<string, array{status: string, note: string, seconds: float, output: string}> $results
+ */
+function gateRecord(array $results, float $elapsed): string
+{
+    $checks = [];
+
+    foreach ($results as $name => $result) {
+        $checks[] = [
+            'name' => $name,
+            'status' => $result['status'],
+            'seconds' => round($result['seconds'], 1),
+            'note' => $result['note'],
+        ];
+    }
+
+    return (string) json_encode([
+        'taken' => date('Y-m-d'),
+        'php' => PHP_VERSION,
+        'exit' => in_array('FAIL', array_column($checks, 'status'), true) ? 1 : 0,
+        'elapsed' => round($elapsed, 1),
+        'checks' => $checks,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers — argument handling
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -531,6 +616,7 @@ function usage(): void
           --audit       Also run `composer audit` (needs network access).
           --require-all Treat a missing tool as a failure instead of a skip.
           --list        List the checks and their skip conditions.
+          --record      Write the summary to .agents/gate.json for the handoff note.
       -h, --help        Show this help.
 
     Exit code: 0 all green, 1 anything failed, 2 usage error.
