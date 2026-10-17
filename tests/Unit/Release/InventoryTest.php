@@ -150,7 +150,11 @@ final class InventoryTest extends TestCase
         $this->assertSame('', $cutting->error, $cutting->describe());
 
         // The tag the release then creates is the same reading: a note rendered before it cannot be
-        // stale after it, which is the whole point of accepting the stamp.
+        // stale after it, which is the whole point of accepting the stamp. The release commits the
+        // records it just stamped and tags that commit, which is also what keeps this fixture
+        // unambiguous — two tags on one commit leave `git describe` choosing between them, and the
+        // reading then depends on which one it picked.
+        $repo->commit('Release v0.2.0');
         $repo->tag('v0.2.0');
 
         $published = $repo->scriptRun('inventory.php', '--check');
