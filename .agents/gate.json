@@ -2,36 +2,36 @@
     "taken": "2026-10-17",
     "php": "8.4.26",
     "exit": 0,
-    "elapsed": 731.6,
+    "elapsed": 599.4,
     "checks": [
         {
             "name": "syntax",
             "status": "PASS",
-            "seconds": 19.1,
+            "seconds": 18.8,
             "note": "152 files, no syntax errors"
         },
         {
             "name": "ast",
             "status": "PASS",
-            "seconds": 3.5,
+            "seconds": 2.3,
             "note": "152 files parsed"
         },
         {
             "name": "writeback",
             "status": "PASS",
-            "seconds": 0.9,
+            "seconds": 0.6,
             "note": "3 write-back(s) in the shipped tree, every one declared; the detector agreed …"
         },
         {
             "name": "schema",
             "status": "PASS",
-            "seconds": 4.8,
+            "seconds": 4.2,
             "note": "composer.json is valid; composer.lock is not part of this repository, so it is not checked"
         },
         {
             "name": "platform",
             "status": "PASS",
-            "seconds": 4.2,
+            "seconds": 3.1,
             "note": "20 platform requirements satisfied"
         },
         {
@@ -49,13 +49,13 @@
         {
             "name": "yaml",
             "status": "PASS",
-            "seconds": 2.2,
+            "seconds": 2.3,
             "note": "[OK] All 1 YAML files contain valid syntax."
         },
         {
             "name": "counts",
             "status": "PASS",
-            "seconds": 1,
+            "seconds": 0.9,
             "note": "54 count(s) across 12 record(s), all in step with their derivations."
         },
         {
@@ -67,20 +67,20 @@
         {
             "name": "phpstan",
             "status": "PASS",
-            "seconds": 10.9,
+            "seconds": 8.9,
             "note": "[OK] No errors"
         },
         {
             "name": "pint",
             "status": "PASS",
-            "seconds": 8,
+            "seconds": 6.9,
             "note": "PASS … 153 files"
         },
         {
             "name": "tests",
             "status": "PASS",
-            "seconds": 676.8,
-            "note": "Tests: 1440, Assertions: 9538, Skipped: 5."
+            "seconds": 551.2,
+            "note": "Tests: 1442, Assertions: 9580, Skipped: 5."
         }
     ]
 }

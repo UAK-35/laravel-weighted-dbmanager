@@ -120,21 +120,21 @@ off PHPUnit's line — and the day and the interpreter are the record's rather t
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 731.6s
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 599.4s
       recorded 2026-10-17, PHP 8.4.26
-      syntax     PASS    19.1s  152 files, no syntax errors
-      ast        PASS     3.5s  152 files parsed
-      writeback  PASS     0.9s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     4.8s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     4.2s  20 platform requirements satisfied
+      syntax     PASS    18.8s  152 files, no syntax errors
+      ast        PASS     2.3s  152 files parsed
+      writeback  PASS     0.6s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     4.2s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     3.1s  20 platform requirements satisfied
       interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.30.4, phpstan 2.2.14, phpunit 11.5.56, yaml-lint v7.4.18
-      yaml       PASS     2.2s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     1.0s  54 count(s) across 12 record(s), all in step with their derivations.
+      yaml       PASS     2.3s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     0.9s  54 count(s) across 12 record(s), all in step with their derivations.
       sentences  PASS     0.1s  8555 prose line(s) in 28 record(s), no fused sentence; the detector agreed wi…
-      phpstan    PASS    10.9s  [OK] No errors
-      pint       PASS     8.0s  PASS … 153 files
-      tests      PASS   676.8s  Tests: 1440, Assertions: 9538, Skipped: 5.
+      phpstan    PASS     8.9s  [OK] No errors
+      pint       PASS     6.9s  PASS … 153 files
+      tests      PASS   551.2s  Tests: 1442, Assertions: 9580, Skipped: 5.
 ```
 <!-- /handoff:gate -->
 
@@ -182,24 +182,21 @@ version nobody is handed rather than a runner finding out after the push.
 
 The three `.tsv` records describe the tree `v0.2.0-alpha3` was cut from, and they say so in their
 header line — the release rewrites them, which is why the record of one tag is the record of no later
-tree. That is the check reading the stamp and the rows: against the register this note names it exits
-1, naming each record and how far the tree it describes has moved past the alpha3 rows, and against
-this checkout, which carries work no commit has, it exits 1 with that same reading plus this cycle's
-work, which the release's own records do not carry yet:
+tree. That is the check reading the stamp and the rows: against the register this note names the
+record on disk describes another tag, so it exits 1 on one line per file — the header — and nothing
+else, because the rows themselves are the tree's; and against this checkout it exits 0, naming the
+tag those rows describe, which is the release the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=516e1f0
-  --> exit 1: the inventory is out of step with the tree at 516e1f0
-      files.tsv: 3 line(s) stale
-      methods.tsv: 4 line(s) stale
-      surface.tsv: 3 line(s) stale
-
-php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with the tree
+php bin/inventory.php --check --at=d319a29
+  --> exit 1: the inventory is out of step with the tree at d319a29
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
       surface.tsv: 1 line(s) stale
+
+php bin/inventory.php --check
+  --> exit 0: inventory is current — 49 files, 246 public methods, 280 key(s)/member(s), described as v0.2.0-alpha4
 ```
 <!-- /handoff:records -->
 
@@ -235,10 +232,6 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `.agents/gate.json` | the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1's `gate` block is rendered from |
-| `src/Support/DeploymentContract.php` | the deployment contract as data: each requirement's key, its statement, and the `db:doctor` rows that answer it |
-| `src/Support/PinnedQuery.php` | the one real query — `select 1`, through the application's own connection — with the answer the health endpoint and `db:doctor --real-test` both report |
-| `tests/Unit/Docs/DeploymentContractTest.php` | the guard that holds the record's `Key` column and the README's row table to that map, in both directions |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -255,10 +248,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `516e1f0` — *docs: the handoff note is re-taken at the release that moves its own tag rows* |
-| `origin/dev` | `2744a13` — *docs: the handoff note is re-taken at the release commit, and its records reading is its transcript* |
-| Unpushed | 21 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 10, feat 9, fix 2 |
+| HEAD | `d319a29` — *fix: a release's own commit is green on the note it writes* |
+| `origin/dev` | `95ab09e` — *Release v0.2.0-alpha4* |
+| Unpushed | 1 commit — the one `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -284,19 +277,10 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The ten most recent are the ones a reader is most likely to be standing in the middle of:
+The one most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
-516e1f0  docs: the handoff note is re-taken at the release that moves its own tag rows
-44a33da  fix: a release moves the handoff note's tag rows into its own commit
-2fc0449  docs: the note's gate timing is the gate's own reading
-55dea77  docs: the handoff note is re-taken at the connector a connection is built through
-53d6352  feat: the connector a connection is built through is named, not assumed
-8cd853a  docs: the handoff note is re-taken at the flip's variant shape and the deployment's contract
-1ce9e2f  docs: the deployment's contract is written down, and a clone has a machine record to copy
-2e5acd3  feat: the file a flip would swap in is judged by its shape, on both surfaces
-ae0e3e8  feat: the read path, a silent schedule's causes, and a preflight a build can run
-fbec6d6  docs: the handoff note is re-taken at the mechanisms-contend finding
+d319a29  fix: a release's own commit is green on the note it writes
 ```
 <!-- /handoff:log -->
 
@@ -330,8 +314,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4` |
 | The latest of them | `v0.2.0-alpha4` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 19 entries — 13 added, 6 fixed, 0 changed |
-| The notes weigh as | minor — thirteen capabilities, which is the rung they take, and six repairs beside them |
+| `## Unreleased` at the basis | 2 entries — 0 added, 2 fixed, 0 changed |
+| The notes weigh as | patch — two repairs, which is the rung they take |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -339,18 +323,14 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries thirteen entries under `### Added` and six under `### Fixed` at the register,
-which the weighing reads as `minor` — thirteen capabilities the rung is for, and the six repairs that
-landed beside them. The register is therefore a branch whose release would publish the schedule that
-can be watched, the api page a past tree renders, the published config that says which key set it is,
-the file preconditions that cover a whole flip cycle, the supervisor's three failures, the two
-mechanisms that can own the pooler's mode being reported by name, the boot-environment row and the
-bounded `--connection-only` preflight that carries it, the three readings beside a silent schedule's
-verdict with the contract an application answers a cancellation by, the shape of the file a flip would
-swap in, the connector a connection is actually built through, and what a deployment of this package
-has to have — with the six repairs the release before it did not carry, the tag rows a release moves
-among them — as `0.2.0`, the first version with no suffix, which is the lane the absent version leaves
-open.
+and the section carries two entries under `### Fixed` at the register, which the weighing reads as
+`patch`. The register is therefore a branch whose release would publish the two repairs the release
+before it left red: `v0.2.0-alpha4`'s own commit failed on the note it had just written, in the two
+claims a release cannot make true in the one commit it may make them in — the records transcript,
+which was rendered before the tag it names existed, and a tag row read as "behind the register".
+Both are repaired at the reading rather than at the release's order, which is why the plan below
+declares `0.2.0-alpha5` instead of cutting the suffixless `0.2.0` the changes alone call for: the two
+repairs are the lane's next prerelease, and the version with no suffix is still ahead of it.
 
 ### The release that cut this tag, and the three rows it could not write
 
@@ -378,68 +358,66 @@ including that the three lines it changes are the three `Handoff::tagRowLines()`
 
 ### The release the weighing would ask for now
 
-Asked on 2026-10-16, with `44a33da` in the tree, what a release would do, it plans a `minor` and
-promotes nineteen bullets — the thirteen `### Added` and the six `### Fixed` the section carries:
+Asked on 2026-10-17, with the repairs in the tree, what a release would do, it weighs a `patch` — the
+two `### Fixed` entries the section carries — and the version it plans is the prerelease this note's
+table names, declared rather than weighed because the rung those changes call for is the suffixless
+one:
 
 ```bash
-php bin/release.php --weigh --branch=dev --dry-run
+php bin/release.php --version=0.2.0-alpha5 --branch=dev --dry-run
 ```
 
 ```
   branch        dev  (dirty)
   ci            HEAD is not the tip of origin/dev
-  latest tag    v0.2.0-alpha3
-  bump          minor  (weighed: a minor change)
-  next version  0.2.0  (tag v0.2.0)
-  CHANGELOG     ## Unreleased -> ## 0.2.0 - 2026-10-16, new Unreleased section above
-  release notes 19 bullet(s) in the promoted section
-  inventory     47 file(s), 243 method(s), 278 key(s)/member(s), described as v0.2.0  (fresh, weighed against v0.2.0-alpha3)
-  api page      45 class(es), 243 public method(s), described as v0.2.0
+  latest tag    v0.2.0-alpha4
+  bump          minor  (declared as --version=0.2.0-alpha5; the changes call for patch)
+  next version  0.2.0-alpha5  (tag v0.2.0-alpha5)
+  prerelease    alpha — Composer stability "alpha", so a consumer has to opt in
+  CHANGELOG     ## Unreleased -> ## 0.2.0-alpha5 - 2026-10-17, new Unreleased section above
+  release notes 2 bullet(s) in the promoted section
+  inventory     49 file(s), 246 method(s), 280 key(s)/member(s), described as v0.2.0-alpha5  (fresh, weighed against v0.2.0-alpha4)
+  api page      47 class(es), 246 public method(s), described as v0.2.0-alpha5
   branch-alias  dev-dev, dev-main -> 0.2.x-dev  (unchanged)
-  handoff note  HANDOFF.md — Tags on the branch, The latest of them, A version with no suffix moved to v0.2.0
-  commit        Release v0.2.0
-  tag           git tag -a v0.2.0 -m "v0.2.0"
+  handoff note  HANDOFF.md — Tags on the branch, The latest of them moved to v0.2.0-alpha5
+  note guard    HandoffTest at the commit this tags — nothing is tagged if it is red
+  commit        Release v0.2.0-alpha5
+  tag           git tag -a v0.2.0-alpha5 -m "v0.2.0-alpha5"
   push          git push origin dev --follow-tags
 ```
 
-Three lines of it are the state this note describes rather than a step of a release. `ci` is the
-interlock the twenty unpushed commits leave: a real run refuses to tag until they are on `origin/dev`,
-which is section 2's job and the `pkg-push` runbook's rather than this note's. `CHANGELOG` is the
-nineteen entries section 3's table counts, which the promotion would move into `0.2.0 - 2026-10-16`.
-`branch` is `(dirty)` because the re-take is measured in the working tree it was taken in; the note
-commit is what makes it clean. The `handoff note` line is the one this cycle added, and it says what
-the release would move in this file.
+Two lines of it are the state this note describes rather than a step of a release. `ci` is the
+interlock the unpushed commits leave: a real run refuses to tag until they are on `origin/dev`, which
+is section 2's job and the `pkg-push` runbook's rather than this note's. `branch` is `(dirty)` because
+the re-take is measured in the working tree it was taken in; the note commit is what makes it clean.
+The `handoff note` line says what the release would move in this file, and it names two rows rather
+than three: the absent version this note already carries is `v0.2.0`, so the row is moved to the
+version it holds.
 
 That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers in
-it that *are* checkable are held, though they are two different readings now: the entries the notes
-carry **at the register** (the table at the top of this section — nineteen) and the state of the three
-records (section 1, whose transcript the guard now runs). Its own `19 bullet(s)` is the weighing's
-answer about the working tree, which no guard here holds.
+it that *are* checkable are held, though they are two different readings: the entries the notes carry
+**at the register** (the table at the top of this section — two) and the state of the three records
+(section 1, whose transcript the guard runs). Its own `2 bullet(s)` is the weighing's answer about the
+working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Nineteen entries at the register, and they are this cycle's: thirteen `### Added` for the schedule that
-can be watched, the api page a past tree renders, the published config that says which key set it is,
-the paths a flip cycle writes, the supervisor's three failures, the two mechanisms that can own the
-pooler's mode being reported by name, the boot environment a row now names with the cached
-configuration beside it and the bounded preflight a build container runs, the three readings beside a
-silent schedule's verdict, the read path's caps, standby feedback and pinned pair, the shape of the
-file a flip would swap in, the connector a connection is built through being named rather than
-assumed, and the contract a deployment of this package has to meet; and six
-`### Fixed` for the repairs the release before this one left, the register settled and this cycle
-landed — the guarded commit path, and the records reading that holds the commands section 1 quotes —
-the two the register itself settled (the published copy's `swrr.pgcat.schedule.enabled`, whose shipped
-default quietly prevented the inheritance every surface promised, and the rule its `interval_minutes`
-falls back by), the machine record a clone now copies, and the tag rows a release moves rather than a
-re-take repairing them afterwards. The sixteen entries the tag carries — six `### Added`, six
-`### Changed`, four `### Fixed` — are the pgcat cycle's work and the guard repairs before them, and
-the promotion would carry all nineteen of these with them.
+Two entries at the register, and both are this cycle's repair of the release before it: the records
+transcript, which a release now reads at the stamp of the tag it is cutting rather than at the tag
+that already exists, and the tag row, which is read as the branch it names rather than as the register
+a note taken before the release names. Neither could be repaired by re-taking the note afterwards,
+because the commit the tag points at is the one a reader is sent to — `v0.2.0-alpha4`'s own commit went
+red on both, and cold also on the second.
 
-What those sixteen change for a consumer is written in the released section rather than repeated here.
-What is *not* in them is anything the three `.tsv` records, `API.md` or the changelog cannot account
-for: the records are the tree at the tag, the page is rendered from the record, and the weighing's own
-lines are the surface the cycle moved — `public API` and `config` weighing `minor` on the changes the
-prerelease carried, and nothing removed, renamed or added since.
+Everything the release before this one carried is in `v0.2.0-alpha4`: the schedule that can be watched,
+the api page a past tree renders, the published config that says which key set it is, the paths a flip
+cycle writes, the supervisor's three failures, the two mechanisms that can own the pooler's mode being
+reported by name, the bounded preflight a build container runs with the boot-environment row that
+carries it, the three readings beside a silent schedule's verdict, the read path's caps, standby
+feedback and pinned pair, the shape of the file a flip would swap in, the connector a connection is
+built through being named rather than assumed, and the contract a deployment of this package has to
+meet — with the repairs that release settled beside them, the tag rows a release moves among them.
+What those change for a consumer is written in the released section rather than repeated here.
 
 ### The boundary flip, in a tag and in no installation
 
