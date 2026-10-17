@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha4 - 2026-10-17
+
 ### Added
 
 - **The bounded preflight can prove the connection answers: `db:doctor --real-test` puts one real

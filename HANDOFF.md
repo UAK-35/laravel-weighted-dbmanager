@@ -191,15 +191,15 @@ work, which the release's own records do not carry yet:
 ```
 php bin/inventory.php --check --at=516e1f0
   --> exit 1: the inventory is out of step with the tree at 516e1f0
-      files.tsv: 8 line(s) stale
-      methods.tsv: 42 line(s) stale
-      surface.tsv: 40 line(s) stale
+      files.tsv: 3 line(s) stale
+      methods.tsv: 4 line(s) stale
+      surface.tsv: 3 line(s) stale
 
 php bin/inventory.php --check
   --> exit 1: the inventory is out of step with the tree
-      files.tsv: 9 line(s) stale
-      methods.tsv: 44 line(s) stale
-      surface.tsv: 41 line(s) stale
+      files.tsv: 1 line(s) stale
+      methods.tsv: 1 line(s) stale
+      surface.tsv: 1 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -327,8 +327,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3` |
-| The latest of them | `v0.2.0-alpha3` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4` |
+| The latest of them | `v0.2.0-alpha4` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 19 entries — 13 added, 6 fixed, 0 changed |
 | The notes weigh as | minor — thirteen capabilities, which is the rung they take, and six repairs beside them |
