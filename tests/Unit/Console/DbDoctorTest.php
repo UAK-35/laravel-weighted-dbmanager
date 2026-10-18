@@ -2159,6 +2159,7 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringStartsWith('FAIL  pool probe', $row);
         $this->assertStringContainsString('holds no pool "reader_db_2"', $row);
+        $this->assertStringContainsString('— probed tcp://127.0.0.1:7432', $row, 'the row names the endpoint it asked as well as what the pooler said');
         $this->assertStringContainsString('No pool configured for database', $row, 'the pooler\'s admission rather than a paraphrase of it');
         $this->assertStringStartsWith('PASS  pgcat supervisor', $this->rowContaining($output, 'pgcat supervisor'), 'the program supervisord can see is up, which is exactly why this row exists');
         $this->assertSame(1, $exit, 'a pool the pooler cannot serve is a failure, and `--strict` is not what decides it');
@@ -2179,6 +2180,7 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringStartsWith('WARN  pool probe', $row);
         $this->assertStringContainsString('did not answer for pool "reader_db_2"', $row);
+        $this->assertStringContainsString('— probed tcp://127.0.0.1:7432', $row, 'the row names where the packets went, which is what tells a wrong port from a stopped pooler');
         $this->assertSame(0, $exit, 'a pooler that answered nothing is not a failure');
     }
 
@@ -5615,9 +5617,15 @@ class DbDoctorTest extends TestCase
                 'status' => $status,
                 'evidence' => match ($status) {
                     'missing' => sprintf('pgcat is running but has no pool "%s": No pool configured for database: "%s"', $database, $database),
-                    'silent' => sprintf('tcp://127.0.0.1:5432 did not answer for pool "%s": Connection refused', $database),
+                    'silent' => sprintf('tcp://127.0.0.1:7432 did not answer for pool "%s": Connection refused', $database),
                     default => sprintf('the pooler answered for pool "%s"', $database),
                 },
+                // The endpoint the packets went to, as `PoolProbe::ask()` returns it. 7432 rather
+                // than pgcat's 6432 so a row that printed the convention instead of the exchange
+                // would be a different string, and so would one that printed nothing.
+                'host' => '127.0.0.1',
+                'port' => 7432,
+                'address' => 'tcp://127.0.0.1:7432',
             ];
         };
 

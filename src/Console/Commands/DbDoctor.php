@@ -2921,6 +2921,12 @@ class DbDoctor extends Command
      *   address must not be able to fail a healthy installation, and the same line is what keeps a
      *   misconfigured probe from restarting a healthy pooler every minute.
      *
+     *   Every row that asked something names the endpoint the packets went to, `tcp://host:port`,
+     *   read off the probe's own answer rather than off `swrr.pgcat.pool_probe.*`. A probe aimed at
+     *   the wrong port reports the same silence as a pooler that is down, so the pool names alone
+     *   leave an operator nothing to check; the address is what lets that installation diagnose
+     *   itself, and it is the one fact both this row and `/health/db`'s `pool_probe` block carry.
+     *
      * WHY IT IS NOT JUDGED WHILE THE BOOT WINDOW IS OPEN
      *   A container is allowed to converge, and the repair that re-applies the configuration runs
      *   inside that window: `applyCurrentState()` re-applies the variant and restarts the pooler for
@@ -2974,12 +2980,20 @@ class DbDoctor extends Command
         // answered sentence, so a `null` can only reach a row that would not print it.
         $reason = $verdict['reason'] ?? 'the running pooler answered for every pool the configuration declares';
 
+        // Where the packets actually went. A probe aimed at the wrong port reports the same silence
+        // as a pooler that is down, and the pool names alone cannot tell those apart — so every row
+        // that asked something names its endpoint, and a row that asked nothing appends nothing.
+        // The address comes from the probe's own answer rather than from the settings, which is what
+        // makes it describe the exchange instead of the intention.
+        $address = $verdict['address'] ?? null;
+        $probed = is_string($address) && $address !== '' ? ' — probed '.$address : '';
+
         if ($verdict['failed'] === true) {
-            return $this->row($name, self::FAIL, $reason);
+            return $this->row($name, self::FAIL, $reason.$probed);
         }
 
         if ($verdict['warned'] === true) {
-            return $this->row($name, self::WARN, $reason);
+            return $this->row($name, self::WARN, $reason.$probed);
         }
 
         if ($verdict['answered'] === true) {
@@ -2989,7 +3003,7 @@ class DbDoctor extends Command
             // The control name is what turns "the pooler answered" into a proof, or says that it
             // cannot be one on this pooler: an installation whose pooler authenticates before it
             // resolves a pool is not failing, but a PASS that read as proof would be wrong.
-            return $this->row($name, self::PASS, match ($discriminates) {
+            $detail = match ($discriminates) {
                 true => sprintf(
                     'the running pooler answered for every pool the configuration declares (%s), and refused a control name it cannot hold — so each answer is proof the pool exists',
                     $declared,
@@ -3002,10 +3016,12 @@ class DbDoctor extends Command
                     'the running pooler answered for every pool the configuration declares (%s), but a control name it cannot hold did not answer, so the answers could not be checked',
                     $declared,
                 ),
-            });
+            };
+
+            return $this->row($name, self::PASS, $detail.$probed);
         }
 
-        return $this->row($name, self::PASS, $reason);
+        return $this->row($name, self::PASS, $reason.$probed);
     }
 
     /**

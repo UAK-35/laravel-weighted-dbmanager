@@ -467,6 +467,22 @@ class DbFlipPgcatCommand extends Command
             ),
         ];
 
+        // What the last repair was for: the count above opens the question — which pool, under
+        // which variant — and the run that repaired it answered it in a sentence that is one line
+        // among a container's logs by the time anybody asks. The two facts are recorded beside the
+        // count, so the table answers them without the archaeology; `never` is the honest reading
+        // for a container that has not repaired anything, or a state file written before they were
+        // kept, which is the same default the row above uses for its time.
+        $rows[] = [
+            'last_repair_pool',
+            $text($window['last_repair_pool'] ?? null, 'never'),
+        ];
+
+        $rows[] = [
+            'last_repair_mode',
+            $text($window['last_repair_mode'] ?? null, 'never'),
+        ];
+
         return $rows;
     }
 

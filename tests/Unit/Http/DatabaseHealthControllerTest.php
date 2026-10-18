@@ -12,6 +12,7 @@ use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
+use Uak35\WeightedDbManager\Tests\Support\Readme;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
 /**
@@ -799,9 +800,15 @@ class DatabaseHealthControllerTest extends TestCase
             pools: ['writer_db_1', 'reader_db_2'],
             poolProbe: static fn (string $database): array => [
                 // The pooler this fixture is resolves a pool before it authenticates, so the
-                // control name is refused and every accepted pool is one it holds.
+                // control name is refused and every accepted pool is one it holds. The endpoint
+                // is carried as `PoolProbe::ask()` carries it, because the block publishes where
+                // the packets went: 7432 rather than pgcat's 6432, so a payload that printed the
+                // convention instead of the exchange would be a different string.
                 'status' => str_starts_with($database, 'weighted-dbmanager-control-') ? 'missing' : 'answered',
                 'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+                'host' => '127.0.0.1',
+                'port' => 7432,
+                'address' => 'tcp://127.0.0.1:7432',
             ],
         );
 
@@ -820,7 +827,10 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('pool_probe.reason', null)
             ->assertJsonPath('pool_probe.pools.0.database', 'writer_db_1')
             ->assertJsonPath('pool_probe.pools.1.database', 'reader_db_2')
-            ->assertJsonPath('pool_probe.pools.1.status', 'answered');
+            ->assertJsonPath('pool_probe.pools.1.status', 'answered')
+            ->assertJsonPath('pool_probe.host', '127.0.0.1')
+            ->assertJsonPath('pool_probe.port', 7432)
+            ->assertJsonPath('pool_probe.address', 'tcp://127.0.0.1:7432');
 
         Log::shouldNotHaveReceived('error');
     }
@@ -1000,6 +1010,165 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
+     * The repair rate, which is the one reading in this payload that warns rather than fails: a
+     * pooler repaired on run after run is a problem for a person, and the repair itself is the
+     * self-heal working. So the block says `warned` with the count, the window and the threshold it
+     * was judged against, and the status stays `ok` — the difference between a monitor that opens a
+     * ticket and a load balancer that evicts an instance.
+     */
+    public function test_the_pool_repair_rate_warns_without_moving_the_status(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            stateExtra: [
+                'pool_repairs' => 5,
+                'last_pool_repair_at' => gmdate(DATE_ATOM, time() - 60),
+                'pool_repair_times' => [
+                    gmdate(DATE_ATOM, time() - 2400),
+                    gmdate(DATE_ATOM, time() - 1800),
+                    gmdate(DATE_ATOM, time() - 600),
+                    gmdate(DATE_ATOM, time() - 120),
+                    gmdate(DATE_ATOM, time() - 60),
+                ],
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_repairs.applicable', true)
+            ->assertJsonPath('pool_repairs.judged', true)
+            ->assertJsonPath('pool_repairs.warned', true)
+            ->assertJsonPath('pool_repairs.in_window', 5)
+            ->assertJsonPath('pool_repairs.count', 5)
+            ->assertJsonPath('pool_repairs.window_seconds', 3600)
+            ->assertJsonPath('pool_repairs.max_repairs', 3);
+
+        $this->assertStringContainsString('threshold is 3', (string) $response->json('pool_repairs.reason'));
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * Below the line it is a reading and nothing else: the count is published, `warned` is false
+     * and there is no sentence to page on — a container that repaired itself once or twice at boot
+     * is the feature working, not a warning.
+     */
+    public function test_a_container_within_the_threshold_publishes_the_rate_and_no_warning(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            stateExtra: [
+                'pool_repairs' => 2,
+                'pool_repair_times' => [
+                    gmdate(DATE_ATOM, time() - 300),
+                    gmdate(DATE_ATOM, time() - 60),
+                ],
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_repairs.judged', true)
+            ->assertJsonPath('pool_repairs.warned', false)
+            ->assertJsonPath('pool_repairs.in_window', 2)
+            ->assertJsonPath('pool_repairs.reason', null);
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * A file written before repairs were dated is the one state this cannot judge, and the payload
+     * says so rather than reporting zero recent repairs — the comfortable answer, and the one that
+     * would make an installation with four repairs on record look quiet.
+     */
+    public function test_a_state_file_with_a_count_and_no_times_says_it_could_not_be_judged(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            stateExtra: ['pool_repairs' => 4],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_repairs.applicable', true)
+            ->assertJsonPath('pool_repairs.judged', false)
+            ->assertJsonPath('pool_repairs.in_window', null)
+            ->assertJsonPath('pool_repairs.warned', false)
+            ->assertJsonPath('pool_repairs.count', 4);
+
+        $this->assertStringContainsString('no times', (string) $response->json('pool_repairs.reason'));
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The window block's key set is the README's, key for key.
+     *
+     * This is the array a monitor reads: `flip.window` here, `status.window` under
+     * `db:pgcat-flip --status --json`, and the same reading behind the status table's rows, the
+     * doctor's `pool repairs` row and the `pool_repairs` block. Its shape is therefore a contract
+     * with four readers at once, and the only place it is written down is the table under this
+     * heading in the README — so the table and the array are compared here rather than left to a
+     * reader to notice a key that arrived unannounced. Both directions are checked: a key the
+     * array publishes and the table does not name fails, and so does a row the array has stopped
+     * publishing.
+     *
+     * The second assertion is the reason a single table can document the other two surfaces:
+     * the endpoint publishes the flipper's own array rather than a copy of it, which is what the
+     * reader-window and schedule blocks beside it do as well.
+     */
+    public function test_every_key_the_window_block_publishes_is_documented(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $flipper = $this->bindWindowFlipper(bootedSecondsAgo: 120);
+
+        $response = $this->getJson('/health/db')->assertOk();
+        $published = array_keys($response->json('flip.window'));
+
+        $documented = array_map(
+            [Readme::class, 'plain'],
+            array_column(Readme::table('### The window block: every key it publishes', 'key'), 'key'),
+        );
+
+        $this->assertSame($documented, $published, 'the README table and the published array are the same key set');
+        $this->assertSame(
+            array_keys($flipper->windowStatus()),
+            $published,
+            'the block is the flipper\'s own array, which is what lets one table document it',
+        );
+    }
+
+    /**
      * Point the connection the package follows at SQLite.
      *
      * `$database` is a file, `:memory:` or a path under a directory that does not exist — the
@@ -1059,6 +1228,7 @@ class DatabaseHealthControllerTest extends TestCase
         ?\Closure $poolProbe = null,
         ?string $beatAt = null,
         bool $stampBeat = true,
+        array $stateExtra = [],
     ): PgcatConfigFlipper {
         $dir = sys_get_temp_dir().'/swrr-health-window-'.bin2hex(random_bytes(4));
 
@@ -1130,6 +1300,12 @@ class DatabaseHealthControllerTest extends TestCase
                 if ($stampBeat) {
                     $state['beat_at'] = $beatAt ?? gmdate(DATE_ATOM);
                 }
+
+                // The state a test is *about* travel last, so a repair history can be seeded
+                // beside the convergence record a healthy container carries — the two are the
+                // same file, written by the same run, and a reading that took one without the
+                // other would be a container that never existed.
+                $state = array_merge($state, $stateExtra);
 
                 file_put_contents($config['state_file'], (string) json_encode($state));
             }

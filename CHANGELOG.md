@@ -68,6 +68,48 @@
 
 ### Added
 
+- **A repair records which pool it was refused for and which mode's variant declares it, and
+  `db:pgcat-flip --status` prints both.** The count said a repair happened and the stamp said when,
+  and neither said *what* — the pool was in the refusal sentence of the run that saw it, which is a
+  log line an operator arrives at after the fact, and the mode was inferable from the file only
+  while the file was still the one that run wrote. `recordRun()` now writes `last_repair_pool` and
+  `last_repair_mode` where it already wrote the count and the time, so both call sites — the poll
+  that found the mode already applied and the flip that applied one a moment before — record them
+  without knowing they do; the pool is the name the refusing probe gave, and a repair with none
+  writes null rather than carrying the previous repair's pool into a new record. `repairFacts()` is
+  still the one derivation, so `poolRepairStatus()` returns `pool` and `mode` beside `count` and
+  `last_at`, and `windowStatus()` carries them as `last_repair_pool` / `last_repair_mode` for the
+  two rows `--status` prints (`reader_db_2`, `readers`). A state file written before this reads the
+  new fields as null and its count and time unchanged, which is the shape a container upgrades in
+  until its next repair. `/health/db` is unchanged: its `pool_repairs` block is a rate, and the
+  warning's subject is the pooler rather than one pool.
+- **`/health/db` warns when this container has needed the pooler repaired faster than a threshold,
+  and it can say how many repairs fell inside a window because the flip now dates them.** A repair
+  is the self-heal working, so the count `db:pgcat-flip --status` prints cannot separate a container
+  that repaired itself once at boot from a pooler being re-applied on run after run, and `last_kind`
+  reads `repaired` in both. `recordRun()` now appends the moment of every repair to
+  `pool_repair_times` in the state file — pruning what is older than the configured window, so the
+  array is bounded by the setting that measures it — and `PgcatConfigFlipper::poolRepairRate()`
+  counts the moments inside that window and says `warned` when they are more than the threshold. The
+  endpoint publishes it as `pool_repairs`, beside `pool_probe`: `window_seconds`, `max_repairs` and
+  `in_window` beside `count` and `last_at`, and a `reason` that names the count and the line it was
+  judged against. It moves no status code, because a repair is history and the blocks that fail this
+  endpoint are the faults standing now; `judged` is false and `in_window` null for a state file that
+  carries a count and no times, because reading that as "none recently" is the comfortable answer
+  rather than the true one. The shipped line is more than three repairs in an hour
+  (`swrr.pgcat.pool_repairs.*`), the sample gains those two keys and so raises the published
+  config's generation to 2, and the decision, its retention and the shapes it rejected are in
+  [docs/pool-repair-rate.md](docs/pool-repair-rate.md).
+- **The pool probe's two surfaces name the endpoint they actually asked.** `poolProbeVerdict()` now
+  carries `host`, `port` and `address` — taken from the probe's own answer, not from
+  `swrr.pgcat.pool_probe.*`, so an installation that injects a probe is reported at that probe's
+  endpoint — and `/health/db`'s `pool_probe` block publishes them beside the pool answers. The
+  `db:doctor` row ends with `— probed tcp://host:port` for every row that asked something, and
+  appends nothing to the two that answer without a socket. A probe aimed at the wrong port is the
+  one fault that looks exactly like a pooler that is down: both are `silent`, and a row that listed
+  only the pool names left an operator with an installation whose every pool was silent and no way
+  to tell a stopped pooler from a mis-aimed probe. Now the address the packets went to is printed
+  with the silence.
 - **`PoolProbe` can read a port out of a pooler's own file.** `PoolProbe::port()` answers the
   `[general] port` from a `pgcat.toml`'s text — `6432` when the section names none, because that is
   pgcat's convention rather than PostgreSQL's — so the probe can be aimed at the port the pooler

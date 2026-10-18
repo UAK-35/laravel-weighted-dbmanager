@@ -78,7 +78,11 @@ use Throwable;
  *     fails every read to it while `supervisorctl status` reports the program
  *     healthy, and no other field here can see the difference. A pool the pooler
  *     refuses makes the payload `degraded`; a pooler that answered nothing at all
- *     is reported (`warned`) and never failed — see poolProbeVerdict()
+ *     is reported (`warned`) and never failed — see poolProbeVerdict(). The block
+ *     carries `address` beside the answers: where the packets actually went, read
+ *     off the probe's own answer, because a probe aimed at the wrong port reports
+ *     the same silence as a pooler that is down and the pool names alone cannot
+ *     tell those apart
  *
  * EVERY FAILURE IS ALSO LOGGED
  *   A payload nobody is looking at is not a signal. Each response that is not
@@ -201,6 +205,14 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         // default, so an installation that has not armed the probe pays nothing for this field.
         $poolProbe = $this->poolProbeVerdict($this->pgcat);
 
+        // The one reading in this payload that warns rather than fails: a repair is the self-heal
+        // working, so a pooler that keeps needing one is a problem for a person before it is an
+        // outage for the installation. The count alone cannot tell the two apart — one repair in a
+        // boot window and a pooler repaired on every run read the same — so the rate is the fact
+        // this block exists for, and it is deliberately not folded into $allHealthy: the status
+        // stays with the blocks that answer "is this installation serving now".
+        $poolRepairs = $this->poolRepairVerdict($this->pgcat);
+
         // pgcat being off is not ill health — on a MySQL connection there is
         // simply nothing to flip — so it does not feed $allHealthy. Neither does the
         // audit: a configuration that cannot act is not a database that cannot answer.
@@ -242,6 +254,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'schedule' => $schedule,
             'reader_window' => $readerWindow,
             'pool_probe' => $poolProbe,
+            'pool_repairs' => $poolRepairs,
             'audit' => $this->audit(),
             'errors' => $errors,
         ], $allHealthy ? 200 : 503);
@@ -511,6 +524,53 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         }
 
         return $pgcat->poolProbeVerdict();
+    }
+
+    /**
+     * Whether this container has been repairing its pooler faster than the configured threshold.
+     *
+     * The count `db:pgcat-flip --status` prints is a fact about the container's life, and the
+     * question a monitor has is narrower: is the pooler being repaired again and again right now.
+     * One repair inside a boot window is the self-heal doing its job, and the same code path run on
+     * every poll is a pooler that keeps refusing the pools the file declares — the difference is a
+     * rate, so the block publishes the repairs inside `swrr.pgcat.pool_repairs.window_seconds`
+     * beside the threshold and says `warned` when the count is past it. `in_window` is `null` and
+     * `judged` is false for a state file written before repairs were dated: it carries a count and
+     * no times, and reading that as "none recently" would be the most comfortable answer and the
+     * wrong one.
+     *
+     * The verdict is the flipper's, from the state file the flip writes, so this block and
+     * `db:doctor`'s `pool repairs` row count one container's repairs the same way — the row reports
+     * the count and the time, this reports the rate, and neither reads the file itself.
+     *
+     * Warns rather than fails, and moves no status code: a repair is the self-heal working, and the
+     * blocks that fail this endpoint are the ones whose fault is standing now — `pool_probe` asks
+     * the pooler at this moment, where this reads what happened to it.
+     *
+     * @param PgcatConfigFlipper|null $pgcat the flipper this endpoint was built with
+     *
+     * @return array{applicable: bool, judged: bool, warned: bool, window_seconds: int, max_repairs: int, count: int, in_window: int|null, last_at: string|null, reason: string|null}
+     */
+    private function poolRepairVerdict(?PgcatConfigFlipper $pgcat): array
+    {
+        if ($pgcat === null) {
+            return [
+                'applicable' => false,
+                'judged' => false,
+                'warned' => false,
+                'window_seconds' => PgcatConfigFlipper::DEFAULT_REPAIR_WINDOW_SECONDS,
+                'max_repairs' => PgcatConfigFlipper::DEFAULT_MAX_REPAIRS_PER_WINDOW,
+                'count' => 0,
+                'in_window' => null,
+                'last_at' => null,
+                'reason' => null,
+            ];
+        }
+
+        return [
+            'applicable' => true,
+            ...$pgcat->poolRepairRate(),
+        ];
     }
 
     /**

@@ -421,6 +421,17 @@ final class DbFlipPgcatCommandTest extends TestCase
      *
      * @return array<string, mixed>
      */
+    private function rowContaining(string $output, string $check): string
+    {
+        foreach (explode("\n", $output) as $line) {
+            if (str_contains($line, $check)) {
+                return trim($line);
+            }
+        }
+
+        $this->fail("The status table printed no [{$check}] row:\n" . $output);
+    }
+
     private function report(string $output): array
     {
         /** @var array<string, mixed> $decoded */
@@ -799,6 +810,8 @@ final class DbFlipPgcatCommandTest extends TestCase
             'last_kind' => 'repaired',
             'pool_repairs' => 2,
             'last_pool_repair_at' => '2026-10-10T12:00:00+00:00',
+            'last_repair_pool' => 'reader_db_2',
+            'last_repair_mode' => 'readers',
         ]));
 
         $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
@@ -807,13 +820,20 @@ final class DbFlipPgcatCommandTest extends TestCase
         $this->assertStringContainsString('pool_repairs', $output);
         $this->assertStringContainsString('2 recorded (last 2026-10-10T12:00:00+00:00)', $output);
 
-        // And the same two facts in the report a machine reads.
+        // The failing pool is named in the table, so "which one?" is a row rather than a search
+        // through the run's output.
+        $this->assertStringContainsString('reader_db_2', $this->rowContaining($output, 'last_repair_pool'));
+        $this->assertStringContainsString('readers', $this->rowContaining($output, 'last_repair_mode'));
+
+        // And the same facts in the report a machine reads.
         $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--json' => true]));
 
         $window = $this->report(Artisan::output())['status']['window'];
 
         $this->assertSame(2, $window['pool_repairs']);
         $this->assertSame('2026-10-10T12:00:00+00:00', $window['last_pool_repair_at']);
+        $this->assertSame('reader_db_2', $window['last_repair_pool']);
+        $this->assertSame('readers', $window['last_repair_mode']);
     }
 
     /**
@@ -829,8 +849,14 @@ final class DbFlipPgcatCommandTest extends TestCase
         $installation->install();
 
         $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+        $output = Artisan::output();
 
-        $this->assertStringContainsString('0 recorded (last never)', Artisan::output());
+        $this->assertStringContainsString('0 recorded (last never)', $output);
+
+        // The same rule for the pool and the mode: a repair that has not happened names nothing,
+        // and the cell says so rather than printing an empty one.
+        $this->assertStringContainsString('never', $this->rowContaining($output, 'last_repair_pool'));
+        $this->assertStringContainsString('never', $this->rowContaining($output, 'last_repair_mode'));
     }
 
     /**
