@@ -90,6 +90,14 @@ final class PoolProbe
      */
     private const MISSING_MARKER = 'no pool configured for database';
 
+    /**
+     * The port pgcat listens on when nothing else can say: its own convention, which is not
+     * PostgreSQL's. A probe aimed at a PostgreSQL server is answered for every name, in that
+     * server's words rather than the pooler's, which is the one mistake this class exists to keep
+     * out of a repair.
+     */
+    private const CONVENTIONAL_PORT = 6432;
+
     /** How much of the server's first message is read before it is classified. */
     private const MAX_ANSWER_BYTES = 4096;
 
@@ -97,8 +105,8 @@ final class PoolProbe
     private const EVIDENCE_CHARS = 200;
 
     /**
-     * Not instantiable: everything here is a pure function of an address and a name, plus one
-     * optional injected exchange.
+     * Not instantiable: everything here is a pure function of an address, a name, or the bytes of
+     * a configuration file, plus one optional injected exchange.
      */
     private function __construct()
     {
@@ -303,6 +311,72 @@ final class PoolProbe
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * The port a probe should dial, read in the order of authority: what the installation
+     * configured, then what the pooler's own file says it listens on, then pgcat's convention.
+     *
+     * WHY THE FILE, AND WHICH FILE
+     *   `[general] port` is the pooler stating its own listen port, and it belongs to the process
+     *   rather than to a flip — but only when it is read from the file the process is *running on*.
+     *   That is `config_path`, the target a swap renames over, and it is why this reading is not
+     *   the one `declaredPools()` makes of a variant: a variant is one of the files a flip may put
+     *   in front of the pooler, so a port taken from it would move with the flip instead of staying
+     *   with the program. The caller names the file; this method reads bytes, which is what keeps it
+     *   a pure function like the rest of the class.
+     *
+     *   `[general]` is the only section read. A `port` under `[pools…]` is a backend's port, and a
+     *   probe sent there would be measuring a database rather than the pooler.
+     *
+     * WHY THE CONVENTION IS LAST
+     *   An installation that configured no port and whose file cannot be read is one the probe will
+     *   report as silent, and silence is reported rather than repaired — so the fallback only
+     *   decides which address is named in that report. It is pgcat's port rather than PostgreSQL's
+     *   for the reason the class note gives: a PostgreSQL server answers every name, and would be
+     *   read as a pooler holding them all.
+     *
+     * @param string   $toml       the bytes of the pooler's own config file, or '' when unreadable
+     * @param int|null $configured the port the installation configured, or null/0 when it names none
+     */
+    public static function port(string $toml, ?int $configured = null): int
+    {
+        if ($configured !== null && $configured > 0) {
+            return $configured;
+        }
+
+        $general = false;
+
+        foreach (preg_split('/\R/', $toml) ?: [] as $line) {
+            // A trailing comment is not part of the value, and a line that is nothing but one is
+            // not a setting: `port = 6432 # the one clients connect to` is a port, `# port = 1`
+            // is prose about one.
+            $line = trim((string) preg_replace('/#.*$/', '', $line));
+
+            if ($line === '') {
+                continue;
+            }
+
+            if (preg_match('/^\[\s*([^\]]+?)\s*\]$/', $line, $header) === 1) {
+                $general = strtolower($header[1]) === 'general';
+
+                continue;
+            }
+
+            if (! $general) {
+                continue;
+            }
+
+            if (preg_match('/^port\s*=\s*"?(\d+)"?$/', $line, $match) === 1) {
+                $port = (int) $match[1];
+
+                // A port outside the range a client can dial is the file's mistake rather than
+                // an address, so it falls through to the convention like a missing one does.
+                return $port >= 1 && $port <= 65535 ? $port : self::CONVENTIONAL_PORT;
+            }
+        }
+
+        return self::CONVENTIONAL_PORT;
     }
 
     /**

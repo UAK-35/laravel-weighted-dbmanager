@@ -130,6 +130,45 @@ final class PoolProbeTest extends TestCase
     }
 
     /**
+     * The port the probe dials, proved on a file whose port is not the conventional one.
+     *
+     * `[general] port` is the pooler's own statement of where it listens, and `7432` is deliberately
+     * not `6432`: a reading that quietly fell back to pgcat's convention would pass a test written
+     * against the conventional port, which is why this one is written against a file naming another
+     * — and the file is written and read back rather than passed as a string, because the caller
+     * this exists for has to read it from disk.
+     *
+     * The `port` under `[pools.reader_db_2]` is a backend's, and a probe sent there would measure a
+     * database rather than the pooler, so it must not be what comes back. A configured value wins,
+     * because an operator who sets one is saying where the pooler is — behind a forward or a proxy,
+     * which the file cannot know — and zero is not one: it is what an absent key narrows to, and
+     * pgcat does not listen on it.
+     */
+    public function test_the_port_is_the_general_sections_and_not_the_conventional_one(): void
+    {
+        $file = sys_get_temp_dir().'/pgcat-general-port-'.bin2hex(random_bytes(6)).'.toml';
+        file_put_contents($file, <<<'TOML'
+        [general]
+        host = "0.0.0.0"
+        port = 7432
+
+        [pools.reader_db_2]
+        port = 9999
+        TOML);
+
+        $toml = (string) file_get_contents($file);
+        @unlink($file);
+
+        $this->assertSame(7432, PoolProbe::port($toml), "the pooler's own port, not pgcat's convention");
+        $this->assertSame(7432, PoolProbe::port($toml, 0), 'zero is an absent port rather than a configured one');
+        $this->assertSame(7000, PoolProbe::port($toml, 7000), 'a configured port is the operator saying where the pooler is');
+        $this->assertSame(6432, PoolProbe::port("[general]\nhost = \"0.0.0.0\"\n"), 'the convention when the file names no port');
+        $this->assertSame(6432, PoolProbe::port("[pools.reader_db_2]\nport = 9999\n"), 'a pool section is a backend, not the pooler');
+        $this->assertSame(6432, PoolProbe::port(''), 'and when there is no file to read at all');
+        $this->assertSame(6432, PoolProbe::port("[general]\nport = 70000\n"), 'a port outside the dialable range is the file mistaking one');
+    }
+
+    /**
      * The control name: a name no configuration declares, so a pooler that refuses it is one that
      * resolves a pool before it authenticates. The suffix is random so that a pool an installation
      * happens to have named cannot make the control answer for a pool; the prefix is what a report

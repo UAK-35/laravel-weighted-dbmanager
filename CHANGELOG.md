@@ -45,6 +45,18 @@
 
 ### Added
 
+- **`PoolProbe` can read a port out of a pooler's own file.** `PoolProbe::port()` answers the
+  `[general] port` from a `pgcat.toml`'s text — `6432` when the section names none, because that is
+  pgcat's convention rather than PostgreSQL's — so the probe can be aimed at the port the pooler
+  itself is configured on instead of at a figure the installation has to restate. The reading is
+  pure: a text in and an integer out, no file opened and no socket spent, which is what lets it be
+  asked from the path that asks the pooler. A `port` under `[pools…]` is a backend's and is
+  ignored, the first `[general]` section decides, and a port outside the dialable range is the
+  file's mistake rather than an address. A configured value still wins and a zero counts as absent,
+  because an operator who sets one is saying where the pooler is — behind a forward or a proxy,
+  which the file cannot know. `PoolProbeTest` reads `7432` out of a text whose pool section names
+  `9999`, and `6432` out of a section with no port, a pool-only file, an empty string and a
+  `port = 70000`.
 - **`db:doctor` reports the pool repair count and the last repair, from the same reading
   `db:pgcat-flip --status` prints.** The two facts were built for the status table, which is run
   when somebody already suspects the pooler; the preflight is read whether or not anybody does, and
