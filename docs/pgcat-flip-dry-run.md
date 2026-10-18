@@ -149,6 +149,7 @@ second failure means.
 | the gates          | performed | the `disabledReason()`/`driverSupported()` sentence, or nothing |
 | the lock           | performed | the lock file, taken and released                              |
 | read the source    | performed | the source path and its byte count                             |
+| the variant shape  | performed | the variants that parse and the pools each declares, or the sentence of the one that could not be served; an address that does not resolve here is a warning rather than a refusal |
 | the supervisor check | performed | supervisor's own answer, or the fault a flip would refuse on   |
 | the start          | reported  | only when supervisord answers that pgcat is not running: the `start` command a repair runs, beside the state that made it one |
 | write the temp     | performed | the temp path and the bytes written                            |
