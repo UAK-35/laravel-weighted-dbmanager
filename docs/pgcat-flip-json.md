@@ -130,7 +130,10 @@ sentence in `reason`, rather than an error line on a human channel — a job tha
 run never started" from "the run started and failed" needs the reason in the thing it parses.
 And the state report carries the flipper's own `status()` array, not the table: `(not set)` is
 how a table prints a `null`, and a machine has to be able to test a path for being unset without
-matching an English sentence.
+matching an English sentence. The keys of that array are listed in `README.md` — its
+`window` block under `### The window block: every key it publishes`, the envelope's five in the
+sample above — and that one list is what documents `/health/db`'s `flip.window` as well, since the
+endpoint publishes the same block rather than a copy of it.
 
 ### F and G — a stream instead of an object
 

@@ -647,6 +647,7 @@ final class Handoff
         'tests/Unit/Docs/DeploymentContractTest.php' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
         'src/Support/PinnedQuery.php' => 'the one real query — `select 1`, through the application\'s own connection — with the answer the health endpoint and `db:doctor --real-test` both report',
         'docs/read-path-escalation.md' => 'the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record\'s facts, written for the caller rather than for this package\'s maintainer',
+        'docs/pool-repair-rate.md' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
     ];
 
     /**

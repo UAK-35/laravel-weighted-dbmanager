@@ -194,11 +194,11 @@ the note before this one cut:
 php bin/inventory.php --check --at=d319a29
   --> exit 1: the inventory is out of step with the tree at d319a29
       files.tsv: 1 line(s) stale
-      methods.tsv: 5 line(s) stale
-      surface.tsv: 1 line(s) stale
+      methods.tsv: 7 line(s) stale
+      surface.tsv: 9 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 49 files, 250 public methods, 280 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 0: inventory is current — 49 files, 252 public methods, 288 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -233,6 +233,7 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `docs/pool-repair-rate.md` | the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails |
 | `docs/read-path-escalation.md` | the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record's facts, written for the caller rather than for this package's maintainer |
 <!-- /handoff:pending -->
 
@@ -251,9 +252,9 @@ section 4 moves.
 |---|---|
 | Branch | `dev` |
 | HEAD | `d319a29` — *fix: a release's own commit is green on the note it writes* |
-| `origin/dev` | `95ab09e` — *Release v0.2.0-alpha4* |
-| Unpushed | 1 commit — the one `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | fix 1 |
+| `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
+| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
+| Since the last tag | none |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -279,11 +280,7 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The one most recent are the ones a reader is most likely to be standing in the middle of:
-
-```
-d319a29  fix: a release's own commit is green on the note it writes
-```
+Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
 <!-- /handoff:log -->
 
 The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the

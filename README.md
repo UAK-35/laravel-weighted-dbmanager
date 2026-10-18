@@ -1230,7 +1230,10 @@ the pooler less time to be repaired, not less work to do.
   configuration declares, and a refusal means the pooler resolves a pool before it authenticates,
   so each `answered` pool exists — while an answer means it authenticates first and answers every
   name, so the pools could not be proved (`discriminates` is `null` when the control itself said
-  nothing, and `control` is `null` when a refused pool already settled the question). It is the
+  nothing, and `control` is `null` when a refused pool already settled the question). The block
+  also names where the packets went — `host`, `port` and `address`, read off the probe's own
+  answer — because a probe aimed at the wrong port reports the same `silent` as a pooler that is
+  down, and the pool names alone cannot tell an operator which of the two they have. It is the
   read-only half of the same probe the per-minute flip repairs with: one bounded startup packet per pool on `swrr.pgcat.pool_probe.*`'s address, no credentials
   and nothing written. A pooler that answered nothing at all is `warned` rather than failed, so a
   probe pointed at the wrong address cannot fail a healthy installation, and like everything else
@@ -1244,7 +1247,12 @@ the pooler less time to be repaired, not less work to do.
   starts use, because both ways of applying a config return before pgcat has re-read anything —
   and a pooler that still refuses is restarted on the file the run just wrote, in the same run, and
   the run reports `repaired` with the transition in its sentence rather than a clean `flipped`.
-  Silence is not a refusal here either: a pooler that answered nothing is never restarted.
+  Silence is not a refusal here either: a pooler that answered nothing is never restarted. This is
+  also the reading the probe is *for*, so it is the one that moves with the switch:
+  `swrr.pgcat.pool_probe.enabled` ships `false`, and while it is off — or when the applied variant
+  declares no pool to ask about — a `flipped` verdict is the copy and the supervisor command's exit
+  code rather than anything the pooler said. Which is which, place by place, is written down in
+  [docs/pgcat-pool-probe.md](docs/pgcat-pool-probe.md#what-is-read-back-and-where-it-is-not).
 - **What does not fail.** A window that is still open, a container with no boot stamp at all
   (`window.source: no_stamp` — a local run, or an image whose entrypoint predates the stamp), and
   an installation where pgcat does not apply. `db:pgcat-flip --status` prints the whole window as
@@ -1253,12 +1261,72 @@ the pooler less time to be repaired, not less work to do.
   HTTP endpoint. `pool_repairs` is the sibling counter `flip_runs` cannot be: every run that found
   a running pooler refusing a pool and repaired it is counted, with the time of the last one, and
   the two together are what tells a one-off repair from a pooler that keeps needing one — a state
-  `last_kind` reads as the same `repaired` however often it happens. `db:doctor`'s `pool repairs`
-  row reports the same two facts from the same reading, so a preflight and a status table cannot
-  count one container's repairs differently.
+  `last_kind` reads as the same `repaired` however often it happens. The state file records *which*
+  pool the pooler refused and *which* variant declares it, printed as `last_repair_pool` and
+  `last_repair_mode` rows beside the count: the refusal is the run's sentence, and a table read a
+  day later had nothing else to name the pool with. `db:doctor`'s `pool repairs` row reports the
+  same count and time from the same reading, so a preflight and a status table cannot count one
+  container's repairs differently.
+- **What warns without failing.** `/health/db` publishes `pool_repairs` beside `pool_probe`: the
+  repairs this container recorded inside `swrr.pgcat.pool_repairs.window_seconds`, the threshold
+  `swrr.pgcat.pool_repairs.max_repairs` those are judged against, and `warned` when the first is
+  past the second. The count cannot tell a container that repaired itself once at boot from a
+  pooler being repaired on run after run, and the rate can — which is the fact a monitor needs and
+  the one the status is deliberately not moved by, because a repair is the self-heal working and
+  the blocks that fail this endpoint are the faults standing now. `judged` is false and `in_window`
+  is `null` for a state file that carries a count and no times: reading that as "none recently"
+  would be the comfortable answer rather than the true one. The shipped line is more than three
+  repairs in an hour, and the decision, the retention the window buys and the shapes it rejected
+  are in [docs/pool-repair-rate.md](docs/pool-repair-rate.md).
 
 The window says nothing about `--dry-run`: a rehearsal answers what a flip *would* do, and a
 container that has stopped flipping is exactly the container a deploy wants to rehearse against.
+
+### The window block: every key it publishes
+
+`/health/db` publishes the boot window as `flip.window`, and `db:pgcat-flip --status --json`
+publishes the same array as `status.window` — one array from `PgcatConfigFlipper::windowStatus()`,
+so this table is the documentation for both. The status *table* renders it as rows, `db:doctor`'s
+`pool repairs` row and the endpoint's `pool_repairs` block are built from the same reading, and the
+ordinary `/health/db` status is not moved by any of it except `failed`, so a reader arriving here
+from a payload has one place to look rather than four.
+
+| key | what it is |
+|---|---|
+| `boot_file` | the path the container's boot stamp is read from (`swrr.pgcat.boot_file`), published so a reader can name the file a wrong window came from |
+| `source` | `stamped` when a boot time was read and `no_stamp` when nothing recorded one — the field that keeps *not judged* from reading as *the window passed* |
+| `booted_at` | when the container booted, ISO-8601 UTC, or `null` with no stamp |
+| `booted_at_unix` | the same moment as unix seconds, which is what the deadline is computed from |
+| `window_seconds` | the window the settings resolved to (`swrr.pgcat.flip_window_seconds`), with a zero or negative value replaced by the default |
+| `deadline` | `booted_at` plus the window, ISO-8601 UTC, or `null` with no stamp |
+| `deadline_unix` | the same moment as unix seconds |
+| `remaining_seconds` | how long is left, rounded to milliseconds and negative once the deadline has passed; `null` with no stamp |
+| `closed` | whether the deadline has passed — false with no stamp, because there is nothing to compare against rather than time being on the container's side |
+| `runs` | how many runs the state file has recorded: every run that took the flip's lock and reached a decision (`flipped`, `no_change`, `repaired`, `failed`) |
+| `last_run_at` | when the last of those ran, ISO-8601 UTC, or `null` when none has |
+| `last_kind` | what that run found — `flipped`, `no_change`, `repaired` or `failed`, the kinds a recorded run can reach, or `null` when none has |
+| `pool_repairs` | how many pool repairs the container has recorded over its life |
+| `last_pool_repair_at` | when the last repair happened, ISO-8601 UTC, or `null` |
+| `last_repair_pool` | the pool the last repair was refused for, or `null` when there was no repair and for a state file written before the name was recorded |
+| `last_repair_mode` | the mode whose variant declares that pool, on the same terms |
+| `converged` | whether the first usable mode on record was reached inside this window's bounds |
+| `converged_at` | that moment, as the state file holds it, or `null` |
+| `converged_mode` | the mode it reached, or `null` |
+| `failed` | closed and not converged — the one field here the endpoint acts on, and the one behind `flip.failed` and the `503` |
+| `failed_reason` | which of the three ways it failed when `failed` is true, and `null` otherwise |
+
+Two rules hold for the whole block. A key that was never recorded is `null` rather than absent, so
+a consumer tests a value instead of the shape of the object. And the convergence keys are sticky
+for the container's life: the first run that reached a usable mode is what the window is judged on,
+so a later failure cannot un-work a container that did come up. A container with no flipper at all
+publishes `flip.window: null`, which is the same answer `applicable: false` gives beside it.
+
+One line about the shapes, because the state file is one an operator may edit by hand: `runs` is
+read as an integer and the repair facts are read as strings, so a value that is neither arrives as
+`0` or `null` — while `last_run_at`, `last_kind`, `converged_at` and `converged_mode` are published
+as the file holds them, because each is the record of a run that happened rather than a reading
+this class derives. A hand-edited value comes through as it was written, which is the line
+`db:pgcat-flip --status` draws for the same fields.
 
 ### The reader-window tasks: `db:pgcat-window-flip`
 
@@ -1577,7 +1645,7 @@ the application still boots and answers requests, and each one is a row:
 | `switch values`      | **Fails** when `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` or `swrr.allow_local_fallback` is written as something that is not on or off — `'false'`, `'off'` and `'no'` are how off is written, and a cast reads every one of them as *on*, which on the pgcat switch arms the file swap. The row quotes the value, quotes the accepted spellings, and names the value the setting falls back to. Names **every** switch it refuses rather than the first, and dates each from its own finding in the boot record. Nothing is suggested: re-spelling `'flase'` would be guessing at what was meant |
 | `reader windows`     | `swrr.reader_windows` holds an entry that is not a window — the flat `'10:00-14:20'` is the one everyone writes first — or is not a list of windows at all, or `swrr.reader_days` is not a list of day numbers — `'1,2,3'` written as one string is the same mistake one key over. **Fails** on both, naming the entry and quoting the shape the setting reads: reading a typo as "nothing" is what inverts the setting, so the package refuses it instead. *Warns* on the three ways a well-formed setting still cannot act — an empty day list (permissive), days outside 1…7 (the pool is never used), and windows whose start is not before their end (never entered). When the refused value names its own replacement — the flat string, `'1,2,3'` — the row also prints the setting line to paste as a `suggestion` under it. Names **every** problem it finds rather than the first, and dates each from its own finding in the boot record |
 | `pgcat mode`         | **Fails** when the pooler is on the configuration the reader windows are not asking for, and leads with which way round it is: the writer-only config while a reader window is open, so every read the resolver meant for the replica pool reaches the writer, or the readers config outside every window, so reads keep reaching a replica through the hours the fallback holds them on the writer. Reads pgcat's own *file* rather than the mode the last flip recorded, so a task that booted outside a window, converged to the writer-only config and never flipped again still shows here — that shape is the incident the row exists for. Prints the flipper's own sentence rather than a second copy of it, the same one `/health/db` reports and logs, which names the file in place and the command that moves it; so no `suggestion`, and the verdict is dated from the boot window like the endpoint's. Passes when the flipper is not armed — no file is compared, so the two cannot disagree — and when the file could not be read at all, which is reported as *nothing compared* rather than as a pass, because judging a file is `pgcat files`' row |
-| `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. **Fails** on that refusal, which is the pooler's own sentence rather than this package's reading, and this is the read-only half of the self-heal the per-minute flip performs: one PostgreSQL v3 startup packet per declared pool and the first message back, on the address and the bound `swrr.pgcat.pool_probe.*` names, with no credentials, no `psql` and no connection through the pool. A pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach — and whether such an answer is *proof* is settled by one more name, a control no configuration declares: refused, the pooler reads pools before it authenticates and each answer proves the pool exists; answered, the pooler authenticates *first* — which is what the deployment this was written against was measured doing — and answers every name, so the row reports what the pooler said rather than a proof that each pool is there. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
+| `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. **Fails** on that refusal, which is the pooler's own sentence rather than this package's reading, and this is the read-only half of the self-heal the per-minute flip performs: one PostgreSQL v3 startup packet per declared pool and the first message back, on the address and the bound `swrr.pgcat.pool_probe.*` names, with no credentials, no `psql` and no connection through the pool. A pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach — and whether such an answer is *proof* is settled by one more name, a control no configuration declares: refused, the pooler reads pools before it authenticates and each answer proves the pool exists; answered, the pooler authenticates *first* — which is what the deployment this was written against was measured doing — and answers every name, so the row reports what the pooler said rather than a proof that each pool is there. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Every row that asked something ends with the endpoint the packets went to — `— probed tcp://host:port`, read off the probe's own answer rather than off the settings — because a probe aimed at the wrong port reports the same silence as a pooler that is down, and the pool names alone leave an operator nothing to check. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
 | `pool repairs`       | how many pool repairs this container has recorded, and when the last one happened. A repair is the self-heal working rather than a fault — a run that found the running pooler refusing a pool the applied file declares re-applied the file, and the fact that it did is the answer the self-heal gave — so the row **passes** in every state it can find and states the count and the time, the line `read/write pair` draws for its own reading: failing on it would fail an installation for the flip having done its job. What it adds is the difference `last_kind` cannot carry — two repairs a minute apart and two a week apart both leave the last run reading `repaired` — and the standing fault, when there is one now, is `pool probe`'s row, which asks the pooler rather than reading its history. The two facts are `PgcatConfigFlipper::poolRepairStatus()`'s, the same derivation `db:pgcat-flip --status` prints its `pool_repairs` row from, so the two surfaces cannot count one container's repairs differently; a repair is only possible inside the boot window, because a run past it returns before it takes the lock, and the row says so rather than letting a count that is not moving read as a pooler that has stopped needing repair. Read from the flip's state file and nothing else, so it is answered in a `--connection-only` run. Prints no `suggestion`: the repair for a pooler that keeps refusing pools is the pooler — a restart, a file, an address — and none of them is a value this line could name |
 | `flip schedule`      | nothing moves the pooler at the boundaries the configuration is written for. *Warns* when the reader-window tasks are on and no boundary is scheduled — every window is unusable, or too short to hold `lead_seconds` + `grace_seconds` — and when the flipper is armed with neither the per-minute entry nor the window tasks on, which leaves pgcat's file where the last write put it while the resolver's mode moves on. **Fails** on either `swrr.pgcat.schedule.enabled` or `swrr.pgcat.schedule.windows.enabled` written as something that is not on or off — the two switches `switch values` does not cover — naming the value, the accepted spellings and the value the setting falls back to, which for these two is *on* for the cadence and *off* for the tasks, each the value its setting documents. On a run that reads cleanly it says which mechanism answers a boundary: the reader-window tasks, named with their boundaries and their lead and grace, or the per-minute entry alone, which converges the pool in the first minutes after a container starts and is then a no-op. *Warns* as well when **both** are armed, naming both keys: one mode with two owners is one mode with two accounts of it. No boundary is contended — the per-minute entry checks the boot window before it takes its lock, so once a container has converged it returns `window_closed` without reading or writing a file — and that is the part neither setting shows on its own: what the tasks apply goes through the flipper's `forceMode()` at the boundary, which records no run, so the readings that describe the entry's convergence describe a mechanism that has stopped acting. It is a warning rather than a failure because an installation may be halfway through the documented migration — disarm this entry in the same change that arms the tasks — so a preflight that failed it would refuse exactly the installation doing the right thing slowly; `--strict` fails it, and it is a boot finding of its own (`swrr.pgcat.schedule.both_armed`), so the row dates the pair while this boot's row describes it. The row prints no `suggestion`, because the repair for either warning is a choice between two settings |
 | `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Beside that verdict the row names the three causes a stopped schedule has that the state file cannot show — the store the runs' mutexes live in and whether it answered, how many entries run `db:pgcat-flip`, and the boot stamp with the mode and owner it was found with — as *readings* rather than verdicts, so the row's status and the exit code stay the beat's and an installation whose entry is not scheduled is told none of them; a bounded run (`--connection-only`) names the store without asking it, because being answerable where the store is not there is what that mode is for. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |

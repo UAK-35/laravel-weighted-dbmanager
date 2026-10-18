@@ -1,8 +1,9 @@
 # Is a RUNNING pgcat that holds no pool a fault?
 
 A design record for `src/Pgcat/PoolProbe.php`, the flipper's answerability repair
-(`PgcatConfigFlipper::poolFault()`, `refusalAfterApply()`, `refusedPool()`), and the `pool_probe`
-reading that `/health/db` and `db:doctor` publish through `PgcatConfigFlipper::poolProbeVerdict()`.
+(`PgcatConfigFlipper::poolFault()`, `refusalAfterApply()`, `refusalFor()`, `refusedPool()`), and the
+`pool_probe` reading that `/health/db` and `db:doctor` publish through
+`PgcatConfigFlipper::poolProbeVerdict()`.
 
 The flipper's self-heal had exactly one question for supervisord — is pgcat RUNNING — and a pooler
 can answer that question truthfully while being the wrong thing to serve. A container stood with
@@ -190,10 +191,18 @@ records the `repaired` kind. A run that has just *applied* a mode asks `refusalA
 the same read with the retry a pooler that was signalled a moment ago needs: a reload returns before
 pgcat has re-read anything and a restart returns inside supervisor's `startsecs` window, so a refusal
 is re-read with the same bounded attempts and delay a repair's starts use, and one that survives
-escalates to `restart_command` before the pools are read back once more. Both paths record the run,
+escalates to `restart_command` before the pools are read back once more. The two questions are one
+read, `refusalFor()`, with the policy as an argument: the count and the delay have one home
+(`startAttempts()` and `startRetryDelayMs()`, which `status()` reports and the start loop is bounded
+by), so the poll path and the apply path can disagree about *when* to ask but not about how often or
+how long, which is the drift two loops over one read would eventually produce — and the source scan in
+`PgcatConfigFlipperTest` is what keeps a second reader from arriving. Both paths record the run,
 and a repair is counted in the state file as well — `pool_repairs` and `last_pool_repair_at`, printed
 by `db:pgcat-flip --status` and reported as `db:doctor`'s `pool repairs` row from the same reading —
-because a run's kind cannot tell a one-off from a pooler that keeps needing repair.
+because a run's kind cannot tell a one-off from a pooler that keeps needing repair. The repair
+records the pool it was refused for and the mode whose variant declares it, as `last_repair_pool`
+and `last_repair_mode` beside the count, printed as rows of their own: the count opens the question
+*which* pool, under *which* variant, and the table answers it without the run's own sentence.
 
 ### Where the surfaces read it
 
@@ -202,11 +211,50 @@ they cannot disagree. It publishes `enabled` (the switch), `applicable` (armed, 
 mode declares a pool), `answered` (true when every pool answered, null when nothing was asked),
 `pools` (one entry per declared pool with its three-answer status and the probe's sentence),
 `discriminates` (true, false or null for the control's reading), `control` (the control exchange, or
-`null` when a refusal already proved the pooler), `failed`, `warned`, and `reason`. It deliberately
+`null` when a refusal already proved the pooler), `host`, `port` and `address` (the endpoint the
+packets were actually sent to), `failed`, `warned`, and `reason`. It deliberately
 records, restarts and throws nothing: a status reading that restarted a pooler would not be one an
 endpoint could be polled with. `/health/db` embeds it as the `pool_probe` block and `db:doctor`
 prints it as the `pool probe` row, and the block is published whole
 rather than reduced to a boolean, because the three answers call for different work.
+
+The endpoint is read off the probe's own answer rather than off `swrr.pgcat.pool_probe.*`, because
+the fact the two surfaces have to report is where the packet went rather than where the settings
+meant it to go — an installation that injects a probe of its own is reported at that probe's
+endpoint. It is `null` when nothing was asked. That matters because a probe aimed at the wrong port
+is the one fault that looks exactly like a pooler that is down: both are `silent`. A row that listed
+only the pool names would leave an operator with an installation whose every pool is silent and no
+way to tell a stopped pooler from a mis-aimed probe, so the row and the block both name the
+address, and `db:doctor` prints it after the sentence — `— probed tcp://127.0.0.1:6432`.
+
+### What is read back, and where it is not
+
+The pooler is asked in the repair and nowhere else, and the repair only asks where the probe is
+armed — `refusedPool()` returns null with no closure behind it, which is the shipped state
+(`swrr.pgcat.pool_probe.enabled` is `false`). Everywhere else a state is the commands' own: the copy,
+and the supervisor command the installation configured (a reload when `use_reload` is on, otherwise a
+restart) exiting `0`. The audit below is what that costs, place by place — the claim in the left
+column is what a reader of that surface sees.
+
+| the claim | the evidence it actually rests on | who reads it |
+|---|---|---|
+| `applyCurrentState()` → `flipped` | the copy and the supervisor command exiting `0`, when the probe is not armed | a pipeline reading `kind`, the scheduler's log, the `flip_runs` row |
+| `applyCurrentState()` → `flipped`, probe armed | the same commands, when the variant declares no pool: `configuredPools()` is empty, so `refusalAfterApply()` has nothing to ask and returns null | as above |
+| `forceMode()` → `flipped` | the same commands and nothing more: this path has no boot window, no `poolFault()` and no `refusalAfterApply()` | `db:pgcat-window-flip` at every boundary, and `db:pgcat-flip --force-mode` run by hand |
+| the mode-unchanged repair → `repaired` | the refusal read from the pooler before the re-application, then the re-application's exit codes; the pools are *not* read again | the `pool_repairs` and `flip_runs` rows, and `--status --json` |
+| `swap()`'s supervisor command | the command exiting `0`. The program's state is read *before* the swap (`SupervisorStep::inspect()`) and never after it | the run's own outcome: a restart that leaves pgcat `FATAL` reads like one that worked |
+
+The boundary task's own `SELECT 1` is not on this list and is not a substitute for one of its rows:
+`ReadinessProbe` asks the *target* a mode would point at, which is a fact about the replicas, while the
+question an absent read-back leaves open is whether the pooler re-read the file it was given.
+
+Two lines are deliberately *not* findings. The transition path that does read back — the refusal
+before the restart, and the pools once more after it — reports `repaired` and exits `0` when the
+pooler still refuses: the file and the mode are the flip's job and both are in place, and the standing
+fault is the `pool_probe` block's to report. And `startAndWait()` does read supervisord back, up to
+`start_attempts` times, because a program inside `startsecs` answers `STARTING` after both a start
+that will work and one that will not — the hot-swap restart in the table has no equivalent, which is
+what makes the repair path a separate one rather than a retry of the same command.
 
 ### Why it is not in `healthSummary()`
 
@@ -243,9 +291,15 @@ only one in the package that opens a socket on a poll path: an installation opts
 installation that has not armed it pays nothing — `db:replica-status` and `--status` stay offline, and
 `/health/db` reports that the pooler is taken at supervisord's word. The address is configured rather
 than derived, because it belongs to the process that is listening while a variant file is one of the
-things a flip may put in front of it. The port defaults to pgcat's own convention, `6432`, rather than
-PostgreSQL's `5432`, because a PostgreSQL server answers every name in its own words and would be read
-as a pooler holding them all — which is the mistake this record exists to keep out of the repair.
+things a flip may put in front of it — with one exception, and only upward: an installation that
+configures no port has it read from `[general] port` in `config_path`, the file the pooler is
+*running on* and the target a swap renames over, so it is the process's own statement rather than a
+candidate's. A configured port wins over the file, and pgcat's own convention, `6432`, is left for a
+file that cannot answer — which is what `PoolProbe::port()` decides, in that order. A `port` under
+`[pools…]` is never it: that is a backend's port, and a probe sent there would be measuring a
+database rather than the pooler. The convention is pgcat's rather than PostgreSQL's `5432` because a
+PostgreSQL server answers every name in its own words and would be read as a pooler holding them all
+— which is the mistake this record exists to keep out of the repair.
 
 ---
 
@@ -254,8 +308,12 @@ as a pooler holding them all — which is the mistake this record exists to keep
 The measurement and its vocabulary: `PoolProbeTest::test_the_startup_packet_is_a_well_formed_postgresql_v3_open()`,
 `PoolProbeTest::test_the_declared_pools_are_the_section_headers_and_nothing_else()`,
 `PoolProbeTest::test_a_pool_declared_by_its_sub_tables_is_read_by_the_first_segment()`,
-`PoolProbeTest::test_pgcats_own_refusal_is_the_missing_pool()`, and
-`PoolProbeTest::test_no_answer_at_all_is_silent_rather_than_missing()`.
+`PoolProbeTest::test_pgcats_own_refusal_is_the_missing_pool()`,
+`PoolProbeTest::test_no_answer_at_all_is_silent_rather_than_missing()`, and
+`PoolProbeTest::test_the_port_is_the_general_sections_and_not_the_conventional_one()` — the last one
+read off a file whose port is `7432`, so a reading that quietly kept the convention cannot pass it.
+What the flipper builds from that reading is
+`PgcatConfigFlipperTest::test_the_probe_dials_the_port_the_poolers_own_file_names()`.
 
 The repair: `PgcatConfigFlipperTest::test_a_running_pooler_that_has_no_pool_is_repaired()`,
 `PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_is_not_repaired()`,
@@ -265,7 +323,8 @@ and `PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_after_a_flip_is
 
 The verdict: `PgcatConfigFlipperTest::test_a_pool_the_pooler_does_not_hold_fails_the_pool_probe_verdict()`,
 `PgcatConfigFlipperTest::test_a_missing_pool_is_not_judged_while_the_boot_window_is_open()`,
-`PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_is_warned_about_and_not_failed()`, and
+`PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_is_warned_about_and_not_failed()`,
+`PgcatConfigFlipperTest::test_a_probe_that_names_only_its_host_and_port_still_names_an_endpoint()`, and
 `PgcatConfigFlipperTest::test_nothing_is_asked_of_the_pooler_without_a_probe()`.
 
 The surfaces: `DatabaseHealthControllerTest::test_a_pool_the_pooler_holds_no_pool_for_degrades_the_payload_and_is_logged()`,
