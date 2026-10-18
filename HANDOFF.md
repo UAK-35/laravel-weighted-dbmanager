@@ -196,7 +196,7 @@ php bin/inventory.php --check --at=d319a29
       surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 49 files, 246 public methods, 280 key(s)/member(s), described as v0.2.0-alpha4
+  --> exit 0: inventory is current — 49 files, 246 public methods, 280 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -311,8 +311,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4` |
-| The latest of them | `v0.2.0-alpha4` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5` |
+| The latest of them | `v0.2.0-alpha5` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 2 entries — 0 added, 2 fixed, 0 changed |
 | The notes weigh as | patch — two repairs, which is the rung they take |

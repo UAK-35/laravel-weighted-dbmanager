@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha5 - 2026-10-18
+
 ### Fixed
 
 - **A release's own commit is green on the note it writes: the records transcript is read at the stamp
