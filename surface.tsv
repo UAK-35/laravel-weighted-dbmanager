@@ -30,12 +30,14 @@ config	lock_file	config/db-manager.php
 config	log	config/db-manager.php
 config	log_directory	config/db-manager.php
 config	maintenance	config/app.php
+config	max_repairs	config/db-manager.php
 config	name	config/app.php
 config	name	config/db-manager.php
 config	no_readers_path	config/db-manager.php
 config	pgcat	config/db-manager.php
 config	pinned_query	config/db-manager.php
 config	pool_probe	config/db-manager.php
+config	pool_repairs	config/db-manager.php
 config	port	config/db-manager.php
 config	previous_keys	config/app.php
 config	primary_store	config/db-manager.php
@@ -63,6 +65,7 @@ config	timezone	config/db-manager.php
 config	url	config/app.php
 config	use_reload	config/db-manager.php
 config	user	config/db-manager.php
+config	window_seconds	config/db-manager.php
 config	windows	config/db-manager.php
 const	Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand::KIND_DISABLED	src/Console/Commands/DbFlipPgcatCommand.php
 const	Uak35\WeightedDbManager\Console\Commands\DbFlipPgcatCommand::KIND_REFUSED	src/Console/Commands/DbFlipPgcatCommand.php
@@ -133,11 +136,14 @@ const	Uak35\WeightedDbManager\Pgcat\FlipSchedule::OVERLAP_MINUTES	src/Pgcat/Flip
 const	Uak35\WeightedDbManager\Pgcat\FlipWindow::DEFAULT_SECONDS	src/Pgcat/FlipWindow.php
 const	Uak35\WeightedDbManager\Pgcat\FlipWindow::SOURCE_NO_STAMP	src/Pgcat/FlipWindow.php
 const	Uak35\WeightedDbManager\Pgcat\FlipWindow::SOURCE_STAMPED	src/Pgcat/FlipWindow.php
+const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::DEFAULT_MAX_REPAIRS_PER_WINDOW	src/Pgcat/PgcatConfigFlipper.php
+const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::DEFAULT_REPAIR_WINDOW_SECONDS	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_MISSING	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNREADABLE	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNSET	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNWRITABLE	src/Pgcat/PgcatConfigFlipper.php
+const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::REPAIR_HISTORY_KEY	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::SUPPORTED_DRIVERS	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PoolProbe::DEFAULT_TIMEOUT_MS	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_ANSWERED	src/Pgcat/PoolProbe.php
@@ -249,6 +255,8 @@ env	SWRR_PGCAT_POOL_PROBE_HOST	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_PORT	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_USER	config/db-manager.php
+env	SWRR_PGCAT_POOL_REPAIRS_MAX	config/db-manager.php
+env	SWRR_PGCAT_POOL_REPAIRS_WINDOW_SECONDS	config/db-manager.php
 env	SWRR_PGCAT_READERS	config/db-manager.php
 env	SWRR_PGCAT_SCHEDULE_ENABLED	config/db-manager.php
 env	SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES	config/db-manager.php

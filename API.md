@@ -9,10 +9,10 @@ release: a name that is not on this page is not part of the published API.
 | the record | rows |
 | --- | ---: |
 | files shipped | 49 |
-| public methods | 250 |
-| config keys | 64 |
-| public constants | 154 |
-| environment variables read | 48 |
+| public methods | 252 |
+| config keys | 67 |
+| public constants | 157 |
+| environment variables read | 50 |
 | public properties | 14 |
 | enum cases | 0 |
 
@@ -56,12 +56,14 @@ from here is a key a deployed config stops receiving.
 | `log` | `config/db-manager.php` |
 | `log_directory` | `config/db-manager.php` |
 | `maintenance` | `config/app.php` |
+| `max_repairs` | `config/db-manager.php` |
 | `name` | `config/app.php` |
 | `name` | `config/db-manager.php` |
 | `no_readers_path` | `config/db-manager.php` |
 | `pgcat` | `config/db-manager.php` |
 | `pinned_query` | `config/db-manager.php` |
 | `pool_probe` | `config/db-manager.php` |
+| `pool_repairs` | `config/db-manager.php` |
 | `port` | `config/db-manager.php` |
 | `previous_keys` | `config/app.php` |
 | `primary_store` | `config/db-manager.php` |
@@ -89,6 +91,7 @@ from here is a key a deployed config stops receiving.
 | `url` | `config/app.php` |
 | `use_reload` | `config/db-manager.php` |
 | `user` | `config/db-manager.php` |
+| `window_seconds` | `config/db-manager.php` |
 | `windows` | `config/db-manager.php` |
 
 ### Environment variables
@@ -126,6 +129,8 @@ from here is a key a deployed config stops receiving.
 | `SWRR_PGCAT_POOL_PROBE_PORT` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_PROBE_USER` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_REPAIRS_MAX` | `config/db-manager.php` |
+| `SWRR_PGCAT_POOL_REPAIRS_WINDOW_SECONDS` | `config/db-manager.php` |
 | `SWRR_PGCAT_READERS` | `config/db-manager.php` |
 | `SWRR_PGCAT_SCHEDULE_ENABLED` | `config/db-manager.php` |
 | `SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES` | `config/db-manager.php` |
@@ -175,8 +180,8 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Pgcat\FlipResult` | 10 | `src/Pgcat/FlipResult.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipSchedule` | 10 | `src/Pgcat/FlipSchedule.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipWindow` | 11 | `src/Pgcat/FlipWindow.php` |
-| `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 29 | `src/Pgcat/PgcatConfigFlipper.php` |
-| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 6 | `src/Pgcat/PoolProbe.php` |
+| `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 30 | `src/Pgcat/PgcatConfigFlipper.php` |
+| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 7 | `src/Pgcat/PoolProbe.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleBeat` | 7 | `src/Pgcat/ScheduleBeat.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` | 4 | `src/Pgcat/ScheduleCauses.php` |
 | `Uak35\WeightedDbManager\Pgcat\SupervisorStep` | 14 | `src/Pgcat/SupervisorStep.php` |
@@ -558,6 +563,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 | `isEnabled()` | 0 of 0 | — |
 | `isMismatched()` | 0 of 0 | — |
 | `poolProbeVerdict()` | 0 of 0 | — |
+| `poolRepairRate()` | 0 of 0 | — |
 | `poolRepairStatus()` | 0 of 0 | — |
 | `readerWindowVerdict()` | 0 of 0 | — |
 | `refusedSwitches()` | 0 of 0 | — |
@@ -572,7 +578,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 | `windowStatus()` | 0 of 0 | — |
 | `writePaths()` | 0 of 0 | — |
 
-Members: `FILE_DIRECTORY_UNWRITABLE`, `FILE_MISSING`, `FILE_UNREADABLE`, `FILE_UNSET`, `FILE_UNWRITABLE`, `SUPPORTED_DRIVERS`.
+Members: `DEFAULT_MAX_REPAIRS_PER_WINDOW`, `DEFAULT_REPAIR_WINDOW_SECONDS`, `FILE_DIRECTORY_UNWRITABLE`, `FILE_MISSING`, `FILE_UNREADABLE`, `FILE_UNSET`, `FILE_UNWRITABLE`, `REPAIR_HISTORY_KEY`, `SUPPORTED_DRIVERS`.
 
 #### `Uak35\WeightedDbManager\Pgcat\PoolProbe`
 
@@ -585,6 +591,7 @@ Members: `FILE_DIRECTORY_UNWRITABLE`, `FILE_MISSING`, `FILE_UNREADABLE`, `FILE_U
 | `controlName()` | 0 of 0 | — |
 | `declaredPools()` | 1 of 1 | `string $toml` |
 | `discriminates()` | 1 of 1 | `string $status` |
+| `port()` | 1 of 2 | `string $toml, ?int $configured=` |
 | `startupPacket()` | 2 of 2 | `string $user, string $database` |
 
 Members: `DEFAULT_TIMEOUT_MS`, `STATUS_ANSWERED`, `STATUS_MISSING`, `STATUS_SILENT`.
