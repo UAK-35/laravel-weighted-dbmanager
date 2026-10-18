@@ -993,6 +993,81 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('not armed', $row);
     }
 
+    /**
+     * The inventory of what this package writes, in one row.
+     *
+     * `pgcat files` only speaks of a path when the path is unusable, so an installation cannot
+     * see the rest of the set — and a deployment that moves its state directory has nothing to
+     * confirm the move against. This row names every path the flipper lists, with the mode and
+     * owner each was found with, whether or not any of them is a fault; the verdict follows the
+     * unwritable ones rather than the label list.
+     */
+    public function test_the_write_paths_row_names_every_path_a_flip_writes_beside_the_mode_found(): void
+    {
+        $paths = $this->armPgcat([
+            'boot_file' => $this->tempDir().'/container-booted-at',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'write paths');
+
+        $this->assertStringStartsWith('PASS  write paths', $row);
+
+        foreach (['flip target', 'flip target directory', 'reader source', 'writer source', 'flip state', 'flip lock', 'boot stamp'] as $label) {
+            $this->assertStringContainsString($label, $row, "the row names the {$label}");
+        }
+
+        $this->assertStringContainsString($paths['config_path'], $row);
+        $this->assertStringContainsString($paths['readers_path'], $row);
+        // The state file does not exist yet, so the path whose mode decides the write is the
+        // directory that will take it — the same rule `fileProblems()` judges by.
+        $this->assertStringContainsString('flip state [' . dirname($paths['state_file']) . ']', $row);
+        $this->assertStringContainsString('mode ', $row, 'the mode and owner found travel with every path');
+
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * A read-only variant is the plan's fixture: the row reports the path, the mode it was found
+     * with, and what an unwritable one costs — and it still names the paths that are fine beside
+     * it, because the reading is the whole inventory rather than only the fault.
+     */
+    public function test_a_read_only_path_is_named_with_its_mode_and_what_it_costs(): void
+    {
+        $paths = $this->armPgcat();
+        chmod($paths['readers_path'], 0o444);
+
+        if (is_writable($paths['readers_path'])) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'write paths');
+
+        $this->assertStringStartsWith('FAIL  write paths', $row);
+        $this->assertStringContainsString("reader source [{$paths['readers_path']}]", $row);
+        $this->assertStringContainsString('mode 0444', $row);
+        $this->assertStringContainsString('nothing to read for that direction', $row);
+        $this->assertStringContainsString($paths['config_path'], $row, 'the writable paths are named beside the blocked one');
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * An inert flipper writes nothing, so there is no path to name — the line both it and
+     * `pgcat files` draw.
+     */
+    public function test_the_write_paths_row_is_moot_while_the_flipper_is_not_armed(): void
+    {
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'write paths');
+
+        $this->assertStringStartsWith('PASS  write paths', $row);
+        $this->assertStringContainsString('not armed', $row);
+    }
+
 
     public function test_the_supervisor_row_passes_when_supervisor_knows_the_program(): void
     {
@@ -2046,7 +2121,28 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringStartsWith('PASS  pool probe', $row);
         $this->assertStringContainsString('answered for every pool the configuration declares (writer_db_1, reader_db_2)', $row);
+        $this->assertStringContainsString('refused a control name it cannot hold', $row, 'the control is what makes the answers proof');
+        $this->assertStringContainsString('each answer is proof the pool exists', $row);
         $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The pooler this row was measured against authenticates before it resolves a pool and answers
+     * every name. The row still passes — nothing is wrong with the installation — but it says the
+     * answers are not proof, which is the difference between a green row and a claim.
+     */
+    public function test_the_pool_probe_row_says_when_the_poolers_answers_are_not_proof(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered');
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringContainsString('answered for every pool the configuration declares (reader_db_2)', $row);
+        $this->assertStringContainsString('not proof the pools exist', $row);
+        $this->assertStringContainsString('authenticates before it resolves a pool', $row);
+        $this->assertSame(0, $exit, 'a pooler that authenticates first is not a fault in the installation');
     }
 
     /**
@@ -2121,6 +2217,91 @@ class DbDoctorTest extends TestCase
         $this->assertStringStartsWith('PASS  pool probe', $row);
         $this->assertStringContainsString('the probe is not armed (swrr.pgcat.pool_probe.enabled)', $row);
         $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The count and the time a repair leaves behind, on the preflight rather than only in the
+     * status table: `--status` is a table an operator runs when they already suspect the pooler,
+     * and this row is read whether or not anybody does.
+     */
+    public function test_the_pool_repairs_row_reports_the_count_and_time_the_flip_wrote(): void
+    {
+        $this->bindRedis(reachable: true);
+        $paths = $this->armPgcat();
+
+        file_put_contents($paths['state_file'], (string) json_encode([
+            'pool_repairs' => 2,
+            'last_pool_repair_at' => '2026-10-10T12:00:00+00:00',
+        ]));
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool repairs');
+
+        $this->assertStringStartsWith('PASS  pool repairs', $row);
+        $this->assertStringContainsString('the pooler has been repaired 2 time(s)', $row);
+        $this->assertStringContainsString('the last at 2026-10-10T12:00:00+00:00', $row);
+        $this->assertStringContainsString('convergence history', $row, 'a count that is not moving is not a pooler that stopped needing repair');
+        $this->assertSame(0, $exit, 'a repair is the self-heal working, not a failure of the installation');
+    }
+
+    /**
+     * A container that has never repaired anything reads none, and says so rather than printing an
+     * empty count — and a state file an operator edited into a counter that is not a number reads
+     * the same way, because the file is theirs to edit and one field must not have two shapes.
+     */
+    public function test_the_pool_repairs_row_reads_no_repairs_as_none(): void
+    {
+        $this->bindRedis(reachable: true);
+        $paths = $this->armPgcat();
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool repairs');
+
+        $this->assertStringStartsWith('PASS  pool repairs', $row);
+        $this->assertStringContainsString('no pool repair is recorded in this container', $row);
+        $this->assertSame(0, $exit);
+
+        file_put_contents($paths['state_file'], (string) json_encode([
+            'pool_repairs' => 'two',
+            'last_pool_repair_at' => ['2026-10-10'],
+        ]));
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool repairs');
+
+        $this->assertStringStartsWith('PASS  pool repairs', $row);
+        $this->assertStringContainsString('no pool repair is recorded in this container', $row);
+    }
+
+    /**
+     * The two surfaces are one reading: the row prints what the flipper's `--status` block is built
+     * from, so a count that moved in one moves in the other. A row that parsed the state file for
+     * itself would be the way the two start disagreeing, silently, about a file only the flip
+     * writes.
+     */
+    public function test_the_pool_repairs_row_is_the_reading_the_status_table_prints(): void
+    {
+        $this->bindRedis(reachable: true);
+        $paths = $this->armPgcat();
+
+        file_put_contents($paths['state_file'], (string) json_encode([
+            'pool_repairs' => 7,
+            'last_pool_repair_at' => '2026-10-11T05:30:00+00:00',
+        ]));
+
+        [$output] = $this->doctor();
+
+        $flipper = $this->app->make(PgcatConfigFlipper::class);
+        $reading = $flipper->poolRepairStatus();
+
+        $this->assertSame(7, $reading['count']);
+        $this->assertStringContainsString(
+            sprintf('the pooler has been repaired %d time(s), the last at %s', $reading['count'], $reading['last_at']),
+            $this->rowContaining($output, 'pool repairs'),
+            'the row is built from the reading `--status` prints, not from a second parse of the file',
+        );
+        $this->assertSame($reading['count'], $flipper->windowStatus()['pool_repairs']);
+        $this->assertSame($reading['last_at'], $flipper->windowStatus()['last_pool_repair_at']);
     }
 
     /**
@@ -2988,7 +3169,7 @@ class DbDoctorTest extends TestCase
         [$json] = $this->doctorJson(connectionOnly: true);
 
         $this->assertSame(
-            ['boot environment', 'provider swap', 'weighted factory', 'connector', 'published config', 'pgcat gate', 'pgcat files', 'variant shape'],
+            ['boot environment', 'provider swap', 'weighted factory', 'connector', 'published config', 'pgcat gate', 'pgcat files', 'write paths', 'variant shape'],
             array_column($this->report($json)['checks'], 'name'),
         );
         $this->assertSame([], $supervisor->ran);
@@ -4096,13 +4277,19 @@ class DbDoctorTest extends TestCase
             // connector for a pgsql connection and passes.
             // `real query` is a fifth: no profile asks for one, so every one of them reports
             // the row as not asked rather than as a pass — the +1 is the row's presence.
-            'healthy' => [22, 0, 0],
-            'warned' => [21, 1, 0],
-            'warned-twice' => [20, 2, 0],
-            'failed' => [21, 0, 1],
-            'failed-twice' => [20, 0, 2],
-            'mixed' => [20, 1, 1],
-            'mixed-twice' => [18, 2, 2],
+            // `write paths` is a sixth, and it passes in every profile for a reason the fixtures do
+            // not spoil: the missing reader source in `failed-twice` and `mixed-twice` is a path
+            // that can be created, which this row judges by the directory that would take it.
+            // `pool repairs` is a seventh for the same kind of reason: every fixture starts from a
+            // state file with no repairs in it, and the row is a reading rather than a verdict, so
+            // it is a PASS in every profile.
+            'healthy' => [24, 0, 0],
+            'warned' => [23, 1, 0],
+            'warned-twice' => [22, 2, 0],
+            'failed' => [23, 0, 1],
+            'failed-twice' => [22, 0, 2],
+            'mixed' => [22, 1, 1],
+            'mixed-twice' => [20, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -5386,7 +5573,7 @@ class DbDoctorTest extends TestCase
      * @param array<string, string> $answers database => status
      * @return array<string, string> the paths `armPgcat()` returned
      */
-    private function armPgcatWithPoolProbe(array $pools, array $answers = [], bool $windowClosed = true): array
+    private function armPgcatWithPoolProbe(array $pools, array $answers = [], bool $windowClosed = true, string $control = 'missing'): array
     {
         $this->bindRedis(reachable: true);
 
@@ -5416,8 +5603,13 @@ class DbDoctorTest extends TestCase
             implode('', array_map(static fn (string $pool): string => "[pools.{$pool}]\n", $pools)),
         );
 
-        $probe = static function (string $database) use ($answers): array {
-            $status = $answers[$database] ?? 'answered';
+        $probe = static function (string $database) use ($answers, $control): array {
+            // The control is the one name no configuration declares: a fixture that had to be
+            // right about the random suffix would be testing `random_bytes()`, so the prefix is
+            // the fixture's handle on it.
+            $status = str_starts_with($database, 'weighted-dbmanager-control-')
+                ? $control
+                : ($answers[$database] ?? 'answered');
 
             return [
                 'status' => $status,

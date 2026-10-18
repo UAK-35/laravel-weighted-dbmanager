@@ -147,9 +147,9 @@ row set now has.
 | the ways a flip can politely do nothing, as DbFlipPgcatCommandTest counts them | "the **three** ways a flip can politely do nothing are one documented case" | the same cells, stated in the map's own docblock — the copy that had drifted to "two" |
 | the ways a command can be refused, as DbFlipPgcatCommandTest counts them | "the **three** ways a command can be refused are another" | the same cells, stated in the map's own docblock |
 | the doctor's documented cases, as documented-exit-codes.md counts them | "the doctor's **three** documented cases" | the README's `db:doctor` exit table, which the doctor's matrix is written as |
-| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **twenty-two**-row description of what each check judges" | the README's `db:doctor` check table |
-| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **twenty-two** verdicts, one per row" | the README's `db:doctor` check table |
-| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty-two** otherwise" | the README's `db:doctor` check table |
+| the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **twenty-four**-row description of what each check judges" | the README's `db:doctor` check table |
+| the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **twenty-four** verdicts, one per row" | the README's `db:doctor` check table |
+| the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty-four** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **twelve** values a run can reach" | the README's `kind` table |
 | the reasons a replica is excluded, as pool-exclusions.md counts them | "The reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
 | the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **nine** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
@@ -164,10 +164,10 @@ record and compared with what the run produced.
 
 | Claim | The sentence | What it counts |
 |---|---|---|
-| `/([\w-]+) things can be wrong/` in `README.md` | "**Twenty-two** things can be wrong" | the rows the command builds, against the README's own table |
-| `/That is ([\w-]+) on an installation where \`db\` resolves/` in `docs/db-doctor-json.md` | "That is **twenty-two** on an installation where …" | the rows the weighted run built |
-| `/and \*\*([\w-]+)\*\* where it does not/` in `docs/db-doctor-json.md` | "… and **nine** where it does not" | the rows a run built with `db` replaced |
-| `/([\w-]+) configuration rows/` in `README.md` | "leaves the **nine** configuration rows" | the rows a run built with `db` replaced |
+| `/([\w-]+) things can be wrong/` in `README.md` | "**Twenty-four** things can be wrong" | the rows the command builds, against the README's own table |
+| `/That is ([\w-]+) on an installation where \`db\` resolves/` in `docs/db-doctor-json.md` | "That is **twenty-four** on an installation where …" | the rows the weighted run built |
+| `/and \*\*([\w-]+)\*\* where it does not/` in `docs/db-doctor-json.md` | "… and **ten** where it does not" | the rows a run built with `db` replaced |
+| `/([\w-]+) configuration rows/` in `README.md` | "leaves the **ten** configuration rows" | the rows a run built with `db` replaced |
 | `/(\w+) rows can offer one/` in `docs/db-doctor-json.md` | "**Four** rows can offer one" | the rows an actual run marks with a non-empty `suggestions` |
 
 Both halves select by name rather than by count, and both compare *lists* before they compare

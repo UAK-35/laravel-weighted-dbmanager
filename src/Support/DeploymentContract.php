@@ -94,9 +94,9 @@ final class DeploymentContract
             ],
             'pooler' => [
                 'statement' => 'a pinned, compiled pooler',
-                'readings' => ['pool probe'],
+                'readings' => ['pool probe', 'pool repairs'],
                 'unread' => null,
-                'note' => 'the version is decided by the image build and no row reads it — `pool probe` asks what the running pooler holds, not which build is answering',
+                'note' => 'the version is decided by the image build and no row reads it — `pool probe` asks what the running pooler holds, not which build is answering, and `pool repairs` asks whether it has had to be repaired rather than which version was repaired',
             ],
             'boot-stamp' => [
                 'statement' => 'a boot stamp the flip\'s window is measured from',
@@ -112,7 +112,7 @@ final class DeploymentContract
             ],
             'state-dir' => [
                 'statement' => 'a writable state directory the schedule can write',
-                'readings' => ['pgcat files', 'store probe'],
+                'readings' => ['pgcat files', 'write paths', 'store probe'],
                 'unread' => null,
                 'note' => 'the rows report the mode and owner each path was found with rather than judging the user the schedule runs as, which is an entrypoint fact',
             ],

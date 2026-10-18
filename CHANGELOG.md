@@ -31,6 +31,21 @@
 
 ### Added
 
+- **`db:doctor` reports the pool repair count and the last repair, from the same reading
+  `db:pgcat-flip --status` prints.** The two facts were built for the status table, which is run
+  when somebody already suspects the pooler; the preflight is read whether or not anybody does, and
+  a deploy gates on it. The new `pool repairs` row passes in every state it can find — a repair is
+  a run that found the pooler refusing a pool the applied file declares and re-applied the file, so
+  failing on it would fail an installation for the self-heal having done its job; the standing
+  fault, where there is one now, is `pool probe`'s, which asks the pooler rather than reading its
+  history. What the row adds is the difference `last_kind` cannot carry: two repairs a minute apart
+  and two a week apart both leave the last run reading `repaired`. `PgcatConfigFlipper::poolRepairStatus()`
+  is the one derivation, and `windowStatus()` builds its `pool_repairs` and `last_pool_repair_at`
+  from it, so `--status` and the row cannot count one container's repairs differently; the row says
+  the count is history rather than a live reading, because a run past the boot window returns before
+  it takes the lock. It reads the flip's state file and opens nothing, so a `--connection-only` run
+  answers it, and `--json` carries it in `checks` like every other row. The README's preflight table,
+  the contract's `pooler` requirement and the row counts in the records move with it.
 - **`docs/read-path-escalation.md` explains the cancellations to the engineer who has to handle
   them.** The record states the facts and the recipes behind them, but it is written for a reader
   deciding what this package should do; the caller that receives a cancelled read is a different
@@ -59,6 +74,24 @@
   instead of leaving a green row to be read as one. Nothing about the repair changes: a pool such a
   pooler answers for cannot be told from one it holds, so `missing` is never observed there and the
   flip has nothing to act on.
+- **`db:doctor` names every path this package must be able to write, with the mode found and what an
+  unwritable one costs, in one row.** `pgcat files` answers a fault — a source it cannot read, a
+  target that is missing, a directory that will not take the copy — so the paths that are writable
+  are the ones nothing described until one of them failed, and an installation that moves its state
+  directory had no reading to confirm the new one was the one being judged. `write paths` is that
+  inventory: the flip target and the directory its temp file and rename act in, the two variants the
+  deployment renders, the state and lock a flip records itself in, the boot stamp the window is
+  measured from, and the audit record with the `.lock` companion it is serialised on. Each entry
+  names the path whose mode decides the write — the file when it is there, the directory that will
+  have to take it when it is not — the mode and owner it was found with, and, for one that cannot be
+  written, the cost the existing rows already state (a copy that never gets into place, a boot window
+  that never closes, a probe skipped because its throttle cannot be written, two boots merging one
+  record). The list is `PgcatConfigFlipper::writePaths()`'s, so the row and the class that writes the
+  paths cannot disagree about which ones they are; the row fails naming every blocked path with the
+  writable ones beside it, passes listing the set it judged, and names nothing while the flipper is
+  inert. It prints no suggestion: `pgcat files` owns the `chmod` lines and the findings they are
+  dated from, and one fault offered two lines a gate could apply is the duplication that rule exists
+  to stop.
 
 ## 0.2.0-alpha5 - 2026-10-18
 

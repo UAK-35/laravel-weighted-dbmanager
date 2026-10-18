@@ -938,6 +938,49 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
+     * The reading both surfaces print: `poolRepairStatus()` is where `--status`'s window block and
+     * `db:doctor`'s `pool repairs` row get the count and the time, so the two cannot disagree
+     * about a file only the flip writes.
+     *
+     * A counter that is not a number and a stamp that is not a string are the same state as an
+     * absent one — the state file is one an operator may edit by hand — and the two fields have to
+     * be one shape whichever way they were written, which is the line `converged_at` already
+     * draws.
+     */
+    public function test_the_pool_repair_reading_is_the_one_both_surfaces_print(): void
+    {
+        file_put_contents($this->stateFile, json_encode([
+            'pool_repairs' => 3,
+            'last_pool_repair_at' => '2026-10-10T12:00:00+00:00',
+        ]));
+
+        $flipper = $this->build('readers');
+
+        $this->assertSame(
+            ['count' => 3, 'last_at' => '2026-10-10T12:00:00+00:00'],
+            $flipper->poolRepairStatus(),
+            'the reading is the count and the time, and nothing about the window beside them',
+        );
+        $this->assertSame(3, $flipper->windowStatus()['pool_repairs'], '--status prints the same count');
+        $this->assertSame(
+            '2026-10-10T12:00:00+00:00',
+            $flipper->windowStatus()['last_pool_repair_at'],
+            'and the same time',
+        );
+
+        file_put_contents($this->stateFile, json_encode([
+            'pool_repairs' => 'many',
+            'last_pool_repair_at' => 12345,
+        ]));
+
+        $this->assertSame(
+            ['count' => 0, 'last_at' => null],
+            $flipper->poolRepairStatus(),
+            'a counter that is not a number and a stamp that is not a string read as none, not as two shapes',
+        );
+    }
+
+    /**
      * A flip that *applies* a mode asks the same question the run above asks about a mode that
      * was already in place, because the two states are silent in exactly the same way: the file is
      * the variant the mode asks for, `pgcat mode` compares two files and finds them in step, and
@@ -1160,7 +1203,11 @@ class PgcatConfigFlipperTest extends TestCase
         ], poolProbe: function (string $database) use (&$probed): array {
             $probed[] = $database;
 
-            return ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)];
+            // The pooler this fixture is: it resolves a pool before it authenticates, so the
+            // control name is refused and every accepted pool is one it holds.
+            return str_starts_with($database, 'weighted-dbmanager-control-')
+                ? ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)]
+                : ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)];
         });
 
         $verdict = $flipper->poolProbeVerdict();
@@ -1168,12 +1215,93 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertTrue($verdict['enabled']);
         $this->assertTrue($verdict['applicable']);
         $this->assertTrue($verdict['answered']);
+        $this->assertTrue($verdict['discriminates'], 'the control was refused, so an answered pool is a pool that exists');
         $this->assertFalse($verdict['failed']);
         $this->assertFalse($verdict['warned']);
         $this->assertNull($verdict['reason']);
-        $this->assertSame(['writer_db_1', 'reader_db_2'], $probed, 'every pool the variant declares is asked about, in file order');
+        $this->assertSame(['writer_db_1', 'reader_db_2'], array_slice($probed, 0, 2), 'every pool the variant declares is asked about, in file order');
+        $this->assertStringStartsWith('weighted-dbmanager-control-', $probed[2] ?? '', 'then the one name no configuration declares');
+        $this->assertSame('missing', $verdict['control']['status'] ?? null);
         $this->assertSame(['writer_db_1', 'reader_db_2'], array_column($verdict['pools'], 'database'));
         $this->assertSame(['answered', 'answered'], array_column($verdict['pools'], 'status'));
+    }
+
+    /**
+     * The pooler this reading was measured against: it authenticates before it resolves a pool and
+     * answers every name, the control included. The pools are still reported as answered — the
+     * pooler did answer — but `discriminates` says those answers are not proof, and nothing is
+     * failed: a pooler's ordering is a property of the pooler, not a fault in the installation.
+     */
+    public function test_an_auth_first_pooler_is_reported_as_answering_every_name(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: static fn (string $database): array => [
+            'status' => 'answered',
+            'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+        ]);
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertTrue($verdict['answered'], 'the pooler did answer');
+        $this->assertFalse($verdict['discriminates'], 'but it answered a name it cannot hold too');
+        $this->assertSame('answered', $verdict['control']['status'] ?? null);
+        $this->assertFalse($verdict['failed'], 'a pooler that authenticates first is not a fault');
+        $this->assertFalse($verdict['warned']);
+        $this->assertNull($verdict['reason']);
+    }
+
+    /**
+     * The control is a question like the pools are: if it answered nothing, the sweep can say
+     * neither that the pooler reads pools first nor that it does not, and `discriminates` is null
+     * rather than a guess in either direction.
+     */
+    public function test_a_control_that_did_not_answer_leaves_the_proof_unchecked(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: static fn (string $database): array => str_starts_with($database, 'weighted-dbmanager-control-')
+            ? ['status' => 'silent', 'evidence' => 'the control did not answer']
+            : ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)]);
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertTrue($verdict['answered']);
+        $this->assertNull($verdict['discriminates'], 'neither proved nor disproved');
+        $this->assertSame('silent', $verdict['control']['status'] ?? null);
+        $this->assertFalse($verdict['failed']);
+        $this->assertFalse($verdict['warned']);
+    }
+
+    /**
+     * A pool the pooler refuses is already the proof that it reads pools before it authenticates,
+     * so the control is not asked: a second exchange for a fact the first one settled would be a
+     * socket spent on nothing.
+     */
+    public function test_a_refused_pool_proves_the_pooler_without_a_control(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $probed = [];
+
+        $verdict = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'missing', 'evidence' => 'pgcat is running but has no pool "reader_db_2"'];
+        })->poolProbeVerdict();
+
+        $this->assertTrue($verdict['discriminates']);
+        $this->assertNull($verdict['control'], 'nothing was left to ask');
+        $this->assertSame(['reader_db_2'], $probed, 'the control was never asked');
     }
 
     /**
@@ -1260,26 +1388,35 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertFalse($verdict['enabled']);
         $this->assertFalse($verdict['applicable']);
         $this->assertNull($verdict['answered']);
+        $this->assertNull($verdict['discriminates']);
+        $this->assertNull($verdict['control']);
         $this->assertSame([], $verdict['pools']);
         $this->assertNull($verdict['reason']);
     }
 
     /**
      * An armed probe and a variant that declares no pool is not a pooler that failed: there is
-     * nothing the configuration claims the pooler should hold, so nothing can be missing.
+     * nothing the configuration claims the pooler should hold, so nothing can be missing — and
+     * the control is part of that nothing, not a question asked on its own.
      */
     public function test_a_variant_that_declares_no_pool_asks_nothing(): void
     {
-        $verdict = $this->build('readers', poolProbe: static fn (string $database): array => [
-            'status' => 'missing',
-            'evidence' => 'pgcat is running but has no pool',
-        ])->poolProbeVerdict();
+        $probed = [];
+
+        $verdict = $this->build('readers', poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'missing', 'evidence' => 'pgcat is running but has no pool'];
+        })->poolProbeVerdict();
 
         $this->assertTrue($verdict['enabled']);
         $this->assertFalse($verdict['applicable']);
         $this->assertNull($verdict['answered']);
+        $this->assertNull($verdict['discriminates']);
+        $this->assertNull($verdict['control']);
         $this->assertSame([], $verdict['pools']);
         $this->assertNull($verdict['reason']);
+        $this->assertSame([], $probed, 'nothing was asked, the control included');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1618,6 +1755,100 @@ class PgcatConfigFlipperTest extends TestCase
             $flipper->fileProblems(),
             'none of the three exists yet, which is normal for all of them, and the directory that will take each one is writable',
         );
+    }
+
+    /**
+     * The inventory the fault list only speaks of when something is wrong: every path this
+     * package must be able to write while a flip is armed, with the mode and owner each was found
+     * with and the cost of an unwritable one. It is the reading `db:doctor`'s `write paths` row
+     * prints, and it names the file when it is there and the directory that will take it when it
+     * is not — the path whose mode decides the write.
+     */
+    public function test_write_paths_names_every_path_with_the_mode_it_was_found_with(): void
+    {
+        $record = $this->tmp.'/swrr-audit.json';
+        file_put_contents($record, '{}');
+
+        $flipper = $this->build(
+            'readers',
+            ['boot_file' => $this->tmp.'/container-booted-at'],
+            auditFile: $record,
+        );
+
+        $paths = [];
+
+        foreach ($flipper->writePaths() as $path) {
+            $paths[$path['setting']] = $path;
+        }
+
+        $this->assertSame(
+            [
+                'config_path',
+                'config_path.directory',
+                'readers_path',
+                'no_readers_path',
+                'state_file',
+                'lock_file',
+                'boot_file',
+                'audit_lock',
+                'audit_file',
+            ],
+            array_keys($paths),
+            'the inventory is every path a flip cycle writes, not only the ones that failed',
+        );
+
+        $this->assertSame($this->tmp.'/pgcat.toml', $paths['config_path']['path']);
+        $this->assertTrue($paths['config_path']['writable']);
+        $this->assertStringContainsString('mode ', (string) $paths['config_path']['facts']);
+        $this->assertStringContainsString('copy into place', $paths['config_path']['cost']);
+
+        // The state, lock and stamp files do not exist yet, which is normal for all of them: the
+        // path whose mode decides the write is the directory that will have to take them.
+        $this->assertSame($this->tmp, $paths['state_file']['path']);
+        $this->assertSame($this->tmp, $paths['boot_file']['path']);
+        $this->assertStringContainsString('boot window never closes', $paths['boot_file']['cost']);
+
+        // The record itself is here, so its path and mode are its own.
+        $this->assertSame($record, $paths['audit_file']['path']);
+        $this->assertStringContainsString('mode ', (string) $paths['audit_file']['facts']);
+    }
+
+    /**
+     * A path a flip cannot write is marked, and carries the cost the inventory prints — the
+     * reading `db:doctor` builds its failure from. The blocked directory is a regular file where
+     * a directory is wanted, which holds on every filesystem.
+     */
+    public function test_write_paths_marks_an_unwritable_path_and_keeps_its_cost(): void
+    {
+        $blocked = $this->tmp.'/blocked';
+        file_put_contents($blocked, '');
+
+        $flipper = $this->build(
+            'readers',
+            ['boot_file' => $blocked.'/container-booted-at'],
+        );
+
+        $paths = [];
+
+        foreach ($flipper->writePaths() as $path) {
+            $paths[$path['setting']] = $path;
+        }
+
+        $this->assertArrayHasKey('boot_file', $paths);
+        $this->assertFalse($paths['boot_file']['writable']);
+        $this->assertSame($blocked, $paths['boot_file']['path']);
+        $this->assertStringContainsString('boot window never closes', $paths['boot_file']['cost']);
+        $this->assertStringContainsString('mode ', (string) $paths['boot_file']['facts']);
+    }
+
+    /**
+     * Nothing is written while the flipper is inert, so there is no inventory to print.
+     */
+    public function test_write_paths_is_empty_while_the_flipper_is_inert(): void
+    {
+        $flipper = $this->build('readers', ['enabled' => false]);
+
+        $this->assertSame([], $flipper->writePaths());
     }
 
     /**

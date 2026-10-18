@@ -9,7 +9,7 @@ release: a name that is not on this page is not part of the published API.
 | the record | rows |
 | --- | ---: |
 | files shipped | 49 |
-| public methods | 248 |
+| public methods | 250 |
 | config keys | 64 |
 | public constants | 154 |
 | environment variables read | 48 |
@@ -175,7 +175,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Pgcat\FlipResult` | 10 | `src/Pgcat/FlipResult.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipSchedule` | 10 | `src/Pgcat/FlipSchedule.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipWindow` | 11 | `src/Pgcat/FlipWindow.php` |
-| `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 27 | `src/Pgcat/PgcatConfigFlipper.php` |
+| `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 29 | `src/Pgcat/PgcatConfigFlipper.php` |
 | `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 6 | `src/Pgcat/PoolProbe.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleBeat` | 7 | `src/Pgcat/ScheduleBeat.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` | 4 | `src/Pgcat/ScheduleCauses.php` |
@@ -558,6 +558,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 | `isEnabled()` | 0 of 0 | — |
 | `isMismatched()` | 0 of 0 | — |
 | `poolProbeVerdict()` | 0 of 0 | — |
+| `poolRepairStatus()` | 0 of 0 | — |
 | `readerWindowVerdict()` | 0 of 0 | — |
 | `refusedSwitches()` | 0 of 0 | — |
 | `scheduleStatus()` | 0 of 0 | — |
@@ -569,6 +570,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 | `variantShape()` | 0 of 0 | — |
 | `window()` | 0 of 0 | — |
 | `windowStatus()` | 0 of 0 | — |
+| `writePaths()` | 0 of 0 | — |
 
 Members: `FILE_DIRECTORY_UNWRITABLE`, `FILE_MISSING`, `FILE_UNREADABLE`, `FILE_UNSET`, `FILE_UNWRITABLE`, `SUPPORTED_DRIVERS`.
 

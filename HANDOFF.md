@@ -47,7 +47,8 @@ so the report and the healthcheck cannot explain one silence with different evid
 `db:doctor --contract`: the requirements `docs/deployment-contract.md` states as rows named by their
 keys, folded from the same readings a plain run asks, with the mapping in
 `Support\DeploymentContract` and its record held to the class by `DeploymentContractTest`. That batch
-is why section 1's table below carries two rows: the two files no commit has yet. Everything the notes
+is why section 1's table below names files as well as batches: what no commit has yet is a set, and
+the table is where it is stated. Everything the notes
 before this one carried is committed on `dev` and unpushed, and section 2 lists those commits. Section
 3's `### Added` is where the prose of a landed batch belongs — a capability a consumer can install
 rather than a file somebody has to be told about. Three of them are worth naming anyway, because the
@@ -183,20 +184,21 @@ version nobody is handed rather than a runner finding out after the push.
 The three `.tsv` records describe the tree `v0.2.0-alpha3` was cut from, and they say so in their
 header line — the release rewrites them, which is why the record of one tag is the record of no later
 tree. That is the check reading the stamp and the rows: against the register this note names the
-record on disk describes another tag, so it exits 1 on one line per file — the header — and nothing
-else, because the rows themselves are the tree's; and against this checkout it exits 0, naming the
-tag those rows describe, which is the release the note before this one cut:
+record on disk describes another tag, so it exits 1 on one line per file — the header — and, in
+`methods.tsv`, on the rows this batch has added since, which the record carries and that commit does
+not; and against this checkout it exits 0, naming the tag those rows describe, which is the release
+the note before this one cut:
 
 <!-- handoff:records -->
 ```
 php bin/inventory.php --check --at=d319a29
   --> exit 1: the inventory is out of step with the tree at d319a29
       files.tsv: 1 line(s) stale
-      methods.tsv: 1 line(s) stale
+      methods.tsv: 5 line(s) stale
       surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 49 files, 246 public methods, 280 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 0: inventory is current — 49 files, 250 public methods, 280 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -218,11 +220,10 @@ The table under it is **rendered rather than written**, as are the gate summary 
 transcript of the records and section 2's table and the listing under it. Its rows are the files this
 checkout has that the register does not carry (`git ls-files --cached --others --exclude-standard`
 minus `git ls-tree -r` of the register), one row apiece, with the prose column declared in
-`tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. It carries the
-three rows this note's own batch added and no others: the schedule-causes work was carried by the
-register, while these files are the ones no commit has yet — a row in it is the register saying it
-does not carry that file, and the gate's record is one of them because the run it holds was taken for
-this note. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
+`tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. Only a file no
+commit carries is on it, so this note's own batch shows up as the page it added and nothing else: a
+tracked path's modification is not a file the register lacks, and a file the register already carries
+is a file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
 and one from the recorded run — and the note's own guard renders the same five and asserts the file
 says what they say, so a re-take cannot state a set of files, a count or a listing the tree does not
 have. A file the register does not carry and that has no line declared for it is refused by name
@@ -232,6 +233,7 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `docs/read-path-escalation.md` | the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record's facts, written for the caller rather than for this package's maintainer |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released

@@ -87,6 +87,18 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     traffic is supposed to switch. The one row that never prints a
  *                     suggestion: what is wrong is a path or a permission, and neither
  *                     is a value this package can name for somebody else's filesystem
+ *   write paths       every path this package must be able to write while the flipper is
+ *                     armed, in one row: the flip target and the directory its temp file is
+ *                     written in, the two variants a deployment renders, the state and lock a
+ *                     flip records itself in, the boot stamp the window is measured from, and
+ *                     the audit record with its lock. Each names the path whose mode decides
+ *                     the write, the mode and owner it was found with, and what an unwritable
+ *                     one costs — the inventory `pgcat files` only speaks of when one of them
+ *                     fails, so an operator can see what the package writes and a gate can
+ *                     find a state directory an entrypoint moved. Fails naming every path that
+ *                     cannot be written, and passes with the labels it judged otherwise; prints
+ *                     no suggestion, because the `chmod` lines and the findings they are dated
+ *                     from are `pgcat files`'
  *   variant shape     the file a flip would swap *in* is one this installation cannot
  *                     serve: a configured path that is not a readable file, a `[pools…]`
  *                     section no pool name can be read out of, a variant that declares no
@@ -125,6 +137,13 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     Warns, rather than failing, for a pooler that answered nothing at
  *                     all, and is not judged while the boot window is still open, where
  *                     the flip still re-applies the configuration
+ *   pool repairs      how many pool repairs this container has recorded, and when the last
+ *                     one happened: a repair is the self-heal working, so the row reports it
+ *                     rather than failing on it — the standing fault, if there is one now,
+ *                     is `pool probe`'s, which asks the pooler rather than reading its
+ *                     history. Read from the same state file and the same derivation
+ *                     `db:pgcat-flip --status` prints, so the two surfaces cannot count one
+ *                     container's repairs differently
  *   replica metadata  replicas carry no weight metadata, so the resolver picks at
  *                     random while the table looks weighted — or a replica's weight,
  *                     cores or memory is a value the resolver cannot read, which
@@ -548,6 +567,7 @@ class DbDoctor extends Command
             $this->publishedConfig(),
             $this->pgcatGate(),
             $this->pgcatFiles(),
+            $this->writePaths(),
             $this->variantShape(),
         ];
 
@@ -568,6 +588,10 @@ class DbDoctor extends Command
             if ($this->asks('pool probe')) {
                 $rows[] = $this->poolProbe();
             }
+
+            // Beside the probe rather than in `--connection-only`'s left-out set: this row reads
+            // the flip's state file and opens nothing, so a build container can answer it.
+            $rows[] = $this->poolRepairs();
 
             $rows[] = $this->flipSchedule();
             $rows[] = $this->scheduleBeat();
@@ -1832,6 +1856,87 @@ class DbDoctor extends Command
     }
 
     /**
+     * Every path this package must be able to write while the flipper is armed, in one row.
+     *
+     * WHY A ROW OF ITS OWN
+     *   `pgcat files` answers a fault: a source cannot be read, a target is missing, a directory
+     *   will not take the copy. It is silent about the rest — the paths that are writable today
+     *   are the ones nothing describes — so an operator cannot see what the package writes at all
+     *   until one of the writes fails, and a deployment that moves its state directory has no
+     *   reading that confirms the new path is the one being judged. This row is that inventory:
+     *   the flip target and the directory beside it, the two variants the deployment renders, the
+     *   state and lock a flip records itself in, the boot stamp the window is measured from, and
+     *   the audit record and its lock. The list is `PgcatConfigFlipper::writePaths()`'s, so the
+     *   doctor judges exactly the paths the class that writes them judges.
+     *
+     * WHAT IT SAYS, AND WHAT IT DOES NOT
+     *   Each entry carries the mode and owner the path was found with, and the sentence that says
+     *   what an unwritable one costs — a flip that cannot get its copy into place, a window that
+     *   never closes, two boots that write one record at once. That is the fact a bare "not
+     *   writable" sentence leaves out: the check already asked the filesystem, and an operator is
+     *   one question — *by whom* — away from the repair. The repairs themselves stay in
+     *   `pgcat files`: that row owns the `chmod` lines because it owns the per-setting findings
+     *   they are dated from, and printing them twice would offer one fault two lines a gate could
+     *   apply. No entry is dated for the same reason — the finding is the other row's.
+     *
+     *   A writable installation passes naming every path it judged, so the row states what it read
+     *   in both directions rather than only when something is wrong. An inert flipper writes
+     *   nothing, so the row names no path: that is `pgcat files`' line too, and a list of files a
+     *   disabled feature would have touched is a reading of a world that cannot happen.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function writePaths(): array
+    {
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row('write paths', self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row('write paths', self::FAIL, 'the flipper could not be built: ' . $e->getMessage());
+        }
+
+        if (!$flipper->isEnabled()) {
+            return $this->row('write paths', self::PASS, 'flipper is not armed — the package writes no path, so none is judged');
+        }
+
+        $paths = $flipper->writePaths();
+        $blocked = 0;
+        $entries = [];
+
+        foreach ($paths as $path) {
+            // Every path is named, writable or not: the reading is the inventory, and a row that
+            // listed only the blocked ones would leave an operator unable to confirm that the
+            // directory they just moved is the directory being judged.
+            $entry = sprintf(
+                '%s [%s]%s',
+                $path['label'],
+                $path['path'],
+                $path['facts'] === null ? '' : ' ('.$path['facts'].')',
+            );
+
+            if ($path['writable']) {
+                $entries[] = $entry;
+
+                continue;
+            }
+
+            // The cost is printed only where it applies, because it is the consequence of this
+            // path being unwritable rather than a description of the path.
+            $entries[] = $entry.', so '.$path['cost'];
+            $blocked++;
+        }
+
+        return $this->row(
+            'write paths',
+            $blocked === 0 ? self::PASS : self::FAIL,
+            implode('; ', $entries),
+        );
+    }
+
+    /**
      * The shape of what a flip would swap in — the row above judges whether a flip can *read and
      * write* the files, and this one judges whether the file it would write is one this installation
      * can serve.
@@ -2901,6 +3006,96 @@ class DbDoctor extends Command
         }
 
         return $this->row($name, self::PASS, $reason);
+    }
+
+    /**
+     * How many pool repairs this container has recorded, and when the last one happened.
+     *
+     * WHY THIS ROW EXISTS
+     *   The count was built for `db:pgcat-flip --status`, which is a table an operator runs when
+     *   they already suspect the pooler. The preflight is the surface that is read whether or not
+     *   anything is suspect, and the one a deploy gates on, so the same two facts belong in front
+     *   of it: a one-off repair inside the boot window is the self-heal doing its job, while a
+     *   count that keeps climbing is a pooler that needs looking at — and `last_kind` reads the
+     *   same `repaired` however often it happens, so the count is the only place that difference
+     *   is visible.
+     *
+     * WHY IT IS A READING AND NOT A VERDICT
+     *   A repair is not a fault: it is a run that found the pooler refusing a pool the applied
+     *   file declares and re-applied the file, and the fact that it happened is the answer the
+     *   self-heal gave. Failing on it would fail an installation for the flip having done its
+     *   job. The standing fault, when there is one now, is `pool probe`'s row — it asks the pooler
+     *   at this moment, where this row reports what happened — so the row passes in every state
+     *   it can find and says what it read, the line `read/write pair` draws for its own reading.
+     *
+     * THE SAME STATE FILE, AND THE SAME DERIVATION
+     *   The two facts come from `PgcatConfigFlipper::poolRepairStatus()`, which is what
+     *   `windowStatus()` builds its `pool_repairs` and `last_pool_repair_at` from as well, so
+     *   `--status` and this row cannot count one container's repairs differently. A second reader
+     *   of the file here — `json_decode` this row's own, a `?? 0` this row's own — would be the
+     *   way the two surfaces begin to disagree, and the disagreement would be silent in both.
+     *
+     * WHAT THE COUNT IS, AND IS NOT
+     *   It is this container's history rather than a live reading: a repair is only possible
+     *   inside the boot window, because `applyCurrentState()` returns before it takes the lock
+     *   once the window has closed. The row says so, so a count that is not moving is not read as
+     *   a pooler that has stopped needing repair.
+     *
+     * No finding key: a repair is a run's outcome rather than a state a boot closes out, and the
+     * absence of one is not a finding at all. No `suggestion`: the repair for a pooler that keeps
+     * refusing pools is the pooler — a restart, a file, an address — and none of them is a value
+     * this line could name.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function poolRepairs(): array
+    {
+        $name = 'pool repairs';
+
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row(
+                $name,
+                self::PASS,
+                'the flipper is not bound, so no run repairs a pool and nothing is counted — the '
+                .'`pool probe` row names that fault',
+            );
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row(
+                $name,
+                self::FAIL,
+                'the flipper could not be built, so the pool repairs it recorded cannot be read: '.$e->getMessage(),
+            );
+        }
+
+        $repairs = $flipper->poolRepairStatus();
+        $armed = $flipper->isEnabled();
+
+        if ($repairs['count'] === 0) {
+            return $this->row($name, self::PASS, sprintf(
+                'no pool repair is recorded in this container: no run has found the running pooler refusing a '
+                .'pool the applied file declares%s',
+                $armed ? '' : ', and the flipper is not armed, so none will be',
+            ));
+        }
+
+        return $this->row($name, self::PASS, sprintf(
+            'the pooler has been repaired %d time(s), %s — %s; the count is what `last_kind` cannot show, '
+            .'because a one-off and a pooler that keeps needing repair both leave the last run reading '
+            .'`repaired`',
+            $repairs['count'],
+            $repairs['last_at'] === null
+                ? 'with no time recorded for the last one'
+                : 'the last at '.$repairs['last_at'],
+            $armed
+                ? 'a repair is a run that found it refusing a pool and re-applied the file, and nothing '
+                    .'repairs anything once the boot window has closed, so this is the container\'s convergence '
+                    .'history rather than a live reading'
+                : 'the flipper is not armed now, so no further repair is made',
+        ));
     }
 
     /**

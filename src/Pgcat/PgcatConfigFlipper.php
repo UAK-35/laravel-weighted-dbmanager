@@ -1202,6 +1202,144 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * Every path this package must be able to write while a flip is armed, one reading for all of
+     * them, each with the path whose mode decides the write, what an unwritable one costs, and
+     * whether it can be written here.
+     *
+     * WHY ONE LIST
+     *   `fileProblems()` answers "is one of these unusable?", and it is the list a fault is
+     *   reported from. This answers the other half of the same question — "which paths are they,
+     *   and are they writable?" — as one reading that exists in every state rather than only when
+     *   something is wrong. A preflight whose only evidence is a failure cannot tell an operator
+     *   what the package was going to write in the first place, and an installation that moves its
+     *   state directory has no way to confirm the new one is the path being judged.
+     *
+     *   The two lists are deliberately not one method. A problem carries a setting, a kind, a
+     *   sentence and a repair because a boot finding needs them; a reading carries a path, the
+     *   cost of its absence, and the mode it was found with, because a row prints them whether or
+     *   not anything failed. Folding one into the other would make the reading's shape depend on
+     *   the fault set, which is the rule `db:doctor --json` refuses for its own rows.
+     *
+     * WHAT IS ON IT, AND WHAT IS NOT
+     *   The flip target and the directory the atomic swap writes beside it; the two variants a
+     *   deployment renders (a flip reads them, the entrypoint writes them); the state and lock
+     *   files a flip records itself in; the boot stamp the window is measured from; and the audit
+     *   record and its lock, which the package writes for a different reason — findings and the
+     *   probe's throttle share that file. That is every path `fileProblems()` judges as a
+     *   *writer*, plus the record itself, which `store probe` owns as a verdict and which is on
+     *   this list because the question here is the inventory rather than the fault.
+     *
+     *   Empty while the flipper is inert, exactly like `fileProblems()`: nothing is written then,
+     *   and a reading that named paths anyway would describe a swap that cannot happen.
+     *
+     * The path a reading names is the one whose mode decides the write — the file when it is
+     * there, and the directory that will have to take it when it is not, which is the normal state
+     * of the stamp and the record on a container that has not booted yet. `writtenPaths()` supplies
+     * the two that are not a flip step's own, so their labels and costs cannot drift between the
+     * fault and the inventory.
+     *
+     * @return list<array{setting: string, path: string, label: string, cost: string, writable: bool, facts: string|null}>
+     */
+    public function writePaths(): array
+    {
+        if (!$this->isEnabled()) {
+            return [];
+        }
+
+        $paths = [];
+
+        $target = ConfigValue::string($this->config['config_path'] ?? null);
+
+        if ($target !== '') {
+            $paths[] = $this->writtenPath(
+                'config_path',
+                $target,
+                'flip target',
+                'a flip cannot get its copy into place, so the window it was meant to open never opens',
+            );
+
+            // The temp file and the rename that replaces the target both live in its directory,
+            // so the target being writable is not enough on its own.
+            $paths[] = $this->writtenPath(
+                'config_path.directory',
+                dirname($target),
+                'flip target directory',
+                'the atomic swap cannot write its temp file beside the target, so no copy reaches it',
+            );
+        }
+
+        // Read by a flip, written by the deployment's entrypoint: an unwritable variant is a boot
+        // whose render fails, and a flip with nothing to read for that direction.
+        foreach ([
+            'readers_path' => ['reader source', 'the entrypoint cannot re-render the readers variant, and a flip has nothing to read for that direction'],
+            'no_readers_path' => ['writer source', 'the entrypoint cannot re-render the writer-only variant, and a flip has nothing to read for that direction'],
+        ] as $setting => [$label, $cost]) {
+            $path = ConfigValue::string($this->config[$setting] ?? null);
+
+            if ($path !== '') {
+                $paths[] = $this->writtenPath($setting, $path, $label, $cost);
+            }
+        }
+
+        foreach ([
+            'state_file' => ['flip state', 'a flip reports success while recording nothing, and restarts pgcat again on the next poll'],
+            'lock_file' => ['flip lock', 'the mutex a concurrent flipper stands down on cannot be taken'],
+        ] as $setting => [$label, $cost]) {
+            $path = $setting === 'state_file' ? $this->stateFile : $this->lockFile;
+
+            if ($path !== '') {
+                $paths[] = $this->writtenPath($setting, $path, $label, $cost);
+            }
+        }
+
+        // The two the fault list already carries — the boot stamp and the record's lock — so their
+        // sentences and this inventory cannot describe the same path two ways.
+        foreach ($this->writtenPaths() as $setting => $row) {
+            if ($row['path'] === '') {
+                continue;   // an unset key is the arming's problem, not a path to judge
+            }
+
+            $paths[] = $this->writtenPath($setting, $row['path'], $row['label'], $row['cost']);
+        }
+
+        $auditFile = $this->auditFile ?? '';
+
+        if ($auditFile !== '') {
+            $paths[] = $this->writtenPath(
+                'audit_file',
+                $auditFile,
+                'audit record',
+                'a finding and the probe\'s throttle cannot be recorded, so a fault is logged once and the store is PINGed on every boot',
+            );
+        }
+
+        return $paths;
+    }
+
+    /**
+     * One entry of the list above: the path whose mode decides the write, whether it can be
+     * written, and the mode and owner it was found with.
+     *
+     * The file itself when it is there and the directory that will have to take it when it is not,
+     * which is the same rule `writable()` judges by and the same path the fault sentences name.
+     *
+     * @return array{setting: string, path: string, label: string, cost: string, writable: bool, facts: string|null}
+     */
+    private function writtenPath(string $setting, string $path, string $label, string $cost): array
+    {
+        $subject = file_exists($path) ? $path : dirname($path);
+
+        return [
+            'setting' => $setting,
+            'path' => $subject,
+            'label' => $label,
+            'cost' => $cost,
+            'writable' => self::writable($path),
+            'facts' => self::facts($subject),
+        ];
+    }
+
+    /**
      * Whether this package can create or write a path: the file itself when it is already there,
      * and the directory it will be created in when it is not — which is the normal state of both
      * of the paths above on a container that has not booted yet.
@@ -1229,7 +1367,11 @@ final class PgcatConfigFlipper
      * `BootAudit`'s finding already judge it (`BootAudit::probeUnwritableSentence()`), the reading
      * belongs to the object that owns the record, and a second row printing the same sentence would
      * be one fault reported twice. What is on the list is the record's **lock**, which nothing
-     * judged, and the boot stamp, which nothing judged.
+     * judged, and the boot stamp, which nothing judged. The record *is* on `writePaths()`'s list
+     * below, which is the inventory rather than this fault list: it names every path the package
+     * writes, and a record it cannot write is reported there with the cost of that. The two rows
+     * print different sentences — the probe's is about the throttle — and both reach the verdict the
+     * record's unwritability is, which is the aggregate's point rather than a repetition of it.
      *
      * @return array<string, array{path: string, label: string, cost: string}>
      */
@@ -1668,6 +1810,14 @@ final class PgcatConfigFlipper
      *   `silent`) and the sentence `PoolProbe` produced for it. `answered` is true when every pool
      *   answered, false when one did not, and null when nothing was asked.
      *
+     *   `discriminates` is what makes an `answered` pool a *proof* or only an answer. It is read off
+     *   one control name no configuration declares: the same sweep asks it, and a refusal means the
+     *   pooler resolves a pool before it authenticates, so `answered` is evidence the pool exists;
+     *   an answer to the control means the pooler authenticates first and answers every name, so
+     *   the pools could not be proved. `control` is that exchange, or null when it was not needed —
+     *   a `missing` pool is itself the proof, and asking it again would be a socket for a fact
+     *   already settled.
+     *
      *   It deliberately repairs, restarts and records nothing: the throw, the swap and the record
      *   belong to a flip, and a status reading that restarted a pooler would not be one an endpoint
      *   could be polled with. `failed` is the judgement, and it is the repair's own — `missing`, the
@@ -1690,7 +1840,7 @@ final class PgcatConfigFlipper
      *   contract rather than add a field to this one. The surfaces that want the answer ask for it
      *   by name, and neither of the two is on the flip's own hot path.
      *
-     * @return array{enabled: bool, applicable: bool, answered: bool|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, control: array{database: string, status: string, evidence: string}|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
      */
     public function poolProbeVerdict(): array
     {
@@ -1700,6 +1850,8 @@ final class PgcatConfigFlipper
             'enabled' => $this->poolProbe !== null,
             'applicable' => false,
             'answered' => null,
+            'discriminates' => null,
+            'control' => null,
             'failed' => false,
             'warned' => false,
             'pools' => [],
@@ -1745,10 +1897,39 @@ final class PgcatConfigFlipper
 
         $judged = $this->window->closed();
 
+        // A refusal of a declared pool already proves this pooler resolves pools before it
+        // authenticates, so the control is asked only when nothing was refused: one extra
+        // exchange that turns "the pooler answered" into "the pool exists" or into "the pooler
+        // answers everything", which no pool's answer alone can do.
+        $discriminates = true;
+        $control = null;
+
+        if ($missing === []) {
+            $controlName = PoolProbe::controlName();
+            /** @var array{status?: string, evidence?: string} $controlVerdict */
+            $controlVerdict = ($this->poolProbe)($controlName);
+
+            $controlStatus = is_string($controlVerdict['status'] ?? null) && $controlVerdict['status'] !== ''
+                ? $controlVerdict['status']
+                : PoolProbe::STATUS_SILENT;
+
+            $control = [
+                'database' => $controlName,
+                'status' => $controlStatus,
+                'evidence' => is_string($controlVerdict['evidence'] ?? null) && $controlVerdict['evidence'] !== ''
+                    ? $controlVerdict['evidence']
+                    : sprintf('the pooler gave no answer for the control name "%s"', $controlName),
+            ];
+
+            $discriminates = PoolProbe::discriminates($controlStatus);
+        }
+
         return [
             'enabled' => true,
             'applicable' => true,
             'answered' => $missing === [] && $silent === [],
+            'discriminates' => $discriminates,
+            'control' => $control,
             'failed' => $judged && $missing !== [],
             'warned' => $judged && $missing === [] && $silent !== [],
             'pools' => $pools,
@@ -1898,6 +2079,50 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * How many pool repairs this container has recorded, and when the last one happened — the
+     * reading `db:pgcat-flip --status` prints and `db:doctor`'s `pool repairs` row reports.
+     *
+     * WHY ONE READING AND NOT A COUNTER EACH
+     *   `windowStatus()` carries the same two facts, and the preflight could have read them out of
+     *   that block. It does not, because that block is the *boot window's* — an age, a deadline, a
+     *   convergence — and a caller asking only what a repair left behind would be given the
+     *   window's questions in the same array. What the two callers share instead is this method's
+     *   derivation: one cast of `pool_repairs` and one reading of `last_pool_repair_at` that is
+     *   null unless it is a string, over the state file the flip wrote. Two readers of that file
+     *   — a `json_decode()` here and a key cast there — is how two surfaces start disagreeing
+     *   about a file whose writes are serialised by the flip's own lock.
+     *
+     *   `last_at` is null rather than whatever the file holds when the value is absent, empty or
+     *   not a string, which is the line `windowStatus()` already draws for `converged_at`. A
+     *   report that printed a scalar beside an ISO time would be one field in two shapes, and a
+     *   state file edited by hand is the case an operator arrives in first.
+     *
+     * @return array{count: int, last_at: string|null}
+     */
+    public function poolRepairStatus(): array
+    {
+        return $this->repairFacts($this->readState());
+    }
+
+    /**
+     * The two repair facts in a state file already read, so a caller holding the state does not
+     * read the file twice and the two surfaces agree by construction.
+     *
+     * @param array<string, mixed> $state
+     *
+     * @return array{count: int, last_at: string|null}
+     */
+    private function repairFacts(array $state): array
+    {
+        $last = $state['last_pool_repair_at'] ?? null;
+
+        return [
+            'count' => ConfigValue::int($state['pool_repairs'] ?? null, 0),
+            'last_at' => is_string($last) && $last !== '' ? $last : null,
+        ];
+    }
+
+    /**
      * The container's boot window as one block: the window itself, plus what the recorded runs
      * inside it say about convergence.
      *
@@ -1918,7 +2143,9 @@ final class PgcatConfigFlipper
      * written), and the count says whether that was a one-off or a pooler that keeps needing
      * repair — which `last_kind` alone cannot, because two repairs a minute apart and two repairs
      * a week apart both leave it reading `repaired`. `last_pool_repair_at` is when the last one
-     * happened, read the same way `last_run_at` is.
+     * happened, read the same way `last_run_at` is. Both are `poolRepairStatus()`'s facts, from
+     * the state read below rather than from a second read of the file, so this block and the
+     * preflight's `pool repairs` row cannot count one container's repairs differently.
      *
      * @return array<string, mixed>
      */
@@ -1927,6 +2154,7 @@ final class PgcatConfigFlipper
         $window = $this->window->toArray();
         $state = $this->readState();
         $convergedAt = $this->stateTime($state, 'converged_at');
+        $repairs = $this->repairFacts($state);
 
         $converged = $convergedAt !== null && $this->window->contains($convergedAt);
         $runs = ConfigValue::int($state['runs'] ?? null, 0);
@@ -1947,8 +2175,8 @@ final class PgcatConfigFlipper
             'runs' => $runs,
             'last_run_at' => $state['last_run_at'] ?? null,
             'last_kind' => $state['last_kind'] ?? null,
-            'pool_repairs' => ConfigValue::int($state['pool_repairs'] ?? null, 0),
-            'last_pool_repair_at' => $state['last_pool_repair_at'] ?? null,
+            'pool_repairs' => $repairs['count'],
+            'last_pool_repair_at' => $repairs['last_at'],
             'converged' => $converged,
             'converged_at' => $state['converged_at'] ?? null,
             'converged_mode' => $state['converged_mode'] ?? null,

@@ -36,7 +36,7 @@ That is the same problem `db:pgcat-flip --json` was built for, and the reasoning
 — a sentence is reworded for clarity, a line wraps, a detail contains the phrase being matched, and
 the job that parsed it breaks silently in a file that has no idea the job exists. What is different
 here is the *shape* of what a job wants to assert. A flip has one verdict for a run. A doctor has
-twenty-two verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
+twenty-four verdicts, one per row, each with prose evidence and sometimes a repair, and a job is as
 likely to care that `store probe` **passed** as that `reader windows` failed.
 
 ## The candidates
@@ -204,8 +204,8 @@ sentence exists to prevent.
 
 ### The row list is not a fixed length
 
-`checks` is every row the run built. That is twenty-two on an installation where `db` resolves to the
-weighted manager and **nine** where it does not — the replica rows are only asked when there is a
+`checks` is every row the run built. That is twenty-four on an installation where `db` resolves to the
+weighted manager and **ten** where it does not — the replica rows are only asked when there is a
 manager to ask them of, which is a property of the rendered command that predates this flag, and
 `--connection-only` removes six more by design (`connection_only` below). So `name` is the row's
 identity and the thing to select on; the order and the count are the table's, and are documented as
@@ -272,6 +272,7 @@ about, and which of the two it is:
 | `reader windows` | each refused reader setting, and each window that can never be entered | **several, named all** — the register |
 | `pgcat mode` | one fault in two directions: the writer-only config while a reader window is open, and the readers config outside every window | **one, named at the front of the sentence** — which end of the last window the flip missed is the operator's next question, so the direction is stated rather than left to the sentence that follows; the flipper's own reason travels as the rest of the detail, and an unreadable file is *nothing compared* rather than a pass |
 | `pool probe` | the pooler refused to serve a pool the configuration declares, and the pooler that answered nothing at all | **one store of answers, read as one**: what the pooler said is a single reading with a single verdict, so the pools that did not answer are named in one sentence rather than one per pool — `missing` is judged (it is the pool the flip re-applies the file for), `silent` is only reported, and neither is judged while the boot window is still open. Its two answers are told apart by the verdict rather than by two sentences, which is why nothing here is dated |
+| `pool repairs` | how many repairs this container recorded, and when the last one happened | **one reading, two facts**: the count and the time are one answer about one counter — whether the pooler was repaired at all, and how long ago — so they travel in one sentence rather than one per fact. It is a reading rather than a verdict (a repair is the self-heal working), it is undated (a repair is a run's outcome, not a state the audit keeps), and it is read from the same state file and the same derivation as `--status` |
 | `store probe` | a probe switched off, a record that cannot be written, an in-process store | **several, named all** — the register |
 | `store reachability` | a primary store that failed in this process, a process already degraded, an in-process store, a store that would not answer a PING | one store, one state: a store that failed is *why* the process is degraded |
 | `real query` | the query that was asked and how it answered, and the state where no query was asked at all | **two mutually exclusive states in one sentence each** — either the query was put to the connection and the driver's own words came back, or nothing was connected to. Neither is dated: a database that refused a moment ago is not a finding the audit keeps, and the state that was not asked is not a finding at all |
@@ -388,7 +389,7 @@ it reports is a row the same rule can bind, and one the set test can measure.
 
 ## Known limitations
 
-- **The row set is not a fixed length.** Nine rows when `db` does not resolve, twenty-two otherwise, and
+- **The row set is not a fixed length.** Ten rows when `db` does not resolve, twenty-four otherwise, and
   six fewer than either in a `--connection-only` run, which is why the object publishes that flag. A gate
   must select by `name` — the row's identity, and the same string the table prints — and nothing in the
   object states how many rows there "should" be, so a gate that expects a particular row to exist has

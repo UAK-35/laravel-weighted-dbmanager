@@ -135,6 +135,7 @@ healthSummary	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\Pgc
 isEnabled	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 isMismatched	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 poolProbeVerdict	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
+poolRepairStatus	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 readerWindowVerdict	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 refusedSwitches	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 scheduleStatus	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
@@ -146,6 +147,7 @@ switchReadingsIn	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\
 variantShape	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 window	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 windowStatus	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
+writePaths	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 ask	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	4/6 string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=
 classify	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $answer, string $database
 controlName	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	0/0 
