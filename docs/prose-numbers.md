@@ -200,8 +200,15 @@ records rather than trusting them.
   wrong on the first clean clone. So the sentence names the derivation instead — `git status --short`,
   the command the note's own opening block runs — and `HandoffTest` holds it to that: the sentence has
   to name the command, and a count written back into it (*Nine paths differ*) fails, because a number
-  nothing can derive is not a claim a committed file can carry. The half of section 1 that *is* bound
-  is the list, in the other direction: every file the register does not carry has to be named there.
+  nothing can derive is not a claim a committed file can carry. The refusal's reach is the working
+  tree's rather than the vocabulary's: `NumberWords` stops at thirty because a number in a record is a
+  sentence about a code fact, and a pending set is not one — it has no ceiling — so the count is read
+  by *shape* (a numeral, a known word, a compound or a scale word past the table) instead of asking
+  the table to spell a number it deliberately does not have. A large set is stated the way a small one
+  is: the table names the files, the sentence names the command, and no number appears at any size.
+  Growing the vocabulary would not have let the note state a pending set; it would only have made one
+  more way of stating it readable. The half of section 1 that *is* bound is the list, in the other
+  direction: every file the register does not carry has to be named there.
   The working-tree counts the section *does* carry are the two that a command answers — how far the
   three `.tsv` records have fallen behind the tree, and what the last gate run reported — and they are
   the same rule read the other way: each is the reading of the thing that measured it, `bin/handoff.php`
@@ -279,6 +286,8 @@ written down.
 | `ProseNumbersTest::test_the_three_switch_tables_list_the_same_settings` | the three tables a switch lives in — the provider's `SWITCHES`, the row's `SWITCH_KEYS`, its `SWITCH_CONSEQUENCES` — name the same settings |
 | `DbDoctorTest::test_the_readme_check_table_is_the_rows_the_command_builds` | the README check table by row name, the two counts stated about it, and that the unweighted rows are a subset |
 | `DbDoctorTest::test_the_record_says_which_rows_can_carry_a_repair` | the rows an actual run marks with a `suggestion`, against the record's count and its named classes |
+| `HandoffTest::test_section_1_names_the_derivation_for_the_pending_set_rather_than_a_count` | section 1's size sentence names `git status --short`, and states no count of the pending set |
+| `HandoffTest::test_the_pending_set_refusal_reads_a_count_the_vocabulary_cannot_spell` | the refusal reads a count by shape — a numeral, a compound, a scale word — rather than by the spelling table's ceiling |
 | `DocCitationsTest::test_every_test_a_record_cites_is_one_this_package_declares` | every `test_…` the records cite, and the class each one credits |
 | `bin/counts.php --check`, run as a check by `bin/checks.php` | the rendered half: every count in `docs/documented-exit-codes.md` is the number its derivation has |
 
@@ -294,9 +303,9 @@ a switch to one table only each fail with a message naming the record and the se
 | `tests/Unit/Console/DbDoctorTest.php` | the two claims that need the command to run, and `numberClaim()` |
 | `tests/Support/Readme.php` | the README read as data — the tables the claims count |
 | `tests/Unit/Docs/DocCitationsTest.php` | the name half: the records' test citations against the classes that declare them |
-| `tests/Unit/Docs/HandoffTest.php` | the working-tree half: that section 1 of the handoff note names the derivation for the size of the pending set rather than stating a count |
+| `tests/Unit/Docs/HandoffTest.php` | the working-tree half: that section 1 of the handoff note names the derivation for the size of the pending set rather than stating a count, and that the refusal reads a count past the vocabulary's ceiling |
 | `tests/Support/DocumentedExitCounts.php` | the rendered counts: what `docs/documented-exit-codes.md` states, and the derivation of each |
-| `tests/Support/NumberWords.php` | the vocabulary, in both directions: the word a record has, and the word to write |
+| `tests/Support/NumberWords.php` | the vocabulary, in both directions: the word a record has and the word to write — plus `looksLikeNumber()`, the shape reading that recognises a count the vocabulary does not spell |
 | `bin/counts.php` | the renderer: writes the records from the derivations, or checks them without writing |
 | `bin/checks.php` | the gate: runs `bin/counts.php --check`, so an unrendered record fails before a release |
 | the records in the bound table | the sentences themselves; each keeps its wording, because the guard is pinned to it |

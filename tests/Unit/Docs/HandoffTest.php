@@ -300,17 +300,24 @@ final class HandoffTest extends TestCase
      *   reader to run — and this holds it to the two things a committed file *can* be asked for: that
      *   it names that command, and that it does not state a count again.
      *
-     *   The count check is a vocabulary check rather than a pattern, because the way the number would
+     *   The count check is a *shape* check rather than a pattern, because the way the number would
      *   come back is as a word — `Twelve paths differ`, `nine tracked paths changed`, `three new
-     *   files` — and `NumberWords` is the package's list of the words a record writes numbers with. It
-     *   reads the words in front of every noun the guard counts, because that is where the note put its
-     *   three counts, and it reads three of them rather than one because the note's own phrasing puts
-     *   an adjective between the number and the noun: a check that saw only `tracked` would report
-     *   agreement with a count it had never read. Which nouns those are is `Handoff::countsNoun()`'s —
-     *   the pair table the count readings are built from — so the noun this catches is the noun a
-     *   reading counts, in either of its forms, rather than a list kept here beside it. Case is the
-     *   record's (`NumberWords` folds it), and a number word nowhere near those nouns — `one working
-     *   tree` — is prose rather than a count.
+     *   files` — or as a numeral, and neither is reliably readable through one table. `NumberWords`
+     *   spells the counts a record states about a code fact and stops at thirty, deliberately; the
+     *   pending set is a fact about one working tree and has no ceiling, so a refusal built on that
+     *   table would be walked around by `thirty-five files` — a count the vocabulary cannot spell —
+     *   and by `35 files`, which it never spells at all. `NumberWords::looksLikeNumber()` reads the
+     *   shape instead, and the vocabulary's ceiling stays a writing rule rather than the refusal's
+     *   reach.
+     *
+     *   It reads the words in front of every noun the guard counts, because that is where the note
+     *   put its three counts, and it reads three of them rather than one because the note's own
+     *   phrasing puts an adjective between the number and the noun: a check that saw only `tracked`
+     *   would report agreement with a count it had never read. Which nouns those are is
+     *   `Handoff::countsNoun()`'s — the pair table the count readings are built from — so the noun
+     *   this catches is the noun a reading counts, in either of its forms, rather than a list kept
+     *   here beside it. Case is the record's (`NumberWords` folds it), and a number word nowhere near
+     *   those nouns — `one working tree` — is prose rather than a count.
      */
     public function test_section_1_names_the_derivation_for_the_pending_set_rather_than_a_count(): void
     {
@@ -327,7 +334,9 @@ final class HandoffTest extends TestCase
             ),
         );
 
-        $words = preg_split('/[^A-Za-z-]+/', $sentence['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        // Digits are kept as words of their own: a numeral is a count too, and the split that
+        // dropped them would leave `35 files` with no number in it at all.
+        $words = preg_split('/[^A-Za-z0-9-]+/', $sentence['text'], -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $counted = [];
 
         foreach ($words as $index => $word) {
@@ -336,7 +345,7 @@ final class HandoffTest extends TestCase
             }
 
             foreach (array_slice($words, max(0, $index - 3), min(3, $index)) as $before) {
-                if (NumberWords::knows($before)) {
+                if (NumberWords::looksLikeNumber($before)) {
                     $counted[] = $before.' '.$word;
                 }
             }
@@ -349,11 +358,46 @@ final class HandoffTest extends TestCase
                 "HANDOFF.md line %d states the pending set as a count again (%s).\n".
                 'A count of uncommitted paths is a fact about one working tree — red on every checkout but the one '.
                 'that wrote the note — so the sentence names the derivation (`git status --short`) and leaves the '.
-                'number to the command.',
+                'number to the command. A large set is not an exception: the table is how it is stated, at any size.',
                 $sentence['source'],
                 implode(', ', $counted),
             ),
         );
+    }
+
+    /**
+     * The refusal reaches a count past the vocabulary that spells the records' numbers.
+     *
+     * WHY THIS IS A TEST RATHER THAN A COMMENT
+     * ---------------------------------------
+     *   `NumberWords` stops at thirty because a count that size is a generated document rather than a
+     *   sentence, and every number it renders is a count of a code fact — bounded by a list. The
+     *   pending set is the one count with no bound at all: a working tree can hold any number of
+     *   files. A refusal that asked `NumberWords::knows()` would therefore be blind exactly where a
+     *   large batch invites a count — `thirty-five files`, which the table cannot spell, and `35
+     *   files`, which it never spells — while catching the small ones the note is least likely to
+     *   state. The shape reading is what makes the refusal's reach the tree's rather than the
+     *   vocabulary's, and this holds it to both ends.
+     */
+    public function test_the_pending_set_refusal_reads_a_count_the_vocabulary_cannot_spell(): void
+    {
+        // The two shapes a large batch is most likely to be written in, and neither is in the table.
+        self::assertFalse(NumberWords::knows('thirty-five'), 'the vocabulary stops at thirty, on purpose');
+        self::assertFalse(NumberWords::knows('35'), 'records write words, so a numeral was never in it');
+
+        foreach (['thirty-five', '35', '1,024', 'ninety', 'hundred', 'nine', 'zero', 'Twenty-five'] as $count) {
+            self::assertTrue(
+                NumberWords::looksLikeNumber($count),
+                sprintf('[%s] is a count, and the pending-set refusal has to see it at any size.', $count),
+            );
+        }
+
+        foreach (['several', 'few', 'most', 'working', 'tracked', 'paths', 'well-known'] as $prose) {
+            self::assertFalse(
+                NumberWords::looksLikeNumber($prose),
+                sprintf('[%s] is prose or a noun rather than a count.', $prose),
+            );
+        }
     }
 
     /**

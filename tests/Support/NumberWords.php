@@ -27,6 +27,29 @@ use RuntimeException;
 final class NumberWords
 {
     /**
+     * The stems a count may be written with beyond the table below — the units and tens it spells,
+     * and the scale words a longer count is built from.
+     *
+     * WHY THIS EXISTS AT ALL, WHEN THE TABLE STOPS AT THIRTY
+     * ----------------------------------------------------
+     *   The table is a *rendering* vocabulary: it spells the counts a record states about a code
+     *   fact, and it stops where a count stops being a sentence. `looksLikeNumber()` answers a
+     *   different question — is this word a count at all — and must not inherit that ceiling. The one
+     *   count in this package that has no bound is the handoff note's pending set, a fact about one
+     *   working tree: a note that wrote "thirty-five files" would be stating a count the table cannot
+     *   spell and the refusal has to catch. So the shapes are read here, beside the words, and the
+     *   table is free to stay a writing rule rather than a grammar.
+     *
+     * @var list<string>
+     */
+    private const STEMS = [
+        'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+        'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
+        'eighteen', 'nineteen', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy',
+        'eighty', 'ninety', 'hundred', 'thousand', 'million',
+    ];
+
+    /**
      * The word for each number the records may state.
      *
      * The list stops at thirty on purpose, and it used to stop at twenty. The ceiling is a
@@ -38,13 +61,19 @@ final class NumberWords
      * rather than a paragraph, and a failure is a better outcome than silently writing digits into
      * prose that spells its numbers out.
      *
+     * The ceiling is the *writer's*, not the reader's: nothing that has to recognise a count may use
+     * this table as its grammar. `looksLikeNumber()` is the shape reading for that, and it is what
+     * the handoff note's pending-set refusal uses, because that one count is a fact about a working
+     * tree and has no ceiling at all.
+     *
      * @var array<int, string>
      */
     private const WORDS = [
         // Zero is here because the vocabulary is also what tells a number from a word: the guard that
         // refuses a count in section 1 of the handoff note — the one sentence whose number would be a
         // fact about one working tree, so it names the derivation instead, `Handoff::pendingSize()` —
-        // reads a word through this table, and a "zero" it did not know is a count it would not catch.
+        // reads a word through `looksLikeNumber()`, and a "zero" neither table knew is a count it
+        // would not catch.
         0 => 'zero',
         1 => 'one',
         2 => 'two',
@@ -124,5 +153,52 @@ final class NumberWords
     public static function knows(string $word): bool
     {
         return in_array(strtolower($word), self::WORDS, true);
+    }
+
+    /**
+     * Whether one word is a count at all, read by shape rather than by the table that spells the
+     * records' numbers.
+     *
+     * WHY NOT `knows()`
+     * ----------------
+     *   The pending set is the one count in this package with no ceiling, and it is exactly the count
+     *   the handoff note may not state (`docs/prose-numbers.md`, "A count of a working tree"). A
+     *   refusal built on `knows()` would be walked around by the two shapes a large batch is most
+     *   likely to be written in: a number past thirty ("thirty-five files") and a numeral ("35
+     *   files"). The first is outside the table because the table is a rendering rule; the second
+     *   was never in it, because records write words. Both are counts, and a refusal whose reach is
+     *   the renderer's vocabulary is a refusal with a ceiling the working tree does not have.
+     *
+     *   Three shapes are read: a known word, a numeral (with the separators a writer groups one with),
+     *   and a compound or scale word built from the stems above. Everything else is prose — including
+     *   the words that describe a size without counting it ("several", "few", "most"), which are not
+     *   claims a derivation could disagree with and so are not what this refuses.
+     */
+    public static function looksLikeNumber(string $word): bool
+    {
+        $word = strtolower(trim($word));
+
+        if ($word === '') {
+            return false;
+        }
+
+        // A numeral, however it was grouped: 35, 1,024, 1_024.
+        if (preg_match('/^\d[\d,_]*$/', $word) === 1) {
+            return true;
+        }
+
+        if (self::knows($word)) {
+            return true;
+        }
+
+        // A compound the table does not spell whole ("thirty-five") and a scale word a longer count
+        // is built from ("hundred"). Every part has to be a stem: "well-known" is not a count.
+        foreach (explode('-', $word) as $part) {
+            if (! in_array($part, self::STEMS, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

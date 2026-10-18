@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Changed
+
+- **The handoff note's refusal of a pending-set count no longer stops at the number vocabulary.**
+  `HANDOFF.md`'s size sentence names `git status --short` rather than a number, because a count of
+  uncommitted paths is a fact about one working tree; `HandoffTest` held it to that by asking
+  `NumberWords::knows()` about each word before a counted noun. That table stops at thirty on
+  purpose, so the refusal was blind to exactly the shapes a large batch invites — `thirty-five
+  files`, which the table cannot spell, and `35 files`, which records never spell at all. The
+  decision is that the vocabulary does not track working-tree size: it stays the renderer's rule for
+  bounded code facts, and `NumberWords::looksLikeNumber()` reads a count by shape instead — a
+  numeral, a known word, a compound or a scale word past the table. A large pending set is still
+  stated the way a small one is: the rendered table names every path the register does not carry,
+  the sentence names the derivation, and no number appears at any size.
+
 ## 0.2.0-alpha5 - 2026-10-18
 
 ### Fixed
