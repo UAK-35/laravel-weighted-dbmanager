@@ -188,8 +188,10 @@ return [
             // password is ever sent. A `timeout_ms` that runs out is reported as silence, never
             // as a missing pool, so a probe pointed at the wrong address cannot restart a
             // healthy pooler — and a pooler that authenticates *before* it resolves a pool
-            // answers every name, which is the limitation
-            // Uak35\WeightedDbManager\Pgcat\PoolProbe writes down beside its measurement.
+            // answers every name. So the sweep also asks one control name no configuration
+            // declares, and a refusal of it is what makes an `answered` pool proof that it
+            // exists; on a pooler that answers the control too, the reading says the pools
+            // could not be proved. See Uak35\WeightedDbManager\Pgcat\PoolProbe.
             'pool_probe' => [
                 'enabled' => env('SWRR_PGCAT_POOL_PROBE_ENABLED', false),
                 'host' => env('SWRR_PGCAT_POOL_PROBE_HOST', '127.0.0.1'),

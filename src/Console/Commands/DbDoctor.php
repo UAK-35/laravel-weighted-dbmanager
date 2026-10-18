@@ -2800,10 +2800,12 @@ class DbDoctor extends Command
      *   credential, no `psql` and no connection through the pool is needed — a pooler that resolves
      *   a pool before it authenticates refuses a name it holds no pool for, in its own sentence —
      *   and nothing is written, swapped or restarted, so the row is safe in a deploy pipeline. A
-     *   pooler that authenticates *first* answers every name, which is the one thing this row
-     *   cannot tell from a pool that is really there; `PoolProbe` writes that measurement down. An installation that has not armed the probe pays nothing:
-     *   the row reports that the pooler is taken at supervisord's word and returns without opening a
-     *   socket.
+     *   pooler that authenticates *first* answers every name, so the sweep also asks a control name
+     *   no configuration declares: a refusal proves the pooler resolves pools before it
+     *   authenticates, and the row says the answers are proof; an answer to the control says the
+     *   pooler answers everything, and the row says the pools could not be proved. An installation
+     *   that has not armed the probe pays nothing: the row reports that the pooler is taken at
+     *   supervisord's word and returns without opening a socket.
      *
      *   Three answers are told apart, and they are the pooler's rather than this package's. A pool
      *   that exists answers — and a pool that exists behind a database that is down still answers,
@@ -2876,10 +2878,26 @@ class DbDoctor extends Command
         }
 
         if ($verdict['answered'] === true) {
-            return $this->row($name, self::PASS, sprintf(
-                'the running pooler answered for every pool the configuration declares (%s)',
-                implode(', ', array_column($verdict['pools'], 'database')),
-            ));
+            $declared = implode(', ', array_column($verdict['pools'], 'database'));
+            $discriminates = $verdict['discriminates'] ?? null;
+
+            // The control name is what turns "the pooler answered" into a proof, or says that it
+            // cannot be one on this pooler: an installation whose pooler authenticates before it
+            // resolves a pool is not failing, but a PASS that read as proof would be wrong.
+            return $this->row($name, self::PASS, match ($discriminates) {
+                true => sprintf(
+                    'the running pooler answered for every pool the configuration declares (%s), and refused a control name it cannot hold — so each answer is proof the pool exists',
+                    $declared,
+                ),
+                false => sprintf(
+                    'the running pooler answered for every pool the configuration declares (%s) and for a control name it cannot hold, so those answers are not proof the pools exist — this pooler authenticates before it resolves a pool',
+                    $declared,
+                ),
+                default => sprintf(
+                    'the running pooler answered for every pool the configuration declares (%s), but a control name it cannot hold did not answer, so the answers could not be checked',
+                    $declared,
+                ),
+            });
         }
 
         return $this->row($name, self::PASS, $reason);

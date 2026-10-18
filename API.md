@@ -9,7 +9,7 @@ release: a name that is not on this page is not part of the published API.
 | the record | rows |
 | --- | ---: |
 | files shipped | 49 |
-| public methods | 246 |
+| public methods | 248 |
 | config keys | 64 |
 | public constants | 154 |
 | environment variables read | 48 |
@@ -176,7 +176,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Pgcat\FlipSchedule` | 10 | `src/Pgcat/FlipSchedule.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipWindow` | 11 | `src/Pgcat/FlipWindow.php` |
 | `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 27 | `src/Pgcat/PgcatConfigFlipper.php` |
-| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 4 | `src/Pgcat/PoolProbe.php` |
+| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 6 | `src/Pgcat/PoolProbe.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleBeat` | 7 | `src/Pgcat/ScheduleBeat.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` | 4 | `src/Pgcat/ScheduleCauses.php` |
 | `Uak35\WeightedDbManager\Pgcat\SupervisorStep` | 14 | `src/Pgcat/SupervisorStep.php` |
@@ -580,7 +580,9 @@ Members: `FILE_DIRECTORY_UNWRITABLE`, `FILE_MISSING`, `FILE_UNREADABLE`, `FILE_U
 | --- | ---: | --- |
 | `ask()` | 4 of 6 | `string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=` |
 | `classify()` | 2 of 2 | `string $answer, string $database` |
+| `controlName()` | 0 of 0 | — |
 | `declaredPools()` | 1 of 1 | `string $toml` |
+| `discriminates()` | 1 of 1 | `string $status` |
 | `startupPacket()` | 2 of 2 | `string $user, string $database` |
 
 Members: `DEFAULT_TIMEOUT_MS`, `STATUS_ANSWERED`, `STATUS_MISSING`, `STATUS_SILENT`.

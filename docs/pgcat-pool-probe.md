@@ -23,7 +23,9 @@ are pinned by the tests named at the end.
 **A running pooler that refuses a pool its own configuration declares is a fault the flip repairs,
 and the evidence is the pooler's own refusal; a pooler that answered nothing at all is reported and
 never repaired, so a probe pointed at the wrong address cannot fail or restart a healthy
-installation; and the reading only ever happens where an installation has armed
+installation; an `answered` pool is reported as proof that it exists only where a control name no
+configuration declares was refused, because a pooler that authenticates before it resolves a pool
+answers every name; and the reading only ever happens where an installation has armed
 `swrr.pgcat.pool_probe.enabled`, because it is the one surface in the package that opens a socket.**
 
 ---
@@ -61,8 +63,8 @@ out of both, and a name no file contains. An authentication request therefore pr
 and willing to talk; it does not prove the pool exists. On that pooler `missing` is never observed,
 and `answered` is a statement about the pooler rather than about the pool. That limitation is written
 down in `PoolProbe` beside the measurement rather than left for a reader to mistake a green row for
-proof, and telling the two apart there needs something this exchange deliberately does not have:
-credentials, or a control name whose absence is already known.
+proof. Telling the two apart needs no credential at all: it needs a name whose absence is already
+known, which the same exchange can ask, and that is what the control name is for.
 
 ---
 
@@ -72,7 +74,7 @@ credentials, or a control name whose absence is already known.
 
 | answer | what the pooler said | what the package does with it |
 |---|---|---|
-| `answered` | it asked for a password, reported parameters, or said the backend is ready | nothing. The pool exists, so there is nothing to repair and nothing to report |
+| `answered` | it asked for a password, reported parameters, or said the backend is ready | nothing. Either the pool exists, or — on a pooler that authenticates first — the answer proves nothing, which the control name beside the sweep says |
 | `missing` | `No pool configured for database: …` | the flip repairs it; `/health/db` fails `degraded`; `db:doctor`'s row is `FAIL` |
 | `silent` | nothing usable — the address refused, the read timed out, or no bytes came back | reported only: `/health/db` is `warned`, `db:doctor`'s row is `WARN`, and nothing is restarted |
 
@@ -140,6 +142,37 @@ other error is a pool that exists with a different problem, which is an `answere
 `missing`. No bytes, or a read that timed out, is `silent`, with the address and the socket's own
 reason beside it.
 
+### The control name
+
+An `answered` pool is only *proof* that the pool exists if the pooler decides whether a pool exists
+before it authenticates, and that ordering is not something the pool's own answer can report: a
+pooler that asks for a password first returns the same `R` for a pool it holds, a pool only the
+other variant declares, and a name no file contains. So the sweep asks one more name: a name no
+configuration declares, whose absence is therefore known.
+
+`PoolProbe::controlName()` builds it — `weighted-dbmanager-control-` and sixteen random hexadecimal
+characters. The suffix is random rather than fixed so an installation cannot own the control by
+having a pool of that name: the question is whether the pooler can tell a name it does not hold from
+one it does, and a name written into a file would be a pool like any other. The prefix is what makes
+it recognisable in a report.
+
+`PoolProbe::discriminates()` reads the control's status, and the reading is three-valued on purpose:
+
+| control answer | what it says about the pooler | what the sweep publishes |
+|---|---|---|
+| `missing` | it resolves a pool before it authenticates, so the `answered` pools are pools it holds | `discriminates: true` |
+| `answered` | it authenticates first and answers every name, so the `answered` pools could not be proved | `discriminates: false` |
+| `silent` | it said nothing usable about the control, so neither can be concluded | `discriminates: null` |
+
+The control is asked only when every declared pool answered. A pool the pooler refused is already
+the proof — the refusal is a statement only a pooler that reads pools first can make — so asking the
+control there would be a socket spent on a fact the sweep already settled, and `control` is `null`.
+
+What this does *not* do is repair an auth-first pooler's missing pools: a pool it answers for cannot
+be told from one it holds, so `missing` is never observed and the repair has nothing to act on. The
+control does not create that distinction; it makes the reading say which question it was able to
+ask, so a green row is not mistaken for the stronger claim.
+
 ### Which pools are asked about
 
 The pool names come off the file the flip is about, not a second configuration. `PoolProbe::declaredPools()`
@@ -159,18 +192,20 @@ pgcat has re-read anything and a restart returns inside supervisor's `startsecs`
 is re-read with the same bounded attempts and delay a repair's starts use, and one that survives
 escalates to `restart_command` before the pools are read back once more. Both paths record the run,
 and a repair is counted in the state file as well — `pool_repairs` and `last_pool_repair_at`, printed
-by `db:pgcat-flip --status` — because a run's kind cannot tell a one-off from a pooler that keeps
-needing repair.
+by `db:pgcat-flip --status` and reported as `db:doctor`'s `pool repairs` row from the same reading —
+because a run's kind cannot tell a one-off from a pooler that keeps needing repair.
 
 ### Where the surfaces read it
 
 `PgcatConfigFlipper::poolProbeVerdict()` is the one reading, and both surfaces ask for it by name so
 they cannot disagree. It publishes `enabled` (the switch), `applicable` (armed, applicable, and the
 mode declares a pool), `answered` (true when every pool answered, null when nothing was asked),
-`pools` (one entry per declared pool with its three-answer status and the probe's sentence), `failed`,
-`warned`, and `reason`. It deliberately records, restarts and throws nothing: a status reading that
-restarted a pooler would not be one an endpoint could be polled with. `/health/db` embeds it as the
-`pool_probe` block and `db:doctor` prints it as the `pool probe` row, and the block is published whole
+`pools` (one entry per declared pool with its three-answer status and the probe's sentence),
+`discriminates` (true, false or null for the control's reading), `control` (the control exchange, or
+`null` when a refusal already proved the pooler), `failed`, `warned`, and `reason`. It deliberately
+records, restarts and throws nothing: a status reading that restarted a pooler would not be one an
+endpoint could be polled with. `/health/db` embeds it as the `pool_probe` block and `db:doctor`
+prints it as the `pool probe` row, and the block is published whole
 rather than reduced to a boolean, because the three answers call for different work.
 
 ### Why it is not in `healthSummary()`
@@ -192,9 +227,12 @@ directly, and neither is on the flip's own hot path.
 does not hold cannot be served, so the database can answer `select 1` and still not be the one the
 configuration asked for, which is the same reasoning the reader-window verdict follows one step
 earlier. `warned` — a pooler that answered nothing — is reported and never folded, so a probe aimed at
-the wrong address cannot take a healthy installation down. And while the window is open neither is
-set, so a healthy deploy is unaffected. `db:doctor` follows the same line: the row is `FAIL` on a
-missing pool, `WARN` on silence, and not judged inside the boot window.
+the wrong address cannot take a healthy installation down. `discriminates` is a caveat on a reading
+rather than a state of the installation, so it is folded into nothing either: an auth-first pooler
+degrades nothing, it only stops the `answered` pools from being reported as proved. And while the
+window is open neither `failed` nor `warned` is set, so a healthy deploy is unaffected.
+`db:doctor` follows the same line: the row is `FAIL` on a missing pool, `WARN` on silence, and not
+judged inside the boot window.
 
 ### Off by default, and read as a switch
 
@@ -232,4 +270,12 @@ The verdict: `PgcatConfigFlipperTest::test_a_pool_the_pooler_does_not_hold_fails
 
 The surfaces: `DatabaseHealthControllerTest::test_a_pool_the_pooler_holds_no_pool_for_degrades_the_payload_and_is_logged()`,
 `DatabaseHealthControllerTest::test_a_pooler_that_answered_nothing_is_reported_without_degrading_the_payload()`,
-and `DbDoctorTest::test_the_pool_probe_row_fails_when_the_pooler_holds_no_pool()`.
+`DatabaseHealthControllerTest::test_an_auth_first_pooler_is_reported_without_being_failed()`,
+`DbDoctorTest::test_the_pool_probe_row_fails_when_the_pooler_holds_no_pool()`, and
+`DbDoctorTest::test_the_pool_probe_row_says_when_the_poolers_answers_are_not_proof()`.
+
+The control name: `PoolProbeTest::test_the_control_is_a_name_no_configuration_declares()`,
+`PoolProbeTest::test_the_control_distinguishes_a_pooler_that_reads_pools_from_one_that_does_not()`,
+`PgcatConfigFlipperTest::test_an_auth_first_pooler_is_reported_as_answering_every_name()`,
+`PgcatConfigFlipperTest::test_a_control_that_did_not_answer_leaves_the_proof_unchecked()`, and
+`PgcatConfigFlipperTest::test_a_refused_pool_proves_the_pooler_without_a_control()`.

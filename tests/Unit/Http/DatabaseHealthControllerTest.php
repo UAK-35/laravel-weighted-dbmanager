@@ -798,7 +798,9 @@ class DatabaseHealthControllerTest extends TestCase
             appliedMode: 'readers',
             pools: ['writer_db_1', 'reader_db_2'],
             poolProbe: static fn (string $database): array => [
-                'status' => 'answered',
+                // The pooler this fixture is resolves a pool before it authenticates, so the
+                // control name is refused and every accepted pool is one it holds.
+                'status' => str_starts_with($database, 'weighted-dbmanager-control-') ? 'missing' : 'answered',
                 'evidence' => sprintf('the pooler answered for pool "%s"', $database),
             ],
         );
@@ -811,12 +813,52 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('pool_probe.enabled', true)
             ->assertJsonPath('pool_probe.applicable', true)
             ->assertJsonPath('pool_probe.answered', true)
+            ->assertJsonPath('pool_probe.discriminates', true)
+            ->assertJsonPath('pool_probe.control.status', 'missing')
             ->assertJsonPath('pool_probe.failed', false)
             ->assertJsonPath('pool_probe.warned', false)
             ->assertJsonPath('pool_probe.reason', null)
             ->assertJsonPath('pool_probe.pools.0.database', 'writer_db_1')
             ->assertJsonPath('pool_probe.pools.1.database', 'reader_db_2')
             ->assertJsonPath('pool_probe.pools.1.status', 'answered');
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * A pooler that authenticates before it resolves a pool answers every name, the control
+     * included. The payload still says `ok` — that ordering is a property of the pooler rather
+     * than a fault in the installation — but `discriminates` is false and the control is
+     * published beside the pools, so an `answered` pool is not read as a pool that exists.
+     */
+    public function test_an_auth_first_pooler_is_reported_without_being_failed(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.answered', true)
+            ->assertJsonPath('pool_probe.discriminates', false)
+            ->assertJsonPath('pool_probe.control.status', 'answered')
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.warned', false);
+
+        $this->assertStringStartsWith('weighted-dbmanager-control-', (string) $response->json('pool_probe.control.database'));
 
         Log::shouldNotHaveReceived('error');
     }

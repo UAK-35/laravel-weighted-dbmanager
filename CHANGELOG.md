@@ -40,6 +40,25 @@
   arithmetic, the three cap shapes and the cost of each — and the four decisions the package
   deliberately leaves to the application, each with the reason the package cannot make it. It
   links the record rather than restating its figures.
+- **The pool probe tells an auth-first pooler's blanket answer from a pool that exists.** An
+  `answered` pool was documented as `R` — an authentication request — for every name it was given,
+  so on the pooler this package was measured against the reading proved that the pooler was
+  reachable and willing to talk and nothing about the pool. `PoolProbe::controlName()` now supplies
+  the one name that settles it: `weighted-dbmanager-control-` and sixteen random hexadecimal
+  characters, a name no configuration declares, whose absence is therefore known — random rather
+  than fixed so an installation cannot own the control by having a pool of that name.
+  `PoolProbe::discriminates()` reads its answer as three-valued: a refusal means the pooler resolves
+  a pool before it authenticates, so each `answered` pool exists; an answer means it authenticates
+  first and answers every name, so the pools could not be proved; silence concludes nothing. The
+  sweep in `poolProbeVerdict()` asks it once, only when every declared pool answered — a refused
+  pool is already the proof, and asking again would be a socket spent on a settled fact — and
+  publishes `discriminates` and `control` beside the pools, so `/health/db`'s `pool_probe` block and
+  `db:doctor`'s `pool probe` row can say which question they were able to ask. `db:doctor` still
+  passes for an auth-first pooler, because its ordering is a property of the pooler rather than a
+  fault in the installation, but the sentence now says the answers are not proof the pools exist
+  instead of leaving a green row to be read as one. Nothing about the repair changes: a pool such a
+  pooler answers for cannot be told from one it holds, so `missing` is never observed there and the
+  flip has nothing to act on.
 
 ## 0.2.0-alpha5 - 2026-10-18
 

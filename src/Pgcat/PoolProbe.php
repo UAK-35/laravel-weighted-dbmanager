@@ -24,18 +24,22 @@ namespace Uak35\WeightedDbManager\Pgcat;
  *   password, no `psql`, no `PDO`, no database connection through the pool it is measuring. The
  *   pooler's own admission is the evidence.
  *
- * WHAT IT CANNOT TELL APART
+ * WHAT IT CAN AND CANNOT TELL APART
  *   That reading rests on the pooler deciding whether a pool exists *before* it authenticates, and
  *   not every pgcat does. The one this package is deployed against answers an AuthenticationRequest
  *   — `R`, with a fresh SCRAM challenge each time — to *every* name it is given: a pool the applied
  *   configuration declares, a pool only a variant declares, a pool commented out of both variants,
- *   and a name no file anywhere contains all come back as the same `R`. An authentication request
- *   therefore proves the pooler is reachable and willing to talk; it does not prove the pool
- *   exists. On such a pooler `missing` is never observed and `answered` is a statement about the
- *   pooler rather than about the pool, which is why the limitation is written down here instead of
- *   being left for whoever reads a green row as proof that every pool is there. Telling the two
- *   apart on that pooler needs something this exchange deliberately does not have: credentials, or
- *   a control name whose absence is already known and is answered the same way.
+ *   and a name no file anywhere contains all come back as the same `R`. On such a pooler `missing`
+ *   is never observed and `answered` is a statement about the pooler rather than about the pool.
+ *
+ *   `controlName()` is how the two poolers are told apart without a credential: it is a name no
+ *   configuration declares, and `discriminates()` reads its answer. Refused, the pooler resolves a
+ *   pool before it authenticates — so `answered` for a declared pool is proof that pool exists.
+ *   Answered, the pooler authenticates first and answers every name, so `answered` proves only that
+ *   the pooler is reachable and willing to talk. Nothing usable, and the reading says it could not
+ *   be checked. That does not make a blanket pooler's pools provable — it makes the reading say
+ *   which question it was able to ask: *does this pool exist*, or only *is this pooler one whose
+ *   answers could prove it*.
  *
  * THE THREE ANSWERS
  *   `answered`  the pooler accepted the pool: it asked for a password, reported parameters, or
@@ -70,6 +74,12 @@ final class PoolProbe
     /** How long one pool may take to answer before it is reported as silent, in milliseconds. */
     public const DEFAULT_TIMEOUT_MS = 2000;
 
+    /**
+     * The prefix a control name carries, so it is recognisable in a log or a report. The suffix is
+     * random; see `controlName()` for why the name cannot be a fixed string.
+     */
+    private const CONTROL_PREFIX = 'weighted-dbmanager-control-';
+
     /** PostgreSQL protocol version 3.0 as the startup packet encodes it: `3 << 16 | 0`. */
     private const PROTOCOL_VERSION_3 = 196608;
 
@@ -92,6 +102,39 @@ final class PoolProbe
      */
     private function __construct()
     {
+    }
+
+    /**
+     * A database name no configuration declares, asked to see whether the pooler refuses names it
+     * does not hold.
+     *
+     * The suffix is random rather than a fixed string so that a pool an installation happens to
+     * carry cannot turn the control into a false positive: the question is not what the name is,
+     * but whether the pooler can tell it from a pool — and a name written into a file would be a
+     * pool like any other. The prefix keeps it recognisable in a report.
+     */
+    public static function controlName(): string
+    {
+        return self::CONTROL_PREFIX.bin2hex(random_bytes(8));
+    }
+
+    /**
+     * What a control name's answer says about the pooler, and therefore about every `answered` pool
+     * in the same sweep.
+     *
+     * true  the control was refused, so this pooler resolves a pool before it authenticates: an
+     *       `answered` pool is one it holds.
+     * false the control was answered, so this pooler authenticates first and answers every name:
+     *       an `answered` pool is not proof that it exists.
+     * null  the control gave no usable answer, so neither can be concluded.
+     */
+    public static function discriminates(string $status): ?bool
+    {
+        return match ($status) {
+            self::STATUS_MISSING => true,
+            self::STATUS_ANSWERED => false,
+            default => null,
+        };
     }
 
     /**

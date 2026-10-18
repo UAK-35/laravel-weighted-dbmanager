@@ -480,13 +480,19 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * judgements wait for the container's boot window to close, so a starting container is not
      * failed by this block, and `reason` names what the pooler said either way.
      *
+     * `discriminates` and `control` are the caveat that keeps an `answered` pool from reading as
+     * proof on a pooler that authenticates before it resolves a pool. The sweep asks one control
+     * name no configuration declares: refused, the pooler reads pools first and an `answered` pool
+     * exists; answered, the pooler answers every name and the pools could not be proved; `control`
+     * is that exchange, or null when a missing pool already proved it.
+     *
      * This is the one field of the payload that opens a socket — one startup packet per declared
      * pool, bounded by `swrr.pgcat.pool_probe.timeout_ms` — and it does so only when the probe has
      * been armed, so the cost of the endpoint is unchanged for every installation that has not.
      *
      * @param PgcatConfigFlipper|null $pgcat the flipper this endpoint was built with
      *
-     * @return array{enabled: bool, applicable: bool, answered: bool|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, control: array{database: string, status: string, evidence: string}|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
      */
     private function poolProbeVerdict(?PgcatConfigFlipper $pgcat): array
     {
@@ -495,6 +501,8 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
                 'enabled' => false,
                 'applicable' => false,
                 'answered' => null,
+                'discriminates' => null,
+                'control' => null,
                 'failed' => false,
                 'warned' => false,
                 'pools' => [],

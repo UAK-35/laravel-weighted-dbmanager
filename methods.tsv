@@ -148,7 +148,9 @@ window	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfi
 windowStatus	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 ask	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	4/6 string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=
 classify	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $answer, string $database
+controlName	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	0/0 
 declaredPools	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/1 string $toml
+discriminates	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/1 string $status
 startupPacket	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $user, string $database
 __construct	src/Pgcat/ScheduleBeat.php	Uak35\WeightedDbManager\Pgcat\ScheduleBeat	4/5 private readonly bool $scheduled, private readonly int $intervalMinutes, private readonly int $missedRuns, private readonly FlipWindow $window, ?\Closure $clock=
 ageText	src/Pgcat/ScheduleBeat.php	Uak35\WeightedDbManager\Pgcat\ScheduleBeat	1/1 int $seconds

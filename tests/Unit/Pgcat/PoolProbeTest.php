@@ -16,8 +16,10 @@ use Uak35\WeightedDbManager\Pgcat\PoolProbe;
  * startup packet, and a first message read as the three answers. Both are pure, which is why they
  * are tested here without a socket — the one test that does reach a socket injects the exchange, so
  * the answer is the test's rather than a pooler's. What a pooler does *not* prove by answering is
- * `PoolProbe`'s own note: it has been measured answering an authentication request for a name no
- * configuration declares, so `answered` is a statement about the pooler.
+ * `PoolProbe`'s own note: the pooler this package was measured against answers an authentication
+ * request for a name no configuration declares, so on that pooler `answered` is a statement about
+ * the pooler. The control name and `discriminates()` are how the sweep says which of the two it is
+ * looking at, and their two tests are here beside the three answers they qualify.
  */
 final class PoolProbeTest extends TestCase
 {
@@ -128,10 +130,39 @@ final class PoolProbeTest extends TestCase
     }
 
     /**
+     * The control name: a name no configuration declares, so a pooler that refuses it is one that
+     * resolves a pool before it authenticates. The suffix is random so that a pool an installation
+     * happens to have named cannot make the control answer for a pool; the prefix is what a report
+     * recognises.
+     */
+    public function test_the_control_is_a_name_no_configuration_declares(): void
+    {
+        $control = PoolProbe::controlName();
+
+        $this->assertStringStartsWith('weighted-dbmanager-control-', $control);
+        $this->assertSame(27, strlen('weighted-dbmanager-control-'), 'the prefix is the recognisable half');
+        $this->assertSame(27 + 16, strlen($control), 'and the hexadecimal suffix is what makes it a name no file holds');
+        $this->assertMatchesRegularExpression('/^weighted-dbmanager-control-[0-9a-f]{16}$/', $control);
+    }
+
+    /**
+     * What the control's answer says about every other answer in the sweep: a refusal means the
+     * pooler read the name before it asked to authenticate, so the pools it accepted exist; an
+     * answer means it authenticates first and answers every name; silence concludes nothing.
+     */
+    public function test_the_control_distinguishes_a_pooler_that_reads_pools_from_one_that_does_not(): void
+    {
+        $this->assertTrue(PoolProbe::discriminates(PoolProbe::STATUS_MISSING));
+        $this->assertFalse(PoolProbe::discriminates(PoolProbe::STATUS_ANSWERED));
+        $this->assertNull(PoolProbe::discriminates(PoolProbe::STATUS_SILENT));
+    }
+
+    /**
      * The three answers. `R` is the pooler asking for a password, which is an answer rather than a
      * refusal — and deliberately the strongest thing this probe says: the two are not the same
-     * claim, because a pooler can ask before it looks the pool up. See `PoolProbe`'s own note and
-     * the sub-table test above for what that costs a caller.
+     * claim, because a pooler can ask before it looks the pool up — which is why the sweep asks a
+     * control name beside it; see `test_the_control_distinguishes_a_pooler_that_reads_pools_from_one_that_does_not()`
+     * and `PoolProbe`'s own note for what that costs a caller.
      */
     public function test_an_authentication_request_is_an_answer_rather_than_a_refusal(): void
     {
