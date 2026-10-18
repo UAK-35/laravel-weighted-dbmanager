@@ -15,6 +15,31 @@
   numeral, a known word, a compound or a scale word past the table. A large pending set is still
   stated the way a small one is: the rendered table names every path the register does not carry,
   the sentence names the derivation, and no number appears at any size.
+- **The read-path cancellations record is now backed by recipes rather than by history.**
+  `docs/read-path-cancellations.md` led with the two SQLSTATEs but stated its figures as facts about
+  one deployment — a cap pair, a warning fraction, a fleet of cancellation counts — with nothing a
+  reader of *this* package could run to see any of them. It is rewritten around the two cancellations
+  (`40001` with `serialization_failure` and its standby sentence, `57014` with `query_canceled` and
+  the timeout sentence), the reason the read and write caps differing is what makes escalation
+  possible, and the four things this package deliberately leaves to the application — re-running and
+  where, the escalation target, `useWritePdo()` pinning, the caps and the alerting. Every figure now
+  carries a numbered recipe a reader runs against their own endpoints (`R1` … `R9`), from a one-session
+  `57014` and a two-session `40001` to the conflict counters in `pg_stat_database_conflicts`, the row
+  `db:doctor` prints, and the constants the warning and the connect bound come from; the counts of one
+  installation's log lines are gone, because no reader could repeat them. Five of the recipes were run
+  against a throwaway PostgreSQL 17.9 server as the record was written, and the record says so.
+
+### Added
+
+- **`docs/read-path-escalation.md` explains the cancellations to the engineer who has to handle
+  them.** The record states the facts and the recipes behind them, but it is written for a reader
+  deciding what this package should do; the caller that receives a cancelled read is a different
+  reader with a different question. The new page is that explanation: what `40001` and `57014`
+  each mean, why the sentence rather than the code is the thing to match, why escalation is a
+  caller-side re-run that works only because the target endpoint's cap is higher — with the
+  arithmetic, the three cap shapes and the cost of each — and the four decisions the package
+  deliberately leaves to the application, each with the reason the package cannot make it. It
+  links the record rather than restating its figures.
 
 ## 0.2.0-alpha5 - 2026-10-18
 

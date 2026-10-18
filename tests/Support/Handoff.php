@@ -646,6 +646,7 @@ final class Handoff
         'src/Support/DeploymentContract.php' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
         'tests/Unit/Docs/DeploymentContractTest.php' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
         'src/Support/PinnedQuery.php' => 'the one real query — `select 1`, through the application\'s own connection — with the answer the health endpoint and `db:doctor --real-test` both report',
+        'docs/read-path-escalation.md' => 'the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record\'s facts, written for the caller rather than for this package\'s maintainer',
     ];
 
     /**
