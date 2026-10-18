@@ -31,7 +31,7 @@ return [
     |
     */
 
-    'generation' => 1,
+    'generation' => 2,
 
     /*
     |--------------------------------------------------------------------------
@@ -179,13 +179,16 @@ return [
             // evidence; see Uak35\WeightedDbManager\Pgcat\PoolProbe.
             //
             // Off by default, and read as a switch: an installation opts into a socket on the
-            // poll path. `host`/`port` are where pgcat itself listens — the config paths above
-            // name files, not an address — so the port here is the one the pooler's own
-            // `[general]` section names, and the shipped value is pgcat's convention rather than
-            // PostgreSQL's: a probe aimed at a PostgreSQL server is *answered* for every name, in
-            // PostgreSQL's words rather than pgcat's, where the whole point is to hear the
-            // pooler's own. `user` is the client name the startup packet carries, and no
-            // password is ever sent. A `timeout_ms` that runs out is reported as silence, never
+            // poll path. `host` is where pgcat itself listens — the config paths above name files,
+            // not an address. `port` is the same address's port, and leaving it unset is the
+            // ordinary case: the probe then reads the pooler's own `[general]` section from
+            // `config_path`, the file the process is running on, and falls back to pgcat's
+            // convention (`6432`, not PostgreSQL's `5432`) only when that file cannot answer —
+            // a probe aimed at a PostgreSQL server is *answered* for every name, in PostgreSQL's
+            // words rather than pgcat's, where the whole point is to hear the pooler's own. Set
+            // it when the pooler listens somewhere its own file does not say. `user` is the
+            // client name the startup packet carries, and no password is ever sent. A
+            // `timeout_ms` that runs out is reported as silence, never
             // as a missing pool, so a probe pointed at the wrong address cannot restart a
             // healthy pooler — and a pooler that authenticates *before* it resolves a pool
             // answers every name. So the sweep also asks one control name no configuration
@@ -195,9 +198,36 @@ return [
             'pool_probe' => [
                 'enabled' => env('SWRR_PGCAT_POOL_PROBE_ENABLED', false),
                 'host' => env('SWRR_PGCAT_POOL_PROBE_HOST', '127.0.0.1'),
-                'port' => (int) env('SWRR_PGCAT_POOL_PROBE_PORT', 6432),
+                'port' => env('SWRR_PGCAT_POOL_PROBE_PORT'),
                 'user' => env('SWRR_PGCAT_POOL_PROBE_USER', 'postgres'),
                 'timeout_ms' => (int) env('SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS', 2000),
+            ],
+
+            // ── How often a repair is too often (the reading `/health/db` warns on) ─────────
+            //
+            // A repair is the self-heal working, so the count on its own does not say whether
+            // the installation is well: one repair inside a boot window is the feature doing its
+            // job, and a pooler needing one on run after run is a pooler that needs looking at.
+            // The difference is a rate, and this is where the line is drawn — more than
+            // `max_repairs` inside `window_seconds` is warned about in the endpoint's
+            // `pool_repairs` block and in no other field. It changes no status code, because the
+            // blocks that fail that endpoint are the faults standing now; this one reads what the
+            // flip already did.
+            //
+            // Three in an hour is the shipped line, and the window is wide enough that a container
+            // booting twice inside it is not read as one pooler failing twice. A repair is only
+            // possible inside the boot window — a run past it returns before it takes the lock —
+            // so the repairs a container can record are the ones its own start produced. The window
+            // is also how much repair history the state file keeps, which is what bounds that file:
+            // the moments older than the window are dropped when a new one is written, so widening
+            // the window later starts from the times the narrower one kept.
+            //
+            // A value this cannot read — zero, a negative, a word — resolves to the documented
+            // default rather than meaning "never warn" or "warn on everything"; the class that
+            // owns the defaults is Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper.
+            'pool_repairs' => [
+                'window_seconds' => (int) env('SWRR_PGCAT_POOL_REPAIRS_WINDOW_SECONDS', 3600),
+                'max_repairs' => (int) env('SWRR_PGCAT_POOL_REPAIRS_MAX', 3),
             ],
 
             // ── The boot window ─────────────────────────────────────────────────────

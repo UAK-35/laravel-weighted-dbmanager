@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **The pool probe reads its port from the pooler's own file when the installation names none.**
+  `swrr.pgcat.pool_probe.port` shipped as `6432`, pgcat's convention, so an installation whose
+  pooler listens elsewhere — the deployment this was measured against answers on `5433` — had to
+  restate a port its own `pgcat.toml` already declares, and a probe left at the convention reported
+  silence that read like a pooler problem. The key is now unset by default: the flipper reads
+  `[general] port` from `config_path` — the file the pooler is running on, never a variant, which is
+  one of the files a flip may put in front of it — and falls back to `6432` only when that file
+  cannot answer. `PoolProbe::port()` is the one place that order is decided, and a `port` under
+  `[pools…]` is ignored because it is a backend's. A configured port still wins over the file, and
+  nothing else about the probe moved.
 - **The handoff note's refusal of a pending-set count no longer stops at the number vocabulary.**
   `HANDOFF.md`'s size sentence names `git status --short` rather than a number, because a count of
   uncommitted paths is a fact about one working tree; `HandoffTest` held it to that by asking
@@ -42,6 +52,19 @@
   on the file just written, or unarmed, where the transition is taken on supervisord's word.
   Only a refusal is repaired at all, and a pooler that answered nothing is reported and left
   alone.
+- **The flip's two pool questions are now one read with a policy, and the repair's bounds have one
+  home.** `poolFault()` — a poll that finds the mode already applied — and `refusalAfterApply()` — a
+  run that has just applied one — were two loops over `refusedPool()`, each reading `start_attempts`
+  and `start_retry_delay_ms` for itself; `startAndWait()` read them a third time and `status()` a
+  fourth, which is how a report starts describing a bound the run does not use. Both are now
+  `refusalFor($mode, $attempts, $delayMs)`, called with the policy the question deserves — one read
+  and no wait for the poll, the bounded retry for the apply — and `startAttempts()` and
+  `startRetryDelayMs()` are the only readers of those two settings, with the start loop and the
+  reported status taking their answer from the same pair. Nothing observable changes: the poll path
+  still asks once and sleeps nothing however the retry is bounded, the apply path still uses the
+  configured attempts and delay, and the single-reader rule is held by a source scan in
+  `PgcatConfigFlipperTest` that reads either quote style, beside the existing assertions that each
+  path sleeps the configured delay.
 
 ### Added
 

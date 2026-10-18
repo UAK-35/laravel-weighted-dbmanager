@@ -106,7 +106,9 @@ use DateTimeZone;
  * ----------
  *   Path: configured via `state_file` (default sys_get_temp_dir())
  *   Format: JSON { "last_mode": "readers"|"writer", "last_flipped_at": ISO,
- *                  "pool_repairs": N, "last_pool_repair_at": ISO, ... }
+ *                  "pool_repairs": N, "last_pool_repair_at": ISO,
+ *                  "last_repair_pool": NAME, "last_repair_mode": MODE,
+ *                  "pool_repair_times": [ISO, ...], ... }
  *   Missing file → treated as "never applied"; first call applies current mode.
  */
 final class PgcatConfigFlipper
@@ -132,6 +134,48 @@ final class PgcatConfigFlipper
 
     /** See ENABLED_DEFAULT: `use_reload` ships true, so a flip reloads unless told otherwise. */
     private const USE_RELOAD_DEFAULT = true;
+
+    /**
+     * The state key the repair times are kept under, beside the count they belong to.
+     *
+     * A constant because three readers ask for it by name — the writer in `recordRun()`, the
+     * reading in `poolRepairRate()`, and a test that seeds a state file to be read — and a
+     * hand-written string in each of them is how the writer and the reader begin to disagree
+     * about one file without either of them looking wrong.
+     */
+    public const REPAIR_HISTORY_KEY = 'pool_repair_times';
+
+    /**
+     * How often a repair is too often, when the configuration does not say: more than three in an
+     * hour is the shipped line.
+     *
+     * A repair is only possible inside the boot window, because `applyCurrentState()` returns
+     * before it takes the lock once the window has closed, so the repairs a container can record
+     * are the ones its first eight minutes produced. Three of them in that window is a pooler that
+     * refused the pools it was just given more than once; a single repair is the self-heal doing
+     * its job, and the hour is wide enough that a container booting twice inside it is not read as
+     * one pooler failing twice.
+     */
+    public const DEFAULT_MAX_REPAIRS_PER_WINDOW = 3;
+
+    /**
+     * The window the shipped line is drawn over, in seconds: an hour.
+     *
+     * It is also how much repair history the state file keeps, so a file is bounded by the
+     * window rather than by the life of the container. A window widened later starts from the
+     * times the narrower one kept, which is a limit of keeping the history small enough to write
+     * on the poll path rather than a fact about the pooler.
+     */
+    public const DEFAULT_REPAIR_WINDOW_SECONDS = 3600;
+
+    /**
+     * The most repair times the state file keeps, whatever the window asks for.
+     *
+     * The window is the bound that matters — repairs are only possible inside a boot window — and
+     * this is the ceiling that keeps a hand-edited or misconfigured state file from growing one
+     * array for the life of a container.
+     */
+    private const REPAIR_HISTORY_LIMIT = 100;
 
     /**
      * The states a file a flip needs can be in. Named rather than left to the sentence, because
@@ -420,11 +464,11 @@ final class PgcatConfigFlipper
                     // transition. A swap that fails is the catch below — a failed repair is a
                     // failed run, and the mode stays unrecorded so the next poll retries.
                     $this->swap($currentMode);
-                    $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode);
+                    $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode, $fault['database']);
 
                     return FlipResult::repaired(
                         mode: $currentMode,
-                        reason: $fault,
+                        reason: $this->poolFaultReason($fault, $currentMode),
                     );
                 }
 
@@ -468,7 +512,7 @@ final class PgcatConfigFlipper
             // what it was asked to — and the standing fault is `/health/db`'s `pool_probe`
             // block, which is where a state is reported rather than a run's outcome.
             if ($refusal !== null) {
-                $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode);
+                $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode, $refusal['database']);
 
                 return FlipResult::repaired(
                     mode: $currentMode,
@@ -932,8 +976,8 @@ final class PgcatConfigFlipper
             // commands because a report that named only the reload would not say what happens
             // when pgcat is down, which is the case a flip now also covers.
             'start_command' => $this->startCommand(),
-            'start_attempts' => max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT)),
-            'start_retry_delay_ms' => max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT)),
+            'start_attempts' => $this->startAttempts(),
+            'start_retry_delay_ms' => $this->startRetryDelayMs(),
             'state_file' => $this->stateFile,
             'lock_file' => $this->lockFile,
         ];
@@ -1818,6 +1862,14 @@ final class PgcatConfigFlipper
      *   a `missing` pool is itself the proof, and asking it again would be a socket for a fact
      *   already settled.
      *
+     *   `host`, `port` and `address` are where the packets were actually sent, taken from the
+     *   answers rather than from the configuration: a probe aimed at the wrong port is the one fault
+     *   that looks exactly like a pooler that is down, because both are silence, and a reader that
+     *   only sees "no pool answered" has nowhere to go. Naming the address beside the refusal is what
+     *   lets that installation diagnose itself. They are null when nothing was asked, and they are the
+     *   probe's own answer rather than a reading of the settings — an installation that injects a
+     *   probe reporting some other endpoint is reported at that endpoint.
+     *
      *   It deliberately repairs, restarts and records nothing: the throw, the swap and the record
      *   belong to a flip, and a status reading that restarted a pooler would not be one an endpoint
      *   could be polled with. `failed` is the judgement, and it is the repair's own — `missing`, the
@@ -1840,7 +1892,7 @@ final class PgcatConfigFlipper
      *   contract rather than add a field to this one. The surfaces that want the answer ask for it
      *   by name, and neither of the two is on the flip's own hot path.
      *
-     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, control: array{database: string, status: string, evidence: string}|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, control: array{database: string, status: string, evidence: string}|null, host: string|null, port: int|null, address: string|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
      */
     public function poolProbeVerdict(): array
     {
@@ -1852,6 +1904,9 @@ final class PgcatConfigFlipper
             'answered' => null,
             'discriminates' => null,
             'control' => null,
+            'host' => null,
+            'port' => null,
+            'address' => null,
             'failed' => false,
             'warned' => false,
             'pools' => [],
@@ -1868,11 +1923,13 @@ final class PgcatConfigFlipper
 
         $mode = $this->resolver->currentModeName();
         $pools = [];
+        $probed = ['host' => null, 'port' => null, 'address' => null];
 
         foreach ($this->configuredPools($mode) as $database) {
             /** @var array{status?: string, evidence?: string} $verdict */
             $verdict = ($this->poolProbe)($database);
 
+            $probed = self::probedAddress($probed, $verdict);
             $status = is_string($verdict['status'] ?? null) && $verdict['status'] !== ''
                 ? $verdict['status']
                 : PoolProbe::STATUS_SILENT;
@@ -1909,6 +1966,10 @@ final class PgcatConfigFlipper
             /** @var array{status?: string, evidence?: string} $controlVerdict */
             $controlVerdict = ($this->poolProbe)($controlName);
 
+            // The same exchange as the pools, so this only ever fills in for a probe that named an
+            // address on the control and not on a pool — never a second endpoint.
+            $probed = self::probedAddress($probed, $controlVerdict);
+
             $controlStatus = is_string($controlVerdict['status'] ?? null) && $controlVerdict['status'] !== ''
                 ? $controlVerdict['status']
                 : PoolProbe::STATUS_SILENT;
@@ -1930,6 +1991,9 @@ final class PgcatConfigFlipper
             'answered' => $missing === [] && $silent === [],
             'discriminates' => $discriminates,
             'control' => $control,
+            'host' => $probed['host'],
+            'port' => $probed['port'],
+            'address' => $probed['address'],
             'failed' => $judged && $missing !== [],
             'warned' => $judged && $missing === [] && $silent !== [],
             'pools' => $pools,
@@ -1937,6 +2001,42 @@ final class PgcatConfigFlipper
                 ? null
                 : $this->poolProbeReason($missing, $silent, $judged),
         ];
+    }
+
+    /**
+     * The endpoint a probe answer names, laid over the one already known.
+     *
+     * Taken from the answer rather than from the settings, because the fact a surface has to report
+     * is where the packet was *sent*: `PoolProbe::ask()` returns `host`, `port` and the `address` it
+     * dialled, and an installation that injects its own probe reports its own endpoint. A probe that
+     * names no address leaves these null rather than having one invented from the configuration — a
+     * surface that printed a configured address the probe never used would be answering the very
+     * question this exists for with the wrong answer.
+     *
+     * The first answer wins: every exchange in one sweep is the same endpoint, so a later answer only
+     * fills in what an earlier one left out, and an address and a host/port pair that disagree cannot
+     * both be reported. `address` is composed from the pair when only the pair is given, so a caller
+     * that carries one or the other still gets the one string a row can print.
+     *
+     * @param array{host: string|null, port: int|null, address: string|null} $known
+     * @param array<string, mixed>                                         $answer
+     * @return array{host: string|null, port: int|null, address: string|null}
+     */
+    private static function probedAddress(array $known, array $answer): array
+    {
+        if ($known['address'] !== null) {
+            return $known;
+        }
+
+        $host = is_string($answer['host'] ?? null) && $answer['host'] !== '' ? $answer['host'] : null;
+        $port = is_int($answer['port'] ?? null) ? $answer['port'] : null;
+        $address = is_string($answer['address'] ?? null) && $answer['address'] !== '' ? $answer['address'] : null;
+
+        if ($address === null && $host !== null && $port !== null) {
+            $address = sprintf('tcp://%s:%d', $host, $port);
+        }
+
+        return ['host' => $host, 'port' => $port, 'address' => $address];
     }
 
     /**
@@ -2079,16 +2179,25 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * How many pool repairs this container has recorded, and when the last one happened — the
-     * reading `db:pgcat-flip --status` prints and `db:doctor`'s `pool repairs` row reports.
+     * How many pool repairs this container has recorded, when the last one happened, which pool
+     * was refused and which mode it was applied with — the reading `db:pgcat-flip --status` prints
+     * and `db:doctor`'s `pool repairs` row reports.
+     *
+     * The pool and the mode are the two facts a count cannot carry and a log can: a run that
+     * repaired says `repaired` and names the pool in its sentence, and an hour later the sentence
+     * is one line among thousands while the state file still holds the answer. Naming the mode
+     * beside it is what makes the pool name mean something — a pool is declared by a variant, so
+     * "the pooler refused `reader_db_2`" says nothing until it says which variant asked for it.
+     * Both are null for a state file written before they were recorded, and for a hand-edited
+     * value that is not a non-empty string, which is the line `last_at` already draws.
      *
      * WHY ONE READING AND NOT A COUNTER EACH
-     *   `windowStatus()` carries the same two facts, and the preflight could have read them out of
+     *   `windowStatus()` carries the same four facts, and the preflight could have read them out of
      *   that block. It does not, because that block is the *boot window's* — an age, a deadline, a
      *   convergence — and a caller asking only what a repair left behind would be given the
      *   window's questions in the same array. What the two callers share instead is this method's
-     *   derivation: one cast of `pool_repairs` and one reading of `last_pool_repair_at` that is
-     *   null unless it is a string, over the state file the flip wrote. Two readers of that file
+     *   derivation: one cast of `pool_repairs` and three readings that are null unless they are
+     *   non-empty strings, over the state file the flip wrote. Two readers of that file
      *   — a `json_decode()` here and a key cast there — is how two surfaces start disagreeing
      *   about a file whose writes are serialised by the flip's own lock.
      *
@@ -2097,7 +2206,7 @@ final class PgcatConfigFlipper
      *   report that printed a scalar beside an ISO time would be one field in two shapes, and a
      *   state file edited by hand is the case an operator arrives in first.
      *
-     * @return array{count: int, last_at: string|null}
+     * @return array{count: int, last_at: string|null, pool: string|null, mode: string|null}
      */
     public function poolRepairStatus(): array
     {
@@ -2105,21 +2214,198 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * The two repair facts in a state file already read, so a caller holding the state does not
+     * The repair facts in a state file already read, so a caller holding the state does not
      * read the file twice and the two surfaces agree by construction.
      *
      * @param array<string, mixed> $state
      *
-     * @return array{count: int, last_at: string|null}
+     * @return array{count: int, last_at: string|null, pool: string|null, mode: string|null}
      */
     private function repairFacts(array $state): array
     {
         $last = $state['last_pool_repair_at'] ?? null;
+        $pool = $state['last_repair_pool'] ?? null;
+        $mode = $state['last_repair_mode'] ?? null;
 
+        // The shapes are the ones `last_at` already draws: a stamp that is not a string is the
+        // same state as an absent one, because the file is one an operator may edit by hand and
+        // a report that printed an array beside a name would be one field in two shapes.
         return [
             'count' => ConfigValue::int($state['pool_repairs'] ?? null, 0),
             'last_at' => is_string($last) && $last !== '' ? $last : null,
+            'pool' => is_string($pool) && $pool !== '' ? $pool : null,
+            'mode' => is_string($mode) && $mode !== '' ? $mode : null,
         ];
+    }
+
+    /**
+     * Whether this container has needed the pooler repaired faster than the configured threshold —
+     * the reading `/health/db` publishes as `pool_repairs`, and the one a monitor pages on.
+     *
+     * WHY A RATE RATHER THAN THE COUNT
+     *   `poolRepairStatus()` gives the count and the time of the last repair, and neither
+     *   separates the two shapes an installation has to be told apart by: one repair inside
+     *   a boot window, which is the self-heal working exactly as intended, and a pooler that is
+     *   repaired on run after run, which is a pooler that needs looking at. The count is cumulative
+     *   for the container's life and `last_at` is one moment, so a rate is the only shape of the
+     *   same history that answers the second question: too many repairs inside a window.
+     *
+     * WHY THE TIMES ARE IN THE STATE FILE
+     *   A count and one timestamp cannot be turned into a rate by a reader, however the reader is
+     *   written: the file is the only place the moments are known, so `recordRun()` keeps them and
+     *   this reads them. The window is also the bound on what is kept — the write drops the times
+     *   older than the window it is measuring, which is why the array does not grow with the life
+     *   of the container — and the configured window is therefore both the measurement and the
+     *   retention. Widening it later starts from the times the narrower one kept; that is stated
+     *   rather than hidden, because it is a limit of keeping the file small on the poll path.
+     *
+     * WHY A FILE WITH A COUNT AND NO HISTORY IS NOT "NO REPAIRS IN THE WINDOW"
+     *   Every state file written before this reading existed carries `pool_repairs` and no times.
+     *   Reporting zero recent repairs there would be the most comfortable answer available and the
+     *   wrong one — the file says repairs happened and says nothing about when — so `judged` is
+     *   false and `reason` names both the count and the window it could not measure. A file that has
+     *   never seen a repair is different: zero is then the whole history, so it is judged and quiet.
+     *
+     * WHY IT WARNS AND DOES NOT FAIL
+     *   A repair is the self-heal working, so failing an installation for it would fail it for the
+     *   flip having done its job; the faults that are one *now* are `/health/db`'s other blocks —
+     *   `pool_probe` asks the pooler, this reads what already happened. The threshold is where the
+     *   reading stops being a reassurance and becomes a warning for a person, and the endpoint keeps
+     *   its status for the blocks that answer "is this installation serving now".
+     *
+     * A window or a threshold the configuration cannot express — zero, a negative, a word — falls
+     * back to the documented default rather than meaning "never warn" or "warn on everything": a
+     * refused setting must not be the thing that silences the reading.
+     *
+     * @return array{judged: bool, window_seconds: int, max_repairs: int, count: int, in_window: int|null, last_at: string|null, warned: bool, reason: string|null}
+     */
+    public function poolRepairRate(): array
+    {
+        $state = $this->readState();
+        $facts = $this->repairFacts($state);
+        $settings = $this->repairRateSettings();
+        $times = $state[self::REPAIR_HISTORY_KEY] ?? null;
+
+        // A repair recorded before the history existed is the one state this cannot read: the
+        // count proves something happened, and the file has nothing to say about when. Zero
+        // repairs is a history in its own right, and a file that has never seen one is quiet.
+        if (!is_array($times) && $facts['count'] > 0) {
+            return [
+                'judged' => false,
+                'window_seconds' => $settings['window_seconds'],
+                'max_repairs' => $settings['max_repairs'],
+                'count' => $facts['count'],
+                'in_window' => null,
+                'last_at' => $facts['last_at'],
+                'warned' => false,
+                'reason' => sprintf(
+                    'this state file records %d pool repair(s) and no times for them: it was written '
+                    .'before repairs were dated, so how many fell inside the last %d seconds cannot be read',
+                    $facts['count'],
+                    $settings['window_seconds'],
+                ),
+            ];
+        }
+
+        $since = time() - $settings['window_seconds'];
+        $inWindow = 0;
+
+        foreach (is_array($times) ? $times : [] as $time) {
+            $parsed = $this->parseTimestamp($time);
+
+            // An entry that is not a time is dropped rather than counted: the state file is one an
+            // operator may edit by hand, and a value nobody can place is not a repair inside the
+            // window — the same line `last_pool_repair_at` draws for a stamp that is not a string.
+            if ($parsed !== null && $parsed >= $since) {
+                $inWindow++;
+            }
+        }
+
+        $warned = $inWindow > $settings['max_repairs'];
+
+        return [
+            'judged' => true,
+            'window_seconds' => $settings['window_seconds'],
+            'max_repairs' => $settings['max_repairs'],
+            'count' => $facts['count'],
+            'in_window' => $inWindow,
+            'last_at' => $facts['last_at'],
+            'warned' => $warned,
+            'reason' => $warned
+                ? sprintf(
+                    'the pooler has been repaired %d time(s) in the last %d seconds, and the threshold '
+                    .'is %d: a repair is the self-heal working, so this many means the pooler keeps '
+                    .'refusing the pools the applied file declares — look at why it is being restarted '
+                    .'or losing its file rather than at the flip',
+                    $inWindow,
+                    $settings['window_seconds'],
+                    $settings['max_repairs'],
+                )
+                : null,
+        ];
+    }
+
+    /**
+     * The window and the threshold the rate is measured against, with a default in place of a
+     * value that cannot mean anything.
+     *
+     * A zero or negative window would ask a question about no time at all, and a zero or negative
+     * threshold would warn about a container that never repaired anything — the two shapes a
+     * typo takes. Both land on the documented default instead, which is the same rule the
+     * switches follow: a refused value lands where an absent one would, never somewhere the
+     * setting's own documentation does not describe.
+     *
+     * @return array{window_seconds: int, max_repairs: int}
+     */
+    private function repairRateSettings(): array
+    {
+        $settings = ConfigValue::assoc($this->config['pool_repairs'] ?? null);
+        $window = ConfigValue::int($settings['window_seconds'] ?? null, self::DEFAULT_REPAIR_WINDOW_SECONDS);
+        $max = ConfigValue::int($settings['max_repairs'] ?? null, self::DEFAULT_MAX_REPAIRS_PER_WINDOW);
+
+        return [
+            'window_seconds' => $window > 0 ? $window : self::DEFAULT_REPAIR_WINDOW_SECONDS,
+            'max_repairs' => $max > 0 ? $max : self::DEFAULT_MAX_REPAIRS_PER_WINDOW,
+        ];
+    }
+
+    /**
+     * The repair times to keep after one more happened: the ones still inside the window, plus
+     * the moment being recorded, capped at the history limit.
+     *
+     * Pruning here rather than in the reader is what keeps the array bounded: a state file is
+     * rewritten on every run, and a list that only ever grew would be a list the poll path pays
+     * for on every write. The window is the setting's, so the history it keeps is exactly the
+     * history its reading asks about — and an entry that is not a timestamp is dropped for the
+     * reason the reader drops it.
+     *
+     * @return list<string>
+     */
+    private function recordRepairTime(mixed $existing): array
+    {
+        $cutoff = time() - $this->repairRateSettings()['window_seconds'];
+        $kept = [];
+
+        foreach (is_array($existing) ? $existing : [] as $raw) {
+            // Narrowed before it is compared and kept: an entry that is not a string cannot be a
+            // timestamp, and what is kept is the string the moment was written as rather than a
+            // rendering of the number it parsed to.
+            if (!is_string($raw) || $raw === '') {
+                continue;
+            }
+
+            $parsed = $this->parseTimestamp($raw);
+
+            if ($parsed === null || $parsed < $cutoff) {
+                continue;
+            }
+
+            $kept[] = $raw;
+        }
+
+        $kept[] = $this->nowIso();
+
+        return array_slice($kept, -self::REPAIR_HISTORY_LIMIT);
     }
 
     /**
@@ -2143,9 +2429,12 @@ final class PgcatConfigFlipper
      * written), and the count says whether that was a one-off or a pooler that keeps needing
      * repair — which `last_kind` alone cannot, because two repairs a minute apart and two repairs
      * a week apart both leave it reading `repaired`. `last_pool_repair_at` is when the last one
-     * happened, read the same way `last_run_at` is. Both are `poolRepairStatus()`'s facts, from
-     * the state read below rather than from a second read of the file, so this block and the
-     * preflight's `pool repairs` row cannot count one container's repairs differently.
+     * happened, read the same way `last_run_at` is; `last_repair_pool` and `last_repair_mode` are
+     * what it happened to — the pool the pooler refused, and the variant that declares it — so the
+     * failing pool is named by the table rather than by the log line of the run that saw it. All
+     * four are `poolRepairStatus()`'s facts, from the state read below rather than from a second
+     * read of the file, so this block and the preflight's `pool repairs` row cannot count one
+     * container's repairs differently.
      *
      * @return array<string, mixed>
      */
@@ -2177,6 +2466,8 @@ final class PgcatConfigFlipper
             'last_kind' => $state['last_kind'] ?? null,
             'pool_repairs' => $repairs['count'],
             'last_pool_repair_at' => $repairs['last_at'],
+            'last_repair_pool' => $repairs['pool'],
+            'last_repair_mode' => $repairs['mode'],
             'converged' => $converged,
             'converged_at' => $state['converged_at'] ?? null,
             'converged_mode' => $state['converged_mode'] ?? null,
@@ -2444,14 +2735,16 @@ final class PgcatConfigFlipper
      * the pooler's answer unexamined, which is the state every installation was in before this
      * existed.
      *
-     * The address is the pooler's own, which is why it is configured rather than derived. A
-     * variant file does name it — `[general].port` is where the pooler says what it listens on,
-     * measured at `5433` on the installation this was written against — but the address belongs to
-     * the *process* that is listening while a variant is one of the files a flip may put in front
-     * of it, so an address read out of the variant would move with the flip instead of staying with
-     * the pooler. The port defaults to pgcat's own convention rather than PostgreSQL's, because a
+     * The host is the pooler's own, which is why it is configured rather than derived: a variant
+     * file does name an address — `[general].port` is where the pooler says what it listens on,
+     * measured at `5433` on the installation this was written against — but a variant is one of the
+     * files a flip may put in front of the process, so an address read out of a variant would move
+     * with the flip instead of staying with the pooler. The *port*, when the installation configures
+     * none, is read from the file the pooler is actually running on — `config_path`, the target a
+     * swap renames over — because that file is the process's own statement rather than a candidate's.
+     * A file that cannot answer leaves pgcat's convention, `6432`, which is not PostgreSQL's: a
      * PostgreSQL server answers every name in its own words and would be read as a pooler holding
-     * them all.
+     * them all. `PoolProbe::port()` is the one place that order of authority is decided.
      *
      * @param array<string, mixed> $config the `swrr.pgcat` block
      */
@@ -2464,7 +2757,10 @@ final class PgcatConfigFlipper
         }
 
         $host = ConfigValue::string($probe['host'] ?? null, '127.0.0.1');
-        $port = ConfigValue::int($probe['port'] ?? null, 6432);
+        $port = PoolProbe::port(
+            self::poolerConfigToml($config),
+            ConfigValue::int($probe['port'] ?? null, 0),
+        );
         $user = ConfigValue::string($probe['user'] ?? null, 'postgres');
         $timeout = ConfigValue::int($probe['timeout_ms'] ?? null, PoolProbe::DEFAULT_TIMEOUT_MS);
 
@@ -2472,32 +2768,68 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * Why the running pooler is a fault for the mode that is already applied, or null when it
-     * answers for every pool the applied variant declares.
+     * The bytes of the file the pooler is running on — `config_path`, the target a flip renames
+     * over — or an empty string when it cannot be read.
      *
-     * One pool is enough to call it a fault, and the sentence names which: the pooler is
-     * running, so supervisord has nothing to report, and a single missing pool is the whole
-     * reason every read to it fails. The comparison is against the *variant the mode asks for*
-     * rather than against a list configured twice — the pool names are the section headers of
-     * the file a flip would write, so the probe and the flip read one source.
+     * Read here rather than inside `PoolProbe::port()` so that class stays a function of bytes, and
+     * empty rather than thrown because a file that cannot be read is the case the convention exists
+     * for: the probe then reports silence, and silence is reported rather than repaired.
+     *
+     * @param array<string, mixed> $config the `swrr.pgcat` block
+     */
+    private static function poolerConfigToml(array $config): string
+    {
+        $path = ConfigValue::string($config['config_path'] ?? null);
+
+        if ($path === '' || ! is_readable($path)) {
+            return '';
+        }
+
+        $toml = @file_get_contents($path);
+
+        return is_string($toml) ? $toml : '';
+    }
+
+    /**
+     * The pool the running pooler refuses for the mode that is already applied, in its own words —
+     * or null when it answers for every pool the applied variant declares.
+     *
+     * One pool is enough to call it a fault, and this answers *which* rather than a sentence
+     * about it: the run records the name beside the mode it was refused under, so `--status` can
+     * say which pool the last repair was for without an operator reading the log back. The
+     * sentence the run reports is built from the same array by `poolFaultReason()`, so the pool
+     * the report names and the pool the state records cannot be two answers.
+     *
+     * The comparison is against the *variant the mode asks for* rather than against a list
+     * configured twice — the pool names are the section headers of the file a flip would write,
+     * so the probe and the flip read one source.
      *
      * Only `missing` is a fault. A pooler that answered nothing (`silent`) is the supervisor's
      * question or a wrong address, and treating either as a reason to restart would let a probe
      * pointed at the wrong port restart a healthy pooler every minute — the line `PoolProbe`
      * draws, kept here.
      *
-     * The reading itself is `refusedPool()`; this is the reading a mode that *has* been applied
-     * gets, and `refusalAfterApply()` is the one a mode that has just been applied gets, because
-     * only the second has to allow for a pooler that was signalled a moment ago.
+     * One read and no wait: the reading is `refusalFor()` with the policy that fits a pooler which has
+     * been up and answering for a while — the mode never moved, so nothing was just signalled. The
+     * reading a mode that has *just* been applied gets is `refusalAfterApply()`, which is the same
+     * read with a different policy rather than a second loop, so the two cannot come to different
+     * answers about how many times the pooler is asked and how long the run waits in between.
+     *
+     * @return array{database: string, evidence: string}|null
      */
-    private function poolFault(string $mode): ?string
+    private function poolFault(string $mode): ?array
     {
-        $refusal = $this->refusedPool($this->configuredPools($mode));
+        return $this->refusalFor($mode, 1, 0);
+    }
 
-        if ($refusal === null) {
-            return null;
-        }
-
+    /**
+     * The sentence `poolFault()`'s refusal is reported with — the run's own reason, unchanged by
+     * the state now naming the same pool.
+     *
+     * @param array{database: string, evidence: string} $refusal
+     */
+    private function poolFaultReason(array $refusal, string $mode): string
+    {
         return sprintf(
             'the pooler was running but had no pool "%s" — %s, so the %s config was applied again',
             $refusal['database'],
@@ -2511,14 +2843,14 @@ final class PgcatConfigFlipper
      * pooler that has just been signalled has to be asked: more than once, with a wait between
      * the attempts.
      *
-     * The retry is the whole difference between this read and `poolFault()`. There the pooler has
-     * been up and answering for a while — the mode never moved, so nothing was just restarted —
-     * and one read is the entire question. Here the file was replaced and supervisord was
-     * signalled a moment ago, and both ways of applying a config are asynchronous: a reload
-     * returns before pgcat has re-read anything, and a restart returns while the program is still
-     * inside supervisor's `startsecs` window, where it may not be listening yet. One read would
-     * call that second state a refusal and restart a pooler that was doing exactly what it was
-     * told.
+     * Only the policy separates this read from `poolFault()`: both are `refusalFor()` over the same
+     * pools, and this one asks more than once with a wait between the attempts. There the pooler has
+     * been up and answering for a while — the mode never moved, so nothing was just restarted — and
+     * one read is the entire question. Here the file was replaced and supervisord was signalled a
+     * moment ago, and both ways of applying a config are asynchronous: a reload returns before pgcat
+     * has re-read anything, and a restart returns while the program is still inside supervisor's
+     * `startsecs` window, where it may not be listening yet. One read would call that second state a
+     * refusal and restart a pooler that was doing exactly what it was told.
      *
      * The attempts and the delay are the pair a repair already uses to bring pgcat up
      * (`start_attempts`, `start_retry_delay_ms`) rather than a third and a fourth setting: it is
@@ -2531,14 +2863,36 @@ final class PgcatConfigFlipper
      */
     private function refusalAfterApply(string $mode): ?array
     {
+        return $this->refusalFor($mode, $this->startAttempts(), $this->startRetryDelayMs());
+    }
+
+    /**
+     * The pool the running pooler refuses for `$mode`'s variant, read up to `$attempts` times with
+     * `$delayMs` between them — the one read both of a flip's pool questions are built from.
+     *
+     * The policy is an argument rather than a second loop because the two questions differ in
+     * nothing but the policy: `poolFault()` asks a pooler that has been up for a while, and
+     * `refusalAfterApply()` asks one that was signalled a moment ago and needs the wait. Two loops
+     * over `refusedPool()` is how the count and the delay drift apart — a bound raised in the loop a
+     * reader is looking at, and not in the one that was copied from it. No behavioural test can see
+     * that copy, because each loop is correct on its own; what sees it is the source scan in
+     * `PgcatConfigFlipperTest`, which counts the config reads rather than the behaviour.
+     *
+     * A variant that declares no pool is null rather than a read: there is nothing the file claims
+     * the pooler should be serving, so nothing can be refused, and the poll path pays nothing for a
+     * variant that names no pools.
+     *
+     * @return array{database: string, evidence: string}|null the refusal that stood after the last
+     *         attempt, or null when the pooler answered for every pool the variant declares
+     */
+    private function refusalFor(string $mode, int $attempts, int $delayMs): ?array
+    {
         $pools = $this->configuredPools($mode);
 
         if ($pools === []) {
             return null;
         }
 
-        $attempts = max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT));
-        $delayMs = max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT));
         $refusal = null;
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
@@ -2556,6 +2910,30 @@ final class PgcatConfigFlipper
         }
 
         return $refusal;
+    }
+
+    /**
+     * How many times a repair asks one bounded question before it gives up: `start_attempts`, floored
+     * at one.
+     *
+     * Read in one method because three callers need the same answer — `startAndWait()` for the starts
+     * that bring pgcat up, `refusalAfterApply()` for the pool read-back that follows an applied mode,
+     * and `status()` for the report an operator reads — and a floor applied at one of them is how the
+     * report starts describing a retry the run does not perform.
+     */
+    private function startAttempts(): int
+    {
+        return max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT));
+    }
+
+    /**
+     * How long a repair waits between those attempts, in milliseconds: `start_retry_delay_ms`,
+     * floored at zero — which is a legitimate value rather than an absent one, and the one a test or
+     * an installation that would rather ask twice back to back sets.
+     */
+    private function startRetryDelayMs(): int
+    {
+        return max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT));
     }
 
     /**
@@ -2931,8 +3309,8 @@ final class PgcatConfigFlipper
     private function startAndWait(): void
     {
         $command = $this->startCommand();
-        $attempts = max(1, ConfigValue::int($this->config['start_attempts'] ?? null, self::START_ATTEMPTS_DEFAULT));
-        $delayMs = max(0, ConfigValue::int($this->config['start_retry_delay_ms'] ?? null, self::START_RETRY_DELAY_MS_DEFAULT));
+        $attempts = $this->startAttempts();
+        $delayMs = $this->startRetryDelayMs();
         $failures = [];
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
@@ -3087,8 +3465,15 @@ final class PgcatConfigFlipper
      * facts `db:pgcat-flip --status` reports, and they are written where the run is rather than
      * at either of the two call sites — a pool repair happens on both, and a counter that only
      * one path moved would be a pooler that keeps needing repair read as one that never did.
+     *
+     * `last_repair_pool` and `last_repair_mode` ride with them, and for the same reason they are
+     * written here rather than by a caller: they are the answer to the question the count opens —
+     * *which* pool, under *which* variant — and either call site could forget one of them. `$pool`
+     * is the name the refusing probe gave, and null leaves the key null rather than carrying the
+     * previous repair's pool into a new run's record; `$mode` is already a parameter because a run
+     * records the mode it left in place.
      */
-    private function recordRun(string $kind, string $mode): void
+    private function recordRun(string $kind, string $mode, ?string $pool = null): void
     {
         $state = $this->readState();
         $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE, FlipResult::KIND_REPAIRED], true);
@@ -3101,6 +3486,9 @@ final class PgcatConfigFlipper
         if ($kind === FlipResult::KIND_REPAIRED) {
             $state['pool_repairs'] = ConfigValue::int($state['pool_repairs'] ?? null, 0) + 1;
             $state['last_pool_repair_at'] = $this->nowIso();
+            $state['last_repair_pool'] = $pool;
+            $state['last_repair_mode'] = $mode;
+            $state[self::REPAIR_HISTORY_KEY] = $this->recordRepairTime($state[self::REPAIR_HISTORY_KEY] ?? null);
         }
 
         if ($usable && !isset($state['converged_at'])) {
@@ -3120,8 +3508,16 @@ final class PgcatConfigFlipper
      */
     private function stateTime(array $state, string $key): ?float
     {
-        $raw = $state[$key] ?? null;
+        return $this->parseTimestamp($state[$key] ?? null);
+    }
 
+    /**
+     * One value as a moment, for both the single stamps beside the count and the list the rate is
+     * read from — so an entry that cannot be placed is read as absent in one place rather than
+     * handled twice.
+     */
+    private function parseTimestamp(mixed $raw): ?float
+    {
         if (!is_string($raw) || $raw === '') {
             return null;
         }
