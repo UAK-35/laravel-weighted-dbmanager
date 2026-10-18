@@ -28,6 +28,20 @@
   `db:doctor` prints, and the constants the warning and the connect bound come from; the counts of one
   installation's log lines are gone, because no reader could repeat them. Five of the recipes were run
   against a throwaway PostgreSQL 17.9 server as the record was written, and the record says so.
+- **The rehearsal's step list says why the pool read is reported rather than performed.** The
+  record sorted the steps a `db:pgcat-flip --dry-run` reports into the ones it performs and the
+  ones it only describes, and gave one reason for the sort — whether the rehearsal can take the
+  effect back. A second exists and the record did not name it: whether taking the step now
+  measures the state a flip leaves. The pool read passes the first test, because it opens a
+  socket per declared pool and reads one message on each and a rehearsal could put that back,
+  and fails the second, because a flip reads the pools back after the rename and the signal,
+  from the variant that is by then in place; asked now, the read would put the pools of a file
+  the pooler has not been given in front of it and collect a refusal the flip is about to make
+  untrue. The record names the two questions, gives the pool read its own row, and says which of
+  the two positions the installation is in: armed, where a refused pool is repaired by a restart
+  on the file just written, or unarmed, where the transition is taken on supervisord's word.
+  Only a refusal is repaired at all, and a pooler that answered nothing is reported and left
+  alone.
 
 ### Added
 

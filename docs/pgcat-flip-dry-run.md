@@ -23,11 +23,13 @@ rules are pinned by the tests named at the end.
 
 ## The answer in one line
 
-**Perform every step whose effect can be undone, and report the three that cannot.** The
-source is read, the temp file a swap writes is written into the target's own directory and
-removed again, and the lock is taken and released — the same steps, by the same code
-paths. The rename, the supervisor command and the state write are printed as what a flip
-*would* do. The exit code answers "would a flip work", not "did a flip happen".
+**Perform every step whose effect can be undone and whose question is about the installation
+as it stands, and report the rest.** The source is read, the temp file a swap writes is
+written into the target's own directory and removed again, and the lock is taken and released
+— the same steps, by the same code paths. The rename, the supervisor command and the state
+write fail the first half and are printed as what a flip *would* do; the pool read fails the
+second and is printed as the read a flip would make once the file is in place. The exit code
+answers "would a flip work", not "did a flip happen".
 
 ---
 
@@ -117,11 +119,13 @@ the program name — an inference, assembled by hand, from two commands, on two 
 neither of which writes. The reason to have a flip command at all is that the decision is
 one answer; the rehearsal is that answer.
 
-### E — perform what can be undone, report what cannot (chosen)
+### E — perform what is reversible and answerable now (chosen)
 
-The steps are sorted by whether their effect can be undone, and the sort is the feature:
-read, write-then-remove, lock-then-release are performed; rename, signal, state-write are
-reported. Nothing is approximated and nothing is claimed that was not done.
+The steps are sorted by whether a rehearsal can take them *now*, and the sort is the feature:
+an effect it can put back, and a question about the installation in the state it is actually
+in. Read, write-then-remove and lock-then-release pass both and are performed; the rename,
+the signal and the state write fail the first, and the pool read fails the second, so they
+are reported. Nothing is approximated and nothing is claimed that was not done.
 
 ### F — rehearse in a sandbox copy of the two files
 
@@ -135,6 +139,11 @@ part that is not in doubt.
 
 ### The steps, and which side each falls on
 
+Two questions decide which side a step falls on: can the rehearsal take its effect back, and
+would taking it now measure the state a flip leaves? A step that answers yes to both is
+performed; one that does not is reported, and the paragraph after the table says what the
+second failure means.
+
 | Step               | Side      | Detail it reports                                              |
 |--------------------|-----------|----------------------------------------------------------------|
 | the gates          | performed | the `disabledReason()`/`driverSupported()` sentence, or nothing |
@@ -146,7 +155,20 @@ part that is not in doubt.
 | remove the temp    | performed | that the rehearsal leaves nothing behind                       |
 | the rename         | reported  | `→ target`, and what it would do to the target's bytes         |
 | the supervisor     | reported  | the exact command `supervisorCommand()` returns — `startCommand()` instead when the check found pgcat down |
+| the pool read      | reported  | the pools the variant declares, which a flip would read back from the pooler; unarmed, that nothing would be asked and the transition would be taken on supervisord's word |
 | the state write    | reported  | the state path and its writability                             |
+
+The pool read is the step the second question refuses. It opens a socket per declared pool
+and reads one message on each — nothing a rehearsal could not put back — but a flip reads
+the pools back after the rename and the signal, from the variant that is by then in place.
+Asked now, the read would put the pools of a file the pooler has not been given in front of
+it and collect a refusal the flip itself is about to make untrue: an answer about a state no
+flip is in. So the row states the read instead of performing it, and says which of two
+positions the installation is in: armed (`swrr.pgcat.pool_probe.enabled`), where a pool the
+pooler refuses would be repaired by a restart on the file just written
+(`refusalAfterApply()`), or not armed, where the transition is taken on supervisord's word.
+Only a refusal is repaired at all — a pooler that answered nothing is reported and left
+alone; [pgcat-pool-probe.md](pgcat-pool-probe.md) is the record of those three answers.
 
 The gates are not re-implemented. A scheduled rehearsal asks `disabledReason()` and a
 forced one asks `driverSupported()`, exactly as `applyCurrentState()` and `forceMode()` do,
