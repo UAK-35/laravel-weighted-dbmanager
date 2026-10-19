@@ -390,7 +390,7 @@ connections:
 | `isMismatched()` / `armingWarning()`                           | the states that read as armed but cannot act: `swrr.pgcat.enabled = true` on a connection pgcat cannot front (`mismatch` is `true`), or an armed flipper missing one of its three paths (a flip would throw). The flipper stays inert either way, and the warning names what to change |
 | `db:pgcat-flip`, `--watch`, `--force-mode`                     | the command prints that reason and exits `0` at once; it never enters the watch loop, so a scheduled or supervised run costs nothing                                                                                                                                                   |
 | `applyCurrentState()` / `forceMode()`                          | a *no change* result carrying the same reason, returned before the lock, the file copy or supervisorctl                                                                                                                                                                                |
-| `db:pgcat-flip --status`                                       | prints all of it, including the inactive reason, the armed reason and any warning                                                                                                                                                                                                      |
+| `db:pgcat-flip --status`                                       | prints all of it, including the inactive reason, the armed reason and any warning; `--pool-probe` adds the one live reading — the running pooler's own answer — to that report and nothing to the default one |
 | `db:replica-status`                                            | the same snapshot as a `Pgcat:` line — active with driver, connection and mode, or inactive and why — plus a `Warning:` line when it is expected to act but cannot                                                                                                                     |
 | `GET /health/db`                                               | the same snapshot in a `pgcat` block (see [Health endpoint](#health-endpoint))                                                                                                                                                                                                         |
 | the application log                                            | two `[WeightedDB]` lines, at boot: a warning per process while the setting and the driver disagree, and a warning on the boot that sees it corrected — the first state would otherwise never be mentioned, the second would never be closed out                                                                |
@@ -584,6 +584,17 @@ php artisan db:pgcat-flip --dry-run || exit 1   # would the next flip work?
 applies it, `--status` wins when both are passed (a state report is what was asked for),
 and `--dry-run --watch` is refused rather than half-honoured: a watch daemon whose every
 pass is a rehearsal looks exactly like one that is flipping.
+
+`--status` is an offline report — it reads configuration, the state file and pgcat's own
+file, and opens no socket — so it stays usable on a host that is the wrong side of the
+pooler. `--status --pool-probe` asks for the one reading that leaves the process: the
+running pooler's own answer about the pools the variant declares, the same verdict
+`db:doctor`'s `pool probe` row and `/health/db`'s `pool_probe` block carry. It needs
+`--status` — a run printing no report has nowhere to put the answer — and it changes the
+report, not the exit code: an installation that wants a code for a pooler missing a pool
+has the doctor's row. The flag is not a switch and is not remembered: the next `--status`
+is offline again, which is what keeps a diagnostic safe to run where the pooler cannot be
+reached.
 
 `--json` reports any of it as one object instead of the rendered report — the verdict, the
 exit code and the evidence, for a pipeline to assert on rather than to grep: see
@@ -1115,7 +1126,7 @@ All six are registered by the provider.
 | `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only] [--real-test] [--contract]` | Preflight: check an installation end to end before traffic arrives — vet one config file, a container that has no store, supervisor or database, before they are installed, ask the followed connection for one real query, or judge the deployment contract's requirements as rows |
 | `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
-| `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL |
+| `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--pool-probe] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL. `--pool-probe` is a `--status` reading: it asks the running pooler about its pools instead of staying offline |
 | `php artisan db:pgcat-window-flip --mode=readers\|writer --at=HH:MM[:SS] [--json]` | One firing of a reader-window task: probe the mode's target, then apply it at the boundary (scheduled by the provider as `activate_readers` and `deactivate_readers`) |
 | `php artisan db:scheduler-watchdog [--strict] [--json]`                      | Fail when the schedule has stopped running the per-minute flip — for a container's own healthcheck, so a silently dead cron line cannot go unnoticed |
 
@@ -1223,19 +1234,33 @@ the pooler less time to be repaired, not less work to do.
   `swrr.pgcat.pool_probe.enabled` armed, `/health/db` reports `pool_probe.failed: true` (HTTP 503)
   when the pooler supervisord calls RUNNING holds no pool for a database the configuration declares
   — the state `pgcat mode` cannot see, because the file and the windows agree. The block carries
-  what the pooler answered for every pool the configuration declares (`answered`, `missing` or
-  `silent`, each with the pooler's own sentence) in `pools`, and `answered` is true only when every
-  one of them answered. Whether those answers are *proof* is a second question, and the block
-  answers it with `discriminates` and `control`: one more startup packet is sent to a name no
-  configuration declares, and a refusal means the pooler resolves a pool before it authenticates,
-  so each `answered` pool exists — while an answer means it authenticates first and answers every
-  name, so the pools could not be proved (`discriminates` is `null` when the control itself said
-  nothing, and `control` is `null` when a refused pool already settled the question). The block
+  what the pooler answered for every pool the configuration declares (`answered`, `missing`,
+  `indeterminate` or `silent`, each with the pooler's own sentence) in `pools`, and `answered` is
+  true only when every one of them is `answered` — a reading with an `indeterminate` pool is never
+  a pass. The reading itself is the pooler's own inventory when it can be read: the
+  admin console — `SHOW POOLS` on the same address under pgcat's `pgcat` database, authenticated
+  with the `[general] admin_username` and `admin_password` of the file the pooler is running on —
+  is asked first, and `pools` is built from its list as `admin`, so a declared pool that list does
+  not carry is `missing` and the `reason` names the console rather than a refusal the pooler never
+  made. That is the one place the probe sends a credential — the pooler's own, on the connection
+  it opened, and never in `evidence` — and it is what makes the reading independent of how the
+  pooler answers an anonymous startup packet. A console that cannot be read (no credentials in
+  that file, a refusal, a SCRAM challenge, silence) falls back to one startup packet per declared
+  pool, where `discriminates` and `control` say what those answers are worth: a control name no
+  configuration declares is asked, and a refusal means the pooler resolves a pool before it
+  authenticates, so each `answered` pool exists — while an answer means it authenticates first and
+  answers every name, so every `answered` pool is published as `indeterminate` instead, `answered`
+  is false, and past the boot window the reading is `warned`: the pooler spoke, and what it said is
+  not evidence (`discriminates` is `null` when the control itself said nothing, and both are `null`
+  when the console settled the question). `verified` is the single answer to whether an `answered` pool is proof: true when the
+  console listed it or the control was refused, false when neither could be read, `null` while the
+  control is unchecked. `judged` is whether the boot window has closed, so a surface can tell a
+  reading it has not judged from one it has. The block
   also names where the packets went — `host`, `port` and `address`, read off the probe's own
   answer — because a probe aimed at the wrong port reports the same `silent` as a pooler that is
   down, and the pool names alone cannot tell an operator which of the two they have. It is the
-  read-only half of the same probe the per-minute flip repairs with: one bounded startup packet per pool on `swrr.pgcat.pool_probe.*`'s address, no credentials
-  and nothing written. A pooler that answered nothing at all is `warned` rather than failed, so a
+  read-only half of the same probe the per-minute flip repairs with: one bounded exchange per declared pool on the configured host and the `[general] port` of the file the pooler is running on — the console's list where it can be read, a startup packet per pool where it cannot, and no credential in that fallback
+  — and nothing written. A pooler that answered nothing at all is `warned` rather than failed, so a
   probe pointed at the wrong address cannot fail a healthy installation, and like everything else
   in this list it is not judged while the boot window is still open — the flip re-applies the
   configuration inside it, and past the window nothing does. `db:doctor`'s `pool probe` row prints
@@ -1645,11 +1670,11 @@ the application still boots and answers requests, and each one is a row:
 | `switch values`      | **Fails** when `swrr.pgcat.enabled`, `swrr.pgcat.use_reload` or `swrr.allow_local_fallback` is written as something that is not on or off — `'false'`, `'off'` and `'no'` are how off is written, and a cast reads every one of them as *on*, which on the pgcat switch arms the file swap. The row quotes the value, quotes the accepted spellings, and names the value the setting falls back to. Names **every** switch it refuses rather than the first, and dates each from its own finding in the boot record. Nothing is suggested: re-spelling `'flase'` would be guessing at what was meant |
 | `reader windows`     | `swrr.reader_windows` holds an entry that is not a window — the flat `'10:00-14:20'` is the one everyone writes first — or is not a list of windows at all, or `swrr.reader_days` is not a list of day numbers — `'1,2,3'` written as one string is the same mistake one key over. **Fails** on both, naming the entry and quoting the shape the setting reads: reading a typo as "nothing" is what inverts the setting, so the package refuses it instead. *Warns* on the three ways a well-formed setting still cannot act — an empty day list (permissive), days outside 1…7 (the pool is never used), and windows whose start is not before their end (never entered). When the refused value names its own replacement — the flat string, `'1,2,3'` — the row also prints the setting line to paste as a `suggestion` under it. Names **every** problem it finds rather than the first, and dates each from its own finding in the boot record |
 | `pgcat mode`         | **Fails** when the pooler is on the configuration the reader windows are not asking for, and leads with which way round it is: the writer-only config while a reader window is open, so every read the resolver meant for the replica pool reaches the writer, or the readers config outside every window, so reads keep reaching a replica through the hours the fallback holds them on the writer. Reads pgcat's own *file* rather than the mode the last flip recorded, so a task that booted outside a window, converged to the writer-only config and never flipped again still shows here — that shape is the incident the row exists for. Prints the flipper's own sentence rather than a second copy of it, the same one `/health/db` reports and logs, which names the file in place and the command that moves it; so no `suggestion`, and the verdict is dated from the boot window like the endpoint's. Passes when the flipper is not armed — no file is compared, so the two cannot disagree — and when the file could not be read at all, which is reported as *nothing compared* rather than as a pass, because judging a file is `pgcat files`' row |
-| `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. **Fails** on that refusal, which is the pooler's own sentence rather than this package's reading, and this is the read-only half of the self-heal the per-minute flip performs: one PostgreSQL v3 startup packet per declared pool and the first message back, on the address and the bound `swrr.pgcat.pool_probe.*` names, with no credentials, no `psql` and no connection through the pool. A pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach — and whether such an answer is *proof* is settled by one more name, a control no configuration declares: refused, the pooler reads pools before it authenticates and each answer proves the pool exists; answered, the pooler authenticates *first* — which is what the deployment this was written against was measured doing — and answers every name, so the row reports what the pooler said rather than a proof that each pool is there. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Every row that asked something ends with the endpoint the packets went to — `— probed tcp://host:port`, read off the probe's own answer rather than off the settings — because a probe aimed at the wrong port reports the same silence as a pooler that is down, and the pool names alone leave an operator nothing to check. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
+| `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. The reading is the pooler's own inventory where it can be read: `SHOW POOLS` on pgcat's admin console, on the configured host and the `[general] port` the file the pooler is running on names, with that file's `[general] admin_username` and `admin_password` — one connection for the sweep, no `psql`, no connection through the pool, and a declared pool the list does not carry **fails** the row exactly as a front-door refusal does. That is what makes the row independent of how the pooler answers an anonymous startup packet, which is a property of its ordering rather than of its pools. A console that cannot be read — no admin credentials in that file, a refusal, a SCRAM challenge, silence — falls back to one PostgreSQL v3 startup packet per declared pool and the first message back, with no credentials: a pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach. Whether those fallback answers are *proof* is settled by one more name, a control no configuration declares: refused, the pooler reads pools before it authenticates and each answer proves the pool exists; answered, the pooler authenticates *first* — which is what the deployment this was written against was measured doing — and answers every name, so the row *warns* once the boot window has closed rather than passing: a green row is a claim that the pooler is answerable for its pools, and this is the one reading that could not make it. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Every row that asked something ends with the endpoint the packets went to — `— probed tcp://host:port`, read off the probe's own answer rather than off the settings — because a probe aimed at the wrong port reports the same silence as a pooler that is down, and the pool names alone leave an operator nothing to check. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled` off, or the pooler's file naming no dialable `[general] port`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
 | `pool repairs`       | how many pool repairs this container has recorded, and when the last one happened. A repair is the self-heal working rather than a fault — a run that found the running pooler refusing a pool the applied file declares re-applied the file, and the fact that it did is the answer the self-heal gave — so the row **passes** in every state it can find and states the count and the time, the line `read/write pair` draws for its own reading: failing on it would fail an installation for the flip having done its job. What it adds is the difference `last_kind` cannot carry — two repairs a minute apart and two a week apart both leave the last run reading `repaired` — and the standing fault, when there is one now, is `pool probe`'s row, which asks the pooler rather than reading its history. The two facts are `PgcatConfigFlipper::poolRepairStatus()`'s, the same derivation `db:pgcat-flip --status` prints its `pool_repairs` row from, so the two surfaces cannot count one container's repairs differently; a repair is only possible inside the boot window, because a run past it returns before it takes the lock, and the row says so rather than letting a count that is not moving read as a pooler that has stopped needing repair. Read from the flip's state file and nothing else, so it is answered in a `--connection-only` run. Prints no `suggestion`: the repair for a pooler that keeps refusing pools is the pooler — a restart, a file, an address — and none of them is a value this line could name |
 | `flip schedule`      | nothing moves the pooler at the boundaries the configuration is written for. *Warns* when the reader-window tasks are on and no boundary is scheduled — every window is unusable, or too short to hold `lead_seconds` + `grace_seconds` — and when the flipper is armed with neither the per-minute entry nor the window tasks on, which leaves pgcat's file where the last write put it while the resolver's mode moves on. **Fails** on either `swrr.pgcat.schedule.enabled` or `swrr.pgcat.schedule.windows.enabled` written as something that is not on or off — the two switches `switch values` does not cover — naming the value, the accepted spellings and the value the setting falls back to, which for these two is *on* for the cadence and *off* for the tasks, each the value its setting documents. On a run that reads cleanly it says which mechanism answers a boundary: the reader-window tasks, named with their boundaries and their lead and grace, or the per-minute entry alone, which converges the pool in the first minutes after a container starts and is then a no-op. *Warns* as well when **both** are armed, naming both keys: one mode with two owners is one mode with two accounts of it. No boundary is contended — the per-minute entry checks the boot window before it takes its lock, so once a container has converged it returns `window_closed` without reading or writing a file — and that is the part neither setting shows on its own: what the tasks apply goes through the flipper's `forceMode()` at the boundary, which records no run, so the readings that describe the entry's convergence describe a mechanism that has stopped acting. It is a warning rather than a failure because an installation may be halfway through the documented migration — disarm this entry in the same change that arms the tasks — so a preflight that failed it would refuse exactly the installation doing the right thing slowly; `--strict` fails it, and it is a boot finding of its own (`swrr.pgcat.schedule.both_armed`), so the row dates the pair while this boot's row describes it. The row prints no `suggestion`, because the repair for either warning is a choice between two settings |
 | `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Beside that verdict the row names the three causes a stopped schedule has that the state file cannot show — the store the runs' mutexes live in and whether it answered, how many entries run `db:pgcat-flip`, and the boot stamp with the mode and owner it was found with — as *readings* rather than verdicts, so the row's status and the exit code stay the beat's and an installation whose entry is not scheduled is told none of them; a bounded run (`--connection-only`) names the store without asking it, because being answerable where the store is not there is what that mode is for. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |
-| `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — except the unwritable record, which is the one state whose own record cannot hold the date it would print |
+| `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — a record a mode left read-only is repaired before this row is asked, so its date lands; only a file this account genuinely cannot change is the state whose own record has nowhere to put the date |
 | `store reachability` | the primary store cannot serve a read: no usable `redis` binding, or a connection that refuses — workers then fall back to an in-process rotation that is not shared between them |
 | `real query`         | the connection this run follows could not answer one real query — `select 1`, the same statement `/health/db` runs — and the row is also how a run says it never asked. A query is the one reading here that leaves the process, so it is put to a database only where `--real-test` asks for it: without the flag the row **passes** saying nothing was connected to, which is what keeps `--connection-only`'s promise of a run with no reachable database, and it is a row rather than an omission so a gate selecting it by name can never take its absence for a pass. With the flag the connection is the one `ActiveConnection` resolves (`db-manager.swrr.connection`, else `database.default`), asked through `DB::connection()` — the application's own path, so a read/write connection goes through the weighted factory exactly as a request would. **Fails** when the driver refused, carrying the driver's own words — the sentence an operator pastes into a search, and for PostgreSQL the one with the SQLSTATE a deploy gate matches on — and when no connection is named at all, where there is no database to ask. **Passes** naming the connection and the milliseconds it took, which is the proof a deploy gate promotes an image on: no other row opens a connection, so an installation can read exactly as documented while nothing behind it answers. Prints no `suggestion`: the repair is a pooler, a host or a credential, and none of them is a value this line can name. The endpoint's own `swrr.health.pinned_query` switch is not consulted — it turns the *endpoint's* query off where the question is not worth asking, and a flag a gate passed on purpose is that gate's to ask |
 
@@ -1672,6 +1697,18 @@ both writes are silenced with `@`: if they fail, a flip still reports success an
 then restarts pgcat again on the next poll, forever. Every unusable file is named in
 the row. Readability and writability come from `is_readable`/`is_writable`, so no
 probe file is ever created.
+
+The files a run leaves behind are handed back writable, because the run that writes one
+is routinely not the account that writes it next: the per-minute entry and a `db:pgcat-flip`
+an operator ran from a shell are the ordinary pair, and a state file or lock created under
+one of their umasks is a file the other cannot open for writing at all. `Support\WritableFile`
+is the one helper: a flip leaves its state file and its `.lock` at `0666`, and the boot audit
+leaves its record and the `.lock` it is held on the same way — handed back when the lock is
+opened, so a process killed while holding it still leaves the file usable. A file another account
+left read-only is repaired before the open or the write, so the run that meets it still locks and
+still records rather than skipping both under a `@`. Nothing is created by the hand-back, and a
+filesystem that refuses the mode is not turned into a failed write: the next process reports the
+state it meets.
 
 Exit `0` when nothing failed, `1` when a check failed — or, with `--strict`, when any
 check warned:
@@ -1756,16 +1793,23 @@ reports the interval, the record, and whether the record is writable, so an
 installation that can never check its store is visible rather than merely quiet; the
 reachability row's `PASS` in that state means "this boot did not check", which is why
 this one sits directly above it. Disabling the probe is a choice, so that is a
-warning; an unwritable record is not, because nothing then performs the check.
+warning; a record this account cannot write is not, because nothing then performs the
+check. One the mode alone makes read-only is the row's ordinary fault rather than a
+permanent one: the boot repairs it before asking, so the row fails only when the
+filesystem refuses the repair and the write.
 
 Both states are boot findings as well, under a key each —
 `swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable` — so the row dates each
 from its own and a preflight can say how long the installation has been unable to check its
-store rather than only that it is. The second is the one finding whose own record can never hold
-its date: the file a date would be written to is the file that cannot be written, so an operator
-gets the log line, and the row is the surface that remembers nothing about it. A probe that is
-switched on with an in-process store is named by the row and is not a finding, because there is
-nothing it could have been checking.
+store rather than only that it is. A record another account left read-only is repaired by the
+boot that finds it, before the probe is decided, so the PING runs, the finding is written and
+the next boot reads it back already resolved: the record is the probe's throttle as well as
+the findings' home. When this account may not change the file — another owner, an ACL — the
+finding's own record can never hold its date: the file a date would be written to is the file
+that cannot be written, so an operator gets the log line, and the row is the surface that
+remembers nothing about it. A probe that is switched on with an
+in-process store is named by the row and is not a finding, because there is nothing it could have
+been checking.
 
 `pgcat gate` is the row that is not only this process's opinion. The boot audit
 records a mismatch while it stands and clears it on the boot that finds the gate
@@ -2368,8 +2412,9 @@ The rule behind the table is one sentence: non-zero exactly when the run could n
 was asked. Applying a flip, having nothing to apply, and being skipped by another instance are
 all the run doing its job, so a scheduler never has to read the output to tell them apart —
 whereas a step that did not work, or a request that was refused before it started, is a run that
-did not happen. The two refusals are `--force-mode=sideways`, which is not a mode, and
-`--dry-run --watch`, which would be a daemon whose every pass is a rehearsal.
+did not happen. The refusals are `--force-mode=sideways`, which is not a mode,
+`--dry-run --watch`, which would be a daemon whose every pass is a rehearsal, and
+`--pool-probe` without `--status`, which would ask the pooler for an answer nothing prints.
 
 Every row is pinned by
 `DbFlipPgcatCommandTest::test_the_exit_code_is_a_function_of_what_the_flip_would_do`, which
@@ -2587,6 +2632,15 @@ that state. `php bin/interpreter.php` prints the record, the resolution and this
 interpreter without running anything, and `php bin/interpreter.php --run <script> [args …]` runs
 anything else under the resolved one — which is how a shell with no `php` on `PATH` can still run a
 script that needs one.
+
+One test in that suite needs something no other does: `PoolProbeAgainstPgcatTest` holds the pool
+probe's three answers against a pgcat that is actually running. It skips unless `PGCAT_LIVE_CONFIG`
+names the TOML file the pooler runs on, so `composer test:unit` needs no Docker; `PGCAT_LIVE_REQUIRED=1`
+turns a missing fixture into a failure rather than a skip, and the `pgcat-live` job in
+`.github/workflows/main.yml` is the working example — it starts upstream pgcat from a digest-pinned
+image with that file mounted at `/etc/pgcat/pgcat.toml`, waits for the port, and runs the class by
+name. [docs/pgcat-pool-probe.md](docs/pgcat-pool-probe.md) says what the fixture pins and what it
+deliberately does not.
 
 The records under `docs/` are read by the suite as well as by people: the exit tables are compared
 cell by cell with the matrices the commands are written as, the test names they cite are checked

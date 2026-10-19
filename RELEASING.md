@@ -892,4 +892,8 @@ are released from — a version with no suffix from `main`, a prerelease from `d
 and the tag trigger matters because a `branches` filter alone excludes tag refs, so
 without it every published version would carry no CI record of its own. What it runs
 is `composer checks`, the same gate a release is cut behind locally, rather than the
-three checks `composer test` covers.
+three checks `composer test` covers. A second job, `pgcat-live`, is not a step of that gate: it starts
+upstream pgcat from its published image — pinned by digest — and runs the pool probe's live test
+against the process, because the assumptions that test pins are facts about the pooler rather than
+about the tree the gate reads. It sets `PGCAT_LIVE_REQUIRED=1` and checks that the filtered run
+executed the class, so a fixture that never arrived is a failure rather than a green run with skips.

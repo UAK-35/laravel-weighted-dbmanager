@@ -191,14 +191,14 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=d319a29
-  --> exit 1: the inventory is out of step with the tree at d319a29
-      files.tsv: 1 line(s) stale
+php bin/inventory.php --check --at=8c34ffd
+  --> exit 1: the inventory is out of step with the tree at 8c34ffd
+      files.tsv: 2 line(s) stale
       methods.tsv: 7 line(s) stale
-      surface.tsv: 9 line(s) stale
+      surface.tsv: 4 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 49 files, 252 public methods, 288 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 0: inventory is current — 50 files, 256 public methods, 289 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -233,8 +233,9 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/pool-repair-rate.md` | the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails |
-| `docs/read-path-escalation.md` | the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record's facts, written for the caller rather than for this package's maintainer |
+| `src/Support/WritableFile.php` | the one hand-back for files this package leaves behind — 0666 on the audit record and its lock, a flip's state file and its lock, read back from the mode rather than trusted, plus the file-or-directory writability reading the audit and the flipper share |
+| `tests/Unit/Pgcat/PoolProbeAgainstPgcatTest.php` | the live fixture: the probe's three answers held against a real pgcat from the published image, the console column it corrected, and the front-door ordering the image pins |
+| `tests/Unit/Support/WritableFileTest.php` | the guard on that helper: a read-only file handed back with its contents intact, a missing path answered false and not created, and the file-or-directory reading in both of its shapes |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -251,10 +252,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `d319a29` — *fix: a release's own commit is green on the note it writes* |
+| HEAD | `8c34ffd` — *docs: the published page and the inventories carry the batch's new surface* |
 | `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
-| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
-| Since the last tag | none |
+| Unpushed | 11 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 6, feat 5 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -280,7 +281,20 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
+The ten most recent are the ones a reader is most likely to be standing in the middle of:
+
+```
+8c34ffd  docs: the published page and the inventories carry the batch's new surface
+c65aa7e  docs: the records state what the probe dials, and how often a repair is too often
+703b228  docs: the rehearsal's step table lists the variant-shape read it already performs
+db752f8  feat: both surfaces print the endpoint they dialled and the rate this container repairs at
+373dc7f  feat: the flip asks its pools one question with one policy, and dates the repairs it makes
+17eef52  feat: the probe can read a port out of the pooler's own file
+1662181  docs: the rehearsal's step list says why the pool read is reported rather than performed
+314e068  feat: the preflight names the paths the package writes, and counts the repairs it has made
+de7b9e7  feat: the pool probe asks a control name, so an answered pool is proof where the pooler answers everything
+5740f32  docs: the read-path cancellations are recipes, and the caller's explanation is its own page
+```
 <!-- /handoff:log -->
 
 The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
@@ -313,8 +327,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5` |
 | The latest of them | `v0.2.0-alpha5` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 2 entries — 0 added, 2 fixed, 0 changed |
-| The notes weigh as | patch — two repairs, which is the rung they take |
+| `## Unreleased` at the basis | 13 entries — 8 added, 0 fixed, 5 changed |
+| The notes weigh as | minor — eight additions beside five changes, which is the rung they take |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -322,14 +336,12 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries two entries under `### Fixed` at the register, which the weighing reads as
-`patch`. The register is therefore a branch whose release would publish the two repairs the release
-before it left red: `v0.2.0-alpha4`'s own commit failed on the note it had just written, in the two
-claims a release cannot make true in the one commit it may make them in — the records transcript,
-which was rendered before the tag it names existed, and a tag row read as "behind the register".
-Both are repaired at the reading rather than at the release's order, which is why the plan below
-declares `0.2.0-alpha5` instead of cutting the suffixless `0.2.0` the changes alone call for: the two
-repairs are the lane's next prerelease, and the version with no suffix is still ahead of it.
+and the section carries eight entries under `### Added` beside five under `### Changed` at the
+register, which the weighing reads as `minor`. The register is therefore a branch whose release
+would publish the pool probe's two surfaces and its console reading, the flip's repair history and
+the repair rate — a `minor` after a prerelease, with the version that has no suffix still ahead of
+it. The two repairs the release before this one carried are in `v0.2.0-alpha5`, whose own commit was
+cut for them rather than for the suffixless version they alone called for.
 
 ### The release that cut this tag, and the three rows it could not write
 

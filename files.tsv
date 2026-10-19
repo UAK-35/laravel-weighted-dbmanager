@@ -49,3 +49,4 @@ RedisAccess.php	src/Support/RedisAccess.php	Uak35\WeightedDbManager\Support\Redi
 ReplicaMetadata.php	src/Support/ReplicaMetadata.php	Uak35\WeightedDbManager\Support\ReplicaMetadata
 SwitchValue.php	src/Support/SwitchValue.php	Uak35\WeightedDbManager\Support\SwitchValue
 UnreadableRecord.php	src/Support/UnreadableRecord.php	Uak35\WeightedDbManager\Support\UnreadableRecord
+WritableFile.php	src/Support/WritableFile.php	Uak35\WeightedDbManager\Support\WritableFile

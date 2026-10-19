@@ -648,6 +648,9 @@ final class Handoff
         'src/Support/PinnedQuery.php' => 'the one real query — `select 1`, through the application\'s own connection — with the answer the health endpoint and `db:doctor --real-test` both report',
         'docs/read-path-escalation.md' => 'the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record\'s facts, written for the caller rather than for this package\'s maintainer',
         'docs/pool-repair-rate.md' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
+        'tests/Unit/Pgcat/PoolProbeAgainstPgcatTest.php' => 'the live fixture: the probe\'s three answers held against a real pgcat from the published image, the console column it corrected, and the front-door ordering the image pins',
+        'src/Support/WritableFile.php' => 'the one hand-back for files this package leaves behind — 0666 on the audit record and its lock, a flip\'s state file and its lock, read back from the mode rather than trusted, plus the file-or-directory writability reading the audit and the flipper share',
+        'tests/Unit/Support/WritableFileTest.php' => 'the guard on that helper: a read-only file handed back with its contents intact, a missing path answered false and not created, and the file-or-directory reading in both of its shapes',
     ];
 
     /**

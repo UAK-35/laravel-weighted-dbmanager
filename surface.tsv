@@ -38,7 +38,6 @@ config	pgcat	config/db-manager.php
 config	pinned_query	config/db-manager.php
 config	pool_probe	config/db-manager.php
 config	pool_repairs	config/db-manager.php
-config	port	config/db-manager.php
 config	previous_keys	config/app.php
 config	primary_store	config/db-manager.php
 config	providers	config/app.php
@@ -145,8 +144,11 @@ const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNSET	src/Pgcat/Pgc
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::FILE_UNWRITABLE	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::REPAIR_HISTORY_KEY	src/Pgcat/PgcatConfigFlipper.php
 const	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper::SUPPORTED_DRIVERS	src/Pgcat/PgcatConfigFlipper.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::ADMIN_STATUS_READ	src/Pgcat/PoolProbe.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::ADMIN_STATUS_REFUSED	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\PoolProbe::DEFAULT_TIMEOUT_MS	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_ANSWERED	src/Pgcat/PoolProbe.php
+const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_INDETERMINATE	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_MISSING	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\PoolProbe::STATUS_SILENT	src/Pgcat/PoolProbe.php
 const	Uak35\WeightedDbManager\Pgcat\ScheduleBeat::DEFAULT_MISSED_RUNS	src/Pgcat/ScheduleBeat.php
@@ -252,7 +254,6 @@ env	SWRR_PGCAT_FLIP_WINDOW_SECONDS	config/db-manager.php
 env	SWRR_PGCAT_NO_READERS	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_ENABLED	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_HOST	config/db-manager.php
-env	SWRR_PGCAT_POOL_PROBE_PORT	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS	config/db-manager.php
 env	SWRR_PGCAT_POOL_PROBE_USER	config/db-manager.php
 env	SWRR_PGCAT_POOL_REPAIRS_MAX	config/db-manager.php

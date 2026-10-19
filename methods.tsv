@@ -119,7 +119,7 @@ now	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0
 remaining	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0 
 seconds	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0 
 toArray	src/Pgcat/FlipWindow.php	Uak35\WeightedDbManager\Pgcat\FlipWindow	0/0 
-__construct	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	4/20 private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=, ?ScheduleBeat $beat=, private readonly ?string $auditFile=, private readonly array $connectionPools=, private readonly ?\Closure $hostResolver=
+__construct	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	4/21 private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=, ?\Closure $poolAdmin=, ?ScheduleBeat $beat=, private readonly ?string $auditFile=, private readonly array $connectionPools=, private readonly ?\Closure $hostResolver=
 appliedMode	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 applyCurrentState	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 armedReason	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
@@ -149,12 +149,13 @@ variantShape	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\Pgca
 window	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 windowStatus	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
 writePaths	src/Pgcat/PgcatConfigFlipper.php	Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper	0/0 
+adminPools	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	3/5 string $toml, string $host, int $port, int $timeoutMs=, ?\Closure $exchange=
 ask	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	4/6 string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=
 classify	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $answer, string $database
 controlName	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	0/0 
 declaredPools	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/1 string $toml
 discriminates	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/1 string $status
-port	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/2 string $toml, ?int $configured=
+port	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	1/1 string $toml
 startupPacket	src/Pgcat/PoolProbe.php	Uak35\WeightedDbManager\Pgcat\PoolProbe	2/2 string $user, string $database
 __construct	src/Pgcat/ScheduleBeat.php	Uak35\WeightedDbManager\Pgcat\ScheduleBeat	4/5 private readonly bool $scheduled, private readonly int $intervalMinutes, private readonly int $missedRuns, private readonly FlipWindow $window, ?\Closure $clock=
 ageText	src/Pgcat/ScheduleBeat.php	Uak35\WeightedDbManager\Pgcat\ScheduleBeat	1/1 int $seconds
@@ -209,6 +210,7 @@ __construct	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	
 probeOffSentence	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	1/1 int $seconds
 probeUnwritableSentence	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	1/1 string $file
 read	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	0/0 
+repairRecord	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	0/0 
 report	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	3/5 array $record, array $findings, array $checked, ?int $probedAt=, array $scope=
 reported	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	1/1 ?self $audit
 resolveFile	src/Support/BootAudit.php	Uak35\WeightedDbManager\Support\BootAudit	2/2 mixed $audit, string $fallback
@@ -252,3 +254,5 @@ describeRefused	src/Support/SwitchValue.php	Uak35\WeightedDbManager\Support\Swit
 read	src/Support/SwitchValue.php	Uak35\WeightedDbManager\Support\SwitchValue	2/2 mixed $value, bool $default
 resolve	src/Support/SwitchValue.php	Uak35\WeightedDbManager\Support\SwitchValue	1/1 mixed $value
 of	src/Support/UnreadableRecord.php	Uak35\WeightedDbManager\Support\UnreadableRecord	2/2 string $file, string $reason
+canWrite	src/Support/WritableFile.php	Uak35\WeightedDbManager\Support\WritableFile	1/1 string $path
+handBack	src/Support/WritableFile.php	Uak35\WeightedDbManager\Support\WritableFile	1/1 string $path

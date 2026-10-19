@@ -8,11 +8,11 @@ release: a name that is not on this page is not part of the published API.
 
 | the record | rows |
 | --- | ---: |
-| files shipped | 49 |
-| public methods | 252 |
-| config keys | 67 |
-| public constants | 157 |
-| environment variables read | 50 |
+| files shipped | 50 |
+| public methods | 256 |
+| config keys | 66 |
+| public constants | 160 |
+| environment variables read | 49 |
 | public properties | 14 |
 | enum cases | 0 |
 
@@ -64,7 +64,6 @@ from here is a key a deployed config stops receiving.
 | `pinned_query` | `config/db-manager.php` |
 | `pool_probe` | `config/db-manager.php` |
 | `pool_repairs` | `config/db-manager.php` |
-| `port` | `config/db-manager.php` |
 | `previous_keys` | `config/app.php` |
 | `primary_store` | `config/db-manager.php` |
 | `providers` | `config/app.php` |
@@ -126,7 +125,6 @@ from here is a key a deployed config stops receiving.
 | `SWRR_PGCAT_NO_READERS` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_PROBE_ENABLED` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_PROBE_HOST` | `config/db-manager.php` |
-| `SWRR_PGCAT_POOL_PROBE_PORT` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_PROBE_USER` | `config/db-manager.php` |
 | `SWRR_PGCAT_POOL_REPAIRS_MAX` | `config/db-manager.php` |
@@ -151,7 +149,7 @@ from here is a key a deployed config stops receiving.
 
 ## PHP API
 
-47 classes, interfaces, traits and enums.
+48 classes, interfaces, traits and enums.
 
 | class | methods | file |
 | --- | ---: | --- |
@@ -181,7 +179,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Pgcat\FlipSchedule` | 10 | `src/Pgcat/FlipSchedule.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipWindow` | 11 | `src/Pgcat/FlipWindow.php` |
 | `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 30 | `src/Pgcat/PgcatConfigFlipper.php` |
-| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 7 | `src/Pgcat/PoolProbe.php` |
+| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 8 | `src/Pgcat/PoolProbe.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleBeat` | 7 | `src/Pgcat/ScheduleBeat.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` | 4 | `src/Pgcat/ScheduleCauses.php` |
 | `Uak35\WeightedDbManager\Pgcat\SupervisorStep` | 14 | `src/Pgcat/SupervisorStep.php` |
@@ -189,7 +187,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Pgcat\WindowFlipSchedule` | 10 | `src/Pgcat/WindowFlipSchedule.php` |
 | `Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider` | 4 | `src/Providers/WeightedDatabaseServiceProvider.php` |
 | `Uak35\WeightedDbManager\Support\ActiveConnection` | 1 | `src/Support/ActiveConnection.php` |
-| `Uak35\WeightedDbManager\Support\BootAudit` | 11 | `src/Support/BootAudit.php` |
+| `Uak35\WeightedDbManager\Support\BootAudit` | 12 | `src/Support/BootAudit.php` |
 | `Uak35\WeightedDbManager\Support\BootAuditFinding` | 1 | `src/Support/BootAuditFinding.php` |
 | `Uak35\WeightedDbManager\Support\ConfigSchema` | 3 | `src/Support/ConfigSchema.php` |
 | `Uak35\WeightedDbManager\Support\ConfigValue` | 6 | `src/Support/ConfigValue.php` |
@@ -202,6 +200,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Support\ReplicaMetadata` | 6 | `src/Support/ReplicaMetadata.php` |
 | `Uak35\WeightedDbManager\Support\SwitchValue` | 3 | `src/Support/SwitchValue.php` |
 | `Uak35\WeightedDbManager\Support\UnreadableRecord` | 1 | `src/Support/UnreadableRecord.php` |
+| `Uak35\WeightedDbManager\Support\WritableFile` | 2 | `src/Support/WritableFile.php` |
 
 A method's arguments are the shape the inventory compares releases on — how many are
 required of how many it takes, then each argument as it is declared, with a trailing `=`
@@ -547,7 +546,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 
 | method | requires | arguments |
 | --- | ---: | --- |
-| `__construct()` | 4 of 20 | `private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=, ?ScheduleBeat $beat=, private readonly ?string $auditFile=, private readonly array $connectionPools=, private readonly ?\Closure $hostResolver=` |
+| `__construct()` | 4 of 21 | `private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=, ?\Closure $poolAdmin=, ?ScheduleBeat $beat=, private readonly ?string $auditFile=, private readonly array $connectionPools=, private readonly ?\Closure $hostResolver=` |
 | `appliedMode()` | 0 of 0 | — |
 | `applyCurrentState()` | 0 of 0 | — |
 | `armedReason()` | 0 of 0 | — |
@@ -586,15 +585,16 @@ Members: `DEFAULT_MAX_REPAIRS_PER_WINDOW`, `DEFAULT_REPAIR_WINDOW_SECONDS`, `FIL
 
 | method | requires | arguments |
 | --- | ---: | --- |
+| `adminPools()` | 3 of 5 | `string $toml, string $host, int $port, int $timeoutMs=, ?\Closure $exchange=` |
 | `ask()` | 4 of 6 | `string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=` |
 | `classify()` | 2 of 2 | `string $answer, string $database` |
 | `controlName()` | 0 of 0 | — |
 | `declaredPools()` | 1 of 1 | `string $toml` |
 | `discriminates()` | 1 of 1 | `string $status` |
-| `port()` | 1 of 2 | `string $toml, ?int $configured=` |
+| `port()` | 1 of 1 | `string $toml` |
 | `startupPacket()` | 2 of 2 | `string $user, string $database` |
 
-Members: `DEFAULT_TIMEOUT_MS`, `STATUS_ANSWERED`, `STATUS_MISSING`, `STATUS_SILENT`.
+Members: `ADMIN_STATUS_READ`, `ADMIN_STATUS_REFUSED`, `DEFAULT_TIMEOUT_MS`, `STATUS_ANSWERED`, `STATUS_INDETERMINATE`, `STATUS_MISSING`, `STATUS_SILENT`.
 
 #### `Uak35\WeightedDbManager\Pgcat\ScheduleBeat`
 
@@ -722,6 +722,7 @@ Members: `CONFIGURED_SOURCE`, `DEFAULT_SOURCE`.
 | `probeOffSentence()` | 1 of 1 | `int $seconds` |
 | `probeUnwritableSentence()` | 1 of 1 | `string $file` |
 | `read()` | 0 of 0 | — |
+| `repairRecord()` | 0 of 0 | — |
 | `report()` | 3 of 5 | `array $record, array $findings, array $checked, ?int $probedAt=, array $scope=` |
 | `reported()` | 1 of 1 | `?self $audit` |
 | `resolveFile()` | 2 of 2 | `mixed $audit, string $fallback` |
@@ -867,6 +868,15 @@ Members: `ACCEPTED`.
 | method | requires | arguments |
 | --- | ---: | --- |
 | `of()` | 2 of 2 | `string $file, string $reason` |
+
+#### `Uak35\WeightedDbManager\Support\WritableFile`
+
+`src/Support/WritableFile.php`
+
+| method | requires | arguments |
+| --- | ---: | --- |
+| `canWrite()` | 1 of 1 | `string $path` |
+| `handBack()` | 1 of 1 | `string $path` |
 
 ## What this page is not
 
