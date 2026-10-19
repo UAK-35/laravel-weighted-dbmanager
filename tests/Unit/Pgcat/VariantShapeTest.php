@@ -253,7 +253,7 @@ final class VariantShapeTest extends TestCase
         $this->assertSame(
             [],
             $this->problemsOfKind($this->shape(
-                readers: "[pools.writer_db_1]\n[pools.writer_db_1.shards.0]\nservers = [[\"lpr-db-01\", 5432]]\n[pools.\"reader.db\"]  # quoted name\n",
+                readers: "[pools.writer_db_1]\n[pools.writer_db_1.shards.0]\nservers = [[\"lpr-db-01\", 5432]]\n[pools.\"reader.db\"]  # quoted name\n[pools.'literal.db']  # literal-quoted name\n",
             ), VariantShape::PROBLEM_HEADER),
         );
     }

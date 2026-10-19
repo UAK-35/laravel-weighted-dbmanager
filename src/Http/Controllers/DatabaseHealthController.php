@@ -72,13 +72,15 @@ use Throwable;
  *     `degraded` too — see readerWindowVerdict()
  *   • whether the pooler supervisord calls RUNNING is answerable for the pools the
  *     configuration declares — `pool_probe`, the one field that asks the pooler
- *     itself rather than reading a file: one startup packet per declared pool, no
- *     credentials, and only when `swrr.pgcat.pool_probe.enabled` has armed it. A
- *     pooler that holds no pool for a database the application is connected to
- *     fails every read to it while `supervisorctl status` reports the program
- *     healthy, and no other field here can see the difference. A pool the pooler
- *     refuses makes the payload `degraded`; a pooler that answered nothing at all
- *     is reported (`warned`) and never failed — see poolProbeVerdict(). The block
+ *     itself rather than reading a file: the pooler's own `SHOW POOLS` inventory
+ *     first, a startup packet per declared pool only when that cannot be read, and
+ *     only when `swrr.pgcat.pool_probe.enabled` has armed it. A pooler that holds no
+ *     pool for a database the application is connected to fails every read to it
+ *     while `supervisorctl status` reports the program healthy, and no other field
+ *     here can see the difference. A pool the pooler refuses makes the payload
+ *     `degraded`; a pooler that answered nothing at all, or that answered the sentinel
+ *     no configuration declares as readily as the pools, is reported (`warned`) and
+ *     never failed — see poolProbeVerdict(). The block
  *     carries `address` beside the answers: where the packets actually went, read
  *     off the probe's own answer, because a probe aimed at the wrong port reports
  *     the same silence as a pooler that is down and the pool names alone cannot
@@ -484,28 +486,38 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * connection pgcat cannot front — on a MySQL connection there is no pooler to probe, and an
      * endpoint that reported a fault for that would be broken for everyone not using the feature.
      *
-     * The block is published whole rather than reduced to a boolean, because the three answers are
-     * the pooler's own and they call for different work: `pools` carries one entry per pool the
-     * configuration declares, with `answered`/`missing`/`silent` and the sentence the probe
-     * produced; `answered` is true when every one of them answered and false when one did not;
-     * `failed` marks the pool the pooler refused to serve, which is the one the flip repairs; and
-     * `warned` marks a pooler that said nothing at all, which is reported and never repaired. Both
-     * judgements wait for the container's boot window to close, so a starting container is not
-     * failed by this block, and `reason` names what the pooler said either way.
+     * The block is published whole rather than reduced to a boolean, because the answers call for
+     * different work: `pools` carries one entry per pool the configuration declares, with
+     * `answered`/`missing`/`indeterminate`/`silent` and the sentence the probe produced. `answered`
+     * is true only when every one of them is `answered`; `indeterminate` is a pool the pooler
+     * answered while it answered the sentinel too — the pooler spoke, and the answer is not
+     * evidence — so a reading with one is never `answered`. `failed` marks the pool the pooler
+     * refused to serve, which is the one the flip repairs; `warned` marks a pooler that said nothing
+     * at all or one whose answers proved nothing, reported and never repaired. Both judgements wait
+     * for the container's boot window to close, so a starting container is not failed by this block,
+     * and `reason` names what the pooler said either way.
      *
-     * `discriminates` and `control` are the caveat that keeps an `answered` pool from reading as
-     * proof on a pooler that authenticates before it resolves a pool. The sweep asks one control
-     * name no configuration declares: refused, the pooler reads pools first and an `answered` pool
-     * exists; answered, the pooler answers every name and the pools could not be proved; `control`
-     * is that exchange, or null when a missing pool already proved it.
+     * `admin` is the reading the block prefers: the pooler's own `SHOW POOLS` list, asked first,
+     * with `verified` saying that an `answered` pool is proof it exists. `pools` is built from that
+     * list where it can be read, so the answerability of a pool rests on the pooler's inventory
+     * rather than on how it answers an anonymous startup packet; a declared pool the list does not
+     * carry is `missing`, and `reason` names the console rather than a refusal the pooler never
+     * made. `discriminates` and `control` belong to the fallback, for a console that could not be
+     * read: the sentinel — a name no configuration declares — is asked at the front door, and a
+     * refusal means the pooler reads pools first, so an `answered` pool exists. A sentinel that is
+     * answered instead turns every `answered` pool into `indeterminate`, which `warned` reports once
+     * the boot window has closed: the pooler authenticates first, and a reading that could not tell
+     * a pool from a name must not be published as one. Both fields are null when the console
+     * settled the question.
      *
-     * This is the one field of the payload that opens a socket — one startup packet per declared
-     * pool, bounded by `swrr.pgcat.pool_probe.timeout_ms` — and it does so only when the probe has
-     * been armed, so the cost of the endpoint is unchanged for every installation that has not.
+     * This is the one field of the payload that opens a socket — one connection to the console, and
+     * one startup packet per declared pool only when the console could not be read, all bounded by
+     * `swrr.pgcat.pool_probe.timeout_ms` — and it does so only when the probe has been armed, so the
+     * cost of the endpoint is unchanged for every installation that has not.
      *
      * @param PgcatConfigFlipper|null $pgcat the flipper this endpoint was built with
      *
-     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, control: array{database: string, status: string, evidence: string}|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, verified: bool|null, judged: bool, control: array{database: string, status: string, evidence: string}|null, admin: array{status: string, pools: list<string>, evidence: string}|null, host: string|null, port: int|null, address: string|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
      */
     private function poolProbeVerdict(?PgcatConfigFlipper $pgcat): array
     {
@@ -515,7 +527,13 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
                 'applicable' => false,
                 'answered' => null,
                 'discriminates' => null,
+                'verified' => null,
+                'judged' => false,
                 'control' => null,
+                'admin' => null,
+                'host' => null,
+                'port' => null,
+                'address' => null,
                 'failed' => false,
                 'warned' => false,
                 'pools' => [],

@@ -136,6 +136,10 @@ final class DbFlipPgcatCommandTest extends TestCase
                 'preset' => 'armed', 'options' => ['--json' => true, '--watch' => true], 'exit' => 1,
                 'kind' => 'refused', 'line' => 'mutually exclusive', 'target' => $untouched, 'recorded' => false,
             ],
+            'a pool probe cannot be asked for without a status report' => [
+                'preset' => 'armed', 'options' => ['--pool-probe' => true], 'exit' => 1,
+                'kind' => 'refused', 'line' => 'needs --status', 'target' => $untouched, 'recorded' => false,
+            ],
             'an unknown --force-mode is refused before anything else' => [
                 'preset' => 'armed', 'options' => ['--force-mode' => 'sideways'], 'exit' => 1,
                 'kind' => 'refused', 'line' => "--force-mode must be 'readers' or 'writer'", 'target' => $untouched, 'recorded' => false,
@@ -247,7 +251,7 @@ final class DbFlipPgcatCommandTest extends TestCase
         $report = $this->report($output);
 
         $this->assertSame(
-            [...array_keys(JsonEnvelope::CORE), 'mode', 'previous_mode', 'steps', 'status'],
+            [...array_keys(JsonEnvelope::CORE), 'mode', 'previous_mode', 'steps', 'status', 'pool_probe'],
             array_keys($report),
             'the keys are always present, so a rule never has to guard for a missing one — and the '
             .'report begins with the envelope\'s own keys, read from the class rather than restated, '
@@ -377,6 +381,138 @@ final class DbFlipPgcatCommandTest extends TestCase
 
         $this->assertStringNotContainsString('(not set)', $output, 'a substitution a table makes is not a value a machine wants');
         $this->assertStringNotContainsString('inactive reason', $output, 'the table\'s labels are the renderer\'s, not the report\'s');
+    }
+
+    /**
+     * The status report stays offline unless the flag asks, and the flag is the only thing that
+     * opens the socket.
+     *
+     * `--status` is run on hosts that may be the wrong side of the pooler, so the reading that
+     * waits on a connect timeout is not part of it. The probe here is a closure that records the
+     * names it was asked about, which is how "no socket was opened" is asserted rather than
+     * inferred from the table's silence.
+     */
+    public function test_the_status_report_stays_offline_without_the_pool_probe_flag(): void
+    {
+        $asked = [];
+        $this->installWithAProbe($asked);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true]));
+
+        $this->assertSame([], $asked, 'the default status asks the pooler nothing');
+        $this->assertStringNotContainsString('pool_probe', Artisan::output(), 'and it prints no row for a question it did not ask');
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--json' => true]));
+        $report = $this->report(Artisan::output());
+
+        $this->assertNull($report['pool_probe'], 'the report says the probe was not asked, rather than that it found nothing');
+        $this->assertSame([], $asked);
+    }
+
+    /**
+     * With the flag the pooler is asked directly, and the answer is reported beside the state
+     * it belongs to — the same verdict `db:doctor`'s row and `/health/db`'s block print.
+     *
+     * The exit code does not move: the flag changes the report, not the run. The pool it asks
+     * about is the pool the variant for the resolver's mode declares, which is what makes the
+     * reading about this installation rather than about pgcat in general.
+     */
+    public function test_the_status_report_asks_the_pooler_when_the_flag_is_given(): void
+    {
+        $asked = [];
+        $this->installWithAProbe($asked);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--pool-probe' => true]));
+
+        $output = Artisan::output();
+
+        $this->assertSame(['reader_db_2'], $asked, 'one exchange for the pool the variant declares, and nothing else');
+        $this->assertStringContainsString('pool_probe', $output);
+        $this->assertStringContainsString('reader_db_2', $output);
+        $this->assertStringContainsString('missing', $output);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--pool-probe' => true, '--json' => true]));
+        $report = $this->report(Artisan::output());
+
+        $this->assertSame(0, $report['exit_code'], 'the probe changes what is printed, not the code');
+        $this->assertIsArray($report['pool_probe']);
+        $this->assertSame('reader_db_2', $report['pool_probe']['pools'][0]['database']);
+        $this->assertSame(PoolProbe::STATUS_MISSING, $report['pool_probe']['pools'][0]['status']);
+    }
+
+    /**
+     * An inert flipper is not asked, and the status says why rather than reporting a probe that
+     * had nothing to answer: nothing swaps its file or restarts its pooler, so an answer would be
+     * about a process this package is not moving.
+     */
+    public function test_the_pool_probe_flag_says_why_nothing_was_asked_when_the_flipper_is_disarmed(): void
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        config()->set('database.default', self::CONNECTION);
+        $installation->install(['enabled' => false]);
+
+        $asked = [];
+
+        app()->instance(PgcatConfigFlipper::class, new PgcatConfigFlipper(
+            resolver: app()->make(TimeWindowResolver::class),
+            config: [...$installation->config(), 'enabled' => false],
+            stateFile: $installation->path('state_file'),
+            lockFile: $installation->path('lock_file'),
+            poolProbe: static function (string $database) use (&$asked): array {
+                $asked[] = $database;
+
+                return ['status' => PoolProbe::STATUS_SILENT, 'evidence' => 'unreachable'];
+            },
+        ));
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--status' => true, '--pool-probe' => true]));
+
+        $this->assertSame([], $asked, 'an inert flipper has no pooler to ask');
+        $this->assertStringContainsString('flipper is not armed', Artisan::output());
+    }
+
+    /**
+     * An installation with a readers variant that declares a pool, and a flipper whose probe
+     * answers `missing` and records what it was asked.
+     *
+     * The probe seam is injected rather than a port opened: the answer is the test's, and the
+     * question — which pool, on which run — is the part this suite can hold. Everything else is
+     * the provider's own wiring, so the only difference from a real installation is where the
+     * answer comes from.
+     *
+     * @param list<string> $asked filled with the names the probe was asked about, by reference
+     *        so the caller reads the list the closure wrote rather than a copy of it
+     */
+    private function installWithAProbe(array &$asked): PgcatInstallation
+    {
+        $installation = PgcatInstallation::make($this->tempDir());
+        file_put_contents($installation->path('readers_path'), "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+
+        config()->set('database.default', self::CONNECTION);
+        $installation->install();
+
+        $asked = [];
+
+        app()->instance(PgcatConfigFlipper::class, new PgcatConfigFlipper(
+            resolver: app()->make(TimeWindowResolver::class),
+            config: $installation->config(),
+            stateFile: $installation->path('state_file'),
+            lockFile: $installation->path('lock_file'),
+            poolProbe: static function (string $database) use (&$asked): array {
+                $asked[] = $database;
+
+                return [
+                    'status' => PoolProbe::STATUS_MISSING,
+                    'database' => $database,
+                    'answered' => false,
+                    'missing' => true,
+                    'answer' => sprintf('No pool configured for database: "%s"', $database),
+                    'evidence' => sprintf('pgcat is running but has no pool "%s"', $database),
+                ];
+            },
+        ));
+
+        return $installation;
     }
 
     /**
@@ -519,7 +655,7 @@ final class DbFlipPgcatCommandTest extends TestCase
      *
      * The table is written for an operator and the matrix for the code, so they do not line up
      * one to one: the three ways a flip can politely do nothing are one documented case, and
-     * the three ways a command can be refused are another. This map is the correspondence, and
+     * the four ways a command can be refused are another. This map is the correspondence, and
      * it is the only thing either side has to keep in step —
      * `test_the_matrix_agrees_with_the_readme_exit_table()` reads the table and fails when the
      * two disagree in either direction.
@@ -545,6 +681,7 @@ final class DbFlipPgcatCommandTest extends TestCase
             'a rehearsal a flip would refuse exits one' => 'a step a flip needs did not work, or a rehearsal of one',
             'a rehearsal cannot be a watch daemon' => 'a flag combination that is refused',
             'a JSON report cannot be a watch daemon' => 'a flag combination that is refused',
+            'a pool probe cannot be asked for without a status report' => 'a flag combination that is refused',
             'an unknown --force-mode is refused before anything else' => 'a flag combination that is refused',
             'the flipper is not registered, so there was no run at all' => 'the container has no pgcat flipper',
         ];

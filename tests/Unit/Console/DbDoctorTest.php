@@ -2128,21 +2128,107 @@ class DbDoctorTest extends TestCase
 
     /**
      * The pooler this row was measured against authenticates before it resolves a pool and answers
-     * every name. The row still passes — nothing is wrong with the installation — but it says the
-     * answers are not proof, which is the difference between a green row and a claim.
+     * every name, and this installation has no console for the row to fall back on. The row warns
+     * rather than passing: nothing is wrong with the installation, but nothing established that its
+     * pools exist either — and a `PASS` would be read as the answer the reading never gave.
      */
-    public function test_the_pool_probe_row_says_when_the_poolers_answers_are_not_proof(): void
+    public function test_the_pool_probe_row_warns_when_the_poolers_answers_are_not_proof(): void
     {
         $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered');
 
         [$output, $exit] = $this->doctor();
         $row = $this->rowContaining($output, 'pool probe');
 
+        $this->assertStringStartsWith('WARN  pool probe', $row);
+        $this->assertStringContainsString('answered the sentinel name "weighted-dbmanager-control-', $row);
+        $this->assertStringContainsString('does not show that the pool exists', $row);
+        $this->assertStringContainsString('indeterminate rather than a pass', $row);
+        $this->assertStringContainsString('— probed tcp://127.0.0.1:7432', $row);
+        $this->assertSame(0, $exit, 'a reading that could not be established is not a fault in the installation');
+    }
+
+    /**
+     * The reading the row prefers: the pooler's own list names the pool. The row passes because the
+     * question was answered, not because nothing was asked — and it names the console as the
+     * reading, so a green row says which credential was exercised to get it.
+     */
+    public function test_the_pool_probe_row_passes_when_the_console_lists_every_pool(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered', admin: [
+            'status' => 'read',
+            'pools' => ['reader_db_2'],
+            'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 1 pool(s)',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
         $this->assertStringStartsWith('PASS  pool probe', $row);
-        $this->assertStringContainsString('answered for every pool the configuration declares (reader_db_2)', $row);
-        $this->assertStringContainsString('not proof the pools exist', $row);
-        $this->assertStringContainsString('authenticates before it resolves a pool', $row);
-        $this->assertSame(0, $exit, 'a pooler that authenticates first is not a fault in the installation');
+        $this->assertStringContainsString('own admin console lists every pool the configuration declares', $row);
+        $this->assertStringContainsString('listed 1 pool(s)', $row, 'the console\'s own sentence, not a paraphrase of it');
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The fault this row exists for, found by the reading that cannot be fooled by a pooler's
+     * ordering: the pooler's own console says it holds no such pool. That is a `FAIL` past the boot
+     * window, with the reading that found it named in the sentence.
+     */
+    public function test_the_pool_probe_row_fails_when_only_the_console_knows_the_pool_is_missing(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered', admin: [
+            'status' => 'read',
+            'pools' => [],
+            'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 0 pool(s)',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('FAIL  pool probe', $row);
+        $this->assertStringContainsString('holds no pool "reader_db_2"', $row);
+        $this->assertStringContainsString('admin console lists no pool "reader_db_2"', $row, 'the console is the reading, so it is what the row names');
+        $this->assertSame(1, $exit, 'a pool the pooler says it does not hold is a failure');
+    }
+
+    /**
+     * A console that refused the reading — no credentials in the pooler's file, a password it would
+     * not take, a challenge this probe cannot meet — leaves the row warning rather than failing:
+     * the console's own sentence is reported, and the installation is not failed for a credential
+     * this package could not read.
+     */
+    public function test_the_pool_probe_row_warns_when_the_console_refuses_the_reading(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered', admin: [
+            'status' => 'refused',
+            'pools' => [],
+            'evidence' => 'the admin console at tcp://127.0.0.1:7432 refused the pooler\'s own credentials: password authentication failed',
+        ]);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('WARN  pool probe', $row);
+        $this->assertStringContainsString('admin console could not list them', $row);
+        $this->assertStringContainsString('password authentication failed', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The same unverified reading while the container is still starting is not judged: a pooler a
+     * second old may not have read its file yet, so the row passes with the sentence rather than
+     * warning about a state the boot window exists to allow.
+     */
+    public function test_an_unverified_reading_is_not_warned_about_inside_the_boot_window(): void
+    {
+        $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered', windowClosed: false);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe');
+
+        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringContainsString('The boot window is still open', $row);
+        $this->assertSame(0, $exit);
     }
 
     /**
@@ -2217,7 +2303,7 @@ class DbDoctorTest extends TestCase
         $row = $this->rowContaining($output, 'pool probe');
 
         $this->assertStringStartsWith('PASS  pool probe', $row);
-        $this->assertStringContainsString('the probe is not armed (swrr.pgcat.pool_probe.enabled)', $row);
+        $this->assertStringContainsString('the probe is not armed (swrr.pgcat.pool_probe.enabled', $row, 'the row names the switch and the port source, because either one alone arms nothing');
         $this->assertSame(0, $exit);
     }
 
@@ -5571,11 +5657,17 @@ class DbDoctorTest extends TestCase
      * (127.0.0.1:6379, which is what CI's runner does not have) and red on the runner — four tests
      * reading exit 1 while every row they assert on is right.
      *
+     * `$admin` is the answer a pooler's own console gives — null for no console at all, which is the
+     * shape an installation that injected its own probe has. It is asked before the front door in
+     * the sweep, and the row reads it as `verified`: a console that lists the pools is proof, and one
+     * that could not be read leaves the row saying so rather than passing.
+     *
      * @param list<string>          $pools   the pools the readers variant declares
      * @param array<string, string> $answers database => status
+     * @param array{status: string, pools: list<string>, evidence: string}|null $admin the console's answer
      * @return array<string, string> the paths `armPgcat()` returned
      */
-    private function armPgcatWithPoolProbe(array $pools, array $answers = [], bool $windowClosed = true, string $control = 'missing'): array
+    private function armPgcatWithPoolProbe(array $pools, array $answers = [], bool $windowClosed = true, string $control = 'missing', ?array $admin = null): array
     {
         $this->bindRedis(reachable: true);
 
@@ -5639,6 +5731,7 @@ class DbDoctorTest extends TestCase
             driver: 'pgsql',
             supervisorStep: new SupervisorStep(static fn (string $command): array => [0, 'pgcat:pgcat_00 RUNNING pid 1', '']),
             poolProbe: $probe,
+            poolAdmin: $admin === null ? null : static fn (): array => $admin,
         ));
 
         return $paths;

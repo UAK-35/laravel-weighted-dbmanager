@@ -260,6 +260,14 @@ final class PgcatConfigFlipper
     private readonly ?\Closure $poolProbe;
 
     /**
+     * How the pooler's own admin console lists the pools it holds, or null when that question is
+     * not asked. It is the fallback the front door needs: a pooler that authenticates before it
+     * resolves a pool answers every name, and the console is the only statement left that names
+     * its pools.
+     */
+    private readonly ?\Closure $poolAdmin;
+
+    /**
      * The scheduled entry's beat and the bound its silence is judged against. Built from the same
      * config slice as the window beside it — and given that window, when the window was defaulted
      * here rather than injected, so a test that fakes the container's clock fakes it for both.
@@ -303,6 +311,12 @@ final class PgcatConfigFlipper
         // the pooler's answer unexamined. Defaulted from `swrr.pgcat.pool_probe` below, and
         // injected so a test can answer without opening a socket.
         ?\Closure $poolProbe = null,
+        // How the pooler's own admin console lists what it holds — the reading the sweep asks
+        // first, with the startup packets left for a console that cannot be read. Defaulted below
+        // beside the probe, and injected so a test can answer without a console — and so an
+        // installation whose console this package cannot read has one place to say how it is
+        // asked.
+        ?\Closure $poolAdmin = null,
         // The beat the scheduled entry leaves and the tolerance its silence is judged with.
         // Defaulted from `swrr.pgcat.schedule` and the window above, so the two readings of
         // "has this container been moving" share one clock and one boot stamp.
@@ -333,6 +347,11 @@ final class PgcatConfigFlipper
         // on gets no closure, so nothing opens a socket on the poll path. The default is only
         // built from a config that asks for it.
         $this->poolProbe = $poolProbe ?? self::defaultPoolProbe($config);
+
+        // Only beside the default probe: an installation that injected its own probe has said how
+        // its pooler is reached, and this package should not open a second connection to the
+        // configured address beside it.
+        $this->poolAdmin = $poolAdmin ?? ($poolProbe === null ? self::defaultPoolAdmin($config) : null);
 
         $this->fileCopier = $fileCopier ?? static function (string $from, string $to): bool {
             $tmp = $to . '.tmp.' . getmypid();
@@ -876,7 +895,7 @@ final class PgcatConfigFlipper
             'step' => 'pool read',
             'outcome' => DryRunResult::STEP_WOULD,
             'detail' => $this->poolProbe === null
-                ? 'nothing would be asked: the probe is not armed (swrr.pgcat.pool_probe.enabled), so the flip would report the transition on supervisord\'s word'
+                ? 'nothing would be asked: the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the pooler\'s own file), so the flip would report the transition on supervisord\'s word'
                 : sprintf(
                     'the pools %s declares would be read back from the pooler, and a pool it refused would be repaired by a restart on that file',
                     $source,
@@ -1847,20 +1866,46 @@ final class PgcatConfigFlipper
      *   probe` row are the two surfaces that say so, and both read this — so they cannot disagree.
      *
      * WHAT IT REPORTS
-     *   `enabled` is the switch (`swrr.pgcat.pool_probe.enabled`); `applicable` is true when a probe
-     *   is armed, the flipper applies, and the mode's variant declares at least one pool — that is,
-     *   when there was something to ask. `pools` is one entry per pool the variant declares, in file
-     *   order, each carrying the pooler's own three-answer vocabulary (`answered`, `missing`,
-     *   `silent`) and the sentence `PoolProbe` produced for it. `answered` is true when every pool
-     *   answered, false when one did not, and null when nothing was asked.
+     *   `enabled` is whether a probe is armed: the switch is on, and the pooler's own file names a
+     *   port to dial (`swrr.pgcat.pool_probe.enabled` and `[general] port`). A switch on a file that
+     *   names no port arms nothing, because there is no address the pooler itself has stated — and a
+     *   probe aimed by a guess could report a healthy pooler as silent. `applicable` is true when a
+     *   probe is armed, the flipper applies, and the mode's variant declares at least one pool —
+     *   that is, when there was something to ask. `pools` is one entry per pool the variant declares, in file
+     *   order, each carrying the sweep's vocabulary (`answered`, `missing`, `indeterminate`,
+     *   `silent`) and the sentence the exchange produced for it. `answered` is true when every pool
+     *   is `answered` and false when one is not, and null when nothing was asked. `indeterminate`
+     *   is a pool the pooler answered while it answered the sentinel too: the answer is real, and it
+     *   would have been the same for a name no configuration declares, so it is not a pass.
      *
-     *   `discriminates` is what makes an `answered` pool a *proof* or only an answer. It is read off
-     *   one control name no configuration declares: the same sweep asks it, and a refusal means the
-     *   pooler resolves a pool before it authenticates, so `answered` is evidence the pool exists;
-     *   an answer to the control means the pooler authenticates first and answers every name, so
-     *   the pools could not be proved. `control` is that exchange, or null when it was not needed —
-     *   a `missing` pool is itself the proof, and asking it again would be a socket for a fact
-     *   already settled.
+     *   `admin` is the pooler's own answer: `SHOW POOLS` on its admin console, asked first. It is
+     *   the primary reading — one connection for the whole sweep, a list of the pools the process
+     *   serves, and a statement that does not depend on when a pooler resolves a pool — so where it
+     *   can be read, `pools` is built from that list and the front door is not asked at all. A pool
+     *   the list does not carry is published as `missing`, with the sentence naming the console,
+     *   because that is the fault this whole reading exists for. `admin` is that answer — its
+     *   status, its pool names and its own sentence — or the refusal that made the front door the
+     *   reading instead, or null when no console was configured.
+     *
+     *   `discriminates` is what makes a front-door `answered` pool a *proof* or only an answer, and
+     *   it is only asked on the fallback path. It is read off one control name no configuration
+     *   declares: a refusal means the pooler resolves a pool before it authenticates, so `answered`
+     *   is evidence the pool exists; an answer means it authenticates first and answers every name,
+     *   so every pool that answered is published as `indeterminate` instead — the reading cannot be
+     *   mistaken for a pass, which is what an `answered` pool would have been. `control` is that
+     *   exchange, or null when it was not needed
+     *   — a `missing` pool is itself the proof, and asking it again would be a socket for a fact
+     *   already settled — and null when the console answered, because there was nothing left for
+     *   the control to settle.
+     *
+     *   `verified` is whether an `answered` pool is proof it exists: true when the console listed
+     *   it or the control was refused; false when neither could be read; null while the control is
+     *   unchecked.
+     *
+     *   `judged` is whether the boot window has closed, and therefore whether `failed` and
+     *   `warned` are verdicts rather than descriptions: a surface that wants to say a reading is
+     *   *unverified* has to know whether a container is still allowed to be starting, which is the
+     *   line `failed` and `warned` already draw and the one a row cannot draw for itself.
      *
      *   `host`, `port` and `address` are where the packets were actually sent, taken from the
      *   answers rather than from the configuration: a probe aimed at the wrong port is the one fault
@@ -1873,8 +1918,8 @@ final class PgcatConfigFlipper
      *   It deliberately repairs, restarts and records nothing: the throw, the swap and the record
      *   belong to a flip, and a status reading that restarted a pooler would not be one an endpoint
      *   could be polled with. `failed` is the judgement, and it is the repair's own — `missing`, the
-     *   pooler's refusal, and never `silent`, so a probe pointed at the wrong address cannot fail a
-     *   healthy installation.
+     *   pooler's refusal, and never `silent` or `indeterminate`, so a probe pointed at the wrong
+     *   address or a pooler that authenticates first cannot fail a healthy installation.
      *
      * WHY A POOL IS ONLY JUDGED AFTER THE BOOT WINDOW
      *   While the window is open the repair still has somewhere to run: the per-minute flip
@@ -1883,7 +1928,8 @@ final class PgcatConfigFlipper
      *   line {@see readerWindowVerdict()} draws and for the same reason — a starting container is
      *   not a broken one. The answers themselves are reported either way, so a reader can see what
      *   the pooler said without a verdict being invented about it, and `reason` carries the sentence
-     *   from the moment one pool did not answer.
+     *   from the moment one pool did not answer or could not be told apart from a name no file
+     *   declares.
      *
      * WHY IT IS NOT IN healthSummary()
      *   It is the one reading here that opens a socket. `healthSummary()` is what `db:replica-status`
@@ -1892,7 +1938,7 @@ final class PgcatConfigFlipper
      *   contract rather than add a field to this one. The surfaces that want the answer ask for it
      *   by name, and neither of the two is on the flip's own hot path.
      *
-     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, control: array{database: string, status: string, evidence: string}|null, host: string|null, port: int|null, address: string|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
+     * @return array{enabled: bool, applicable: bool, answered: bool|null, discriminates: bool|null, verified: bool|null, judged: bool, control: array{database: string, status: string, evidence: string}|null, admin: array{status: string, pools: list<string>, evidence: string}|null, host: string|null, port: int|null, address: string|null, failed: bool, warned: bool, pools: list<array{database: string, status: string, evidence: string}>, reason: string|null}
      */
     public function poolProbeVerdict(): array
     {
@@ -1903,7 +1949,10 @@ final class PgcatConfigFlipper
             'applicable' => false,
             'answered' => null,
             'discriminates' => null,
+            'verified' => null,
+            'judged' => false,
             'control' => null,
+            'admin' => null,
             'host' => null,
             'port' => null,
             'address' => null,
@@ -1922,10 +1971,63 @@ final class PgcatConfigFlipper
         }
 
         $mode = $this->resolver->currentModeName();
-        $pools = [];
+        $declared = $this->configuredPools($mode);
+
+        // No pool declared is not a pooler that failed: there is nothing the variant claims the
+        // pooler should hold, so there is nothing to be missing — and nothing worth a connection.
+        if ($declared === []) {
+            return $unasked;
+        }
+
+        $judged = $this->window->closed();
         $probed = ['host' => null, 'port' => null, 'address' => null];
 
-        foreach ($this->configuredPools($mode) as $database) {
+        // The pooler's own inventory, asked first: `SHOW POOLS` is one connection for the whole
+        // sweep rather than one startup packet per pool, and it is the process naming the pools it
+        // serves. Where it can be read it *is* the reading, and the front door is not asked at all
+        // — the answerability of a pool then rests on the pooler's list rather than on how it
+        // answers an anonymous packet, which is the one thing a pooler may decide before it looks
+        // a pool up.
+        $admin = null;
+
+        if ($this->poolAdmin !== null) {
+            /** @var array{status?: string, pools?: array<array-key, mixed>, evidence?: string} $answer */
+            $answer = ($this->poolAdmin)();
+            $probed = self::probedAddress($probed, $answer);
+            $admin = self::poolAdminAnswer($answer);
+
+            if ($admin['status'] === PoolProbe::ADMIN_STATUS_READ) {
+                $pools = self::poolsListedBy($declared, $admin['pools']);
+                $missing = array_values(array_filter($pools, static fn (array $pool): bool => $pool['status'] === PoolProbe::STATUS_MISSING));
+
+                return [
+                    'enabled' => true,
+                    'applicable' => true,
+                    'answered' => $missing === [],
+                    'discriminates' => null,
+                    'verified' => true,
+                    'judged' => $judged,
+                    'control' => null,
+                    'admin' => $admin,
+                    'host' => $probed['host'],
+                    'port' => $probed['port'],
+                    'address' => $probed['address'],
+                    'failed' => $judged && $missing !== [],
+                    'warned' => false,
+                    'pools' => $pools,
+                    'reason' => $missing === [] ? null : $this->poolProbeReason($missing, [], [], $judged, $admin),
+                ];
+            }
+        }
+
+        // The console could not be read — no credentials in the pooler's file, a refusal, a
+        // challenge this probe cannot meet, silence — so the front door is asked instead, one
+        // startup packet per pool. Nothing it says is proof on its own: `discriminates` and
+        // `verified` below say what the answers are worth, the reading the console replaced
+        // wherever it could be made.
+        $pools = [];
+
+        foreach ($declared as $database) {
             /** @var array{status?: string, evidence?: string} $verdict */
             $verdict = ($this->poolProbe)($database);
 
@@ -1943,16 +2045,8 @@ final class PgcatConfigFlipper
             ];
         }
 
-        // No pool declared is not a pooler that failed: there is nothing the variant claims the
-        // pooler should hold, so there is nothing to be missing.
-        if ($pools === []) {
-            return $unasked;
-        }
-
         $missing = array_values(array_filter($pools, static fn (array $pool): bool => $pool['status'] === PoolProbe::STATUS_MISSING));
         $silent = array_values(array_filter($pools, static fn (array $pool): bool => $pool['status'] === PoolProbe::STATUS_SILENT));
-
-        $judged = $this->window->closed();
 
         // A refusal of a declared pool already proves this pooler resolves pools before it
         // authenticates, so the control is asked only when nothing was refused: one extra
@@ -1985,21 +2079,53 @@ final class PgcatConfigFlipper
             $discriminates = PoolProbe::discriminates($controlStatus);
         }
 
+        // A sentinel that was answered is the whole point of asking it: this pooler authenticates
+        // before it resolves a pool, so the answer it gave for each declared pool is the answer it
+        // gives every name. Publishing those pools as `answered` would be the green reading this
+        // reading exists to prevent, so they become `indeterminate` — the pooler spoke, and what it
+        // said cannot be taken as evidence. The sentinel's own answer stays in `control`.
+        $indeterminate = [];
+
+        if ($discriminates === false && $control !== null) {
+            foreach ($pools as $index => $pool) {
+                if ($pool['status'] !== PoolProbe::STATUS_ANSWERED) {
+                    continue;
+                }
+
+                $pools[$index]['status'] = PoolProbe::STATUS_INDETERMINATE;
+                $pools[$index]['evidence'] = sprintf(
+                    'the pooler also answered the sentinel name "%s", which no configuration declares, so its answer for pool "%s" does not show that the pool exists',
+                    $control['database'],
+                    $pool['database'],
+                );
+
+                $indeterminate[] = $pools[$index];
+            }
+        }
+
+        // The console was asked first and could not answer, so the front door is as far as this
+        // reading goes: `discriminates` is its proof, and false or null is the honest answer rather
+        // than a pass.
+        $verified = $discriminates;
+
         return [
             'enabled' => true,
             'applicable' => true,
-            'answered' => $missing === [] && $silent === [],
+            'answered' => $missing === [] && $silent === [] && $indeterminate === [],
             'discriminates' => $discriminates,
+            'verified' => $verified,
+            'judged' => $judged,
             'control' => $control,
+            'admin' => $admin,
             'host' => $probed['host'],
             'port' => $probed['port'],
             'address' => $probed['address'],
             'failed' => $judged && $missing !== [],
-            'warned' => $judged && $missing === [] && $silent !== [],
+            'warned' => $judged && $missing === [] && ($silent !== [] || $indeterminate !== []),
             'pools' => $pools,
-            'reason' => $missing === [] && $silent === []
+            'reason' => $missing === [] && $silent === [] && $indeterminate === []
                 ? null
-                : $this->poolProbeReason($missing, $silent, $judged),
+                : $this->poolProbeReason($missing, $silent, $indeterminate, $judged, $admin),
         ];
     }
 
@@ -2040,6 +2166,70 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * A console reading reduced to the shape the verdict publishes: one of the two statuses it can
+     * carry, the pool names it listed, and a sentence. Anything a probe of another shape returns is
+     * read as silence rather than guessed at, the same way a pool answer without a status is.
+     *
+     * @param array{status?: string, pools?: array<array-key, mixed>, evidence?: string} $answer
+     * @return array{status: string, pools: list<string>, evidence: string}
+     */
+    private static function poolAdminAnswer(array $answer): array
+    {
+        $status = is_string($answer['status'] ?? null)
+            && in_array($answer['status'], [PoolProbe::ADMIN_STATUS_READ, PoolProbe::ADMIN_STATUS_REFUSED], true)
+                ? $answer['status']
+                : PoolProbe::STATUS_SILENT;
+
+        $listed = [];
+
+        foreach (is_array($answer['pools'] ?? null) ? $answer['pools'] : [] as $name) {
+            if (is_string($name) && $name !== '') {
+                $listed[] = $name;
+            }
+        }
+
+        return [
+            'status' => $status,
+            'pools' => $listed,
+            'evidence' => is_string($answer['evidence'] ?? null) && $answer['evidence'] !== ''
+                ? $answer['evidence']
+                : 'the pooler\'s admin console gave no answer',
+        ];
+    }
+
+    /**
+     * The reading the pooler's own list produces: one row per pool the variant declares, `answered`
+     * where the list carries it and `missing` where it does not.
+     *
+     * This is the reading the console exists for, so the sentence names the console rather than the
+     * front door: the fault is that the process does not hold a pool its configuration declares,
+     * and a reader should be told which reading found that — the pooler's statement about itself
+     * rather than an inference from a startup packet.
+     *
+     * @param list<string> $declared the pools the applied variant declares, in file order
+     * @param list<string> $listed   the pools the console's `SHOW POOLS` named
+     * @return list<array{database: string, status: string, evidence: string}>
+     */
+    private static function poolsListedBy(array $declared, array $listed): array
+    {
+        $pools = [];
+
+        foreach ($declared as $database) {
+            $held = in_array($database, $listed, true);
+
+            $pools[] = [
+                'database' => $database,
+                'status' => $held ? PoolProbe::STATUS_ANSWERED : PoolProbe::STATUS_MISSING,
+                'evidence' => $held
+                    ? sprintf('the pooler\'s own admin console lists pool "%s"', $database)
+                    : sprintf('the pooler\'s own admin console lists no pool "%s"', $database),
+            ];
+        }
+
+        return $pools;
+    }
+
+    /**
      * The sentence for a pooler that did not answer for something, in the pooler's own words.
      *
      * One sentence for the whole reading rather than one per pool, because the fault is one: what
@@ -2054,12 +2244,19 @@ final class PgcatConfigFlipper
      * so nothing re-applies the file again — and inside it the same answer is a container that is
      * still coming up. A pooler that answered nothing is neither: it is reported and never repaired,
      * which is the line that keeps a probe pointed at the wrong address from failing a pooler that is
-     * fine.
+     * fine. A pooler that answered the sentinel as well is a third case: it spoke, and what it said
+     * is not evidence, so the reading is indeterminate rather than answered — also reported, and also
+     * never repaired, because it says nothing about which pools the process holds.
+     *
+     * The console's own refusal is appended to the indeterminate sentence when there was one, so a
+     * row says both why the inventory could not be read and what the fallback made of that.
      *
      * @param list<array{database: string, status: string, evidence: string}> $missing
      * @param list<array{database: string, status: string, evidence: string}> $silent
+     * @param list<array{database: string, status: string, evidence: string}> $indeterminate
+     * @param array{status: string, pools: list<string>, evidence: string}|null $admin
      */
-    private function poolProbeReason(array $missing, array $silent, bool $judged): string
+    private function poolProbeReason(array $missing, array $silent, array $indeterminate, bool $judged, ?array $admin = null): string
     {
         $names = static function (array $pools): string {
             /** @var list<array{database: string, status: string, evidence: string}> $pools */
@@ -2080,6 +2277,22 @@ final class PgcatConfigFlipper
                         count($missing) === 1 ? 'it' : 'them',
                     )
                     : 'The boot window is still open, where the per-minute flip re-applies the configuration, so this is not judged yet',
+            );
+        }
+
+        if ($indeterminate !== []) {
+            $console = $admin !== null
+                ? sprintf(' Its own admin console could not list them: %s.', $admin['evidence'])
+                : '';
+
+            return sprintf(
+                'the pooler answered for %s — %s. %s.%s',
+                $names($indeterminate),
+                $indeterminate[0]['evidence'],
+                $judged
+                    ? 'Its answers are not proof that those pools exist, so this reading is indeterminate rather than a pass'
+                    : 'The boot window is still open, where the per-minute flip re-applies the configuration, so this is not judged yet',
+                $console,
             );
         }
 
@@ -2736,19 +2949,84 @@ final class PgcatConfigFlipper
      * existed.
      *
      * The host is the pooler's own, which is why it is configured rather than derived: a variant
-     * file does name an address — `[general].port` is where the pooler says what it listens on,
-     * measured at `5433` on the installation this was written against — but a variant is one of the
-     * files a flip may put in front of the process, so an address read out of a variant would move
-     * with the flip instead of staying with the pooler. The *port*, when the installation configures
-     * none, is read from the file the pooler is actually running on — `config_path`, the target a
-     * swap renames over — because that file is the process's own statement rather than a candidate's.
-     * A file that cannot answer leaves pgcat's convention, `6432`, which is not PostgreSQL's: a
-     * PostgreSQL server answers every name in its own words and would be read as a pooler holding
-     * them all. `PoolProbe::port()` is the one place that order of authority is decided.
+     * file does name an address, but a variant is one of the files a flip may put in front of the
+     * process, so an address read out of a variant would move with the flip instead of staying with
+     * the pooler. The *port* is read from the file the pooler is actually running on —
+     * `config_path`, the target a swap renames over — because that file is the process's own
+     * statement rather than a candidate's. It is the only source: there is no separate port setting
+     * and no convention to fall back to, so a file that names no dialable port arms no probe rather
+     * than aiming one where the pooler is not listening. `PoolProbe::port()` is the one place that
+     * reading is made.
      *
      * @param array<string, mixed> $config the `swrr.pgcat` block
      */
     private static function defaultPoolProbe(array $config): ?\Closure
+    {
+        $endpoint = self::poolProbeEndpoint($config);
+
+        if ($endpoint === null) {
+            return null;
+        }
+
+        $probe = ConfigValue::assoc($config['pool_probe'] ?? null);
+        $user = ConfigValue::string($probe['user'] ?? null, 'postgres');
+        $host = $endpoint['host'];
+        $port = $endpoint['port'];
+        $timeout = $endpoint['timeout'];
+
+        return static fn (string $database): array => PoolProbe::ask($host, $port, $database, $user, $timeout);
+    }
+
+    /**
+     * The default console reading: the pooler's own admin console on the same host and port the
+     * client-facing probe dials, with the credentials out of the file that pooler is running on.
+     *
+     * It is asked in one place — `poolProbeVerdict()`, before the front door — because the list it
+     * returns is the reading this probe wants: the process naming the pools it serves, rather than
+     * an anonymous startup packet per pool whose meaning depends on when the pooler resolves one.
+     * Nothing else calls it, and it is built only when the probe itself was, so an installation
+     * that has not armed the probe opens nothing.
+     *
+     * @param array<string, mixed> $config the `swrr.pgcat` block
+     */
+    private static function defaultPoolAdmin(array $config): ?\Closure
+    {
+        $endpoint = self::poolProbeEndpoint($config);
+
+        if ($endpoint === null) {
+            return null;
+        }
+
+        $host = $endpoint['host'];
+        $port = $endpoint['port'];
+        $timeout = $endpoint['timeout'];
+
+        // The file is read when the console is asked rather than when the flipper is built: a
+        // flip in the same run may have just written the file whose credentials are wanted, and a
+        // reading taken at construction would describe the file before it.
+        return static fn (): array => PoolProbe::adminPools(
+            self::poolerConfigToml($config),
+            $host,
+            $port,
+            $timeout,
+        );
+    }
+
+    /**
+     * The address and timeout both readings of the pooler use, or null when the probe is switched
+     * off or cannot be aimed — the one place `swrr.pgcat.pool_probe.host` and `.timeout_ms` are
+     * resolved, and where the port is taken from the file the pooler is running on, so the front
+     * door and the console cannot end up asking two different poolers.
+     *
+     * Off is a decision rather than an error: an installation that has not armed the probe opens no
+     * socket, and the console fallback does not create one behind its back. A file that names no
+     * port is the same outcome for a different reason — there is no address the pooler has stated,
+     * and a guess would be a probe pointed at something that may not be the pooler at all.
+     *
+     * @param array<string, mixed> $config the `swrr.pgcat` block
+     * @return array{host: string, port: int, timeout: int}|null
+     */
+    private static function poolProbeEndpoint(array $config): ?array
     {
         $probe = ConfigValue::assoc($config['pool_probe'] ?? null);
 
@@ -2756,15 +3034,17 @@ final class PgcatConfigFlipper
             return null;
         }
 
-        $host = ConfigValue::string($probe['host'] ?? null, '127.0.0.1');
-        $port = PoolProbe::port(
-            self::poolerConfigToml($config),
-            ConfigValue::int($probe['port'] ?? null, 0),
-        );
-        $user = ConfigValue::string($probe['user'] ?? null, 'postgres');
-        $timeout = ConfigValue::int($probe['timeout_ms'] ?? null, PoolProbe::DEFAULT_TIMEOUT_MS);
+        $port = PoolProbe::port(self::poolerConfigToml($config));
 
-        return static fn (string $database): array => PoolProbe::ask($host, $port, $database, $user, $timeout);
+        if ($port === null) {
+            return null;
+        }
+
+        return [
+            'host' => ConfigValue::string($probe['host'] ?? null, '127.0.0.1'),
+            'port' => $port,
+            'timeout' => ConfigValue::int($probe['timeout_ms'] ?? null, PoolProbe::DEFAULT_TIMEOUT_MS),
+        ];
     }
 
     /**
@@ -2772,8 +3052,8 @@ final class PgcatConfigFlipper
      * over — or an empty string when it cannot be read.
      *
      * Read here rather than inside `PoolProbe::port()` so that class stays a function of bytes, and
-     * empty rather than thrown because a file that cannot be read is the case the convention exists
-     * for: the probe then reports silence, and silence is reported rather than repaired.
+     * empty rather than thrown because a file that cannot be read is a file that names no port: no
+     * probe is armed, which is reported as such rather than as a pooler that said nothing.
      *
      * @param array<string, mixed> $config the `swrr.pgcat` block
      */

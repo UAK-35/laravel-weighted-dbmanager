@@ -17,6 +17,7 @@ use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\PoolProbe;
 use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
@@ -135,8 +136,11 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     declared pool, no credentials and nothing written — and it is the
  *                     read-only half of the self-heal the per-minute flip performs.
  *                     Warns, rather than failing, for a pooler that answered nothing at
- *                     all, and is not judged while the boot window is still open, where
- *                     the flip still re-applies the configuration
+ *                     all or that answered a sentinel name no configuration declares —
+ *                     the second is `indeterminate`, not `answered`, because the same
+ *                     answer would have come back for a name it cannot hold. Not judged
+ *                     while the boot window is still open, where the flip still
+ *                     re-applies the configuration
  *   pool repairs      how many pool repairs this container has recorded, and when the last
  *                     one happened: a repair is the self-heal working, so the row reports it
  *                     rather than failing on it — the standing fault, if there is one now,
@@ -2900,17 +2904,19 @@ class DbDoctor extends Command
      *   per-minute flip performs, over the same probe and the same vocabulary, so the row and the
      *   repair cannot disagree about what the pooler holds.
      *
-     *   It is a real exchange: one PostgreSQL v3 startup packet per declared pool and the first
-     *   message back, on the pooler's own address, bounded by `pool_probe.timeout_ms`. No
-     *   credential, no `psql` and no connection through the pool is needed — a pooler that resolves
-     *   a pool before it authenticates refuses a name it holds no pool for, in its own sentence —
-     *   and nothing is written, swapped or restarted, so the row is safe in a deploy pipeline. A
-     *   pooler that authenticates *first* answers every name, so the sweep also asks a control name
-     *   no configuration declares: a refusal proves the pooler resolves pools before it
-     *   authenticates, and the row says the answers are proof; an answer to the control says the
-     *   pooler answers everything, and the row says the pools could not be proved. An installation
-     *   that has not armed the probe pays nothing: the row reports that the pooler is taken at
-     *   supervisord's word and returns without opening a socket.
+     *   It is a real exchange, on the pooler's own address and bounded by `pool_probe.timeout_ms`,
+     *   and the first thing it asks is the pooler's own inventory: `SHOW POOLS` on pgcat's admin
+     *   console, with the `[general] admin_username` / `admin_password` of the file the process is
+     *   running on. That list is the process stating which pools it serves, so a declared pool it
+     *   does not carry is the fault this row exists for — and the reading rests on that list rather
+     *   than on how the pooler answers an anonymous startup packet, which is a property of the
+     *   pooler's ordering rather than of its pools. Only a console that cannot be read — no
+     *   credentials in that file, a refusal, a SCRAM challenge, silence — falls back to one
+     *   PostgreSQL v3 startup packet per declared pool, where a refusal is the pooler's own
+     *   sentence and a control name no configuration declares says whether those answers are proof.
+     *   Nothing is written, swapped or restarted, so the row is safe in a deploy pipeline. An
+     *   installation that has not armed the probe pays nothing: the row reports that the pooler is
+     *   taken at supervisord's word and returns without opening a socket.
      *
      *   Three answers are told apart, and they are the pooler's rather than this package's. A pool
      *   that exists answers — and a pool that exists behind a database that is down still answers,
@@ -2964,7 +2970,7 @@ class DbDoctor extends Command
         $verdict = $flipper->poolProbeVerdict();
 
         if ($verdict['enabled'] !== true) {
-            return $this->row($name, self::PASS, 'the probe is not armed (swrr.pgcat.pool_probe.enabled) — the running pooler is taken at supervisord\'s word, which cannot tell a pool it is not serving from one it is');
+            return $this->row($name, self::PASS, 'the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the file the pooler runs on) — the running pooler is taken at supervisord\'s word, which cannot tell a pool it is not serving from one it is');
         }
 
         // Not judged rather than passed: nothing was asked, which is a different statement from a
@@ -2976,8 +2982,9 @@ class DbDoctor extends Command
         // The flipper's own sentence rather than a second copy of it — the same words `/health/db`
         // reports and logs — and it carries what the pooler said and what it means either side of
         // the boot window, which is why the row adds nothing to it. It is non-null whenever a pool
-        // did not answer, which is every branch below the answered one; the fallback is the
-        // answered sentence, so a `null` can only reach a row that would not print it.
+        // did not answer or could not be told apart from a name no configuration declares, which is
+        // every branch below the answered one; the fallback is the answered sentence, so a `null`
+        // can only reach a row that would not print it.
         $reason = $verdict['reason'] ?? 'the running pooler answered for every pool the configuration declares';
 
         // Where the packets actually went. A probe aimed at the wrong port reports the same silence
@@ -2996,27 +3003,54 @@ class DbDoctor extends Command
             return $this->row($name, self::WARN, $reason.$probed);
         }
 
-        if ($verdict['answered'] === true) {
-            $declared = implode(', ', array_column($verdict['pools'], 'database'));
-            $discriminates = $verdict['discriminates'] ?? null;
+        $declared = implode(', ', array_column($verdict['pools'], 'database'));
+        $discriminates = $verdict['discriminates'];
+        $verified = $verdict['verified'];
+        $admin = $verdict['admin'];
+        $judged = $verdict['judged'];
 
-            // The control name is what turns "the pooler answered" into a proof, or says that it
-            // cannot be one on this pooler: an installation whose pooler authenticates before it
-            // resolves a pool is not failing, but a PASS that read as proof would be wrong.
-            $detail = match ($discriminates) {
-                true => sprintf(
+        // A green row is a claim that the pooler is answerable for its pools, and a sweep that
+        // could not establish one must not make it. This is the difference the fallback exists
+        // for: an auth-first pooler is read by its own admin console, and a console that could not
+        // be read — or was never configured — leaves the same doubt a missing pool would settle.
+        // Once the boot window has closed, that doubt is a warning rather than a pass.
+        if ($verdict['answered'] === true && $verified !== true) {
+            // Reached when the sentinel itself said nothing: the pools answered, but the one name
+            // that would have made those answers proof could not be read either way. A sentinel
+            // that *was* answered does not arrive here — the flipper publishes every pool as
+            // `indeterminate` and `warned`, which the branch above has already reported.
+            $why = match (true) {
+                $admin !== null => sprintf('its own admin console could not list them (%s)', $admin['evidence']),
+                default => 'the sentinel name it cannot hold did not answer either',
+            };
+
+            return $this->row(
+                $name,
+                $judged ? self::WARN : self::PASS,
+                sprintf(
+                    'the running pooler answered for every pool the configuration declares (%s), but %s — so this reading cannot tell a pool it holds from one it does not',
+                    $declared,
+                    $why,
+                ).$probed,
+            );
+        }
+
+        if ($verdict['answered'] === true) {
+            // Two readings can establish it, and the row says which. The console listed every pool,
+            // which is the pooler's own statement about what it serves — the primary reading, and
+            // the one an operator can check against the credential in the pooler's file. Or the
+            // front door refused a control name, which is the fallback admitting it reads pools
+            // before it authenticates.
+            $detail = $admin !== null && $admin['status'] === PoolProbe::ADMIN_STATUS_READ
+                ? sprintf(
+                    'the pooler\'s own admin console lists every pool the configuration declares (%s) — %s — so each pool is one the pooler holds',
+                    $declared,
+                    $admin['evidence'],
+                )
+                : sprintf(
                     'the running pooler answered for every pool the configuration declares (%s), and refused a control name it cannot hold — so each answer is proof the pool exists',
                     $declared,
-                ),
-                false => sprintf(
-                    'the running pooler answered for every pool the configuration declares (%s) and for a control name it cannot hold, so those answers are not proof the pools exist — this pooler authenticates before it resolves a pool',
-                    $declared,
-                ),
-                default => sprintf(
-                    'the running pooler answered for every pool the configuration declares (%s), but a control name it cannot hold did not answer, so the answers could not be checked',
-                    $declared,
-                ),
-            };
+                );
 
             return $this->row($name, self::PASS, $detail.$probed);
         }

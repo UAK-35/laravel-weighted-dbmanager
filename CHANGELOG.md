@@ -4,16 +4,17 @@
 
 ### Changed
 
-- **The pool probe reads its port from the pooler's own file when the installation names none.**
-  `swrr.pgcat.pool_probe.port` shipped as `6432`, pgcat's convention, so an installation whose
-  pooler listens elsewhere — the deployment this was measured against answers on `5433` — had to
-  restate a port its own `pgcat.toml` already declares, and a probe left at the convention reported
-  silence that read like a pooler problem. The key is now unset by default: the flipper reads
-  `[general] port` from `config_path` — the file the pooler is running on, never a variant, which is
-  one of the files a flip may put in front of it — and falls back to `6432` only when that file
-  cannot answer. `PoolProbe::port()` is the one place that order is decided, and a `port` under
-  `[pools…]` is ignored because it is a backend's. A configured port still wins over the file, and
-  nothing else about the probe moved.
+- **The pool probe's port comes from the pgcat file the flip already reads, and from nowhere
+  else.** `swrr.pgcat.pool_probe.port` (and `SWRR_PGCAT_POOL_PROBE_PORT`) let an installation arm
+  the probe on a port its pooler never stated, and a file that named none fell back to pgcat's
+  convention, `6432` — so an installation whose pooler listens elsewhere, or whose file could not be
+  read, dialed an address that reported silence as if the pooler were down. The setting is gone and
+  there is no convention: `PoolProbe::port()` reads `[general] port` from `config_path`, the file the
+  process is running on, and answers null when it names no dialable port. The flipper then builds no
+  probe, so nothing is asked and the surfaces say the probe is not armed instead of reporting a
+  silence the pooler never produced. The host is still configured, because `[general] host` is a
+  bind address (`0.0.0.0`) rather than one a client can dial, and a variant's port is still never
+  read: it moves with a flip.
 - **The handoff note's refusal of a pending-set count no longer stops at the number vocabulary.**
   `HANDOFF.md`'s size sentence names `git status --short` rather than a number, because a count of
   uncommitted paths is a fact about one working tree; `HandoffTest` held it to that by asking
@@ -68,6 +69,61 @@
 
 ### Added
 
+- **`db:pgcat-flip --status` can ask the running pooler, while the default report still opens no
+  socket.** `--status` is the diagnostic an operator runs on a host that may be the wrong side of
+  the pooler, so `PgcatConfigFlipper::poolProbeVerdict()` was deliberately kept out of it — and an
+  installation that wants that reading had `db:doctor` and `/health/db` only, with no way to ask
+  the question by hand. `--pool-probe` is the opt-in: a `--status --pool-probe` run asks the pools
+  the resolver's variant declares (through the same verdict the doctor's row and the endpoint's
+  block print), adds a row per pool, the sentinel exchange and the console's answer where there was
+  one, and — under `--json` — carries the verdict under `pool_probe`, `null` on every run that did
+  not ask. The flag needs `--status` and is refused without it rather than ignored, because a run
+  printing no report has nowhere to put the answer; it changes the report and not the exit code,
+  since a report is what `--status` is. The rendered default report is unchanged — no socket, no
+  new rows — and the JSON gains only the `pool_probe` key with `null` in it, the same fixed-key
+  rule every other route already follows.
+- **The probe's wire assumptions are held by a live pgcat from its published image, and the first
+  thing the fixture caught was the console's pool column.** Every reading in `PoolProbe` was a
+  reading of bytes a test wrote: the shape of a startup packet, the sentence a refusal carries, the
+  md5 answer to a console's challenge, and the header of `SHOW POOLS`. That is the right shape for
+  the classifier and cannot notice a pooler that does not answer the way the test does. A
+  `pgcat-live` job now starts `ghcr.io/postgresml/pgcat:v1.2.0` pinned by digest with a file that
+  declares one pool and the console's own credentials, hands it to `PoolProbeAgainstPgcatTest` as
+  `PGCAT_LIVE_CONFIG`, and holds the three answers against the process: `answered` for the pool the
+  running file declares, `silent` for an address that is not listening, and `missing` through the
+  console's list where a variant declares one pool more than the process holds. The job sets
+  `PGCAT_LIVE_REQUIRED=1` and checks that the filtered run actually executed the class, so a
+  fixture that never arrived or a filter that matched nothing cannot be a green run. Two assumptions
+  did not survive: upstream's `SHOW POOLS` names the pool column `database`, not `pool` — the row
+  description opens `database, user, pool_mode, …` — so a console it had fully authenticated against
+  was refused as unreadable and every sweep fell back to the front door; `POOL_COLUMNS` now reads
+  both names, `pool` first. And `v1.2.0` authenticates before it resolves a pool, so the fixture
+  pins that ordering too: a release that starts refusing unknown names before it authenticates
+  fails the test and the record is revisited, rather than the change arriving silently. The test
+  skips without the fixture, so `composer test:unit` still needs no Docker.
+- **The pool-answerability reading is the pooler's own inventory, so the `pool probe` row cannot
+  pass the fault it exists for.** The startup packet only says what a pooler is willing to answer,
+  and that depends on when it resolves a pool: the pooler this package is deployed against
+  authenticates first and returns the same `R` for a pool it holds, a pool only the other variant
+  declares and a name no file contains, so `answered` proved nothing and `db:doctor` passed with a
+  sentence saying so — the one fault this row exists for, a declared pool the pooler does not hold,
+  left green. `PoolProbe::adminPools()` is now the first question: it opens the same address under
+  pgcat's `pgcat` database, answers the console's cleartext or md5 challenge with the
+  `[general] admin_username` and `admin_password` of the file the process is running on, and reads
+  `SHOW POOLS` by column name — the process stating which pools it serves. `poolProbeVerdict()`
+  builds `pools` from that list where it can be read, marks every declared pool it does not carry
+  as `missing`, sets `verified`, and sends no startup packet at all; `discriminates` and `control`
+  are null because there is nothing left for them to settle. Only a console that cannot be read — no
+  credentials in the file, a refusal, a SCRAM challenge, silence — falls back to the per-pool sweep
+  and its control name, whose refusal is then the proof. The console's answer is published as
+  `admin` beside `verified` (whether an answered pool is proof) and `judged` (whether the boot
+  window has closed); `/health/db`'s `pool_probe` block carries all three, and the row *warns*
+  rather than passes when the console could not be read, while a pool the console says it does not
+  hold fails exactly as a front-door refusal does. The client-facing exchange still sends no
+  password, no new setting is introduced, the credential is the pooler's own and stays on the
+  connection it opened, and it never appears in a payload or a row. The decision, the rejected
+  alternatives and the repair line the console deliberately does not cross are in
+  [docs/pgcat-pool-probe.md](docs/pgcat-pool-probe.md#the-poolers-own-inventory-asked-first).
 - **A repair records which pool it was refused for and which mode's variant declares it, and
   `db:pgcat-flip --status` prints both.** The count said a repair happened and the stamp said when,
   and neither said *what* — the pool was in the refusal sentence of the run that saw it, which is a
@@ -101,9 +157,8 @@
   config's generation to 2, and the decision, its retention and the shapes it rejected are in
   [docs/pool-repair-rate.md](docs/pool-repair-rate.md).
 - **The pool probe's two surfaces name the endpoint they actually asked.** `poolProbeVerdict()` now
-  carries `host`, `port` and `address` — taken from the probe's own answer, not from
-  `swrr.pgcat.pool_probe.*`, so an installation that injects a probe is reported at that probe's
-  endpoint — and `/health/db`'s `pool_probe` block publishes them beside the pool answers. The
+  carries `host`, `port` and `address` — taken from the probe's own answer, not from the settings,
+  so an installation that injects a probe is reported at that probe's endpoint — and `/health/db`'s `pool_probe` block publishes them beside the pool answers. The
   `db:doctor` row ends with `— probed tcp://host:port` for every row that asked something, and
   appends nothing to the two that answer without a socket. A probe aimed at the wrong port is the
   one fault that looks exactly like a pooler that is down: both are `silent`, and a row that listed
@@ -111,17 +166,14 @@
   to tell a stopped pooler from a mis-aimed probe. Now the address the packets went to is printed
   with the silence.
 - **`PoolProbe` can read a port out of a pooler's own file.** `PoolProbe::port()` answers the
-  `[general] port` from a `pgcat.toml`'s text — `6432` when the section names none, because that is
-  pgcat's convention rather than PostgreSQL's — so the probe can be aimed at the port the pooler
-  itself is configured on instead of at a figure the installation has to restate. The reading is
-  pure: a text in and an integer out, no file opened and no socket spent, which is what lets it be
-  asked from the path that asks the pooler. A `port` under `[pools…]` is a backend's and is
-  ignored, the first `[general]` section decides, and a port outside the dialable range is the
-  file's mistake rather than an address. A configured value still wins and a zero counts as absent,
-  because an operator who sets one is saying where the pooler is — behind a forward or a proxy,
-  which the file cannot know. `PoolProbeTest` reads `7432` out of a text whose pool section names
-  `9999`, and `6432` out of a section with no port, a pool-only file, an empty string and a
-  `port = 70000`.
+  `[general] port` from a `pgcat.toml`'s text, and null when the section names none — there is no
+  convention to fall back to, because a guessed port is what an installation arms the probe on
+  while the pooler listens elsewhere. The reading is pure: a text in and an integer or null out, no
+  file opened and no socket spent, which is what lets it be asked from the path that asks the
+  pooler. A `port` under `[pools…]` is a backend's and is ignored, the first `[general]` section
+  decides, and a port outside the dialable range is the file's mistake rather than an address.
+  `PoolProbeTest` reads `7432` out of a text whose pool section names `9999`, and null out of a
+  section with no port, a pool-only file, an empty string and a `port = 70000`.
 - **`db:doctor` reports the pool repair count and the last repair, from the same reading
   `db:pgcat-flip --status` prints.** The two facts were built for the status table, which is run
   when somebody already suspects the pooler; the preflight is read whether or not anybody does, and
@@ -183,6 +235,30 @@
   inert. It prints no suggestion: `pgcat files` owns the `chmod` lines and the findings they are
   dated from, and one fault offered two lines a gate could apply is the duplication that rule exists
   to stop.
+
+### Fixed
+
+- **An auth-first pooler can no longer be read as healthy.** `poolProbeVerdict()` asked the control
+  name and published `discriminates: false` beside pools still marked `answered`, so `/health/db`
+  reported `answered: true` and `db:doctor` printed a row whose `answered` was a green word for a
+  question the sweep had just said it could not answer. Every `answered` pool is now published as
+  `indeterminate` — with a sentence naming the sentinel and the pool — `answered` is false whenever
+  one is present, and past the boot window the reading is `warned` rather than passing. `failed`
+  still belongs to `missing` alone, so a pooler's ordering neither fails nor restarts an
+  installation: it stops the reading from becoming a claim. The console path is unchanged — a list
+  that names the pool is still proof, and only a console that could not be read falls back to the
+  sentinel.
+- **A pool's name is the first segment of its header path, read as a path rather than as a prefix.**
+  The reader matched a `[pools…]` line with a lookahead that stopped the name at the first dot, so
+  `[pools.writer_db_1.users.0]` was read as `writer_db_1` only because the pattern happened to end
+  there — a nested segment named like a pool, or a later change to that pattern, could have turned
+  `users.0` or `shards.0` into a name a startup packet asks for. It now parses the header's path and
+  takes segment zero, quoted in either TOML string form or bare, so a sub-table cannot become a pool
+  by construction; a header with no closing bracket declares nothing rather than being read up to
+  its first space. `VariantShape`'s section check accepts the same three key forms, so the reader and
+  the shape report cannot disagree about which lines name a pool. A test built from the pooler's own
+  file — a `[general]` block, one pool with `users.0` and `shards.0` sub-tables, and a second pool
+  declared by those sub-tables alone — pins one name per pool and no sub-table among them.
 
 ## 0.2.0-alpha5 - 2026-10-18
 

@@ -177,6 +177,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $stateFile = null,
         ?string $lockFile = null,
         ?\Closure $poolProbe = null,
+        ?\Closure $poolAdmin = null,
         ?\Closure $sleeper = null,
         ?string $auditFile = null,
         ?SupervisorStep $supervisorStep = null,
@@ -231,6 +232,7 @@ class PgcatConfigFlipperTest extends TestCase
             driver: $driver,
             connectionSource: $connectionSource ?? ActiveConnection::DEFAULT_SOURCE,
             poolProbe: $poolProbe,
+            poolAdmin: $poolAdmin,
             sleeper: $sleeper,
             auditFile: $auditFile,
             supervisorStep: $supervisorStep,
@@ -1527,19 +1529,19 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // What the default probe dials — the port a config does not name
+    // What the default probe dials — the port the pooler's own file names
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * The probe the flipper builds for itself, on an installation that configures no port: it dials
-     * the port the pooler's own file names.
+     * The probe the flipper builds for itself dials the port the pooler's own file names.
      *
      * `config_path` is the file the pooler is running on — the target a swap renames over — and
      * `[general] port` there is the process's own statement of where it listens, which is why this
      * is not read from a variant: a variant is one of the files a flip may put in front of the
      * pooler, so its port would move with the flip. `7432` is deliberately not `6432`, because a
      * build that quietly kept the convention would pass a test written against the conventional
-     * port.
+     * port. It is also the only source: a file that names no port builds no probe, and a stale
+     * `port` setting from an older config cannot arm one where the pooler is not listening.
      *
      * The closure is read rather than called, so the proof costs no socket: an arrow function's
      * captured values are what it was built with, which is the fact being asserted. Calling it
@@ -1564,18 +1566,17 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame(7432, $captured['port'] ?? null, "the pooler's own [general] port, not pgcat's convention");
         $this->assertSame('127.0.0.1', $captured['host'] ?? null, 'the host stays the configured default');
 
-        // A configured port still wins: the operator is saying where the pooler is, which its own
-        // file cannot know — a forward or a proxy in front of it.
-        $configured = $build->invoke(null, [
-            'config_path' => $this->tmp . '/pgcat.toml',
+        // A file that names no port arms nothing, and the removed setting is not a fallback: a
+        // stale `port` in a published config must not be able to aim the probe at a port the
+        // pooler never stated.
+        file_put_contents($this->tmp . '/pgcat-no-port.toml', "[general]\nhost = \"0.0.0.0\"\n");
+
+        $unaimed = $build->invoke(null, [
+            'config_path' => $this->tmp . '/pgcat-no-port.toml',
             'pool_probe' => ['enabled' => true, 'port' => 7000],
         ]);
 
-        $this->assertSame(
-            7000,
-            (new \ReflectionFunction($configured))->getStaticVariables()['port'] ?? null,
-            'a configured port is not overruled by the file',
-        );
+        $this->assertNull($unaimed, 'a file that names no port leaves nothing to dial, and a stale setting is not a guess');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1585,10 +1586,30 @@ class PgcatConfigFlipperTest extends TestCase
     /**
      * The reading `/health/db`'s `pool_probe` block and `db:doctor`'s `pool probe` row both ask
      * for: every pool the mode's variant declares, in the pooler's own three-answer vocabulary.
+     *
+     * The variant is the shape the pooler's own file has rather than one header per pool: both
+     * pools are declared by their `users.0` and `shards.0` sub-tables. The sweep's order is
+     * asserted below, so a sub-table read as a name would show up as an extra startup packet and an
+     * extra `pools` entry — the arithmetic this reading exists not to do.
      */
     public function test_the_pool_probe_verdict_reports_what_the_pooler_answered(): void
     {
-        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.writer_db_1]\n[pools.reader_db_2]\n");
+        file_put_contents($this->tmp . '/pgcat-readers.toml', <<<'TOML'
+        [general]
+        port = 6432
+
+        [pools.writer_db_1.users.0]
+        username = "postgres"
+
+        [pools.writer_db_1.shards.0]
+        servers = [["127.0.0.1", 5432, "primary"]]
+
+        [pools.reader_db_2.users.0]
+        username = "postgres"
+
+        [pools.reader_db_2.shards.0]
+        servers = [["reader-db-01", 5432, "replica"]]
+        TOML);
 
         $probed = [];
 
@@ -1665,11 +1686,13 @@ class PgcatConfigFlipperTest extends TestCase
 
     /**
      * The pooler this reading was measured against: it authenticates before it resolves a pool and
-     * answers every name, the control included. The pools are still reported as answered — the
-     * pooler did answer — but `discriminates` says those answers are not proof, and nothing is
-     * failed: a pooler's ordering is a property of the pooler, not a fault in the installation.
+     * answers every name, the control included. The pooler did answer, but its answer would have
+     * been the same for a name no file declares, so each `answered` pool is published as
+     * `indeterminate` and the reading is never `answered` — the green reading this sweep exists to
+     * prevent. Nothing is failed: a pooler's ordering is a property of the pooler, not a fault in the
+     * installation; it is warned about instead.
      */
-    public function test_an_auth_first_pooler_is_reported_as_answering_every_name(): void
+    public function test_an_auth_first_pooler_is_reported_as_indeterminate(): void
     {
         file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
 
@@ -1683,12 +1706,207 @@ class PgcatConfigFlipperTest extends TestCase
 
         $verdict = $flipper->poolProbeVerdict();
 
-        $this->assertTrue($verdict['answered'], 'the pooler did answer');
+        $this->assertFalse($verdict['answered'], 'the pooler answered, and what it said is not evidence');
+        $this->assertSame(['indeterminate'], array_column($verdict['pools'], 'status'));
+        $this->assertStringContainsString('does not show that the pool exists', $verdict['pools'][0]['evidence']);
         $this->assertFalse($verdict['discriminates'], 'but it answered a name it cannot hold too');
         $this->assertSame('answered', $verdict['control']['status'] ?? null);
         $this->assertFalse($verdict['failed'], 'a pooler that authenticates first is not a fault');
+        $this->assertTrue($verdict['warned'], 'and past the boot window it is reported');
+        $this->assertStringContainsString('indeterminate rather than a pass', (string) $verdict['reason']);
+
+        // And it is not proof either: nothing read those pools, so a surface that printed a green
+        // row would be claiming a fact this sweep never established. The console is the fallback
+        // and this fixture injected no reader for it, which is the shape an installation with an
+        // unreadable console is in.
+        $this->assertFalse($verdict['verified']);
+        $this->assertNull($verdict['admin'], 'no console was configured to ask');
+        $this->assertTrue($verdict['judged'], 'the window is closed, so the reading is judged');
+    }
+
+    /**
+     * The reading the sweep prefers: the pooler's own console says which pools it holds, and it is
+     * asked before the front door rather than after it. A declared pool missing from that list is
+     * the fault the reading exists for — reported as `missing`, with the console as the reading, and
+     * failed past the boot window exactly as a front-door refusal would be.
+     *
+     * The console is asked once for the sweep rather than once per pool, because the list is one
+     * statement about the process rather than an answer per name — and when it answers, no startup
+     * packet is sent at all: the answerability of every pool rests on the inventory rather than on
+     * how the pooler answers an anonymous name.
+     */
+    public function test_the_admin_console_is_asked_first_and_its_list_is_the_reading(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.writer_db_1]\n[pools.reader_db_2]\n");
+
+        $asked = 0;
+        $probed = [];
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ];
+        }, poolAdmin: function () use (&$asked): array {
+            $asked++;
+
+            return [
+                'status' => 'read',
+                'pools' => ['writer_db_1'],
+                'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 1 pool(s)',
+            ];
+        });
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertSame(1, $asked, 'one question for the process, not one per pool');
+        $this->assertSame([], $probed, 'the console answered, so no startup packet was sent');
+        $this->assertNull($verdict['discriminates'], 'nothing was left for a control name to settle');
+        $this->assertNull($verdict['control'], 'and no control was asked');
+        $this->assertTrue($verdict['verified'], 'the console named what it holds');
+        $this->assertSame('read', $verdict['admin']['status'] ?? null);
+        $this->assertSame(['writer_db_1'], $verdict['admin']['pools'] ?? null);
+        $this->assertSame(['answered', 'missing'], array_column($verdict['pools'], 'status'));
+        $this->assertFalse($verdict['answered']);
+        $this->assertTrue($verdict['failed'], 'the pool the console does not list is the fault this reading exists for');
+        $this->assertStringContainsString('holds no pool "reader_db_2"', (string) $verdict['reason']);
+        $this->assertStringContainsString('admin console lists no pool "reader_db_2"', (string) $verdict['reason']);
+    }
+
+    /**
+     * A console that lists every declared pool is the other answer, and the one that makes a green
+     * row honest: the pools were named by the process itself rather than assumed from an answered
+     * startup packet.
+     */
+    public function test_a_pool_the_console_lists_is_proof_after_all(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $probed = [];
+
+        $verdict = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)];
+        }, poolAdmin: static fn (): array => [
+            'status' => 'read',
+            'pools' => ['reader_db_2'],
+            'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 1 pool(s)',
+        ])->poolProbeVerdict();
+
+        $this->assertSame([], $probed, 'the console is the reading, so nothing was asked at the front door');
+        $this->assertTrue($verdict['answered']);
+        $this->assertTrue($verdict['verified']);
+        $this->assertFalse($verdict['failed']);
         $this->assertFalse($verdict['warned']);
-        $this->assertNull($verdict['reason']);
+        $this->assertSame(['answered'], array_column($verdict['pools'], 'status'));
+        $this->assertStringContainsString('admin console lists pool "reader_db_2"', $verdict['pools'][0]['evidence']);
+    }
+
+    /**
+     * A console that refuses the reading leaves the pools unproved rather than failing them: the
+     * pooler may hold every one of them, and this package does not get to fail an installation for
+     * a credential it could not read. `verified` is what a surface reads to say so.
+     */
+    public function test_a_console_that_refuses_the_reading_leaves_the_pools_unverified(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $probed = [];
+
+        $verdict = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ];
+        }, poolAdmin: static fn (): array => [
+            'status' => 'refused',
+            'pools' => [],
+            'evidence' => 'the pooler\'s own file names no `[general] admin_username`',
+        ])->poolProbeVerdict();
+
+        $this->assertSame(['reader_db_2'], array_slice($probed, 0, 1), 'the console could not be read, so the front door was asked');
+        $this->assertStringStartsWith('weighted-dbmanager-control-', $probed[1] ?? '', 'and the control with it');
+        $this->assertFalse($verdict['discriminates'], 'the control was answered too, so nothing was proved');
+        $this->assertFalse($verdict['verified'], 'nothing established these pools');
+        $this->assertSame('refused', $verdict['admin']['status'] ?? null);
+        $this->assertSame(['indeterminate'], array_column($verdict['pools'], 'status'), 'the console could not prove them, and the control proved nothing either');
+        $this->assertFalse($verdict['answered']);
+        $this->assertFalse($verdict['failed'], 'an unreadable console is not a fault in the installation');
+        $this->assertTrue($verdict['warned'], 'but a reading that proves nothing is reported');
+        $this->assertTrue($verdict['judged']);
+    }
+
+    /**
+     * The console is the reading, not the only one: a console that cannot be read drops the sweep
+     * back to the front door, where a refused control name still proves the pooler resolves pools
+     * before it authenticates. The row then passes on that proof, and says the console's own
+     * refusal beside it.
+     */
+    public function test_a_console_that_cannot_be_read_falls_back_to_the_front_door(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $probed = [];
+
+        $verdict = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return str_starts_with($database, 'weighted-dbmanager-control-')
+                ? ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)]
+                : ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)];
+        }, poolAdmin: static fn (): array => [
+            'status' => 'refused',
+            'pools' => [],
+            'evidence' => 'the pooler\'s own file names no `[general] admin_username`',
+        ])->poolProbeVerdict();
+
+        $this->assertSame('refused', $verdict['admin']['status'] ?? null, 'the console is reported, not hidden');
+        $this->assertTrue($verdict['discriminates'], 'the front door refused a name it cannot hold');
+        $this->assertTrue($verdict['verified'], 'so its answers are proof after all');
+        $this->assertTrue($verdict['answered']);
+        $this->assertFalse($verdict['failed']);
+        $this->assertFalse($verdict['warned']);
+    }
+
+    /**
+     * The same console answer while the container is still starting is not judged: `judged` is false
+     * and nothing fails, so a surface that wants to warn about an unverified reading knows the
+     * window is the reason rather than a fault.
+     */
+    public function test_a_pool_the_console_does_not_list_is_not_judged_inside_the_boot_window(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+
+        $verdict = $this->build('readers', poolProbe: static fn (string $database): array => [
+            'status' => 'answered',
+            'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+        ], poolAdmin: static fn (): array => [
+            'status' => 'read',
+            'pools' => [],
+            'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 0 pool(s)',
+        ])->poolProbeVerdict();
+
+        $this->assertSame(['missing'], array_column($verdict['pools'], 'status'));
+        $this->assertFalse($verdict['judged'], 'a starting container is not judged');
+        $this->assertFalse($verdict['failed']);
+        $this->assertStringContainsString('boot window is still open', (string) $verdict['reason']);
     }
 
     /**
@@ -1826,7 +2044,10 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertFalse($verdict['applicable']);
         $this->assertNull($verdict['answered']);
         $this->assertNull($verdict['discriminates']);
+        $this->assertNull($verdict['verified']);
         $this->assertNull($verdict['control']);
+        $this->assertNull($verdict['admin']);
+        $this->assertFalse($verdict['judged']);
         $this->assertNull($verdict['host']);
         $this->assertNull($verdict['port']);
         $this->assertNull($verdict['address'], 'nothing was asked, so there is no endpoint to name');
@@ -1853,7 +2074,10 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertFalse($verdict['applicable']);
         $this->assertNull($verdict['answered']);
         $this->assertNull($verdict['discriminates']);
+        $this->assertNull($verdict['verified']);
         $this->assertNull($verdict['control']);
+        $this->assertNull($verdict['admin']);
+        $this->assertFalse($verdict['judged']);
         $this->assertNull($verdict['host']);
         $this->assertNull($verdict['port']);
         $this->assertNull($verdict['address'], 'nothing was asked, so there is no endpoint to name');

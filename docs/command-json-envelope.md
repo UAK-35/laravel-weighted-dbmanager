@@ -136,7 +136,7 @@ Each command declares its evidence as a constant of `key => the value an absent 
 
 | command | evidence | what an absent one is |
 |---|---|---|
-| `db:pgcat-flip` | `mode`, `previous_mode`, `steps`, `status` | `null`, `null`, `[]`, `null` |
+| `db:pgcat-flip` | `mode`, `previous_mode`, `steps`, `status`, `pool_probe` | `null`, `null`, `[]`, `null`, `null` |
 | `db:probe-replicas` | `connection`, `counts`, `replicas` | `null`, a zeroed map, `[]` |
 | `db:replica-status` | `connection`, `status`, `pgcat`, `audit` | `null` each |
 

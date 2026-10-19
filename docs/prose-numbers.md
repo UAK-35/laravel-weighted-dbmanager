@@ -131,7 +131,7 @@ row set now has.
 | the commands whose exit code this record is about, as it counts them | "**Six** commands in this package are scheduled", "All **six** are checked by mutation rather than by argument", "the **six** tables, and the sentences naming the test that reads each one" | the matrices `DocumentedExitCounts` names — which commands have one is a decision, and the record counts the list |
 | the doctor's exit matrix, as documented-exit-codes.md counts its cells | "a **fourteen**-cell matrix" | `DbDoctorTest::exitCodeProvider()` |
 | the probe's exit matrix, as documented-exit-codes.md counts its cells | "a **nine**-cell matrix" | `DbProbeReplicasCommandTest::exitCodeProvider()` |
-| the flip's exit matrix, as documented-exit-codes.md counts its cells | "a **eighteen**-cell matrix" | `DbFlipPgcatCommandTest::exitCodeProvider()` |
+| the flip's exit matrix, as documented-exit-codes.md counts its cells | "a **nineteen**-cell matrix" | `DbFlipPgcatCommandTest::exitCodeProvider()` |
 | the replica-status exit matrix, as documented-exit-codes.md counts its cells | "its **six**-cell matrix" | `DbReplicaStatusTest::exitCodeProvider()` |
 | the watchdog's exit matrix, as documented-exit-codes.md counts its cells | "the watchdog's **sixteen** cells across its routes and the two channels" | `DbSchedulerWatchdogTest::exitCodeProvider()` |
 | the watchdog's documented cases, as documented-exit-codes.md counts them | "the watchdog's **eight** documented cases, their numbers in both" | the distinct cases `DbSchedulerWatchdogTest::documentedSituations()` names |
@@ -143,9 +143,9 @@ row set now has.
 | the window flip's exit matrix, as documented-exit-codes.md counts its cells | "the window flip's **sixteen**-cell matrix, and that each cell's verdict …" | `DbWindowFlipCommandTest::exitCodeProvider()` |
 | the window flip's documented kinds, as documented-exit-codes.md counts them | "the window flip's **twelve** documented kinds" | the distinct cases `DbWindowFlipCommandTest::documentedSituations()` names |
 | the ways a flip can politely do nothing, as documented-exit-codes.md counts them | "the **three** ways a flip can politely do nothing are one case" | the cells `DbFlipPgcatCommandTest::documentedSituations()` assigns to the README row `a flip applied, nothing to do, or skipped by another instance` — the row is wider than the phrase sounds, and which row the phrase names is declared in `DocumentedExitCounts::FLIP_WAYS` |
-| the ways a command can be refused, as documented-exit-codes.md counts them | "the **three** ways a command can be refused are another" | the cells assigned to the row `a flag combination that is refused` |
+| the ways a command can be refused, as documented-exit-codes.md counts them | "the **four** ways a command can be refused are another" | the cells assigned to the row `a flag combination that is refused` |
 | the ways a flip can politely do nothing, as DbFlipPgcatCommandTest counts them | "the **three** ways a flip can politely do nothing are one documented case" | the same cells, stated in the map's own docblock — the copy that had drifted to "two" |
-| the ways a command can be refused, as DbFlipPgcatCommandTest counts them | "the **three** ways a command can be refused are another" | the same cells, stated in the map's own docblock |
+| the ways a command can be refused, as DbFlipPgcatCommandTest counts them | "the **four** ways a command can be refused are another" | the same cells, stated in the map's own docblock |
 | the doctor's documented cases, as documented-exit-codes.md counts them | "the doctor's **three** documented cases" | the README's `db:doctor` exit table, which the doctor's matrix is written as |
 | the checks the doctor judges, as documented-exit-codes.md counts the README table | "the **twenty-four**-row description of what each check judges" | the README's `db:doctor` check table |
 | the rows a doctor asks, as db-doctor-json.md counts them in its opening claim | "A doctor has **twenty-four** verdicts, one per row" | the README's `db:doctor` check table |

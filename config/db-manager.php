@@ -180,25 +180,34 @@ return [
             //
             // Off by default, and read as a switch: an installation opts into a socket on the
             // poll path. `host` is where pgcat itself listens — the config paths above name files,
-            // not an address. `port` is the same address's port, and leaving it unset is the
-            // ordinary case: the probe then reads the pooler's own `[general]` section from
-            // `config_path`, the file the process is running on, and falls back to pgcat's
-            // convention (`6432`, not PostgreSQL's `5432`) only when that file cannot answer —
-            // a probe aimed at a PostgreSQL server is *answered* for every name, in PostgreSQL's
-            // words rather than pgcat's, where the whole point is to hear the pooler's own. Set
-            // it when the pooler listens somewhere its own file does not say. `user` is the
-            // client name the startup packet carries, and no password is ever sent. A
-            // `timeout_ms` that runs out is reported as silence, never
-            // as a missing pool, so a probe pointed at the wrong address cannot restart a
-            // healthy pooler — and a pooler that authenticates *before* it resolves a pool
-            // answers every name. So the sweep also asks one control name no configuration
-            // declares, and a refusal of it is what makes an `answered` pool proof that it
-            // exists; on a pooler that answers the control too, the reading says the pools
-            // could not be proved. See Uak35\WeightedDbManager\Pgcat\PoolProbe.
+            // not an address. The port is not configured: it is read from `[general] port` of
+            // `config_path`, the file the process is running on, so the probe dials the address
+            // the pooler itself states. There is no convention to fall back to — a probe aimed at
+            // a guessed port can reach a PostgreSQL server, which answers every name in its own
+            // words and would be read as a pooler holding them all — so a file that names no
+            // dialable port arms no probe, and nothing is asked.
+            //
+            // The repair is triggered by a front-door refusal. The reading `/health/db` and
+            // `db:doctor` publish is the pooler's own inventory: `SHOW POOLS` on that address under the
+            // `pgcat` database, authenticated with the `[general] admin_username` /
+            // `admin_password` the pooler's file already carries, is the list of pools the
+            // process holds — so a declared pool missing from that list is reported as the fault
+            // it is, and the reading does not depend on how the pooler answers an anonymous
+            // startup packet. That console is the one place a credential is sent: it is the
+            // pooler's own, it stays on the connection this probe opened, and a console that
+            // cannot be read falls back to the startup packet rather than passing.
+            //
+            // The fallback is one PostgreSQL v3 startup packet per declared pool and the first
+            // message back, with `user` as the client name it carries and no password. A
+            // `timeout_ms` that runs out is reported as silence, never as a missing pool, so a
+            // probe pointed at the wrong address cannot restart a healthy pooler — and a pooler
+            // that authenticates *before* it resolves a pool answers every name, so the sweep
+            // also asks one control name no configuration declares: a refusal of it is what
+            // makes an `answered` pool proof that it exists, and an answer means the pools could
+            // not be proved. See Uak35\WeightedDbManager\Pgcat\PoolProbe.
             'pool_probe' => [
                 'enabled' => env('SWRR_PGCAT_POOL_PROBE_ENABLED', false),
                 'host' => env('SWRR_PGCAT_POOL_PROBE_HOST', '127.0.0.1'),
-                'port' => env('SWRR_PGCAT_POOL_PROBE_PORT'),
                 'user' => env('SWRR_PGCAT_POOL_PROBE_USER', 'postgres'),
                 'timeout_ms' => (int) env('SWRR_PGCAT_POOL_PROBE_TIMEOUT_MS', 2000),
             ],

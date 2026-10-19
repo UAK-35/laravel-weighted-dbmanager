@@ -836,10 +836,11 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
-     * A pooler that authenticates before it resolves a pool answers every name, the control
+     * A pooler that authenticates before it resolves a pool answers every name, the sentinel
      * included. The payload still says `ok` — that ordering is a property of the pooler rather
-     * than a fault in the installation — but `discriminates` is false and the control is
-     * published beside the pools, so an `answered` pool is not read as a pool that exists.
+     * than a fault in the installation — but `discriminates` is false, every `answered` pool is
+     * published as `indeterminate`, and the reading is never `answered`, so a pool that may not
+     * exist cannot be read as a pool that does.
      */
     public function test_an_auth_first_pooler_is_reported_without_being_failed(): void
     {
@@ -862,15 +863,112 @@ class DatabaseHealthControllerTest extends TestCase
         $response = $this->getJson('/health/db')->assertOk();
 
         $response->assertJsonPath('status', 'ok')
-            ->assertJsonPath('pool_probe.answered', true)
+            ->assertJsonPath('pool_probe.answered', false)
             ->assertJsonPath('pool_probe.discriminates', false)
             ->assertJsonPath('pool_probe.control.status', 'answered')
             ->assertJsonPath('pool_probe.failed', false)
-            ->assertJsonPath('pool_probe.warned', false);
+            // Past the boot window a reading that proved nothing is reported: the pooler spoke,
+            // and what it said is not evidence.
+            ->assertJsonPath('pool_probe.warned', true)
+            ->assertJsonPath('pool_probe.pools.0.status', 'indeterminate')
+            // No console was configured, so nothing made those answers proof: the payload says
+            // so rather than leaving a green `answered` to be read as one.
+            ->assertJsonPath('pool_probe.verified', false)
+            ->assertJsonPath('pool_probe.admin', null)
+            ->assertJsonPath('pool_probe.judged', true);
 
         $this->assertStringStartsWith('weighted-dbmanager-control-', (string) $response->json('pool_probe.control.database'));
 
         Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The reading the block prefers: the pooler's own admin console lists the pools it holds, and it
+     * is asked before the front door. An answered pool is then proof, and the payload publishes the
+     * console's answer beside it — status, names and sentence — so a reader can see which reading
+     * established the fact rather than having to trust the boolean. `discriminates` and `control`
+     * are null because no anonymous name had to be asked to say what the list already said.
+     */
+    public function test_an_auth_first_pooler_is_proved_by_its_own_admin_console(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ],
+            poolAdmin: static fn (): array => [
+                'status' => 'read',
+                'pools' => ['reader_db_2'],
+                'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 1 pool(s)',
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.answered', true)
+            ->assertJsonPath('pool_probe.discriminates', null)
+            ->assertJsonPath('pool_probe.control', null)
+            ->assertJsonPath('pool_probe.verified', true)
+            ->assertJsonPath('pool_probe.admin.status', 'read')
+            ->assertJsonPath('pool_probe.admin.pools.0', 'reader_db_2')
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.warned', false);
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The fault this block exists for, found by the one reading that can find it on a pooler that
+     * authenticates first: the front door answers every name and the pooler's own console lists no
+     * pool for the database every read is routed to. The payload is degraded, in the console's
+     * words, and logged like the front-door refusal is.
+     */
+    public function test_a_pool_only_the_console_knows_is_missing_degrades_the_payload(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ],
+            poolAdmin: static fn (): array => [
+                'status' => 'read',
+                'pools' => [],
+                'evidence' => 'the admin console at tcp://127.0.0.1:7432 listed 0 pool(s)',
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            ->assertJsonPath('pool_probe.failed', true)
+            ->assertJsonPath('pool_probe.pools.0.status', 'missing');
+
+        $this->assertStringContainsString('admin console lists no pool "reader_db_2"', (string) $response->json('pool_probe.reason'));
+
+        Log::shouldHaveReceived('error')
+            ->once()
+            ->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'health/db degraded')
+                && ($context['pool_probe']['failed'] ?? null) === true);
     }
 
     /**
@@ -1226,6 +1324,7 @@ class DatabaseHealthControllerTest extends TestCase
         ?array $readerWindows = null,
         array $pools = [],
         ?\Closure $poolProbe = null,
+        ?\Closure $poolAdmin = null,
         ?string $beatAt = null,
         bool $stampBeat = true,
         array $stateExtra = [],
@@ -1321,6 +1420,7 @@ class DatabaseHealthControllerTest extends TestCase
             lockFile: $config['lock_file'],
             driver: 'pgsql',
             poolProbe: $poolProbe,
+            poolAdmin: $poolAdmin,
         );
 
         $this->app->instance(PgcatConfigFlipper::class, $flipper);

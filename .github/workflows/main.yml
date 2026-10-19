@@ -84,3 +84,106 @@ jobs:
       # A tool the runner is missing drops to a skip; `--require-all` is what
       # would make that a failure instead.
       run: composer checks
+
+  pgcat-live:
+
+    runs-on: ubuntu-latest
+
+    # A second job rather than a step in the one above: this is the only test
+    # that needs a container, and the unit suite must stay runnable without
+    # Docker. The test it runs skips unless the fixture below is there, and
+    # `PGCAT_LIVE_REQUIRED` is what turns a fixture that never arrived into a
+    # failure — a green job with five skips would pin nothing.
+    name: pgcat pool probe (live)
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Pin the root package version
+      if: github.ref_type != 'tag'
+      run: |
+        BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+        ROOT_VERSION="dev-${BRANCH//\//-}"
+        echo "COMPOSER_ROOT_VERSION=$ROOT_VERSION" >> "$GITHUB_ENV"
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.4'
+        coverage: none
+
+    - name: Install dependencies
+      run: composer install --prefer-dist --no-progress
+
+    - name: Write the pooler's own file
+      # One pool, and the console's own credentials, because the fixture is what
+      # the package is handed: `config_path` is the file the process runs on.
+      # The backend address is deliberately one nothing listens on — the probe
+      # asks what the pooler holds, not whether the database behind it is up.
+      run: |
+        mkdir -p "$RUNNER_TEMP/pgcat"
+        cat > "$RUNNER_TEMP/pgcat/pgcat.toml" <<'TOML'
+        [general]
+        host = "0.0.0.0"
+        port = 6432
+        admin_username = "pgcAdmin"
+        admin_password = "s3cret"
+        pool_mode = "transaction"
+        enable_prometheus_exporter = false
+
+        [pools.writer_db_1]
+        pool_mode = "transaction"
+
+        [pools.writer_db_1.users.0]
+        username = "postgres"
+        password = "postgres"
+        pool_size = 1
+
+        [pools.writer_db_1.shards.0]
+        servers = [["127.0.0.1", 5432, "primary"]]
+        database = "postgres"
+        TOML
+
+    - name: Start pgcat from its published image
+      # The tag and the digest together: the tag says which release this is,
+      # the digest is what actually runs, so a moved tag cannot change what the
+      # fixture measures. v1.2.0 is the newest release, and the one whose
+      # `SHOW POOLS` names the pool column `database`.
+      run: |
+        docker run --detach --name pgcat-live \
+          --publish 127.0.0.1:6432:6432 \
+          --volume "$RUNNER_TEMP/pgcat/pgcat.toml:/etc/pgcat/pgcat.toml:ro" \
+          ghcr.io/postgresml/pgcat:v1.2.0@sha256:627761f6dcbc8c0d17809445d7441518e2452c6d4fbdcc2a9986871d9e3e1176
+        for attempt in $(seq 1 30); do
+          if php -r 'exit(@fsockopen("127.0.0.1", 6432) === false ? 1 : 0);'; then
+            echo "pgcat is listening"
+            exit 0
+          fi
+          sleep 1
+        done
+        docker logs pgcat-live
+        exit 1
+
+    - name: Hold the probe against it
+      # `--filter` names the class, and the grep is what keeps "No tests
+      # executed" from being read as a pass: PHPUnit exits 0 when a filter
+      # matches nothing, and a job that pinned nothing would still be green.
+      env:
+        PGCAT_LIVE_CONFIG: ${{ runner.temp }}/pgcat/pgcat.toml
+        PGCAT_LIVE_REQUIRED: '1'
+      run: |
+        set -o pipefail
+        vendor/bin/phpunit --colors=never --filter PoolProbeAgainstPgcatTest | tee "$RUNNER_TEMP/pgcat-live.log"
+        grep -Eq '^OK \([1-9][0-9]* test' "$RUNNER_TEMP/pgcat-live.log"
+
+    - name: Show the pooler's own log
+      if: failure()
+      run: docker logs pgcat-live || true
+
+    - name: Stop the pooler
+      # `|| true` because a run that failed before the container existed would
+      # otherwise fail twice, and the second failure would hide the first.
+      if: always()
+      run: docker rm --force pgcat-live || true

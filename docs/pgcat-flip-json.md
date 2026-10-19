@@ -108,15 +108,16 @@ beside the object, so the whole of stdout is the report:
     "mode": "readers",
     "previous_mode": null,
     "steps": [{"step": "lock", "outcome": "done", "detail": "…"}],
-    "status": null
+    "status": null,
+    "pool_probe": null
 }
 ```
 
 The five keys that come first are no longer this command's alone: they are `Console\JsonEnvelope`,
 written in that order by `db:probe-replicas` and `db:replica-status` as well, with each command's
 evidence after them — see [command-json-envelope.md](command-json-envelope.md). What is this
-command's own is the evidence (`mode`, `previous_mode`, `steps`, `status`) and the `kind`
-vocabulary below.
+command's own is the evidence (`mode`, `previous_mode`, `steps`, `status`, `pool_probe`) and the
+`kind` vocabulary below.
 
 The keys are written on every route, `null` or an empty list where the route has nothing for one,
 which is the same rule the health payload's `counts` follows: a rule that has to check whether a
@@ -198,7 +199,9 @@ sentence "it still has not worked".
 
 Each route calls `report()` with its own evidence, and `report()` hands it to the shared envelope:
 
-- `status` — the flipper's `status()` array under `status`, exit `0`.
+- `status` — the flipper's `status()` array under `status`, exit `0`. With `--pool-probe` the
+  same run also carries `PgcatConfigFlipper::poolProbeVerdict()` under `pool_probe`; without it
+  that key is `null`, which is the offline report rather than a probe that found nothing.
 - `disabled` — `disabledReason()` in `reason`, exit `0`.
 - `window_closed` — the two numbers that decided it (when the container booted and how long it
   had) in `reason`, exit `0`.
@@ -238,6 +241,8 @@ kind that nothing produces is a lie in a table a job may already be written agai
 | a failure names the step that failed | (same test, for `failed`) |
 | a rehearsal's steps are the pipeline, with the outcomes a flip's would be | `test_the_json_rehearsal_carries_the_pipeline_and_its_outcomes` |
 | the state report is the flipper's array, not the table's substitutions | `test_the_json_state_report_is_the_flippers_own_array` |
+| `--status` opens no socket unless `--pool-probe` asks, and the key is `null` when it did not | `test_the_status_report_stays_offline_without_the_pool_probe_flag` |
+| the flag asks the pooler on that run, reports the verdict beside the status, and leaves the exit code at `0` | `test_the_status_report_asks_the_pooler_when_the_flag_is_given` |
 | a documented kind is a produced kind, code included | `test_every_json_kind_is_documented_with_its_exit_code` |
 | `--json --watch` is refused, and never reaches the flipper | the matrix's `a JSON report cannot be a watch daemon` row, plus `test_a_refused_flag_combination_never_reaches_the_flipper` |
 

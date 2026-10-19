@@ -18,6 +18,7 @@ use Illuminate\Console\Command;
  *   db:pgcat-flip                       — one-shot, swap if mode changed
  *   db:pgcat-flip --watch --interval=N  — daemon mode (loops every N seconds, default 30)
  *   db:pgcat-flip --status              — show current state without flipping
+ *   db:pgcat-flip --status --pool-probe — …and ask the running pooler about its pools
  *   db:pgcat-flip --force-mode=readers  — force into readers config
  *   db:pgcat-flip --force-mode=writer   — force into writer-only config
  *   db:pgcat-flip --dry-run             — rehearse the flip: every step except the
@@ -31,6 +32,13 @@ use Illuminate\Console\Command;
  * changing anything. `--status` wins when both are passed, because a state report is what
  * was asked for. `--dry-run --force-mode=readers` rehearses the forced flip, exactly as
  * `--force-mode` would apply it.
+ *
+ * `--pool-probe` is the status report's one live reading and needs `--status`: it asks the
+ * running pooler whether it holds the pools the configuration declares, which is the reading
+ * `/health/db` and `db:doctor` already make. The default status stays offline — the report is
+ * run on hosts that may be the wrong side of the pooler, and a diagnostic that waits on a
+ * connect timeout is a different contract — so the socket is opened only when an operator
+ * asks for it, and the flag changes the report rather than the exit code.
  *
  * `--json` changes the report and nothing else: one object on stdout, the same exit code as
  * the run it describes, the same file untouched. It is refused beside `--watch`, because a
@@ -67,13 +75,16 @@ class DbFlipPgcatCommand extends Command
      * `mode` and `previous_mode` are the modes the run is about. `status` is the flipper's own
      * `status()` array, not the table's substitutions: `(not set)` is how a table prints a `null`,
      * and a machine has to be able to test a path for being unset without matching an English
-     * sentence. `steps` is a rehearsal's pipeline, and empty on every other route.
+     * sentence. `steps` is a rehearsal's pipeline, and empty on every other route. `pool_probe` is
+     * `PgcatConfigFlipper::poolProbeVerdict()`, present only on a `--status --pool-probe` run — a
+     * `null` is the offline report rather than a probe that found nothing.
      */
     private const EVIDENCE = [
         'mode' => null,
         'previous_mode' => null,
         'steps' => [],
         'status' => null,
+        'pool_probe' => null,
     ];
 
     protected $signature = 'db:pgcat-flip
@@ -81,6 +92,7 @@ class DbFlipPgcatCommand extends Command
                             {--interval=30 : Polling interval in seconds when --watch is set}
                             {--force-mode= : Force a specific mode (readers|writer) instead of consulting the resolver}
                             {--status : Show current state without flipping}
+                            {--pool-probe : With --status, ask the running pooler which of the declared pools it holds}
                             {--dry-run : Rehearse a flip — every step but the rename and the supervisor command — and report what it would have done}
                             {--json : Print one JSON object — the verdict, the exit code and the evidence — instead of the rendered report}';
 
@@ -95,6 +107,17 @@ class DbFlipPgcatCommand extends Command
             return $this->refuse(
                 'PgcatConfigFlipper is not registered. Check WeightedDatabaseServiceProvider.',
                 self::KIND_UNBOUND,
+            );
+        }
+
+        // `--pool-probe` is the status report's one live reading, so it is refused anywhere else
+        // rather than ignored: a flip has its own pool check, and a run that asked for neither a
+        // report nor a flip has nowhere to print an answer. Refused before the status branch, so
+        // `--status` is the only route that can carry it.
+        if ($this->option('pool-probe') && ! $this->option('status')) {
+            return $this->refuse(
+                '--pool-probe needs --status: it is the state report\'s one live reading, and a run '
+                .'that is not printing the state report has nowhere to put the pooler\'s answer'
             );
         }
 
@@ -276,16 +299,33 @@ class DbFlipPgcatCommand extends Command
         };
     }
 
+    /**
+     * The state report, and — when `--pool-probe` asked for it — the one reading in it that
+     * leaves the process.
+     *
+     * The probe is asked *after* the status array is built and never folded into it: `status`
+     * stays the flipper's own array, which is the contract `--json` documents, and the pooler's
+     * answer travels beside it as `pool_probe`. A probe that failed does not change the exit
+     * code — this is a report, and the run's code is not one of the facts the flag was asked
+     * to establish. An installation that wants a verdict with a code has `db:doctor`'s row.
+     */
     private function renderStatus(PgcatConfigFlipper $flipper): int
     {
         $s = $flipper->status();
+        $probe = $this->option('pool-probe') ? $flipper->poolProbeVerdict() : null;
 
         if ($this->option('json')) {
             // The status array as the flipper computed it, with none of the table's
             // substitutions: `(not set)` is a way of printing an absent path, and a machine
             // wants the absent path. The one thing added is the verdict, which is what every
-            // report in this mode leads with.
-            return $this->report(['kind' => self::KIND_STATUS, 'status' => $s], self::SUCCESS);
+            // report in this mode leads with — and the probe's answer beside it, present only
+            // when the flag asked for it, so `null` is the offline report rather than a probe
+            // that found nothing.
+            return $this->report([
+                'kind' => self::KIND_STATUS,
+                'status' => $s,
+                'pool_probe' => $probe,
+            ], self::SUCCESS);
         }
 
         $this->table(
@@ -311,10 +351,124 @@ class DbFlipPgcatCommand extends Command
                 ['lock_file',         $s['lock_file']],
                 ...$this->windowRows($s['window']),
                 ...$this->readerWindowRows($s['reader_window']),
+                ...$this->poolProbeRows($probe, $s['enabled']),
             ],
         );
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The pooler's own answer as table rows, and no rows at all when the flag was not given.
+     *
+     * The default status is the offline report, and a row saying "not asked" would be a new
+     * line in a table operators read on hosts that may not reach the pooler. Rows appear only
+     * on the run that asked, and they carry the same facts `db:doctor`'s `pool probe` row and
+     * `/health/db`'s block do — the verdict, the pools and what the pooler said about each, the
+     * address the packets went to, and the console's answer where there was one — because three
+     * surfaces describing one exchange differently is the failure the reading was extracted for.
+     *
+     * The vocabulary is the flipper's: `failed` and `warning` wait for the boot window to close
+     * (a starting container is not a broken one), `unverified` is an `answered` reading the
+     * control could not make proof, and `no answer` is a probe that was asked and established
+     * nothing either way.
+     *
+     * @param array<string, mixed>|null $verdict `PgcatConfigFlipper::poolProbeVerdict()`, or
+     *        null when `--pool-probe` was not passed
+     * @param bool $armed whether the flipper applies at all — an inert one has no pooler to
+     *        ask about, because nothing swaps its file or restarts it
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function poolProbeRows(?array $verdict, bool $armed): array
+    {
+        if ($verdict === null) {
+            return [];
+        }
+
+        $text = static fn (mixed $value, string $fallback = '?'): string => is_scalar($value)
+            ? (string) $value
+            : $fallback;
+
+        // The row the doctor draws for the same state: nothing asks the pooler anything when the
+        // flipper is inert, whatever the probe's own switch says — an answer here would be about
+        // a process nothing in this package is moving.
+        if (!$armed) {
+            return [['pool_probe', 'the flipper is not armed — nothing asks the running pooler about its pools']];
+        }
+
+        if (($verdict['enabled'] ?? false) !== true) {
+            return [[
+                'pool_probe',
+                'not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the file '
+                .'the pooler runs on) — so the running pooler is taken at supervisord\'s word',
+            ]];
+        }
+
+        if (($verdict['applicable'] ?? false) !== true) {
+            return [[
+                'pool_probe',
+                'nothing to ask — the variant the resolver asks for declares no pool, so the pooler '
+                .'has nothing to be answerable for',
+            ]];
+        }
+
+        $reason = $text($verdict['reason'] ?? null, 'the running pooler answered for every pool the configuration declares');
+        $address = $verdict['address'] ?? null;
+        $probed = is_string($address) && $address !== '' ? ' — probed '.$address : '';
+
+        $reading = match (true) {
+            ($verdict['failed'] ?? false) === true => 'failed',
+            ($verdict['warned'] ?? false) === true => 'warning',
+            ($verdict['answered'] ?? null) === true && ($verdict['verified'] ?? null) === true => 'answered',
+            ($verdict['answered'] ?? null) === true => 'unverified',
+            default => 'no answer',
+        };
+
+        $rows = [['pool_probe', $reading.' — '.$reason.$probed]];
+
+        $pools = $verdict['pools'] ?? [];
+
+        if (is_array($pools)) {
+            foreach ($pools as $pool) {
+                if (!is_array($pool)) {
+                    continue;
+                }
+
+                $rows[] = ['pool_probe_pool', sprintf(
+                    '%s — %s (%s)',
+                    $text($pool['database'] ?? null),
+                    $text($pool['status'] ?? null),
+                    $text($pool['evidence'] ?? null, 'no evidence recorded'),
+                )];
+            }
+        }
+
+        $control = $verdict['control'] ?? null;
+
+        if (is_array($control)) {
+            $rows[] = ['pool_probe_control', sprintf(
+                '%s — %s (%s)',
+                $text($control['database'] ?? null),
+                $text($control['status'] ?? null),
+                $text($control['evidence'] ?? null, 'no evidence recorded'),
+            )];
+        }
+
+        $admin = $verdict['admin'] ?? null;
+
+        if (is_array($admin)) {
+            $pools = $admin['pools'] ?? [];
+
+            $rows[] = ['pool_probe_admin', sprintf(
+                '%s — %d pool(s) listed (%s)',
+                $text($admin['status'] ?? null),
+                is_array($pools) ? count($pools) : 0,
+                $text($admin['evidence'] ?? null, 'no evidence recorded'),
+            )];
+        }
+
+        return $rows;
     }
 
     /**

@@ -108,11 +108,12 @@ final class VariantShape
 
     /**
      * A well-formed pool section: `[pools.<name>]`, a sub-table of one, and a quoted name that keeps
-     * the dots it was quoted for. It exists only to decide whether a `[pools…]` line is one this
+     * the dots it was quoted for — basic or literal, the two forms `PoolProbe::declaredPools()`
+     * reads. It exists only to decide whether a `[pools…]` line is one this
      * package can read a name out of — the names themselves come from `PoolProbe::declaredPools()`,
      * so the two cannot disagree about what a pool is called.
      */
-    private const POOL_SECTION = '/^\[\s*pools\s*\.\s*(?:"[^"]+"|[A-Za-z0-9_\-]+)(?:\s*\.\s*(?:"[^"]+"|[A-Za-z0-9_\-]+))*\s*\]\s*(?:#.*)?$/';
+    private const POOL_SECTION = '/^\[\s*pools\s*\.\s*(?:"[^"]+"|\'[^\']+\'|[A-Za-z0-9_\-]+)(?:\s*\.\s*(?:"[^"]+"|\'[^\']+\'|[A-Za-z0-9_\-]+))*\s*\]\s*(?:#.*)?$/';
 
     /**
      * The section pgcat puts a pool's servers in, and the pair form it writes them in:

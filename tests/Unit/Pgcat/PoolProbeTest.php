@@ -19,7 +19,10 @@ use Uak35\WeightedDbManager\Pgcat\PoolProbe;
  * `PoolProbe`'s own note: the pooler this package was measured against answers an authentication
  * request for a name no configuration declares, so on that pooler `answered` is a statement about
  * the pooler. The control name and `discriminates()` are how the sweep says which of the two it is
- * looking at, and their two tests are here beside the three answers they qualify.
+ * looking at, and their two tests are here beside the three answers they qualify. The one exchange
+ * that does send a credential is the admin console's, and it sends the pooler's own: those tests
+ * script the conversation so the md5 answer, the refusals and the reading of `SHOW POOLS` are
+ * pinned as bytes rather than left to a pooler.
  */
 final class PoolProbeTest extends TestCase
 {
@@ -37,6 +40,69 @@ final class PoolProbeTest extends TestCase
     private static function error(string $message): string
     {
         return self::message('E', 'S'."FATAL\0".'M'.$message."\0"."\0");
+    }
+
+    /** An AuthenticationOk: the console took the password and is ready to be asked. */
+    private static function authenticated(): string
+    {
+        return self::message('R', pack('N', 0)).self::message('Z', 'I');
+    }
+
+    /** An md5 challenge with the four salt bytes the answer has to fold in. */
+    private static function md5Challenge(string $salt = 'abcd'): string
+    {
+        return self::message('R', pack('N', 5).$salt);
+    }
+
+    /**
+     * A RowDescription — the message that names the columns of a `SHOW POOLS` answer, and the only
+     * place the pool column is identified rather than assumed.
+     *
+     * @param list<string> $names
+     */
+    private static function rowDescription(array $names): string
+    {
+        $payload = pack('n', count($names));
+
+        foreach ($names as $name) {
+            // name, table oid, column number, type oid, type size, type modifier, format.
+            $payload .= $name."\0".pack('N', 0).pack('n', 0).pack('N', 25).pack('n', -1).pack('N', -1).pack('n', 0);
+        }
+
+        return self::message('T', $payload);
+    }
+
+    /**
+     * A DataRow: one value per column, or a null when the value is unset.
+     *
+     * @param list<string|null> $values
+     */
+    private static function dataRow(array $values): string
+    {
+        $payload = pack('n', count($values));
+
+        foreach ($values as $value) {
+            $payload .= $value === null
+                ? pack('N', 0xFFFFFFFF)
+                : pack('N', strlen($value)).$value;
+        }
+
+        return self::message('D', $payload);
+    }
+
+    /** The pooler's own file, with the console's credentials in `[general]`. */
+    private static function poolerFile(): string
+    {
+        return <<<'TOML'
+        [general]
+        host = "0.0.0.0"
+        port = 7432
+        admin_username = "pgcAdmin"
+        admin_password = "s3cret"
+
+        [pools.reader_db_2]
+        pool_mode = "transaction"
+        TOML;
     }
 
     /**
@@ -120,17 +186,73 @@ final class PoolProbeTest extends TestCase
 
         [pools."writer.db".users.0]
         username = "pgcAdmin"
+
+        [pools.'literal.db'.shards.0]
+        servers = [["lpr-db-01", 5432, "primary"]]
         TOML;
 
         $this->assertSame(
-            ['writer_db_1', 'reader_db_2', 'writer.db'],
+            ['writer_db_1', 'reader_db_2', 'writer.db', 'literal.db'],
             PoolProbe::declaredPools($toml),
             'the name is the first segment of the header path, and a quoted segment keeps its dots',
         );
     }
 
     /**
-     * The port the probe dials, proved on a file whose port is not the conventional one.
+     * The shape the pooler's own file has, taken from the workflow's fixture: a `[general]` block,
+     * one pool with a parent table and its `users.0` and `shards.0` sub-tables, and a second pool
+     * declared by nothing but those sub-tables. The reading is one name per pool — never
+     * `writer_db_1.users.0`, never `writer_db_1.shards.0`, and never the same pool twice because
+     * the parent and the sub-tables both name it.
+     *
+     * The second pool is the half a reading that stopped at the first dotted header would miss: a
+     * header is a path, and the pool is the segment before every dot.
+     */
+    public function test_a_real_pgcat_config_names_each_pool_once_and_no_sub_table(): void
+    {
+        $toml = <<<'TOML'
+        [general]
+        host = "0.0.0.0"
+        port = 6432
+        admin_username = "pgcAdmin"
+        admin_password = "s3cret"
+        pool_mode = "transaction"
+        enable_prometheus_exporter = false
+
+        [pools.writer_db_1]
+        pool_mode = "transaction"
+
+        [pools.writer_db_1.users.0]
+        username = "postgres"
+        password = "postgres"
+        pool_size = 1
+
+        [pools.writer_db_1.shards.0]
+        servers = [["127.0.0.1", 5432, "primary"]]
+        database = "postgres"
+
+        [pools.reader_db_2.users.0]
+        username = "postgres"
+        password = "postgres"
+        pool_size = 1
+
+        [pools.reader_db_2.shards.0]
+        servers = [["reader-db-01", 5432, "replica"]]
+        database = "postgres"
+        TOML;
+
+        $pools = PoolProbe::declaredPools($toml);
+
+        $this->assertSame(['writer_db_1', 'reader_db_2'], $pools, 'each pool is named once, in file order');
+        $this->assertNotContains('writer_db_1.users.0', $pools, 'a sub-table is not a pool a client asks for');
+        $this->assertNotContains('writer_db_1.shards.0', $pools);
+        $this->assertNotContains('reader_db_2.users.0', $pools);
+        $this->assertNotContains('reader_db_2.shards.0', $pools);
+    }
+
+    /**
+     * The port the probe dials is the one the pooler's own file names, and a file that names none
+     * yields null rather than a guess.
      *
      * `[general] port` is the pooler's own statement of where it listens, and `7432` is deliberately
      * not `6432`: a reading that quietly fell back to pgcat's convention would pass a test written
@@ -139,12 +261,11 @@ final class PoolProbeTest extends TestCase
      * this exists for has to read it from disk.
      *
      * The `port` under `[pools.reader_db_2]` is a backend's, and a probe sent there would measure a
-     * database rather than the pooler, so it must not be what comes back. A configured value wins,
-     * because an operator who sets one is saying where the pooler is — behind a forward or a proxy,
-     * which the file cannot know — and zero is not one: it is what an absent key narrows to, and
-     * pgcat does not listen on it.
+     * database rather than the pooler, so it must not be what comes back. There is no second source
+     * at all: no separate setting, and no convention for the cases the file cannot answer, because a
+     * guessed port is what an installation arms the probe on while its pooler listens elsewhere.
      */
-    public function test_the_port_is_the_general_sections_and_not_the_conventional_one(): void
+    public function test_the_port_is_the_one_the_poolers_own_file_names(): void
     {
         $file = sys_get_temp_dir().'/pgcat-general-port-'.bin2hex(random_bytes(6)).'.toml';
         file_put_contents($file, <<<'TOML'
@@ -159,13 +280,11 @@ final class PoolProbeTest extends TestCase
         $toml = (string) file_get_contents($file);
         @unlink($file);
 
-        $this->assertSame(7432, PoolProbe::port($toml), "the pooler's own port, not pgcat's convention");
-        $this->assertSame(7432, PoolProbe::port($toml, 0), 'zero is an absent port rather than a configured one');
-        $this->assertSame(7000, PoolProbe::port($toml, 7000), 'a configured port is the operator saying where the pooler is');
-        $this->assertSame(6432, PoolProbe::port("[general]\nhost = \"0.0.0.0\"\n"), 'the convention when the file names no port');
-        $this->assertSame(6432, PoolProbe::port("[pools.reader_db_2]\nport = 9999\n"), 'a pool section is a backend, not the pooler');
-        $this->assertSame(6432, PoolProbe::port(''), 'and when there is no file to read at all');
-        $this->assertSame(6432, PoolProbe::port("[general]\nport = 70000\n"), 'a port outside the dialable range is the file mistaking one');
+        $this->assertSame(7432, PoolProbe::port($toml), "the pooler's own port, and the only source there is");
+        $this->assertNull(PoolProbe::port("[general]\nhost = \"0.0.0.0\"\n"), 'a file that names no port states no address to dial');
+        $this->assertNull(PoolProbe::port("[pools.reader_db_2]\nport = 9999\n"), 'a pool section is a backend, not the pooler');
+        $this->assertNull(PoolProbe::port(''), 'and there is no convention for a file that could not be read');
+        $this->assertNull(PoolProbe::port("[general]\nport = 70000\n"), 'a port outside the dialable range is not replaced with a guess');
     }
 
     /**
@@ -310,5 +429,267 @@ final class PoolProbeTest extends TestCase
         $this->assertFalse($verdict['missing']);
         $this->assertStringContainsString('10.0.0.9:5433', $verdict['evidence']);
         $this->assertStringContainsString('Connection refused', $verdict['evidence']);
+    }
+
+    /**
+     * The console conversation, in order: a startup packet naming `pgcat`, the md5 answer to the
+     * console's challenge, and `SHOW POOLS` — with its rows read by the column the console names the
+     * pool in rather than by position.
+     *
+     * The salt is fixed because the answer is arithmetic: `md5` . md5(md5(password . user) . salt)
+     * is what the pooler compares, so the test can compute the bytes a console would accept.
+     * Nothing else is asserted as spelled-out prose: the password itself must not appear in the
+     * message, which is what makes this usable on a pooler whose file holds a real one.
+     */
+    public function test_the_console_is_asked_with_the_poolers_own_credentials(): void
+    {
+        $sent = [];
+        $replies = [
+            self::md5Challenge('abcd'),
+            self::authenticated(),
+            self::rowDescription(['pool', 'user', 'cl_active'])
+                .self::dataRow(['writer_db_1', 'pgcAdmin', '0'])
+                .self::dataRow(['reader_db_2', 'pgcAdmin', '0'])
+                .self::message('C', "SHOW POOLS\0")
+                .self::message('Z', 'I'),
+        ];
+
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$sent, &$replies): array {
+                $sent[] = $client;
+
+                return [array_shift($replies) ?? '', ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_READ, $result['status']);
+        $this->assertSame(['writer_db_1', 'reader_db_2'], $result['pools']);
+        $this->assertSame('tcp://127.0.0.1:7432', $result['address']);
+        $this->assertStringContainsString('listed 2 pool(s)', $result['evidence']);
+
+        $this->assertStringContainsString("database\0pgcat\0", $sent[0], 'the console is the admin database, not a pool');
+        $this->assertStringContainsString("user\0pgcAdmin\0", $sent[0]);
+        $this->assertStringContainsString('md5'.md5(md5('s3cret'.'pgcAdmin').'abcd'), $sent[1], 'the two-pass md5 the console compares');
+        $this->assertStringNotContainsString('s3cret', $sent[1], 'the password itself is never sent for an md5 challenge');
+        $this->assertSame('Q'.pack('N', 4 + strlen("SHOW POOLS\0"))."SHOW POOLS\0", $sent[2]);
+        $this->assertCount(3, $sent, 'one round trip per question, and none for a greeting that was already complete');
+    }
+
+    /**
+     * A console configured for a trusting admin gets no password at all, and the conversation is
+     * one question shorter: the challenge is not there to answer.
+     */
+    public function test_a_console_that_asks_for_no_password_is_asked_without_one(): void
+    {
+        $sent = [];
+        $replies = [
+            self::authenticated(),
+            self::rowDescription(['pool']).self::dataRow(['reader_db_2']).self::message('Z', 'I'),
+        ];
+
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$sent, &$replies): array {
+                $sent[] = $client;
+
+                return [array_shift($replies) ?? '', ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_READ, $result['status']);
+        $this->assertSame(['reader_db_2'], $result['pools']);
+        $this->assertCount(2, $sent, 'no password message for a console that never asked');
+    }
+
+    /**
+     * The cleartext challenge a console behind an older pgbouncer-style configuration can send: the
+     * password travels as itself, because there is no salt to fold in. Reported as the credential
+     * that answers the challenge rather than as a candidate answer there is no such thing for.
+     */
+    public function test_a_cleartext_challenge_gets_the_password_itself(): void
+    {
+        $sent = [];
+        $replies = [
+            self::message('R', pack('N', 3)),
+            self::authenticated(),
+            self::rowDescription(['pool']).self::dataRow(['reader_db_2']).self::message('Z', 'I'),
+        ];
+
+        PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$sent, &$replies): array {
+                $sent[] = $client;
+
+                return [array_shift($replies) ?? '', ''];
+            },
+        );
+
+        $this->assertSame('p'.pack('N', 4 + strlen("s3cret\0"))."s3cret\0", $sent[1]);
+    }
+
+    /**
+     * A file that names no admin credentials is refused before a socket is opened: pgcat's defaults
+     * are a credential this package should not assume, and a `[pools…]` section is a pool's user
+     * rather than the console's. The refusal names the setting that is missing, so an operator can
+     * add it rather than guess at which of the two the probe wanted.
+     */
+    public function test_a_file_without_the_consoles_credentials_is_refused_without_a_socket(): void
+    {
+        $asked = false;
+
+        $result = PoolProbe::adminPools(
+            "[general]\nport = 7432\n\n[pools.reader_db_2]\nadmin_username = \"x\"\nadmin_password = \"y\"\n",
+            '127.0.0.1',
+            7432,
+            200,
+            function () use (&$asked): array {
+                $asked = true;
+
+                return ['', ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_REFUSED, $result['status']);
+        $this->assertSame([], $result['pools']);
+        $this->assertStringContainsString('admin_username', $result['evidence']);
+        $this->assertFalse($asked, 'a pool section is not the console, and no socket is opened without credentials');
+    }
+
+    /**
+     * A wrong credential is the console's refusal, not silence: the difference matters because
+     * silence is reported as unread and a refusal is a fact an operator can act on. The evidence
+     * carries the console's sentence and never the password that was tried.
+     */
+    public function test_a_console_that_refuses_the_password_is_refused_not_silent(): void
+    {
+        $replies = [self::md5Challenge(), self::error('password authentication failed for user "pgcAdmin"')];
+
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$replies): array {
+                return [array_shift($replies) ?? '', ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_REFUSED, $result['status']);
+        $this->assertStringContainsString('password authentication failed', $result['evidence']);
+        $this->assertStringNotContainsString('s3cret', $result['evidence']);
+    }
+
+    /**
+     * A console that asks for SASL is refused rather than answered with a guess: a SCRAM verifier is
+     * not a password, and this probe does not pretend to hold one. Asked once, so the reading costs
+     * one connection rather than a login attempt per theory.
+     */
+    public function test_a_console_that_asks_for_scram_is_refused(): void
+    {
+        $asked = 0;
+        $reply = self::message('R', pack('N', 10)."SCRAM-SHA-256\0\0");
+
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$asked, $reply): array {
+                $asked++;
+
+                return [$reply, ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_REFUSED, $result['status']);
+        $this->assertStringContainsString('SCRAM-SHA-256', $result['evidence']);
+        $this->assertSame(1, $asked, 'the challenge is not something a second question would answer');
+    }
+
+    /**
+     * A console at an address that does not answer is silent, and the address and the socket's own
+     * reason travel in the evidence — the same distinction the pool reading draws, for the same
+     * reason: an unread console must not be reported as a poollist.
+     */
+    public function test_a_console_that_says_nothing_is_silent(): void
+    {
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '10.0.0.9',
+            7432,
+            200,
+            static fn (string $client): array => ['', 'Connection refused'],
+        );
+
+        $this->assertSame(PoolProbe::STATUS_SILENT, $result['status']);
+        $this->assertSame([], $result['pools']);
+        $this->assertStringContainsString('10.0.0.9:7432', $result['evidence']);
+        $this->assertStringContainsString('Connection refused', $result['evidence']);
+    }
+
+    /**
+     * The header upstream pgcat itself writes: v1.2.0's `SHOW POOLS` row description opens
+     * `database, user, pool_mode, …` — pgbouncer's word for the name a client connects with — so the
+     * reading has to know that name as well as `pool`. This is the shape the live fixture meets, and
+     * a console read by a name it does not use is a whole sweep sent to the front door.
+     */
+    public function test_pgcats_own_show_pools_names_the_pool_column_database(): void
+    {
+        $replies = [
+            self::authenticated(),
+            self::rowDescription(['database', 'user', 'pool_mode', 'cl_active'])
+                .self::dataRow(['writer_db_1', 'postgres', 'transaction', '0'])
+                .self::dataRow(['reader_db_2', 'postgres', 'transaction', '0'])
+                .self::message('Z', 'I'),
+        ];
+
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$replies): array {
+                return [array_shift($replies) ?? '', ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_READ, $result['status']);
+        $this->assertSame(['writer_db_1', 'reader_db_2'], $result['pools']);
+    }
+
+    /**
+     * `SHOW POOLS` read by column name, not position: an answer whose columns are named something
+     * else has no pool list in it, and saying so is better than taking the first column — which, on
+     * this console, is the pool only because the order happens to be that way.
+     */
+    public function test_an_answer_without_a_pool_column_cannot_be_read(): void
+    {
+        $replies = [
+            self::authenticated(),
+            self::rowDescription(['name', 'user']).self::dataRow(['reader_db_2', 'pgcAdmin']).self::message('Z', 'I'),
+        ];
+
+        $result = PoolProbe::adminPools(
+            self::poolerFile(),
+            '127.0.0.1',
+            7432,
+            900,
+            function (string $client) use (&$replies): array {
+                return [array_shift($replies) ?? '', ''];
+            },
+        );
+
+        $this->assertSame(PoolProbe::ADMIN_STATUS_REFUSED, $result['status']);
+        $this->assertStringContainsString('pool column', $result['evidence']);
     }
 }
