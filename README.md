@@ -1137,7 +1137,7 @@ closes itself, and a page that never closes is a defect or a file.
 
 ## Artisan commands
 
-All six are registered by the provider.
+All seven are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
@@ -1147,6 +1147,7 @@ All six are registered by the provider.
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--pool-probe] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL. `--pool-probe` is a `--status` reading: it asks the running pooler about its pools instead of staying offline |
 | `php artisan db:pgcat-window-flip --mode=readers\|writer --at=HH:MM[:SS] [--json]` | One firing of a reader-window task: probe the mode's target, then apply it at the boundary (scheduled by the provider as `activate_readers` and `deactivate_readers`) |
 | `php artisan db:scheduler-watchdog [--strict] [--json]`                      | Fail when the schedule has stopped running the per-minute flip — for a container's own healthcheck, so a silently dead cron line cannot go unnoticed |
+| `php artisan db:pgcat-metrics [--strict]`                                    | The pool probe's verdict as Prometheus text exposition — one `swrr_pgcat_pool_present{pool}` per declared pool — refreshed by a textfile collector or gated on with `--strict` |
 
 ```php
 // routes/console.php
@@ -1157,6 +1158,14 @@ Each probe opens a throwaway single-host connection (the pooled `read`/`write`
 lists are stripped) and purges it afterwards, so probing never feeds the weighted
 pool it is measuring. Diagnostics go to the replica's own `host:port` key, the
 same key `WeightResolver` uses.
+
+`db:pgcat-metrics` is the one command here whose stdout is a document rather than a report: the
+pool probe's verdict in Prometheus text exposition, so a pool the pooler has stopped holding can
+page somebody long before a deploy discovers it. `swrr_pgcat_pool_present{pool="…"}` is `1` for a
+pool the pooler holds, `0` for one it refused, and absent for one the reading could not prove — with
+`swrr_pgcat_pool_probe_unverified` counting those, because an answer the pooler gives every name
+proves nothing. The alert rules, the textfile-collector line, and why `--strict` is a separate
+reader from the scrape are in [docs/pgcat-pool-metrics.md](docs/pgcat-pool-metrics.md).
 
 ### The flipper schedules itself
 
@@ -2563,7 +2572,7 @@ src/Pgcat/               pgcat.toml flipper, the supervisor step it runs afterwa
                          two result value objects (a flip, and a rehearsal)
 src/Providers/           WeightedDatabaseServiceProvider (replaces the framework's)
 src/Console/Commands/    db:doctor, db:replica-status, db:probe-replicas, db:pgcat-flip,
-                         db:pgcat-window-flip
+                         db:pgcat-window-flip, db:pgcat-metrics
 src/Http/Controllers/    DatabaseHealthController
 src/Support/             ConfigValue (typed config reads), ReaderWindows/ReaderDays (what the
                          reader fallback may contain), ReplicaMetadata (what a replica's

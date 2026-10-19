@@ -4,6 +4,26 @@
 
 ### Added
 
+- **The pool probe's verdict is a Prometheus metric, so a missing pool can page before a deploy
+  fails.** `php artisan db:pgcat-metrics` prints `swrr_pgcat_pool_present{pool="…"}` for every pool
+  the applied variant declares — `1` when the pooler holds it, `0` when it refused to serve it — beside the
+  verdict's own flags (`failed`, `warned`, `judged`, `enabled`, `applicable`) and the address the
+  packets went to. The reason it is a metric rather than a preflight: `db:doctor`'s `pool probe` row
+  and `/health/db`'s `pool_probe` block answer the same question, and both reach an operator when a
+  release is being promoted or from an HTTP scrape outside the container — so a pool the pooler
+  stopped holding an hour ago is discovered by the deploy that has to decide whether to promote it.
+  A pool the reading could not prove — `indeterminate`, where the pooler also answered the sentinel
+  name no configuration declares, or `silent` — has **no sample** rather than a value, and
+  `swrr_pgcat_pool_probe_unverified` counts those: a `1` there would be the green reading the
+  sentinel exists to prevent, and a `0` would page for a pool that is very likely present while
+  making a probe aimed at the wrong port look exactly like a pooler that lost its configuration. The
+  body is `PgcatConfigFlipper::poolProbeVerdict()` rendered by `PoolProbeMetrics`, a pure function
+  over the array the endpoint and the row already read, so the three cannot disagree about what the
+  pooler holds. Stdout is the exposition on every route, including a container with no flipper
+  (`enabled 0`); `--strict` is the deploy step's reader and exits `1` on `failed`, `warned` or an
+  unbound flipper, with the same body a scrape archives. The command is registered by the provider
+  like the rest, and the alert rules, the textfile-collector line and the shapes it rejected are in
+  `docs/pgcat-pool-metrics.md`.
 - **The interface `pinned.host_ip` reads is now a setting, and the published config's generation is
   3.** The field shipped fixed to `eth1`, which is the right answer on a host with a secondary
   interface and the wrong one on Docker's default bridge — there the interface is `eth0`, and every

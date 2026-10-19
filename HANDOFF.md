@@ -191,14 +191,17 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=de6fa2c
-  --> exit 1: the inventory is out of step with the tree at de6fa2c
+php bin/inventory.php --check --at=41f05d0
+  --> exit 1: the inventory is out of step with the tree at 41f05d0
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
-      surface.tsv: 3 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 51 files, 259 public methods, 291 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 1: the inventory is out of step with the tree
+      files.tsv: 2 line(s) stale
+      methods.tsv: 2 line(s) stale
+      surface.tsv: 8 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -236,7 +239,12 @@ the tree.
 | `.agents/skills/lpr-issue/SKILL.md` | the skill that records an LPR fault as a markdown document: the `/lpr-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in |
 | `docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
 | `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
+| `docs/pgcat-pool-metrics.md` | the metric decision: why the probe needed a surface a monitor can scrape, why a pool the reading could not prove has no sample, the alert rules, and the shapes it rejected |
 | `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
+| `src/Console/Commands/DbPgcatMetrics.php` | the command that writes that exposition to stdout, with `--strict` as the deploy step's exit code and the body unchanged by it |
+| `src/Pgcat/PoolProbeMetrics.php` | the pool probe's verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on |
+| `tests/Unit/Console/DbPgcatMetricsCommandTest.php` | the command's two channels: the exposition a scrape archives and the code `--strict` adds, over a console answer or a probe the test supplies rather than a socket |
+| `tests/Unit/Pgcat/PoolProbeMetricsTest.php` | the rendering held against verdicts written by hand: a held pool, a refused one, an unproven one with no sample, each family's HELP and TYPE, and the label escaping |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -253,10 +261,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `de6fa2c` — *feat: /health/db says which host answered it, as pinned.host_ip* |
+| HEAD | `41f05d0` — *feat: the pinned host address reads an interface the config names* |
 | `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
-| Unpushed | 16 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 7, feat 8, fix 1 |
+| Unpushed | 17 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 7, feat 9, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -285,6 +293,7 @@ travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+41f05d0  feat: the pinned host address reads an interface the config names
 de6fa2c  feat: /health/db says which host answered it, as pinned.host_ip
 628ca9e  feat: the pool probe asks every declared pool in one wave
 f7cbad6  docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back
@@ -294,7 +303,6 @@ dbb9482  feat: the pool probe reads the pooler's own inventory, on the port its 
 c65aa7e  docs: the records state what the probe dials, and how often a repair is too often
 703b228  docs: the rehearsal's step table lists the variant-shape read it already performs
 db752f8  feat: both surfaces print the endpoint they dialled and the rate this container repairs at
-373dc7f  feat: the flip asks its pools one question with one policy, and dates the repairs it makes
 ```
 <!-- /handoff:log -->
 

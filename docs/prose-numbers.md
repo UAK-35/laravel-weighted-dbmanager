@@ -119,7 +119,7 @@ row set now has.
 
 | Claim | The sentence, as the record writes it | What it counts, and what the number is derived from |
 |---|---|---|
-| the commands the provider registers, as README.md counts them | "All **six** are registered by the provider" | the command classes in `src/Console/Commands/` |
+| the commands the provider registers, as README.md counts them | "All **seven** are registered by the provider" | the command classes in `src/Console/Commands/` |
 | the shapes the log-severity decision was weighed against, as README.md counts them | "the **seven** shapes it was weighed against" | the candidate headings of `boot-audit-log-severity.md`, less the chosen one |
 | the audit's finding keys, as boot-audit-surfaces.md counts them | "pgcat is one of **twenty-five** keys", "would put **twenty-five** keys' worth …" | the provider's `KEY_*` constants |
 | the finding lists one boot spreads, as boot-audit-finding-keys.md counts them | "the **nine** methods whose lists are spread into one boot's findings" | the `...$this->` spreads in `reportBootAudit()` |
