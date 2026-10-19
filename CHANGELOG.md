@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha6 - 2026-10-19
+
 ### Added
 
 - **The pool probe's verdict is a Prometheus metric, so a missing pool can page before a deploy
