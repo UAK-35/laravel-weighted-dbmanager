@@ -66,6 +66,38 @@
   configured attempts and delay, and the single-reader rule is held by a source scan in
   `PgcatConfigFlipperTest` that reads either quote style, beside the existing assertions that each
   path sleeps the configured delay.
+- **A read-only audit record is repaired, not abandoned for ever.** A record the process cannot
+  write because its mode refuses it — the state a token pushed from a generator or a volume restored
+  from another host arrives in, and the one that made `persist()` skip the whole read-merge-write
+  from then on and report `swrr.audit.file.unwritable` on every boot — is now made writable and
+  written, which is the repair its resolution sentence has always described. `repairRecord()` runs
+  before anything is decided, and the provider asks it before the probe and before the findings are
+  built, so the throttle and the surfaces see the record as it now is rather than the one the
+  previous boot left. The repair clears the mode on the existing file and reads it back rather than
+  trusting the call, which is why a filesystem that ignores it — a FAT mount, a share, an ACL — still
+  lands in the old state: the finding is logged and no write is attempted. `BootAuditTest` and the
+  provider's probe test hold the repair against a real `chmod()`; the persistent-failure tests
+  now break the parent directory instead of the file's mode, so they still describe the case they are
+  named for, and the row, the resolution sentence and the three audit records say the repair
+  happens.
+- **The files this package writes are handed back writable by one helper, so the next process can
+  write them whatever account it runs as.** The audit record's release already left 0666 behind,
+  but only the record: its `.lock`, the flip's state file and the flip's lock stayed under the
+  writer's umask, and a 0644 file is one the *other* account — the per-minute entry and a shell
+  `db:pgcat-flip` are the ordinary pair — cannot open for writing at all. `Support\WritableFile`
+  is now the single call, `handBack()`, chmod-ing the existing file, clearing the stat cache and
+  reading the mode back rather than trusting the call, so a filesystem that ignores it still gets
+  the state an operator is told about. The lock files are handed back when they are *opened*
+  rather than when they are released, so a run killed while holding one still leaves the next run
+  able to take it. A file another account left read-only is also repaired *before* the open or the
+  write, so the run that meets one still locks and still records rather than losing a silenced
+  write, and the state file is handed back again only when its write actually landed. The
+  same class carries `canWrite()` — the file when there is one, else the directory that would
+  have to take it — which `BootAudit::recordIsWritable()` and
+  `PgcatConfigFlipper::stateFileWritable()` had each written out for themselves; the two readings
+  can no longer drift about the one fact they share. The flip's target config is deliberately
+  untouched: it is the file pgcat runs, and its mode is the deployment's rather than this
+  package's.
 
 ### Added
 

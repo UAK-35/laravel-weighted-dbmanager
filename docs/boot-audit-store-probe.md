@@ -203,11 +203,14 @@ return $lastProbe === null || (time() - $lastProbe) >= $this->storeProbeSeconds;
 - `0` (or negative) means **never probe** — the documented way to keep the audit to pure
   configuration checks. The finding is then neither produced nor resolved: the key is not
   checked, so a recorded finding is carried over untouched.
-- An unwritable record means **no probe** rather than an unbounded one. This is deliberate:
-  the file *is* the throttle, so an installation that cannot write it has no throttle, and
-  the answer chosen here is to lose coverage rather than to pay a timeout per request. Such
-  an installation is not left blind — `db:doctor` issues its own probe regardless of the
-  record.
+- A record that cannot be written means **no probe** rather than an unbounded one — except
+  for the one state a boot can repair. A record another account left read-only is made
+  writable again before this question is asked (`BootAudit::repairRecord()`), so the probe
+  runs and its timestamp lands. A directory that takes no file is the remaining case, and
+  this is deliberate there: the file *is* the throttle, so an installation that cannot write
+  it has no throttle, and the answer chosen is to lose coverage rather than to pay a timeout
+  per request. Such an installation is not left blind — `db:doctor` issues its own probe
+  regardless of the record.
 
 ### Gate 3 — probed findings cannot be resolved by a boot that did not probe
 
@@ -317,14 +320,18 @@ the store that makes it so — a finding would be a second line about one settin
 state for a record to remember, because nothing about the configuration changed. The row keeps
 naming it (see the doctor's row for the third state) and the audit stays silent.
 
-### The one key whose date is never written
+### The one key whose date has nowhere to go
 
-`swrr.audit.file.unwritable` is the only finding in this package whose own record can never hold its
-date: the file a date would be written to *is* the file that cannot be written, so `persist()` skips
-the write and the finding is logged without being remembered. There is therefore no
-`recorded unresolved since` clause the row can append to it — the row prints the sentence the log
-carries and nothing more — and the key exists for the two things it can still do: a log line an alert
-rule and a grep can select on, and a name for the state in the surface that describes it.
+`swrr.audit.file.unwritable` is the only finding in this package whose own record can be the file
+that cannot be written. A read-only record is repaired before the boot decides anything —
+`Support\WritableFile::handBack()`, the same call a write's release makes and a flip makes on its
+state file and lock — so on the installations where that works the finding is not produced at all,
+the probe runs, and its timestamp lands. The state that remains is a file this
+account may not change (another owner, an ACL) or a directory that takes no file: there the finding
+is logged without being remembered, and there is no `recorded unresolved since` clause the row can
+append to it — the row prints the sentence the log carries and nothing more. The key exists for the
+two things it can still do in that case: a log line an alert rule and a grep can select on, and a
+name for the state in the surface that describes it.
 
 The asymmetry is the reason the key was not simply left out. A standing state with no key at all
 would be the one thing this audit does not do — report a configuration the package understood
@@ -363,7 +370,8 @@ probe` case is no longer the only test that would notice a row regressing to its
 | both of them at once are named together, with the loudest as the verdict | `test_the_store_probe_row_names_a_switched_off_probe_and_an_unwritable_record`, `test_the_store_probe_row_names_the_moot_store_beside_an_unwritable_record` | doctor |
 | each of the two states is dated from its own finding entry rather than the first key on file | `test_the_store_probe_row_dates_each_state_from_its_own_finding` | doctor |
 | the switched-off probe is recorded under a key of its own | `test_a_switched_off_store_probe_is_recorded_under_its_own_key` | provider |
-| an unwritable record is logged with its key and never remembered, because the file the date would go in is the file that cannot be written | `test_a_record_that_cannot_be_written_is_logged_and_never_remembered` | provider |
+| a record left read-only is repaired before a due probe, so the probe runs and its timestamp is written | `test_a_read_only_record_is_repaired_before_a_due_store_probe`, `BootAuditTest::test_a_boot_that_finds_the_record_read_only_repairs_it_and_writes` | provider, audit |
+| a record whose directory takes no file is logged with its key and never remembered, because the file the date would go in is the file that cannot be written | `test_a_record_that_cannot_be_written_is_logged_and_never_remembered` | provider |
 | a probe with nothing to reach is named by the row and is not a finding | `test_a_probe_with_nothing_to_reach_is_not_a_finding` | provider |
 | the interval bounds the probe; without a writable record there is no probe at all | `test_the_store_probe_respects_its_interval_and_is_not_attempted_unrecorded` | provider |
 | an unbound `redis` is reported without resolving it, then resolved once bound | `test_a_store_with_no_binding_at_all_is_reported_without_resolving_it` | provider |
@@ -389,17 +397,19 @@ probe` case is no longer the only test that would notice a row regressing to its
    one bounded extra wait. Not probing is worse than probing twice, so the cheaper mechanism
    wins. If this is ever tightened, stamp the timestamp *before* probing rather than taking a
    lock.
-2. **An unwritable record means no coverage — now visible rather than silent.** Accepted
-   above as the trade (losing coverage beats a timeout per request), and reported by the
-   `store probe` row of `db:doctor`, which fails on an unwritable record and warns when
-   probing is switched off. The two are independent, so an installation can be in both,
-   and the row names every state it finds rather than the first: switching the probe on to
-   clear the warning reports an unwritable record on the same run instead of the next
+2. **An unwritable record means no coverage — now visible rather than silent, and repaired
+   where it can be.** Accepted above as the trade (losing coverage beats a timeout per
+   request), and reported by the `store probe` row of `db:doctor`, which fails on an
+   unwritable record and warns when probing is switched off. A read-only record is repaired
+   by the boot before the probe is decided, so the coverage is lost only when the file cannot
+   be changed by this account. The two states are independent, so an installation can be in
+   both, and the row names every state it finds rather than the first: switching the probe on
+   to clear the warning reports an unwritable record on the same run instead of the next
    preflight. `db:doctor`'s own probe is never throttled, so it remains the answer for an
    installation whose throttle is broken. Both states carry a finding key, so the run that
    finds them is also the run that can date them — with the one exception the key documents:
-   the unwritable record's own date has nowhere to be written, so its key is there for the log
-   and the alert rule and its row prints no age.
+   when the file really cannot be changed, the unwritable record's own date has nowhere to be
+   written, so its key is there for the log and the alert rule and its row prints no age.
 3. **The resolution sentence covers two different endings.** Switching
    `swrr.primary_store` to `local` closes a recorded reachability finding with "not
    unreachable any more", which is true of the finding but not of the store. Distinguishing

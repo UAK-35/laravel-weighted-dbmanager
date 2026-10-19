@@ -311,11 +311,15 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * whatever the interval says.
      *
      * This is the fault the README sets against the choice above ("an unwritable record is not"),
-     * and it is the one finding in the package whose own record can never hold its date: the file a
-     * date would be written to is the file that cannot be written, so `persist()` skips the write
-     * and an operator gets the log line. It is keyed anyway — a line with a key is one an alert rule
-     * and a grep can select on — and `db:doctor`'s row reports the same sentence, dated like every
-     * other problem it names.
+     * and it is the one finding in the package whose own record can be the file that cannot be
+     * written. A record a *mode* left read-only is repaired before the probe is decided
+     * (`BootAudit::repairRecord()`), so this finding is not produced at all and the finding that
+     * prompted the repair is written resolved. What remains is a file this account may not change —
+     * another owner, an ACL — where the file a date would be written to is the file that cannot be
+     * written: `persist()` skips the write and an operator gets the log line. It is keyed anyway —
+     * a line with a key is one an alert rule and a grep can select on, and the record holds the
+     * date whenever the repair worked — and `db:doctor`'s row reports the same sentence, dated like
+     * every other problem it names.
      */
     public const KEY_STORE_PROBE_FILE_UNWRITABLE = 'swrr.audit.file.unwritable';
 
@@ -760,6 +764,13 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         }
 
         $record = $audit->read();
+
+        // The record is the probe's throttle as well as the findings' home, so one left read-only
+        // by another boot is not a state to report and leave: the probe would be skipped, the
+        // write would be skipped, and every boot after would say the same thing. Repair it before
+        // the probe is decided, so this boot asks the store and records the answer.
+        $audit->repairRecord();
+
         $config = $this->app->make(Repository::class);
         $swrr = ConfigValue::assoc($config->get('db-manager.swrr'));
         $store = self::storeSelection($swrr);
@@ -1026,7 +1037,8 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      *
      * The sentences are the audit's rather than this class's, because `db:doctor` prints them too and
      * a row and a log line that describe one setting two ways is the failure `ReplicaMetadata` was
-     * extracted for. The unwritable one is logged but can never be remembered — see the key.
+     * extracted for. The unwritable one is remembered wherever the boot could repair the mode, and
+     * is logged without being remembered where it could not — see the key.
      *
      * @return list<BootAuditFinding>
      */

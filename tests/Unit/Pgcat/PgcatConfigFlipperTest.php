@@ -242,6 +242,34 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
+     * A flipper with the shipped closures — the ones that write the state file, take the lock
+     * and hand both back — and a stand-in for the supervisor command, so a test can read what a
+     * run leaves on disk rather than what an injected recorder was told.
+     */
+    private function buildWithShippedClosures(): PgcatConfigFlipper
+    {
+        return new PgcatConfigFlipper(
+            resolver: new TimeWindowResolver(
+                readerWindows: [['start' => '00:00:00', 'end' => '23:59:59']],
+                readerDays: [1, 2, 3, 4, 5, 6, 7],
+            ),
+            config: [
+                'enabled' => true,
+                'config_path' => $this->tmp . '/pgcat.toml',
+                'readers_path' => $this->tmp . '/pgcat-readers.toml',
+                'no_readers_path' => $this->tmp . '/pgcat-no-readers.toml',
+                'restart_command' => 'supervisorctl restart pgcat',
+                'reload_command' => 'supervisorctl signal HUP pgcat',
+                'use_reload' => false,
+            ],
+            stateFile: $this->stateFile,
+            lockFile: $this->lockFile,
+            commandRunner: static fn (string $cmd): array => [0, 'pgcat: started', ''],
+            timezone: 'UTC',
+        );
+    }
+
+    /**
      * A flipper built from a config that does not carry the switch keys at all — how these
      * settings arrive for an installation whose published config predates them, and the case
      * the documented defaults exist for.
@@ -341,6 +369,73 @@ class PgcatConfigFlipperTest extends TestCase
 
         $this->assertSame('flipped', $result->kind());
         $this->assertFileExists($this->stateFile);
+    }
+
+    /**
+     * A run leaves its state file and its lock writable by the next one, whichever account
+     * that is.
+     *
+     * The shipped closures, not `build()`'s recorders: the question is what a run leaves on
+     * disk, and a stand-in releaser would leave exactly the mode the fixture wrote. The
+     * per-minute entry and the shell an operator ran are the ordinary pair — one creates these
+     * files under its umask, the other cannot open a 0644 file for writing at all — so a state
+     * write that lands in one and not the other is how a container starts reporting a state it
+     * can no longer record.
+     */
+    public function test_a_flip_hands_its_state_and_lock_files_back_writable(): void
+    {
+        $flipper = $this->buildWithShippedClosures();
+
+        $this->assertSame('flipped', $flipper->applyCurrentState()->kind());
+
+        foreach ([$this->stateFile, $this->lockFile] as $path) {
+            clearstatcache(true, $path);
+
+            $this->assertFileExists($path);
+            $this->assertTrue(is_writable($path), "the next run cannot open {$path} for writing");
+
+            if (PHP_OS_FAMILY !== 'Windows') {
+                $this->assertSame(0o666, fileperms($path) & 0o777, "{$path} is left under this account's umask");
+            }
+        }
+    }
+
+    /**
+     * A state file another account left read-only is repaired before the write, so the run's
+     * record lands instead of being lost to a silenced `file_put_contents`.
+     *
+     * This is the boot audit's repair one file over: the state file is not merely handed back
+     * after a write that never happened, because a read-only file refuses the write itself. The
+     * flip would otherwise run — pooler restarted, file swapped — and leave no record of it, which
+     * the next run reads as a mode that was never applied.
+     */
+    public function test_a_read_only_state_file_is_repaired_before_the_write(): void
+    {
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $this->assertTrue(chmod($this->stateFile, 0o444));
+        clearstatcache(true, $this->stateFile);
+
+        if (is_writable($this->stateFile)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        $flipper = $this->buildWithShippedClosures();
+
+        $this->assertSame('flipped', $flipper->applyCurrentState()->kind());
+        $this->assertSame(
+            'readers',
+            json_decode((string) file_get_contents($this->stateFile), true)['last_mode'],
+            'the run that swapped the file also recorded that it did',
+        );
+
+        clearstatcache(true, $this->stateFile);
+
+        $this->assertTrue(is_writable($this->stateFile), 'and the next run can write the file this one repaired');
+
+        if (PHP_OS_FAMILY !== 'Windows') {
+            $this->assertSame(0o666, fileperms($this->stateFile) & 0o777);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

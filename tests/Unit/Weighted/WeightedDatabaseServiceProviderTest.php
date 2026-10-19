@@ -2313,6 +2313,55 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     }
 
     /**
+     * A record another account left read-only is repaired before the probe is decided, so the boot
+     * asks the store and records the answer instead of skipping every write and only reporting it.
+     *
+     * The file is made read-only after `useAudit()` has written the rewound throttle, because that
+     * setup writes the same record: the state this test is about is the one a boot meets, not the
+     * one its own fixture would erase. On POSIX the mode is also the claim — 0666 is what the repair
+     * leaves — and on Windows the read-only attribute is all the host has.
+     */
+    public function test_a_read_only_record_is_repaired_before_a_due_store_probe(): void
+    {
+        $redis = $this->bindRedis(reachable: true);
+        $this->useAudit(storeProbeSeconds: 60);
+
+        $file = $this->auditFile();
+
+        $this->assertTrue(chmod($file, 0o444));
+        clearstatcache(true, $file);
+
+        if (is_writable($file)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+        $this->reportBootAudit();
+
+        $this->assertSame(['default'], $redis->asked, 'the probe ran on this boot, not on the next one');
+
+        clearstatcache(true, $file);
+
+        $this->assertTrue(is_writable($file), 'the boot repaired the record before writing it');
+        $this->assertSame([], $this->recordedKeys(), 'and nothing was left saying the probe cannot be recorded');
+        $this->assertGreaterThan(time() - 60, (int) (json_decode((string) file_get_contents($file), true)['store_probed_at'] ?? 0), 'the probe time was written');
+
+        $unwritable = array_values(array_filter(
+            $records,
+            static fn (array $record): bool => ($record['context']['finding'] ?? null) === WeightedDatabaseServiceProvider::KEY_STORE_PROBE_FILE_UNWRITABLE,
+        ));
+
+        $this->assertSame([], $unwritable, 'the repaired record is not reported as the state the boot just fixed');
+
+        if (PHP_OS_FAMILY !== 'Windows') {
+            $this->assertSame(0o666, fileperms($file) & 0o777);
+        }
+    }
+
+    /**
      * A probe that is switched on with an in-process store is not a finding.
      *
      * Nothing is stopped that could have run: there is no store to reach, and the reachability row

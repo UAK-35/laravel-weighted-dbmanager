@@ -176,17 +176,25 @@ final class BootAudit
         private readonly ?\Closure $currentFindings = null,
     ) {
         $this->lockAcquirer = $lockAcquirer ?? static function (string $file): array {
+            // A lock another account left read-only cannot be opened for writing at all, so the
+            // write would go ahead unlocked. The repair comes before the open, and the second
+            // call is for the file the open may have just created — under this process's umask,
+            // which is the state the next boot is being protected from.
+            WritableFile::handBack($file);
+
             $handle = @fopen($file, 'c');
 
             if ($handle === false) {
                 return [false, null];
             }
 
+            WritableFile::handBack($file);
+
             return [@flock($handle, LOCK_EX | LOCK_NB), $handle];
         };
 
         $this->lockReleaser = $lockReleaser ?? static function (mixed $handle, string $filePath): void {
-            self::makeRecordWritable($filePath);
+            WritableFile::handBack($filePath);
 
             if (is_resource($handle)) {
                 @flock($handle, LOCK_UN);
@@ -669,6 +677,10 @@ final class BootAudit
      * probe that is skipped logs nothing. `db:doctor` reports this so an installation
      * that can never check its store is visible rather than merely quiet.
      *
+     * The answer is about the file as it is *now*, so a boot calls `repairRecord()`
+     * before asking: a record a mode left read-only is not a state to report and leave
+     * for ever, and `writable` is false here only when the repair did not take.
+     *
      * @return array{seconds: int, enabled: bool, writable: bool, file: string}
      */
     public function storeProbeStatus(): array
@@ -719,7 +731,10 @@ final class BootAudit
     /**
      * The sentence for a record the probe cannot be remembered in, shared with the row for the same
      * reason. This one is not a choice: the record is the throttle, so nothing runs the PING and
-     * nothing reports an unreachable store, on every boot, from the boot that finds the file.
+     * nothing reports an unreachable store, on every boot, from the boot that finds the file. It is
+     * the sentence for the state a repair did not clear — a read-only record is made writable before
+     * this is ever printed, so a file this account may not change is what an operator is being told
+     * about.
      */
     public static function probeUnwritableSentence(string $file): string
     {
@@ -1049,6 +1064,12 @@ final class BootAudit
      */
     private function persist(array $previous, array $updated, array $produced): array
     {
+        // A record another account left read-only is repaired before anything is decided, because
+        // the answer here is not "skip" — see `repairRecord()`. It is attempted on a quiet report
+        // too: the file is the probe's throttle, and leaving it read-only is what makes every later
+        // boot skip the PING as well.
+        $this->repairRecord();
+
         if (self::canonical($previous) === self::canonical($updated)) {
             return [];
         }
@@ -1288,55 +1309,49 @@ final class BootAudit
     }
 
     /**
-     * The record can only be written where its directory accepts a file — the same
-     * test the probe is gated on, because a probe whose timestamp has nowhere to go
-     * would run on every request.
+     * The record made writable again when this boot found it read-only, and whether it is writable
+     * now.
+     *
+     * WHY THIS IS NOT LEFT TO THE WRITE
+     *   A record is shared by boots that are not the same account — the web worker and the scheduled
+     *   command are the ordinary pair — and the swap leaves it under the writer's umask. A record
+     *   left read-only by one of them is a record the other refuses: `persist()` would skip the whole
+     *   read-merge-write, and the file is also what throttles the store probe, so every boot after
+     *   would skip the PING and report a record it cannot remember anything in, for ever. Reporting
+     *   that state is not a repair, which is why the boot attempts the repair itself.
+     *
+     * WHY IT IS PUBLIC, AND WHY IT IS CALLED BEFORE THE PROBE
+     *   The provider asks this before `storeProbeDue()` and before the findings are built, so the
+     *   answer the probe and the surfaces get is the record as it now is rather than the one the
+     *   previous boot left. `persist()` calls it too, because `report()` is usable on its own and a
+     *   write must not depend on which caller built the audit.
+     *
+     * THE ANSWER
+     *   False is a record this account may not change — another owner, an ACL, a mode the filesystem
+     *   ignores — or a directory that takes no file. That is the state the surfaces report, and the
+     *   attempt is silent: a repair that worked needs no line, and the boot finding already names
+     *   what it found when the repair does not.
      */
-    private function recordIsWritable(): bool
+    public function repairRecord(): bool
     {
-        $directory = dirname($this->file);
-
-        if (is_file($this->file)) {
-            return is_writable($this->file);
+        if ($this->recordIsWritable()) {
+            return true;
         }
 
-        return is_dir($directory) && is_writable($directory);
+        // The helper answers after reading the mode back, so a filesystem that refuses the call
+        // is the false this returns rather than a promise the caller has to discover is empty.
+        return WritableFile::handBack($this->file);
     }
 
     /**
-     * The record handed back able to be written by the next boot, whichever account that is.
-     *
-     * The swap writes the record under this process's umask, so what lands is routinely 0644,
-     * and the boots that share a record are routinely not the same account: the web worker that
-     * boots the application and the scheduled command that writes the same file are the ordinary
-     * pair, and the second of them cannot open a 0644 record for writing at all. This class then
-     * refuses the whole read-merge-write, and — the file being what throttles the store probe —
-     * every boot after the first skips the PING and reports the record it could not remember it in.
-     * So a write ends by saying that anyone who can reach the record may rewrite it.
-     *
-     * Windows has no mode to speak of — `chmod()` there is the read-only attribute and nothing
-     * else — but the one call is the right one on both hosts rather than one per host: a record
-     * another process left read-only is a record `fopen(…, 'c')` refuses, and clearing that
-     * attribute is the same repair in the only spelling that host has. A branch here would be two
-     * spellings of one intention, and the branch that has to be remembered is the one that rots.
-     *
-     * The result is not read, and the mode is not treated as a contract. A filesystem that refuses
-     * it — a FAT mount, a share, an ACL where the mode is not the permission — must not turn a
-     * record that *was* written into a boot that failed, and the state it leaves behind is already
-     * reported by the boot that meets it: `recordIsWritable()` false is the row and the line an
-     * operator reads, with the file named.
-     *
-     * A path with nothing at it is the ordinary case rather than a fault: `write()` removes the
-     * record when the merged one has nothing left to remember, so the release runs over a path that
-     * no longer exists — and `chmod()` fails on one, on both hosts.
+     * The record can only be written where its directory accepts a file when there is none —
+     * the same reading the probe is gated on, because a probe whose timestamp has nowhere to
+     * go would run on every request. `WritableFile::canWrite()` is that reading, shared with
+     * the pgcat flipper's state file so the two cannot drift about one fact.
      */
-    private static function makeRecordWritable(string $filePath): void
+    private function recordIsWritable(): bool
     {
-        if (!is_file($filePath)) {
-            return;
-        }
-
-        @chmod($filePath, 0o666);
+        return WritableFile::canWrite($this->file);
     }
 
     /**

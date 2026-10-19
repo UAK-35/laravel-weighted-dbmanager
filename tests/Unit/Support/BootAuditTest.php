@@ -583,6 +583,104 @@ class BootAuditTest extends TestCase
     }
 
     /**
+     * A boot that finds the record read-only repairs it and writes, rather than skipping every
+     * write for ever and only reporting the state.
+     *
+     * This is the same record the release test above hands back writable, reached from the other
+     * side: another account left it 0444 *before* this boot reported, so the writability gate the
+     * write used to open with refused the whole read-merge-write and the release never ran. The
+     * repair is now attempted first, and the finding the boot came to write lands.
+     */
+    public function test_a_boot_that_finds_the_record_read_only_repairs_it_and_writes(): void
+    {
+        $audit = $this->audit();
+
+        // A record already there, as another account left it.
+        $this->putRecord([]);
+
+        $this->assertTrue(chmod($this->auditFile, 0o444));
+        clearstatcache(true, $this->auditFile);
+
+        if (is_writable($this->auditFile)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        $audit->report($audit->read(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        clearstatcache(true, $this->auditFile);
+
+        $this->assertTrue(is_writable($this->auditFile), 'the record was repaired before the write, so the write landed');
+        $this->assertSame(['swrr.pgcat.gate'], array_keys($audit->read()['findings']), 'with the finding this boot came to report');
+
+        if (PHP_OS_FAMILY !== 'Windows') {
+            $this->assertSame(0o666, fileperms($this->auditFile) & 0o777, 'and left open to the next boot that does not share this account');
+        }
+    }
+
+    /**
+     * The two files a write leaves behind — the record and the `.lock` it was held on — are
+     * both writable by whoever boots next, whichever account this one was.
+     *
+     * The record was already handed back; the lock was the half nothing repaired, and it fails
+     * the same way: `fopen(…, 'c')` refuses a 0644 lock for another account, so the next boot
+     * would write unlocked and report a lock it could not take. The lock is handed back when it
+     * is opened rather than when it is released, so a boot killed while holding it leaves the
+     * file usable too — which is what this test reads as well as the mode.
+     */
+    public function test_the_record_and_its_lock_are_left_writable_for_the_next_boot(): void
+    {
+        $audit = $this->audit();
+        $this->putRecord([]);
+
+        $audit->report($audit->read(), [new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        )], checked: ['swrr.pgcat.gate']);
+
+        foreach ([$this->auditFile, $this->auditFile . '.lock'] as $path) {
+            clearstatcache(true, $path);
+
+            $this->assertFileExists($path);
+            $this->assertTrue(is_writable($path), "the next boot cannot open {$path} for writing");
+
+            if (PHP_OS_FAMILY !== 'Windows') {
+                $this->assertSame(0o666, fileperms($path) & 0o777, "{$path} is left under this account's umask");
+            }
+        }
+
+        // The repair half: a lock another account left read-only is made writable before the
+        // open, so the second boot's write is serialised and lands rather than going ahead
+        // unlocked and saying so.
+        $lock = $this->auditFile . '.lock';
+
+        if (chmod($lock, 0o444)) {
+            clearstatcache(true, $lock);
+
+            if (!is_writable($lock)) {
+                $audit->report($audit->read(), [new BootAuditFinding(
+                    key: 'swrr.audit.store_probe_seconds.off',
+                    warning: 'The probe is switched off.',
+                    resolution: 'The probe runs again.',
+                )], checked: ['swrr.audit.store_probe_seconds.off']);
+
+                clearstatcache(true, $lock);
+
+                $this->assertTrue(is_writable($lock), 'the lock the next boot is held on was repaired before the open');
+                $this->assertArrayHasKey(
+                    'swrr.audit.store_probe_seconds.off',
+                    $audit->read()['findings'],
+                    'and the write behind it landed',
+                );
+            }
+        }
+    }
+
+    /**
      * A lock another boot holds for longer than this one is willing to wait is the one write left
      * that can still lose an entry, so it is named rather than hidden — and it is named *while*
      * the write goes ahead, because the settings this boot checked are still worth recording and a

@@ -8,6 +8,7 @@ use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\SwitchValue;
+use Uak35\WeightedDbManager\Support\WritableFile;
 use DateTimeImmutable;
 use DateTimeZone;
 
@@ -374,10 +375,23 @@ final class PgcatConfigFlipper
         };
 
         $this->lockAcquirer = $lockAcquirer ?? static function (string $file): array {
+            // The lock is one of the files a flip leaves behind, and the next run may be a
+            // different account — the per-minute entry and the shell an operator ran are the
+            // ordinary pair. A 0644 lock cannot be opened for writing at all, so that run would
+            // report a lock it could not take instead of one nobody holds. The first call repairs
+            // a lock another account left read-only, before the open can refuse it; the second
+            // covers the file the open may have just created under this process's umask. Written
+            // on the way in rather than on release, so a run killed while holding it leaves the
+            // file usable too.
+            WritableFile::handBack($file);
+
             $fp = @fopen($file, 'c');
             if ($fp === false) {
                 return [false, null];
             }
+
+            WritableFile::handBack($file);
+
             $acquired = @flock($fp, LOCK_EX | LOCK_NB);
             return [$acquired, $fp];
         };
@@ -952,13 +966,7 @@ final class PgcatConfigFlipper
      */
     private function stateFileWritable(): bool
     {
-        if (is_file($this->stateFile)) {
-            return is_writable($this->stateFile);
-        }
-
-        $directory = dirname($this->stateFile);
-
-        return is_dir($directory) && is_writable($directory);
+        return WritableFile::canWrite($this->stateFile);
     }
 
     /**
@@ -3674,10 +3682,23 @@ final class PgcatConfigFlipper
             @mkdir($dir, 0755, true);
         }
 
-        @file_put_contents(
+        // A state file another account left read-only is repaired before the write, or the
+        // silenced `file_put_contents` below loses the run's record with no line to say so —
+        // the same fault the boot audit repairs on its record, one file over.
+        WritableFile::handBack($this->stateFile);
+
+        $written = @file_put_contents(
             $this->stateFile,
             json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
         );
+
+        // The state file is written in place, so its mode survives a rewrite — which is exactly
+        // why it needs handing back: the first writer is not necessarily the account that reads
+        // and rewrites it next, and the run after it would otherwise rewrite nothing and report
+        // a state it cannot record.
+        if ($written !== false) {
+            WritableFile::handBack($this->stateFile);
+        }
     }
 
     private function readLastMode(): ?string

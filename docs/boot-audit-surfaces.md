@@ -141,9 +141,10 @@ the container's entrypoint writes, and the `.lock` companion the audit record is
 the record *file* itself is not on it, because `swrr.audit.file.unwritable` below is that path's
 reading and the object that owns the record is the one that judges it. Two are the store probe's own states —
 `swrr.audit.store_probe_seconds.off` for a probe switched off on purpose, and
-`swrr.audit.file.unwritable` for the record that throttles it, which is the one finding whose own
-record can never hold its date — and they are keyed because the row reporting them has to be able
-to say how long the installation has been unable to check its store. Filing all of those under
+`swrr.audit.file.unwritable` for the record that throttles it — a boot repairs a read-only record
+before deciding, so only a file this account cannot change is left without its own date — and they
+are keyed because the row reporting them has to be able to say how long the installation has been
+unable to check its store. Filing all of those under
 `pgcat` would put twenty-five keys' worth of claims inside one feature's block, and a finding about
 the weight formula would disappear for an installation that has no pgcat wiring at all.
 

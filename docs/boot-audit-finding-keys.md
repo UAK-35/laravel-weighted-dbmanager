@@ -298,8 +298,15 @@ took.
 The remaining ground is a record that cannot be written at all. A directory that accepts no
 file is answered the way the store probe answers it — none of this runs: the merge is not
 attempted because its result has nowhere to go, and the lock is not asked for eight times over
-a filesystem that will not let this process open it. A read-only deploy pays a stat, and the
-finding the boot logged is the whole of what an operator gets.
+a filesystem that will not let this process open it. A record another account left read-only is
+not that state: the boot repairs it before anything is decided — `Support\WritableFile::handBack()`,
+the same call a write's release makes and the one a flip hands its state file and lock back with —
+so the probe runs, the findings are built against the record it can now use, and the write lands.
+The lock the write is held on is repaired and handed back too, on either side of the open: a 0644
+`.lock` is one the next account cannot open for writing at all, and a read-only one is one *this*
+boot cannot, so the write would go ahead unlocked and say so. A file this account may not change
+(another owner, an ACL) still pays a stat, and the finding the boot logged is the whole of what an
+operator gets.
 
 ### The two windows, measured rather than argued
 
@@ -330,6 +337,7 @@ last writer — that run is the lock's half, and it is the one a merge alone can
 | the collision is not remembered as a state | (same test — one standing finding, and it is the finding's) |
 | the louder of two findings is the one the record keeps, in either order | `BootAuditTest::test_the_record_keeps_the_louder_of_two_findings_that_share_a_key` (two data sets) |
 | equally loud findings keep the first, and the line says so | `BootAuditTest::test_two_findings_of_the_same_level_keep_the_first_of_the_pair` |
+| a boot repairs a read-only record before writing, so the finding lands and the mode is left writable | `BootAuditTest::test_a_boot_that_finds_the_record_read_only_repairs_it_and_writes` |
 | the boot survives it | all three: `report()` returns, the record is written, nothing is rethrown |
 | the provider's own list has no shared key | `WeightedDatabaseServiceProviderTest::test_no_two_findings_of_one_boot_share_a_key` |
 | a record another boot wrote mid-boot is *merged*, not replaced, age and all | `BootAuditTest::test_an_entry_another_boot_recorded_mid_boot_survives_this_boots_write` |
