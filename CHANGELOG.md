@@ -84,17 +84,6 @@
   keeps that transport and is asked one name at a time. Measured against the suite's barrier fixture:
   twelve silent pools at a 500 ms budget took 0.514 s in one wave and 12.48 s through the one-name
   path.
-- **The pool probe's port comes from the pgcat file the flip already reads, and from nowhere
-  else.** `swrr.pgcat.pool_probe.port` (and `SWRR_PGCAT_POOL_PROBE_PORT`) let an installation arm
-  the probe on a port its pooler never stated, and a file that named none fell back to pgcat's
-  convention, `6432` — so an installation whose pooler listens elsewhere, or whose file could not be
-  read, dialed an address that reported silence as if the pooler were down. The setting is gone and
-  there is no convention: `PoolProbe::port()` reads `[general] port` from `config_path`, the file the
-  process is running on, and answers null when it names no dialable port. The flipper then builds no
-  probe, so nothing is asked and the surfaces say the probe is not armed instead of reporting a
-  silence the pooler never produced. The host is still configured, because `[general] host` is a
-  bind address (`0.0.0.0`) rather than one a client can dial, and a variant's port is still never
-  read: it moves with a flip.
 - **The handoff note's refusal of a pending-set count no longer stops at the number vocabulary.**
   `HANDOFF.md`'s size sentence names `git status --short` rather than a number, because a count of
   uncommitted paths is a fact about one working tree; `HandoffTest` held it to that by asking
@@ -371,6 +360,21 @@
   the shape report cannot disagree about which lines name a pool. A test built from the pooler's own
   file — a `[general]` block, one pool with `users.0` and `shards.0` sub-tables, and a second pool
   declared by those sub-tables alone — pins one name per pool and no sub-table among them.
+
+### Removed
+
+- **The pool probe's port is no longer a setting: `swrr.pgcat.pool_probe.port` and
+  `SWRR_PGCAT_POOL_PROBE_PORT` are gone.** The key let an installation arm the probe on a port its
+  pooler never stated, and a file that named none fell back to pgcat's convention, `6432` — so an
+  installation whose pooler listens elsewhere, or whose file could not be read, dialed an address
+  that reported silence as if the pooler were down. There is no replacement to set: `PoolProbe::port()`
+  reads `[general] port` from `config_path`, the file the process is running on, and answers null
+  when it names no dialable port — so a published copy still naming the key should drop it, and an
+  installation whose probe stops being armed after this release is one whose pooler file names no
+  port. The flipper then builds no probe, so nothing is asked and the surfaces say the probe is not
+  armed instead of reporting a silence the pooler never produced. The host is still configured,
+  because `[general] host` is a bind address (`0.0.0.0`) rather than one a client can dial, and a
+  variant's port is still never read: it moves with a flip.
 
 ## 0.2.0-alpha5 - 2026-10-18
 
