@@ -11,6 +11,7 @@ use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\HostAddress;
 use Uak35\WeightedDbManager\Support\PinnedQuery;
 use Uak35\WeightedDbManager\Support\SwitchValue;
 use Illuminate\Http\JsonResponse;
@@ -126,10 +127,18 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * "pgcat": null and "audit": {"available": false} instead of failing to build the
      * route. Both have a default for that reason: the container falls back to it when a
      * dependency cannot be built.
+     *
+     * `$hostIp` is the third reading and the only one the suite cannot take from the machine it
+     * runs on: an address answers a fact about the host, and a test that read its own `eth1`
+     * would be asserting something about CI. It is a closure rather than a value because the
+     * address is read while a response is built, not while a container is built, and it is null
+     * by default so the controller resolves without one — the shipped reading is
+     * `HostAddress::ipv4()`.
      */
     public function __construct(
         private readonly ?PgcatConfigFlipper $pgcat = null,
         private readonly ?BootAudit $audit = null,
+        private readonly ?\Closure $hostIp = null,
     ) {
     }
 
@@ -707,6 +716,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      *   ok: bool|null,
      *   latency_ms: float|null,
      *   error: string|null,
+     *   host_ip: string|null,
      * }
      */
     private function pinnedProbe(array $pinned): array
@@ -723,6 +733,11 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'ok' => null,
             'latency_ms' => null,
             'error' => null,
+            // The host's own address, read whether or not the query runs: it is metadata about
+            // where the request was answered, not part of what `select 1` asked. The key is
+            // always present and never feeds `status` — a null here is a reading this host
+            // cannot make, which is not a database that failed.
+            'host_ip' => $this->hostIp(),
         ];
 
         if (!$switch['on']) {
@@ -737,6 +752,22 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         $probe['error'] = $asked['error'];
 
         return $probe;
+    }
+
+    /**
+     * The address of the host answering this request, or null when it cannot be read.
+     *
+     * The optional closure is the suite's way in: an address is a fact about the machine, and a
+     * test that read this host's `eth1` would be asserting CI's interfaces rather than the payload.
+     * The shipped reading is `HostAddress::ipv4()`, taken here rather than at construction because
+     * the address belongs to the moment the response is built.
+     */
+    private function hostIp(): ?string
+    {
+        /** @var \Closure(): ?string $read */
+        $read = $this->hostIp ?? static fn (): ?string => HostAddress::ipv4();
+
+        return $read();
     }
 
     /**

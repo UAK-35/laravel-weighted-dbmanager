@@ -121,6 +121,81 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
+     * The address the request was answered on. It is read from the host, so the reading is injected
+     * rather than taken from the machine running the suite: an assertion on this host's `eth1`
+     * would be an assertion about CI.
+     */
+    public function test_the_pinned_block_reports_the_hosts_eth1_address(): void
+    {
+        $this->app->instance(
+            DatabaseHealthController::class,
+            new DatabaseHealthController(hostIp: static fn (): ?string => '10.0.3.17'),
+        );
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pinned.host_ip', '10.0.3.17')
+            ->assertJsonPath('pinned.ok', true);
+    }
+
+    /**
+     * A host with no readable address — no `eth1`, a disabled function, a link-local address —
+     * still answers the endpoint, with the key present and `null`. The field is a reading, not a
+     * condition: a missing address must not make a healthy database look degraded.
+     */
+    public function test_the_pinned_block_reports_a_null_host_ip_when_eth1_cannot_be_read(): void
+    {
+        $this->app->instance(
+            DatabaseHealthController::class,
+            new DatabaseHealthController(hostIp: static fn (): ?string => null),
+        );
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pinned.checked', true)
+            ->assertJsonPath('pinned.ok', true);
+
+        $this->assertArrayHasKey('host_ip', $response->json('pinned'));
+        $this->assertNull($response->json('pinned.host_ip'));
+    }
+
+    /**
+     * The host's address is metadata about where the request was answered, not part of the query,
+     * so switching the query off cannot switch it off too. A payload with `checked: false` and no
+     * `host_ip` would make a consumer's key list depend on a setting it has nothing to do with.
+     */
+    public function test_the_host_ip_survives_a_switched_off_pinned_query(): void
+    {
+        $this->app->instance(
+            DatabaseHealthController::class,
+            new DatabaseHealthController(hostIp: static fn (): ?string => '10.0.3.17'),
+        );
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', false);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('pinned.checked', false)
+            ->assertJsonPath('pinned.ok', null)
+            ->assertJsonPath('pinned.host_ip', '10.0.3.17');
+    }
+
+    /**
      * The regression this exists for: a state store that answers cannot make the endpoint say
      * a database answered. No `read` list is declared, so nothing else in the payload is a
      * probe result, and the store is healthy — the endpoint is still `degraded`.

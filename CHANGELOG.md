@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Added
+
+- **`/health/db` says which host answered it: `pinned.host_ip`.** The payload named the connection
+  it was about — `pinned.connection`, `pinned.source` — and whether that connection could run
+  `select 1`, but it could not name the process that answered. Behind a load balancer, a rolling
+  deploy or a pooler per replica, "the database is reachable" and "the database is reachable from
+  *this* container" are different claims, and two responses with no host identity left an operator
+  comparing them with nothing to compare. The pinned block now carries the IPv4 address of `eth1`
+  on the serving host, read by `HostAddress::ipv4()` with PHP's own `net_get_interfaces()` — no
+  shell, no `ip`, no extension, one syscall per response, so a health route opens no process it
+  does not already open. The field is `null` when the address does not exist — interface absent
+  (Docker's default bridge is `eth0`), down, IPv6-only, link-local only, or the runtime lists the
+  function in `disable_functions` — and that `null` is a reading rather than a failure: it never
+  feeds `status`, never appears in `errors`, and never writes a log line. A warning from the call
+  is suppressed and its `false` return becomes the `null` case, because a Laravel error handler
+  would otherwise turn a missing address into a 500. Link-local `169.254.0.0/16` is skipped rather
+  than published as an address nothing routes to; where an interface carries several IPv4
+  addresses the first is the primary, and neither the hostname nor another interface is ever
+  consulted in its place. The key is appended after `error` so no documented order moves, and it
+  is composed independently of `swrr.health.pinned_query`: switching the query off leaves
+  `checked: false` beside a `host_ip` that is still there, because the address describes the host
+  rather than the statement. There is no new setting: the interface is fixed to `eth1` by the
+  field's contract, and the promotion for deployments that serve on `eth0` is recorded as a
+  config-generation change rather than taken now. `DatabaseHealthController` takes the reading
+  through an optional injectable closure, which is how the suite asserts the payload without
+  asserting the interfaces of the machine it runs on.
+
 ### Changed
 
 - **The front-door pool sweep asks every declared pool in one wave, under one timeout budget.** When

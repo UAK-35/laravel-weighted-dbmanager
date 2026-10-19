@@ -726,7 +726,8 @@ So the controller runs one statement — `select 1` — on the connection
 application's own path, so a failure is the failure a request would have had. The
 answer is the `pinned` block, `status` is `ok` only when it came back, and the block
 carries the connection, its driver, the config key the name came from, the query, the
-latency, and the driver's own error when there is one:
+latency, the driver's own error when there is one, and the address of the host that
+answered:
 
 ```json
 {
@@ -740,7 +741,8 @@ latency, and the driver's own error when there is one:
         "refused": null,
         "ok": false,
         "latency_ms": 48.41,
-        "error": "SQLSTATE[08006] [7] connection to server at \"localhost\" (::1), port 5432 failed: fe_sendauth: no password supplied (Connection: pgsql_proxy, SQL: select 1)"
+        "error": "SQLSTATE[08006] [7] connection to server at \"localhost\" (::1), port 5432 failed: fe_sendauth: no password supplied (Connection: pgsql_proxy, SQL: select 1)",
+        "host_ip": "10.0.3.17"
     }
 }
 ```
@@ -753,6 +755,19 @@ is neither on nor off resolves to the default and is reported as `refused`, so a
 cannot be what silences the check. On a large installation the query is one statement on
 one connection per poll, which is the cost this endpoint is worth: the alternative is a
 load balancer promoting a revision that cannot reach its database.
+
+The block also names where the request was answered. `pinned.host_ip` is the IPv4 address of
+`eth1` on the serving host, read with PHP's own `net_get_interfaces()` — no shell, no `ip`, no
+DNS — so two responses can be told apart when a load balancer, a rolling deploy or a pooler per
+replica is in front of the route. Behind a proxy it is still the container's address, not the
+caller's and not the node's. It is `null` when that interface cannot be read: absent (Docker's
+default bridge names it `eth0`), down, IPv6-only, link-local only (`169.254.0.0/16`, where DHCP
+failed), or the runtime has disabled the function. `null` is a reading rather than a failure — it
+never moves `status` — and it is deliberately not guessed from the hostname, from a connected
+socket or from another interface. The field is present whether or not `swrr.health.pinned_query`
+left the query on, because it describes the host rather than the statement. The decision, the
+rejected alternatives and the deployment check are in
+[docs/health-host-ip.md](docs/health-host-ip.md).
 
 Alongside it the payload carries one `pgcat` block — the same
 snapshot `db:replica-status` prints and `db:pgcat-flip --status` shows, so the three
@@ -770,7 +785,8 @@ cannot disagree about whether flipping is active:
         "refused": null,
         "ok": true,
         "latency_ms": 1.21,
-        "error": null
+        "error": null,
+        "host_ip": "10.0.3.17"
     },
     "replicas": {
         "pgsql": {

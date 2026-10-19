@@ -191,14 +191,14 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=f7cbad6
-  --> exit 1: the inventory is out of step with the tree at f7cbad6
-      files.tsv: 1 line(s) stale
-      methods.tsv: 3 line(s) stale
+php bin/inventory.php --check --at=628ca9e
+  --> exit 1: the inventory is out of step with the tree at 628ca9e
+      files.tsv: 2 line(s) stale
+      methods.tsv: 4 line(s) stale
       surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 50 files, 257 public methods, 289 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 0: inventory is current — 51 files, 259 public methods, 289 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -234,11 +234,12 @@ the tree.
 | File | What it is |
 |---|---|
 | `.agents/skills/lpr-issue/SKILL.md` | the skill that records an LPR fault as a markdown document: the `/lpr-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in |
+| `docs/health-host-ip.md` | the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip` |
 | `docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
 | `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
 | `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
-| `tests/Support/pool-probe-server.php` | the sweep fixture: a loopback listener that accepts every connection before answering any, so a serial sweep fails the barrier rather than merely slowing down, plus a silent mode that holds the connections open |
-| `tests/Unit/Pgcat/PoolProbeSweepTest.php` | the concurrent sweep held against that fixture — one wave for the answers, one budget for silence, the sentinel in the same wave, and an empty or refused sweep |
+| `src/Support/HostAddress.php` | the interface reader: `net_get_interfaces()` behind one null-answering call, and the pure `from()` that decides absent, down, IPv6-only, link-local and several-address listings without touching the machine |
+| `tests/Unit/Support/HostAddressTest.php` | the reader held against fixtures rather than this host: the published address, every state that answers `null`, the primary of several, and the refusal to fall back to another interface |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -255,10 +256,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `f7cbad6` — *docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back* |
+| HEAD | `628ca9e` — *feat: the pool probe asks every declared pool in one wave* |
 | `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
-| Unpushed | 14 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 7, feat 6, fix 1 |
+| Unpushed | 15 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 7, feat 7, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -287,6 +288,7 @@ travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+628ca9e  feat: the pool probe asks every declared pool in one wave
 f7cbad6  docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back
 79750a6  fix: a read-only audit record is repaired, and the files this package writes stay writable
 dbb9482  feat: the pool probe reads the pooler's own inventory, on the port its file states
@@ -296,7 +298,6 @@ c65aa7e  docs: the records state what the probe dials, and how often a repair is
 db752f8  feat: both surfaces print the endpoint they dialled and the rate this container repairs at
 373dc7f  feat: the flip asks its pools one question with one policy, and dates the repairs it makes
 17eef52  feat: the probe can read a port out of the pooler's own file
-1662181  docs: the rehearsal's step list says why the pool read is reported rather than performed
 ```
 <!-- /handoff:log -->
 
@@ -309,8 +310,8 @@ register the range is ten commits longer than the ceiling, so the listing stops 
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
 is *unsatisfied* at this register — `HEAD` is twenty commits past `origin/dev` — so a `v0.2.0` needs the
-push below first, and after it only the Unreleased section, which carries twenty entries where the
-release this cycle cut promoted sixteen. The plan in section 3 is what a run would print once the push
+push below first, and after it only the Unreleased section, which carries twenty-one entries where
+the release this cycle cut promoted sixteen. The plan in section 3 is what a run would print once the push
 is done.
 
 The push itself goes through PowerShell 7 and nothing else; `PUSHING.md` is the runbook, and
@@ -330,8 +331,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5` |
 | The latest of them | `v0.2.0-alpha5` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 20 entries — 11 added, 2 fixed, 7 changed |
-| The notes weigh as | minor — eleven additions beside seven changes, which is the rung they take |
+| `## Unreleased` at the basis | 21 entries — 11 added, 2 fixed, 8 changed |
+| The notes weigh as | minor — eleven additions beside eight changes, which is the rung they take |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -339,7 +340,7 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries eleven entries under `### Added`, two under `### Fixed` beside seven under
+and the section carries eleven entries under `### Added`, two under `### Fixed` beside eight under
 `### Changed` at the register, which the weighing reads as `minor`. The register is therefore a
 branch whose release would publish the pool probe's two surfaces, its console reading and its
 one-wave sweep, the flip's repair history and the repair rate — a `minor` after a prerelease, with

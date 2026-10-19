@@ -76,7 +76,7 @@ setStore	src/Database/Weighted/WeightedDatabaseManager.php	Uak35\WeightedDbManag
 setTimeWindow	src/Database/Weighted/WeightedDatabaseManager.php	Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager	1/1 ?TimeWindowResolver $timeWindow
 store	src/Database/Weighted/WeightedDatabaseManager.php	Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager	0/0 
 timeWindow	src/Database/Weighted/WeightedDatabaseManager.php	Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager	0/0 
-__construct	src/Http/Controllers/DatabaseHealthController.php	Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController	0/2 private readonly ?PgcatConfigFlipper $pgcat=, private readonly ?BootAudit $audit=
+__construct	src/Http/Controllers/DatabaseHealthController.php	Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController	0/3 private readonly ?PgcatConfigFlipper $pgcat=, private readonly ?BootAudit $audit=, private readonly ?\Closure $hostIp=
 index	src/Http/Controllers/DatabaseHealthController.php	Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController	0/0 
 exitCode	src/Pgcat/DryRunResult.php	Uak35\WeightedDbManager\Pgcat\DryRunResult	0/0 
 failed	src/Pgcat/DryRunResult.php	Uak35\WeightedDbManager\Pgcat\DryRunResult	3/3 string $mode, string $error, array $steps
@@ -232,6 +232,8 @@ string	src/Support/ConfigValue.php	Uak35\WeightedDbManager\Support\ConfigValue	1
 resolve	src/Support/ConnectorInUse.php	Uak35\WeightedDbManager\Support\ConnectorInUse	2/2 Repository $config, Container $container
 keys	src/Support/DeploymentContract.php	Uak35\WeightedDbManager\Support\DeploymentContract	0/0 
 requirements	src/Support/DeploymentContract.php	Uak35\WeightedDbManager\Support\DeploymentContract	0/0 
+from	src/Support/HostAddress.php	Uak35\WeightedDbManager\Support\HostAddress	2/2 array|false $interfaces, string $interface
+ipv4	src/Support/HostAddress.php	Uak35\WeightedDbManager\Support\HostAddress	0/1 string $interface=
 run	src/Support/PinnedQuery.php	Uak35\WeightedDbManager\Support\PinnedQuery	1/1 string $connection
 describeRejected	src/Support/ReaderDays.php	Uak35\WeightedDbManager\Support\ReaderDays	1/1 array $rejected
 inIsoRange	src/Support/ReaderDays.php	Uak35\WeightedDbManager\Support\ReaderDays	1/1 array $days

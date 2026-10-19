@@ -8,8 +8,8 @@ release: a name that is not on this page is not part of the published API.
 
 | the record | rows |
 | --- | ---: |
-| files shipped | 50 |
-| public methods | 257 |
+| files shipped | 51 |
+| public methods | 259 |
 | config keys | 66 |
 | public constants | 160 |
 | environment variables read | 49 |
@@ -149,7 +149,7 @@ from here is a key a deployed config stops receiving.
 
 ## PHP API
 
-48 classes, interfaces, traits and enums.
+49 classes, interfaces, traits and enums.
 
 | class | methods | file |
 | --- | ---: | --- |
@@ -193,6 +193,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Support\ConfigValue` | 6 | `src/Support/ConfigValue.php` |
 | `Uak35\WeightedDbManager\Support\ConnectorInUse` | 1 | `src/Support/ConnectorInUse.php` |
 | `Uak35\WeightedDbManager\Support\DeploymentContract` | 2 | `src/Support/DeploymentContract.php` |
+| `Uak35\WeightedDbManager\Support\HostAddress` | 2 | `src/Support/HostAddress.php` |
 | `Uak35\WeightedDbManager\Support\PinnedQuery` | 1 | `src/Support/PinnedQuery.php` |
 | `Uak35\WeightedDbManager\Support\ReaderDays` | 5 | `src/Support/ReaderDays.php` |
 | `Uak35\WeightedDbManager\Support\ReaderWindows` | 5 | `src/Support/ReaderWindows.php` |
@@ -458,7 +459,7 @@ No public methods of its own.
 
 | method | requires | arguments |
 | --- | ---: | --- |
-| `__construct()` | 0 of 2 | `private readonly ?PgcatConfigFlipper $pgcat=, private readonly ?BootAudit $audit=` |
+| `__construct()` | 0 of 3 | `private readonly ?PgcatConfigFlipper $pgcat=, private readonly ?BootAudit $audit=, private readonly ?\Closure $hostIp=` |
 | `index()` | 0 of 0 | — |
 
 ### `Uak35\WeightedDbManager\Pgcat`
@@ -787,6 +788,15 @@ Members: `BINDING_PREFIX`.
 | --- | ---: | --- |
 | `keys()` | 0 of 0 | — |
 | `requirements()` | 0 of 0 | — |
+
+#### `Uak35\WeightedDbManager\Support\HostAddress`
+
+`src/Support/HostAddress.php`
+
+| method | requires | arguments |
+| --- | ---: | --- |
+| `from()` | 2 of 2 | `array|false $interfaces, string $interface` |
+| `ipv4()` | 0 of 1 | `string $interface=` |
 
 #### `Uak35\WeightedDbManager\Support\PinnedQuery`
 
