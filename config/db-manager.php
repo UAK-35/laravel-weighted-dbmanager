@@ -31,7 +31,7 @@ return [
     |
     */
 
-    'generation' => 2,
+    'generation' => 3,
 
     /*
     |--------------------------------------------------------------------------
@@ -435,8 +435,19 @@ return [
         // `"pinned":{"checked":false,"ok":null}` and nothing more about reachability,
         // so anything reading it must read that flag rather than the status. A value
         // this is not a switch itself resolves to the documented default, on.
+        //
+        // `host_interface` is the interface `pinned.host_ip` reports: the address of this
+        // container on it, read with PHP's own `net_get_interfaces()` at response time.
+        // `eth1` is the default because that is the interface the field documented before
+        // the key existed; an installation that serves on another name — Docker's default
+        // bridge is `eth0` — names it here. The address is a reading, never a verdict: an
+        // interface that is absent, down or carries only IPv6 or a link-local address
+        // publishes `null` and leaves the status alone, and nothing is guessed from the
+        // hostname or from another interface in its place. A name that is empty or not a
+        // string resolves to `eth1`, so a half-written setting cannot silence the field.
         'health' => [
             'pinned_query' => env('SWRR_HEALTH_PINNED_QUERY', true),
+            'host_interface' => env('SWRR_HEALTH_HOST_INTERFACE', 'eth1'),
         ],
     ],
 

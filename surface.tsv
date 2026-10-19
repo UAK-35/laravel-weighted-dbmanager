@@ -21,6 +21,7 @@ config	generation	config/db-manager.php
 config	grace_seconds	config/db-manager.php
 config	health	config/db-manager.php
 config	host	config/db-manager.php
+config	host_interface	config/db-manager.php
 config	interval_minutes	config/db-manager.php
 config	key	config/app.php
 config	key_prefix	config/db-manager.php
@@ -245,6 +246,7 @@ env	SWRR_ALLOW_LOCAL_FALLBACK	config/db-manager.php
 env	SWRR_AUDIT_FILE	config/db-manager.php
 env	SWRR_AUDIT_STORE_PROBE_SECONDS	config/db-manager.php
 env	SWRR_CONNECTION	config/db-manager.php
+env	SWRR_HEALTH_HOST_INTERFACE	config/db-manager.php
 env	SWRR_HEALTH_PINNED_QUERY	config/db-manager.php
 env	SWRR_KEY_PREFIX	config/db-manager.php
 env	SWRR_PGCAT_BOOT_FILE	config/db-manager.php

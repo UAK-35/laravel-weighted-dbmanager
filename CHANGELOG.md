@@ -4,6 +4,23 @@
 
 ### Added
 
+- **The interface `pinned.host_ip` reads is now a setting, and the published config's generation is
+  3.** The field shipped fixed to `eth1`, which is the right answer on a host with a secondary
+  interface and the wrong one on Docker's default bridge — there the interface is `eth0`, and every
+  such installation published `null` for a name it had no way to change from configuration.
+  `swrr.health.host_interface` (`SWRR_HEALTH_HOST_INTERFACE`) now names it, with `eth1` as the
+  documented default: the name the field carried before the key existed, so a published copy that
+  predates it keeps behaving as it did. The resolution is forgiving in one direction and strict in
+  the other — a value that is empty, whitespace-only or not a string falls back to `eth1` rather than
+  silencing the field, while a readable name is used as it is, and a name this host does not carry
+  answers `null` exactly as an absent interface does. Nothing is validated against a list and
+  nothing is guessed from the hostname or from another interface: the kernel's answer decides. The
+  address still never moves `status`, and it is still published whether or not
+  `swrr.health.pinned_query` left the query on. Adding the key raises `ConfigSchema::GENERATION` from
+  2 to 3 and the sample with it; `v0.2.0` is named for both generations it ships, because the number
+  describes a key set rather than a release. A copy published at generation 2 reads `eth1` from its
+  own default and is told to republish, which is the one cost of the change and the reason it was
+  written down as a promotion before it was taken.
 - **`/health/db` says which host answered it: `pinned.host_ip`.** The payload named the connection
   it was about — `pinned.connection`, `pinned.source` — and whether that connection could run
   `select 1`, but it could not name the process that answered. Behind a load balancer, a rolling

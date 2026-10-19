@@ -34,7 +34,14 @@ namespace Uak35\WeightedDbManager\Support;
  */
 final class HostAddress
 {
-    /** The interface the pinned block reports, fixed by that block's contract. */
+    /**
+     * The interface the pinned block reports unless the configuration names another.
+     *
+     * `swrr.health.host_interface` is the setting; this is the documented default and the name the
+     * field carried before the setting existed. An installation that serves on `eth0` — Docker's
+     * default bridge — names it there, and a name that is empty or not a string resolves back to
+     * this one rather than silencing the field.
+     */
     public const INTERFACE = 'eth1';
 
     /**

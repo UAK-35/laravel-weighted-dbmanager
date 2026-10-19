@@ -191,14 +191,14 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=628ca9e
-  --> exit 1: the inventory is out of step with the tree at 628ca9e
-      files.tsv: 2 line(s) stale
-      methods.tsv: 4 line(s) stale
-      surface.tsv: 1 line(s) stale
+php bin/inventory.php --check --at=de6fa2c
+  --> exit 1: the inventory is out of step with the tree at de6fa2c
+      files.tsv: 1 line(s) stale
+      methods.tsv: 1 line(s) stale
+      surface.tsv: 3 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 51 files, 259 public methods, 289 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 0: inventory is current — 51 files, 259 public methods, 291 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -234,12 +234,9 @@ the tree.
 | File | What it is |
 |---|---|
 | `.agents/skills/lpr-issue/SKILL.md` | the skill that records an LPR fault as a markdown document: the `/lpr-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in |
-| `docs/health-host-ip.md` | the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip` |
 | `docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
 | `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
 | `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
-| `src/Support/HostAddress.php` | the interface reader: `net_get_interfaces()` behind one null-answering call, and the pure `from()` that decides absent, down, IPv6-only, link-local and several-address listings without touching the machine |
-| `tests/Unit/Support/HostAddressTest.php` | the reader held against fixtures rather than this host: the published address, every state that answers `null`, the primary of several, and the refusal to fall back to another interface |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -256,10 +253,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `628ca9e` — *feat: the pool probe asks every declared pool in one wave* |
+| HEAD | `de6fa2c` — *feat: /health/db says which host answered it, as pinned.host_ip* |
 | `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
-| Unpushed | 15 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 7, feat 7, fix 1 |
+| Unpushed | 16 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 7, feat 8, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -288,6 +285,7 @@ travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+de6fa2c  feat: /health/db says which host answered it, as pinned.host_ip
 628ca9e  feat: the pool probe asks every declared pool in one wave
 f7cbad6  docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back
 79750a6  fix: a read-only audit record is repaired, and the files this package writes stay writable
@@ -297,7 +295,6 @@ c65aa7e  docs: the records state what the probe dials, and how often a repair is
 703b228  docs: the rehearsal's step table lists the variant-shape read it already performs
 db752f8  feat: both surfaces print the endpoint they dialled and the rate this container repairs at
 373dc7f  feat: the flip asks its pools one question with one policy, and dates the repairs it makes
-17eef52  feat: the probe can read a port out of the pooler's own file
 ```
 <!-- /handoff:log -->
 

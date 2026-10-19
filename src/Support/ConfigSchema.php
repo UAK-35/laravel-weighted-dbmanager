@@ -67,7 +67,7 @@ final class ConfigSchema
      * those is something a published copy has to be republished to keep working. `RELEASED_IN` is
      * raised with it.
      */
-    public const GENERATION = 2;
+    public const GENERATION = 3;
 
     /**
      * The release that introduced each generation, for the warning that names one.
@@ -84,9 +84,13 @@ final class ConfigSchema
     public const RELEASED_IN = [
         // The key set the row reads was first published by alpha5: the generation itself, and the
         // schedule watchdog's `schedule.stale_after_missed_runs`. The key set v0.2.0 ships adds
-        // the repair rate's two settings beside it, which is generation 2.
+        // the repair rate's two settings beside it, which is generation 2, and the health
+        // endpoint's `host_interface` beside those, which is generation 3. Both are introduced by
+        // the same unreleased version: a generation is named for the release that first ships its
+        // key set, and v0.2.0 is the one that ships both.
         1 => 'v0.2.0-alpha5',
         2 => 'v0.2.0',
+        3 => 'v0.2.0',
     ];
 
     /** Not instantiable — a utility class with only static methods over config values. */

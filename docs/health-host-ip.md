@@ -1,7 +1,7 @@
 # Which host answered the request?
 
-A design record for `pinned.host_ip` in `GET /health/db`, `HostAddress::ipv4()`, and the interface
-name that field is fixed to.
+A design record for `pinned.host_ip` in `GET /health/db`, `HostAddress::ipv4()`, and the
+`swrr.health.host_interface` setting that names the interface it reads.
 
 The endpoint already says which *connection* the payload is about — `pinned.connection` and
 `pinned.source` — and whether that connection can answer `select 1`. Neither says which container
@@ -18,8 +18,9 @@ Everything below is implemented in `src/Support/HostAddress.php` and
 
 ## The answer in one line
 
-**The pinned block carries the IPv4 address of `eth1` on the serving host, read with
-`net_get_interfaces()`, and answers `null` rather than a guess when that address does not exist.**
+**The pinned block carries the IPv4 address of the configured interface — `eth1` unless
+`swrr.health.host_interface` says otherwise — read with `net_get_interfaces()`, and answers `null`
+rather than a guess when that address does not exist.**
 
 ```json
 "pinned": {
@@ -94,21 +95,37 @@ become a 500.
 
 ---
 
-## Why the interface is fixed to `eth1`
+## Why the interface name is a setting
 
-The field was asked for as `eth1`, and a `swrr.health.host_interface` key was considered and not
-taken: it would raise the published config's generation (`docs/config-generations.md`), need a
-schema release row, a README row, a doctor state and a republish cycle for every installation — for
-a field whose name is already decided here. If a deployment turns out to serve on `eth0`, the
-promotion is written down: add the key with `eth1` as its documented default, raise the generation,
-and keep `HostAddress::INTERFACE` as the fallback. Docker's default bridge is exactly that case, and
-it is documented as such rather than silently accommodated.
+The field first shipped fixed to `eth1`, with the promotion to a key written down rather than taken:
+the key would raise the published config's generation (`docs/config-generations.md`), need a schema
+release row and a README row, and cost every installation a republish to receive it. That cost has
+now been paid, because Docker's default bridge names the interface `eth0` and every installation on
+it was publishing `null` for a name it could not change from configuration.
+
+`swrr.health.host_interface` is the setting; `eth1` is its documented default — the name the field
+carried before the key existed, so a copy that predates the key keeps behaving as it did. The
+resolution is deliberately forgiving in one direction and strict in the other: a value that is
+empty, whitespace-only or not a string falls back to `eth1` rather than silencing the field, while a
+readable name is used as it is, and a name this host does not have answers `null` in the payload
+exactly as an absent interface does. The name is never validated against a list and never guessed:
+the kernel's answer decides.
+
+The key raises the config generation from 2 to 3, which is the whole of what that number is for — a
+published copy behind it reads `eth1` from its own default and is told to republish.
+
+```php
+'health' => [
+    'pinned_query' => env('SWRR_HEALTH_PINNED_QUERY', true),
+    'host_interface' => env('SWRR_HEALTH_HOST_INTERFACE', 'eth1'),
+],
+```
 
 The address is the *serving* host's. An FPM worker, a CLI command and a queue worker in one
-container see the same `eth1`; a health request answered by a different pod sees that pod's `eth1`.
-It is not the node's address and not the caller's — a proxy in front of the route does not change
-what is published, which is why the deployment check compares the payload against `ip` inside the
-same container.
+container see the same interface; a health request answered by a different pod sees that pod's. It
+is not the node's address and not the caller's — a proxy in front of the route does not change what
+is published, which is why the deployment check compares the payload against `ip` inside the same
+container.
 
 ---
 
@@ -143,28 +160,34 @@ same container.
 | the payload carries it | `DatabaseHealthControllerTest::test_the_pinned_block_reports_the_hosts_eth1_address` |
 | `null` is still `200`/`ok` | `DatabaseHealthControllerTest::test_the_pinned_block_reports_a_null_host_ip_when_eth1_cannot_be_read` |
 | it survives the query switch | `DatabaseHealthControllerTest::test_the_host_ip_survives_a_switched_off_pinned_query` |
+| the configured name is the one read | `DatabaseHealthControllerTest::test_the_configured_interface_name_is_the_one_read` |
+| an absent or unusable name answers `eth1` | `DatabaseHealthControllerTest::test_an_unset_or_unusable_interface_name_falls_back_to_eth1` |
 
 The controller's default reading is never exercised by the suite on purpose: that would assert the
 interfaces of the machine running it. The injectable `?\Closure` is how the payload half is tested
-without that, and a test that reads this host's `eth1` would be a test about the host.
+without that — it is handed the interface name, so returning the name proves the setting reached
+the reader — and a test that read this host's interfaces would be a test about the host.
 
 ---
 
 ## How to see it fail correctly
 
-Inside the container, not on a development host:
+Inside the container, not on a development host — `$if` is whatever
+`swrr.health.host_interface` names, `eth1` unless the installation changed it:
 
 ```bash
-php -r '$i = net_get_interfaces(); var_export($i["eth1"] ?? null);'
-ip -4 -o addr show dev eth1
+IFACE=eth1
+IFACE="$IFACE" php -r '$i = net_get_interfaces(); var_export($i[getenv("IFACE")] ?? null);'
+ip -4 -o addr show dev "$IFACE"
 curl -fsS http://127.0.0.1/health/db | jq -r '.pinned.host_ip'
 ```
 
-- `host_ip` is `null` and `php -r` prints `NULL` for `eth1` → the deployment names the interface
-  `eth0` (the Docker default) or has no secondary interface; the field is behaving, the contract is
-  not what that installation needs.
-- `host_ip` is `null` but `ip` shows an address → the address is link-local, the interface is down,
-  or `net_get_interfaces` is disabled (`php -r 'var_dump(function_exists("net_get_interfaces"));'`).
+- `host_ip` is `null` and `php -r` prints `NULL` for the name → the host does not have that
+  interface: `swrr.health.host_interface` names a name this deployment does not carry, and the
+  field is behaving — `eth1` on a Docker default bridge is the ordinary case.
+- `host_ip` is `null` but `ip` shows an address for that name → the address is link-local, the
+  interface is down, or `net_get_interfaces` is disabled
+  (`php -r 'var_dump(function_exists("net_get_interfaces"));'`).
 - the two disagree → the request is answered by a different process or network namespace than the
   shell, or a proxy is in front of the route.
 

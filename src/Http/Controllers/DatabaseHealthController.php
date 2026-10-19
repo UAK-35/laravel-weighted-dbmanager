@@ -129,11 +129,12 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * dependency cannot be built.
      *
      * `$hostIp` is the third reading and the only one the suite cannot take from the machine it
-     * runs on: an address answers a fact about the host, and a test that read its own `eth1`
+     * runs on: an address answers a fact about the host, and a test that read its own interface
      * would be asserting something about CI. It is a closure rather than a value because the
-     * address is read while a response is built, not while a container is built, and it is null
-     * by default so the controller resolves without one — the shipped reading is
-     * `HostAddress::ipv4()`.
+     * address is read while a response is built, not while a container is built; it takes the
+     * interface name the configuration chose, so a test can assert that the name reached the
+     * reader without opening a socket. It is null by default so the controller resolves without
+     * one — the shipped reading is `HostAddress::ipv4()`.
      */
     public function __construct(
         private readonly ?PgcatConfigFlipper $pgcat = null,
@@ -737,7 +738,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             // where the request was answered, not part of what `select 1` asked. The key is
             // always present and never feeds `status` — a null here is a reading this host
             // cannot make, which is not a database that failed.
-            'host_ip' => $this->hostIp(),
+            'host_ip' => $this->hostIp($this->hostInterface()),
         ];
 
         if (!$switch['on']) {
@@ -755,19 +756,40 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
     }
 
     /**
-     * The address of the host answering this request, or null when it cannot be read.
+     * The address of the declared interface on the host answering this request, or null when it
+     * cannot be read.
      *
      * The optional closure is the suite's way in: an address is a fact about the machine, and a
-     * test that read this host's `eth1` would be asserting CI's interfaces rather than the payload.
-     * The shipped reading is `HostAddress::ipv4()`, taken here rather than at construction because
-     * the address belongs to the moment the response is built.
+     * test that read this host's interface would be asserting CI's interfaces rather than the
+     * payload. It is given the name the configuration chose, so the name half is testable without
+     * a socket. The shipped reading is `HostAddress::ipv4()`, taken here rather than at
+     * construction because the address belongs to the moment the response is built.
      */
-    private function hostIp(): ?string
+    private function hostIp(string $interface): ?string
     {
-        /** @var \Closure(): ?string $read */
-        $read = $this->hostIp ?? static fn (): ?string => HostAddress::ipv4();
+        /** @var \Closure(string): ?string $read */
+        $read = $this->hostIp ?? static fn (string $name): ?string => HostAddress::ipv4($name);
 
-        return $read();
+        return $read($interface);
+    }
+
+    /**
+     * The interface name the configuration declares, or the documented default.
+     *
+     * `swrr.health.host_interface` is a name rather than a list: one interface is what the field
+     * reports, and a name that is empty, whitespace or not a string is the setting somebody did not
+     * finish writing — `eth1` is what the field documented before the key existed, so the fallback
+     * is that name rather than an empty read. A name that does not exist on this host is not a
+     * configuration fault here: it answers `null` in the payload, the same as an absent interface.
+     */
+    private function hostInterface(): string
+    {
+        $declared = trim(ConfigValue::string(
+            config('db-manager.swrr.health.host_interface'),
+            HostAddress::INTERFACE,
+        ));
+
+        return $declared === '' ? HostAddress::INTERFACE : $declared;
     }
 
     /**

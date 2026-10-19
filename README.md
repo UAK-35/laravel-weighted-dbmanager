@@ -253,6 +253,7 @@ next to the `read` list being weighted.
 | `swrr.read_path.timeout_ms`      | `SWRR_READ_PATH_TIMEOUT_MS`    | `2000`                       | How long one endpoint's reading may take to connect before it is reported as one that did not answer, in milliseconds — rounded up to whole seconds, because that is the unit the driver takes. It bounds the *connect* and not the statement, so an endpoint that is not there costs this bound rather than the driver's own default, which is what keeps a preflight from being made to wait on it |
 | `swrr.pgcat`                     | `SWRR_PGCAT_*`                 | *(see [Pgcat](#pgcat))*      | Pgcat flipper settings — **PostgreSQL connections only**                              |
 | `swrr.health.pinned_query`       | `SWRR_HEALTH_PINNED_QUERY`     | `true`                       | Whether `GET /health/db` runs one real query — `select 1` — on the connection the package follows before it is allowed to answer `ok` (see [Health endpoint](#health-endpoint)). Read as a **switch**; a value that is not one resolves to the documented default — on — and is reported as `pinned.refused`. Turn it off only where no database exists behind that connection at all — a test fixture, a configuration inspection — because with it off the endpoint's status is the state store's again, and `pinned.checked` is `false`. It is the *endpoint's* switch and reaches nothing else: `db:doctor --real-test` asks the same statement on purpose, and a run a gate passes that flag to is asking its own question |
+| `swrr.health.host_interface`     | `SWRR_HEALTH_HOST_INTERFACE`   | `eth1`                       | The interface `pinned.host_ip` reports: the IPv4 address of this container on that interface, read with PHP's `net_get_interfaces()` while the response is built. `eth1` is the documented default — the name the field carried before the key existed — and Docker's default bridge (`eth0`) is the ordinary reason to change it. A value that is empty, whitespace or not a string resolves to `eth1`; a name this host does not have publishes `null`, exactly as an absent interface does. The address never moves `status`, and the decision is in [docs/health-host-ip.md](docs/health-host-ip.md) |
 
 The sample sets two weekday windows — `10:00–14:20` and `17:00–20:30`, read
 in `swrr.timezone` (UTC) — so reads are served by the weighted replica pool
@@ -757,11 +758,12 @@ one connection per poll, which is the cost this endpoint is worth: the alternati
 load balancer promoting a revision that cannot reach its database.
 
 The block also names where the request was answered. `pinned.host_ip` is the IPv4 address of
-`eth1` on the serving host, read with PHP's own `net_get_interfaces()` — no shell, no `ip`, no
-DNS — so two responses can be told apart when a load balancer, a rolling deploy or a pooler per
-replica is in front of the route. Behind a proxy it is still the container's address, not the
-caller's and not the node's. It is `null` when that interface cannot be read: absent (Docker's
-default bridge names it `eth0`), down, IPv6-only, link-local only (`169.254.0.0/16`, where DHCP
+`swrr.health.host_interface` — `eth1` unless the installation names another — on the serving host,
+read with PHP's own `net_get_interfaces()` — no shell, no `ip`, no DNS — so two responses can be
+told apart when a load balancer, a rolling deploy or a pooler per replica is in front of the route.
+Behind a proxy it is still the container's address, not the caller's and not the node's. It is
+`null` when that interface cannot be read: absent (Docker's default bridge names it `eth0`, so an
+installation there sets the key), down, IPv6-only, link-local only (`169.254.0.0/16`, where DHCP
 failed), or the runtime has disabled the function. `null` is a reading rather than a failure — it
 never moves `status` — and it is deliberately not guessed from the hostname, from a connected
 socket or from another interface. The field is present whether or not `swrr.health.pinned_query`

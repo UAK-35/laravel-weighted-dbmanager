@@ -10,9 +10,9 @@ release: a name that is not on this page is not part of the published API.
 | --- | ---: |
 | files shipped | 51 |
 | public methods | 259 |
-| config keys | 66 |
+| config keys | 67 |
 | public constants | 160 |
-| environment variables read | 49 |
+| environment variables read | 50 |
 | public properties | 14 |
 | enum cases | 0 |
 
@@ -47,6 +47,7 @@ from here is a key a deployed config stops receiving.
 | `grace_seconds` | `config/db-manager.php` |
 | `health` | `config/db-manager.php` |
 | `host` | `config/db-manager.php` |
+| `host_interface` | `config/db-manager.php` |
 | `interval_minutes` | `config/db-manager.php` |
 | `key` | `config/app.php` |
 | `key_prefix` | `config/db-manager.php` |
@@ -116,6 +117,7 @@ from here is a key a deployed config stops receiving.
 | `SWRR_AUDIT_FILE` | `config/db-manager.php` |
 | `SWRR_AUDIT_STORE_PROBE_SECONDS` | `config/db-manager.php` |
 | `SWRR_CONNECTION` | `config/db-manager.php` |
+| `SWRR_HEALTH_HOST_INTERFACE` | `config/db-manager.php` |
 | `SWRR_HEALTH_PINNED_QUERY` | `config/db-manager.php` |
 | `SWRR_KEY_PREFIX` | `config/db-manager.php` |
 | `SWRR_PGCAT_BOOT_FILE` | `config/db-manager.php` |

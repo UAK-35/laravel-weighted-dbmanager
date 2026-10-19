@@ -32,6 +32,7 @@ the key set rather than about the code.
 |---|---|---|
 | 1 | `v0.2.0-alpha5` | the generated key set the row reads: the generation itself, and the schedule watchdog's `schedule.stale_after_missed_runs` |
 | 2 | `v0.2.0` | the repair rate's two settings, `pgcat.pool_repairs.window_seconds` and `pgcat.pool_repairs.max_repairs` — the reading [pool-repair-rate.md](pool-repair-rate.md) is about |
+| 3 | `v0.2.0` | the health endpoint's `swrr.health.host_interface`, naming the interface `pinned.host_ip` reads — the setting [health-host-ip.md](health-host-ip.md) is about. Two generations can share a release: the number describes a key set, and v0.2.0 ships both of these |
 
 `ConfigSchema::RELEASED_IN` is the map, and `ConfigSchemaTest::test_every_generation_names_the_release_that_introduced_it`
 holds an entry for every generation the class ships, so a generation added without a release named

@@ -129,7 +129,7 @@ class DatabaseHealthControllerTest extends TestCase
     {
         $this->app->instance(
             DatabaseHealthController::class,
-            new DatabaseHealthController(hostIp: static fn (): ?string => '10.0.3.17'),
+            new DatabaseHealthController(hostIp: static fn (string $interface): ?string => '10.0.3.17'),
         );
 
         Route::get('/health/db', [DatabaseHealthController::class, 'index']);
@@ -153,7 +153,7 @@ class DatabaseHealthControllerTest extends TestCase
     {
         $this->app->instance(
             DatabaseHealthController::class,
-            new DatabaseHealthController(hostIp: static fn (): ?string => null),
+            new DatabaseHealthController(hostIp: static fn (string $interface): ?string => null),
         );
 
         Route::get('/health/db', [DatabaseHealthController::class, 'index']);
@@ -180,7 +180,7 @@ class DatabaseHealthControllerTest extends TestCase
     {
         $this->app->instance(
             DatabaseHealthController::class,
-            new DatabaseHealthController(hostIp: static fn (): ?string => '10.0.3.17'),
+            new DatabaseHealthController(hostIp: static fn (string $interface): ?string => '10.0.3.17'),
         );
 
         Route::get('/health/db', [DatabaseHealthController::class, 'index']);
@@ -193,6 +193,65 @@ class DatabaseHealthControllerTest extends TestCase
         $response->assertJsonPath('pinned.checked', false)
             ->assertJsonPath('pinned.ok', null)
             ->assertJsonPath('pinned.host_ip', '10.0.3.17');
+    }
+
+    /**
+     * `swrr.health.host_interface` is the name the reader is given. The closure returns the name
+     * it was handed rather than an address, which is how the wiring is asserted without a socket:
+     * a payload that reported the configured name has proved the setting reached the reader.
+     */
+    public function test_the_configured_interface_name_is_the_one_read(): void
+    {
+        $this->app->instance(
+            DatabaseHealthController::class,
+            new DatabaseHealthController(hostIp: static fn (string $interface): ?string => $interface),
+        );
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health', ['pinned_query' => true, 'host_interface' => 'eth7']);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('pinned.host_ip', 'eth7');
+    }
+
+    /**
+     * The setting is optional and its default is the name the field documented before the key
+     * existed. An absent key, a whitespace-only one and one written as something that is not a
+     * string all resolve to `eth1`: a half-written setting must not silence a reading, and a
+     * published copy that predates the key has to keep behaving as it did.
+     */
+    public function test_an_unset_or_unusable_interface_name_falls_back_to_eth1(): void
+    {
+        $this->app->instance(
+            DatabaseHealthController::class,
+            new DatabaseHealthController(hostIp: static fn (string $interface): ?string => $interface),
+        );
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        $this->pinToSQLite(':memory:');
+
+        $cases = [
+            'absent' => null,
+            'empty' => '',
+            'whitespace' => "  \n",
+            'not a string' => ['eth2'],
+        ];
+
+        foreach ($cases as $case => $value) {
+            config()->set('db-manager.swrr.health', array_filter(
+                ['pinned_query' => true, 'host_interface' => $value],
+                static fn (mixed $item): bool => $item !== null,
+            ));
+
+            $response = $this->getJson('/health/db')->assertOk();
+
+            $response->assertJsonPath('pinned.host_ip', 'eth1');
+            $this->assertSame('eth1', $response->json('pinned.host_ip'), "the {$case} setting answers the documented default");
+        }
     }
 
     /**
