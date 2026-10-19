@@ -651,6 +651,12 @@ final class Handoff
         'tests/Unit/Pgcat/PoolProbeAgainstPgcatTest.php' => 'the live fixture: the probe\'s three answers held against a real pgcat from the published image, the console column it corrected, and the front-door ordering the image pins',
         'src/Support/WritableFile.php' => 'the one hand-back for files this package leaves behind — 0666 on the audit record and its lock, a flip\'s state file and its lock, read back from the mode rather than trusted, plus the file-or-directory writability reading the audit and the flipper share',
         'tests/Unit/Support/WritableFileTest.php' => 'the guard on that helper: a read-only file handed back with its contents intact, a missing path answered false and not created, and the file-or-directory reading in both of its shapes',
+        'tests/Support/pool-probe-server.php' => 'the sweep fixture: a loopback listener that accepts every connection before answering any, so a serial sweep fails the barrier rather than merely slowing down, plus a silent mode that holds the connections open',
+        'tests/Unit/Pgcat/PoolProbeSweepTest.php' => 'the concurrent sweep held against that fixture — one wave for the answers, one budget for silence, the sentinel in the same wave, and an empty or refused sweep',
+        'health-db-host-ip-plan.md' => 'the plan for reading eth1\'s IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch',
+        'docs/issues/issue-pgcat-flip-force-mode-readers.md' => 'the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix',
+        'docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md' => 'the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix',
+        '.agents/skills/lpr-issue/SKILL.md' => 'the skill that records an LPR fault as a markdown document: the `/lpr-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
     ];
 
     /**

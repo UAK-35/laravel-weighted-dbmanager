@@ -4,6 +4,22 @@
 
 ### Changed
 
+- **The front-door pool sweep asks every declared pool in one wave, under one timeout budget.** When
+  the console cannot be read, the flipper used `PoolProbe::ask()` once per declared pool and once
+  more for the sentinel, so a pooler that accepted and said nothing cost `swrr.pgcat.pool_probe.timeout_ms`
+  per pool: `/health/db` grew slower with every pool an installation declared, and a health check
+  that scales with the configuration it checks is the one reading that cannot be polled on a large
+  pooler. `PoolProbe::askMany()` opens one non-blocking connection per name with
+  `STREAM_CLIENT_ASYNC_CONNECT` and writes each startup packet and reads each first message through
+  one `stream_select()` loop sharing a single deadline, so the connects are concurrent and the
+  silent case waits out the budget once. Answers come back in the order asked; a name still silent
+  at the deadline is `silent` with the same evidence a single exchange produces. The sentinel travels
+  in the same wave and is published only where no refusal already settled the ordering — one
+  connection inside the budget, not a second wait after it. `PgcatConfigFlipper` asks the batch
+  through `PoolProbe::askMany()` by default; an installation that injected its own `$poolProbe`
+  keeps that transport and is asked one name at a time. Measured against the suite's barrier fixture:
+  twelve silent pools at a 500 ms budget took 0.514 s in one wave and 12.48 s through the one-name
+  path.
 - **The pool probe's port comes from the pgcat file the flip already reads, and from nowhere
   else.** `swrr.pgcat.pool_probe.port` (and `SWRR_PGCAT_POOL_PROBE_PORT`) let an installation arm
   the probe on a port its pooler never stated, and a file that named none fell back to pgcat's

@@ -197,9 +197,10 @@ return [
             // pooler's own, it stays on the connection this probe opened, and a console that
             // cannot be read falls back to the startup packet rather than passing.
             //
-            // The fallback is one PostgreSQL v3 startup packet per declared pool and the first
-            // message back, with `user` as the client name it carries and no password. A
-            // `timeout_ms` that runs out is reported as silence, never as a missing pool, so a
+            // The fallback is one wave of PostgreSQL v3 startup packets, one per declared pool, all
+            // in flight under a single `timeout_ms`, and the first message back from each, with
+            // `user` as the client name it carries and no password. A budget that runs out is
+            // reported as silence, never as a missing pool, so a
             // probe pointed at the wrong address cannot restart a healthy pooler — and a pooler
             // that authenticates *before* it resolves a pool answers every name, so the sweep
             // also asks one control name no configuration declares: a refusal of it is what

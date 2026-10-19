@@ -26,9 +26,10 @@ and the evidence is the pooler's own refusal; a pooler that answered nothing at 
 never repaired, so a probe pointed at the wrong address cannot fail or restart a healthy
 installation; the reading itself asks the pooler for its own inventory first — pgcat's admin console
 lists every pool the process serves, and a declared pool missing from that list is the fault, so the
-verdict does not depend on how the pooler answers an anonymous startup packet; one startup packet
-per pool beside a control name no configuration declares is the fallback where that console cannot
-be read, and there an `answered` pool is proof only if the control was refused; and the reading only
+verdict does not depend on how the pooler answers an anonymous startup packet; one wave of startup
+packets — every declared pool beside a control name no configuration declares, all opened at once
+under a single timeout — is the fallback where that console cannot be read, and there an `answered`
+pool is proof only if the control was refused; and the reading only
 ever happens where an installation has armed `swrr.pgcat.pool_probe.enabled`, because it is the one
 surface in the package that opens a socket.**
 
@@ -161,6 +162,41 @@ pgcat's vocabulary and a paraphrase would stop recognising the fault the day the
 other error is a pool that exists with a different problem, which is an `answered` rather than a
 `missing`. No bytes, or a read that timed out, is `silent`, with the address and the socket's own
 reason beside it.
+
+### Why the fallback is one wave
+
+A sweep that asked each name in turn made the health endpoint's cost the size of the configuration:
+with N declared pools and a pooler that accepts connections but says nothing, that was N exchanges
+each waiting out `timeout_ms`, and `/health/db` got slower the more pools the installation added —
+the check grew with the thing it was checking. The serial shape was the fallback's whole behaviour,
+not a detail of it.
+
+`PoolProbe::askMany()` is the same question asked once. It opens one socket per name with
+`STREAM_CLIENT_ASYNC_CONNECT`, keeps every socket non-blocking, writes each startup packet as its
+socket becomes writable, and reads each first message as it arrives, all inside one `stream_select()`
+loop bounded by a single deadline. The deadline covers the connects, the packets and the reads; a
+name still unanswered when it expires is `silent`, with the same evidence a single exchange produces.
+The answers come back in the order the names were asked, so a caller maps them positionally and a
+pooler's refusal lands on the pool it names rather than on a neighbour.
+
+The sentinel travels in that same wave. It is asked even when a refusal will make it unnecessary —
+the refusal is not known until the answers are in, and waiting for it before asking the sentinel
+would put the second timeout back. Its answer is simply not published when a `missing` pool already
+proves the ordering, which is the same shape the serial sweep produced; the difference is one
+connection inside the budget rather than a second wait outside it.
+
+What was rejected: `pcntl_fork()` or a process per pool (not available in every FPM image, and a
+process tree to reap on a health route); `curl_multi` (it speaks HTTP, not the PostgreSQL handshake);
+ext-parallel (a non-default extension this package would have to require); and a synchronous connect
+followed by non-blocking reads (the connects are where a silent pooler spends its time, so that
+shape would still be serial).
+
+The measurement that settled it is in `PoolProbeSweepTest`, whose fixture accepts every connection
+before answering any — a serial sweep cannot get past its first name there, so the test fails rather
+than merely slows down. Twelve silent pools at a 500 ms budget measured 0.514 s through `askMany()`
+and 12.48 s through the one-name path, on the same fixture. An installation that injected its own
+`$poolProbe` keeps that closure's transport and is still asked one name at a time; the shipped path
+is the batched one.
 
 ### The control name
 

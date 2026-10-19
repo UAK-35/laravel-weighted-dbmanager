@@ -177,6 +177,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $stateFile = null,
         ?string $lockFile = null,
         ?\Closure $poolProbe = null,
+        ?\Closure $poolSweep = null,
         ?\Closure $poolAdmin = null,
         ?\Closure $sleeper = null,
         ?string $auditFile = null,
@@ -232,6 +233,7 @@ class PgcatConfigFlipperTest extends TestCase
             driver: $driver,
             connectionSource: $connectionSource ?? ActiveConnection::DEFAULT_SOURCE,
             poolProbe: $poolProbe,
+            poolSweep: $poolSweep,
             poolAdmin: $poolAdmin,
             sleeper: $sleeper,
             auditFile: $auditFile,
@@ -1750,6 +1752,154 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame('127.0.0.1', $verdict['host']);
         $this->assertSame(7432, $verdict['port']);
         $this->assertSame('tcp://127.0.0.1:7432', $verdict['address']);
+    }
+
+    /**
+     * The shipped front door asks every declared name and the sentinel in one call, and reads the
+     * rows out of that one answer. The batch is the change: a large pool set used to cost one
+     * exchange per name, so the sweep's latency grew with the configuration it was measuring.
+     */
+    public function test_the_sweep_asks_every_name_in_one_batch(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', <<<'TOML'
+        [general]
+        port = 6432
+
+        [pools.writer_db_1.users.0]
+        username = "postgres"
+
+        [pools.reader_db_2.users.0]
+        username = "postgres"
+        TOML);
+
+        $calls = 0;
+        $asked = [];
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolSweep: function (array $names) use (&$calls, &$asked): array {
+            $calls++;
+            $asked = $names;
+
+            return array_map(static function (string $database): array {
+                $control = str_starts_with($database, 'weighted-dbmanager-control-');
+
+                return [
+                    'status' => $control ? 'missing' : 'answered',
+                    'evidence' => $control
+                        ? sprintf('pgcat is running but has no pool "%s"', $database)
+                        : sprintf('the pooler answered for pool "%s"', $database),
+                    'host' => '127.0.0.1',
+                    'port' => 7432,
+                    'address' => 'tcp://127.0.0.1:7432',
+                ];
+            }, $names);
+        });
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertSame(1, $calls, 'one wave, however many pools the variant declares');
+        $this->assertSame(['writer_db_1', 'reader_db_2'], array_slice($asked, 0, 2));
+        $this->assertStringStartsWith('weighted-dbmanager-control-', $asked[2] ?? '');
+        $this->assertCount(3, $asked);
+
+        $this->assertSame(['answered', 'answered'], array_column($verdict['pools'], 'status'));
+        $this->assertTrue($verdict['discriminates'], 'the batch refused the sentinel, so the answers are proof');
+        $this->assertSame('missing', $verdict['control']['status'] ?? null);
+    }
+
+    /**
+     * A batch that answered the sentinel as readily as the pools says nothing about the pools: the
+     * same answer would have come back for a name no configuration declares, so the rows are
+     * `indeterminate` rather than `answered` — the sentinel is in the wave, not a second reading.
+     */
+    public function test_a_batch_that_answers_everything_marks_the_pools_indeterminate(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n[pools.writer_db_1]\n");
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolSweep: static fn (array $names): array => array_map(
+            static fn (string $database): array => [
+                'status' => 'answered',
+                'evidence' => sprintf('the pooler answered for "%s"', $database),
+                'address' => 'tcp://127.0.0.1:7432',
+            ],
+            $names,
+        ));
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertSame(
+            ['indeterminate', 'indeterminate'],
+            array_column($verdict['pools'], 'status'),
+            'an answered sentinel makes every pool answer indeterminate',
+        );
+        $this->assertSame('answered', $verdict['control']['status'] ?? null);
+        $this->assertFalse($verdict['discriminates']);
+        $this->assertTrue($verdict['warned']);
+    }
+
+    /**
+     * A refusal in the wave already proves the pooler's ordering, so the sentinel's answer is not
+     * published. It was still asked — that is what makes the reading one budget rather than two —
+     * and this test holds both halves of that: one call, and no control in the verdict.
+     */
+    public function test_a_refusal_leaves_the_sentinel_asked_but_unpublished(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.missing_reader]\n[pools.reader_db_1]\n");
+
+        $asked = [];
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolSweep: function (array $names) use (&$asked): array {
+            $asked = $names;
+
+            return array_map(static function (string $database): array {
+                $control = str_starts_with($database, 'weighted-dbmanager-control-');
+                $missing = str_starts_with($database, 'missing_');
+
+                return [
+                    'status' => $control ? 'answered' : ($missing ? 'missing' : 'answered'),
+                    'evidence' => sprintf('the pooler answered about "%s"', $database),
+                ];
+            }, $names);
+        });
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertCount(3, $asked, 'the sentinel travelled with the pools in the same wave');
+        $this->assertNull($verdict['control'], 'a missing pool is proof enough; the sentinel is not published');
+        $this->assertTrue($verdict['discriminates']);
+        $this->assertTrue($verdict['failed']);
+        $this->assertSame(
+            ['missing', 'answered'],
+            array_column($verdict['pools'], 'status'),
+        );
+    }
+
+    /**
+     * A batch that returns fewer rows than it was asked about reports the absent ones as silent
+     * rather than inventing an answer or failing the reading.
+     */
+    public function test_a_batch_missing_an_answer_reports_that_pool_silent(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_1]\n[pools.reader_db_2]\n");
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolSweep: static fn (array $names): array => []);
+
+        $verdict = $flipper->poolProbeVerdict();
+
+        $this->assertSame(['silent', 'silent'], array_column($verdict['pools'], 'status'));
+        $this->assertTrue($verdict['warned']);
+        $this->assertFalse($verdict['failed']);
     }
 
     /**

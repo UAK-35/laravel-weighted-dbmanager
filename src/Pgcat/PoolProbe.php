@@ -50,12 +50,14 @@ namespace Uak35\WeightedDbManager\Pgcat;
  *   pooler over the connection this probe opened.
  *
  *   That is the reading the sweep asks first, because it is the one that does not depend on the
- *   ordering: one connection names every pool the process holds, where the front door needs one
- *   packet per pool and on a pooler that authenticates first still cannot separate a pool from a
- *   name. The startup packet is therefore the fallback, for a console that cannot be read — no
- *   admin credentials in the file, a refusal, a SCRAM challenge, silence — and there the control
- *   name says what its answers are worth. A reading the console could not make is reported as
- *   that rather than as either answer.
+ *   ordering: one connection names every pool the process holds, where the front door still cannot
+ *   separate a pool from a name on a pooler that authenticates first. The startup packet is
+ *   therefore the fallback, for a console that cannot be read — no admin credentials in the file, a
+ *   refusal, a SCRAM challenge, silence — and there the control name says what its answers are
+ *   worth. The fallback is asked as one non-blocking wave (`askMany()`): every name is opened
+ *   together and one deadline bounds the sweep, so a large pool set costs one timeout rather than
+ *   one per pool. A reading the console could not make is reported as that rather than as either
+ *   answer.
  *
  * THE ANSWERS
  *   `answered`  the pooler accepted the pool: it asked for a password, reported parameters, or
@@ -103,7 +105,10 @@ final class PoolProbe
      */
     public const STATUS_INDETERMINATE = 'indeterminate';
 
-    /** How long one pool may take to answer before it is reported as silent, in milliseconds. */
+    /**
+     * How long an exchange may take before it is reported as silent, in milliseconds — one pool in
+     * `ask()`, and the whole wave in `askMany()`.
+     */
     public const DEFAULT_TIMEOUT_MS = 2000;
 
     /**
@@ -213,11 +218,223 @@ final class PoolProbe
 
         [$answer, $error] = ($exchange ?? self::socketExchange())($packet, $address, $timeoutSeconds);
 
+        return self::verdict($host, $port, $database, $answer, $error);
+    }
+
+    /**
+     * Ask the running pooler about every name at once, under one timeout budget.
+     *
+     * One non-blocking connection per name, all opened before the first answer is read, and a single
+     * deadline for the whole sweep: a pooler that accepts and says nothing costs the configured
+     * timeout once rather than once per pool, which is what a large declared set would otherwise
+     * turn into a health check that grows with the configuration. The answers are classified by
+     * `classify()` like any other, and returned in the order the names were given, so a caller can
+     * line them up with the list it passed without a map keyed by a database name.
+     *
+     * The deadline covers the connects, the startup packets and the first message read. A name whose
+     * connection failed, or that was still silent when the budget ran out, is returned as `silent`
+     * with the reason in its evidence — the same shape `ask()` returns for one name, so the rows a
+     * surface builds keep their meaning whether they came from one exchange or many.
+     *
+     * @param list<string> $databases
+     * @return list<array{status: string, database: string, answered: bool, missing: bool, answer: string, evidence: string, host: string, port: int, address: string}>
+     */
+    public static function askMany(
+        string $host,
+        int $port,
+        array $databases,
+        string $user,
+        int $timeoutMs = self::DEFAULT_TIMEOUT_MS,
+    ): array {
+        $address = sprintf('tcp://%s:%d', $host, $port);
+
+        /** @var list<string> $names */
+        $names = [];
+
+        foreach ($databases as $name) {
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+
+        if ($names === []) {
+            return [];
+        }
+
+        $deadline = microtime(true) + max(0.1, $timeoutMs / 1000);
+
+        /** @var array<int, array{stream: resource|null, packet: string, written: int, buffer: string, error: string, done: bool}> $sweep */
+        $sweep = [];
+
+        foreach ($names as $index => $database) {
+            $errno = 0;
+            $errstr = '';
+
+            // Asynchronous connect: the call returns a stream at once and the wait happens in the
+            // one `stream_select()` below, beside every other connection. A synchronous connect
+            // here would put the pool set back on the serial path this method exists to leave.
+            $stream = @stream_socket_client(
+                $address,
+                $errno,
+                $errstr,
+                0,
+                STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT,
+            );
+
+            if (! is_resource($stream)) {
+                $sweep[$index] = [
+                    'stream' => null,
+                    'packet' => '',
+                    'written' => 0,
+                    'buffer' => '',
+                    'error' => is_string($errstr) && $errstr !== ''
+                        ? $errstr
+                        : sprintf('the connection to %s failed', $address),
+                    'done' => true,
+                ];
+
+                continue;
+            }
+
+            @stream_set_blocking($stream, false);
+
+            $sweep[$index] = [
+                'stream' => $stream,
+                'packet' => self::startupPacket($user, $database),
+                'written' => 0,
+                'buffer' => '',
+                'error' => '',
+                'done' => false,
+            ];
+        }
+
+        while (true) {
+            $read = [];
+            $write = [];
+
+            foreach ($sweep as $index => $entry) {
+                if ($entry['done'] || ! is_resource($entry['stream'])) {
+                    continue;
+                }
+
+                if ($entry['written'] < strlen($entry['packet'])) {
+                    $write[$index] = $entry['stream'];
+                } else {
+                    $read[$index] = $entry['stream'];
+                }
+            }
+
+            if ($read === [] && $write === []) {
+                break;
+            }
+
+            $remaining = $deadline - microtime(true);
+
+            // Below a millisecond there is no wait left worth selecting on, and a rounded 0s/0us
+            // timeout would block indefinitely rather than expire.
+            if ($remaining < 0.001) {
+                break;
+            }
+
+            $seconds = (int) floor($remaining);
+            $micros = (int) (($remaining - $seconds) * 1_000_000);
+            $except = null;
+            $ready = @stream_select($read, $write, $except, $seconds, $micros);
+
+            // A signal interrupted the wait: the deadline still decides, so the next pass recomputes
+            // the remaining budget. Nothing was consumed from any socket.
+            if ($ready === false) {
+                continue;
+            }
+
+            if ($ready === 0) {
+                continue;
+            }
+
+            foreach ($write as $index => $stream) {
+                $entry = &$sweep[$index];
+                $chunk = @fwrite($stream, substr($entry['packet'], $entry['written']));
+
+                if ($chunk === false) {
+                    $entry['error'] = sprintf('the connection to %s failed', $address);
+                    self::closeSweepEntry($entry);
+
+                    continue;
+                }
+
+                $entry['written'] += $chunk;
+            }
+
+            unset($entry);
+
+            foreach ($read as $index => $stream) {
+                $entry = &$sweep[$index];
+                $chunk = @fread($stream, self::MAX_ANSWER_BYTES);
+
+                if (is_string($chunk) && $chunk !== '') {
+                    $entry['buffer'] .= $chunk;
+                }
+
+                if (strlen($entry['buffer']) >= self::MAX_ANSWER_BYTES || self::answerComplete($entry['buffer'])) {
+                    self::closeSweepEntry($entry);
+
+                    continue;
+                }
+
+                if ($chunk === false || ($chunk === '' && feof($stream))) {
+                    // An asynchronous connect that was refused is read-ready and then at EOF, with
+                    // no peer ever established. The socket's own account of itself is the only
+                    // reason worth carrying; an accepted connection that closed is silence.
+                    if ($entry['buffer'] === '' && @stream_socket_get_name($stream, true) === false) {
+                        $entry['error'] = sprintf('the connection to %s failed', $address);
+                    }
+
+                    self::closeSweepEntry($entry);
+                }
+            }
+
+            unset($entry);
+        }
+
+        $answers = [];
+
+        foreach ($names as $index => $database) {
+            if (is_resource($sweep[$index]['stream'])) {
+                self::closeSweepEntry($sweep[$index]);
+            }
+
+            $answer = $sweep[$index]['buffer'];
+            $error = $sweep[$index]['error'];
+
+            if ($answer === '' && $error === '') {
+                $error = 'the pooler did not answer';
+            }
+
+            $answers[] = self::verdict($host, $port, $database, $answer, $error);
+        }
+
+        return $answers;
+    }
+
+    /**
+     * One answer as the shape every caller of this class reads.
+     *
+     * The address and the reason a socket never opened are the one part of the verdict the
+     * classifier cannot know — it sees bytes, not a connection — so the silent case's evidence is
+     * completed here rather than guessed at there.
+     *
+     * @return array{status: string, database: string, answered: bool, missing: bool, answer: string, evidence: string, host: string, port: int, address: string}
+     */
+    private static function verdict(
+        string $host,
+        int $port,
+        string $database,
+        string $answer,
+        string $error,
+    ): array {
+        $address = sprintf('tcp://%s:%d', $host, $port);
         $verdict = self::classify($answer, $database);
 
-        // The address and the reason a socket never opened are the one part of the verdict the
-        // classifier cannot know — it sees bytes, not a connection — so the silent case's evidence
-        // is completed here rather than guessed at there.
         $evidence = $verdict['status'] === self::STATUS_SILENT && $error !== ''
             ? sprintf('%s did not answer for pool "%s": %s', $address, $database, $error)
             : $verdict['evidence'];
@@ -233,6 +450,44 @@ final class PoolProbe
             'port' => $port,
             'address' => $address,
         ];
+    }
+
+    /**
+     * Whether the bytes read so far are one whole PostgreSQL message.
+     *
+     * The framing is `[type][int32 length][payload]`, and the length counts itself but not the type
+     * byte. A length outside the range this class reads is treated as complete rather than waited
+     * on: it cannot become readable by reading more, and the classifier reports the bytes it has.
+     */
+    private static function answerComplete(string $buffer): bool
+    {
+        if (strlen($buffer) < 5) {
+            return false;
+        }
+
+        /** @var int $length */
+        $length = unpack('N', substr($buffer, 1, 4))[1] ?? 0;
+
+        if ($length < 4 || $length > self::MAX_ANSWER_BYTES) {
+            return true;
+        }
+
+        return strlen($buffer) >= 1 + $length;
+    }
+
+    /**
+     * Close one sweep entry and stop selecting on it.
+     *
+     * @param array{stream: resource|null, packet: string, written: int, buffer: string, error: string, done: bool} $entry
+     */
+    private static function closeSweepEntry(array &$entry): void
+    {
+        if (is_resource($entry['stream'])) {
+            @fclose($entry['stream']);
+        }
+
+        $entry['stream'] = null;
+        $entry['done'] = true;
     }
 
     /**

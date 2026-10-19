@@ -261,6 +261,15 @@ final class PgcatConfigFlipper
     private readonly ?\Closure $poolProbe;
 
     /**
+     * How every configured pool is asked at once, or null when this installation's probe can only
+     * answer one name at a time. `\Closure(list<string>): list<array>` — one verdict per name, in
+     * the order asked, as `PoolProbe::ask()` returns them. Defaulted beside the single probe, so
+     * the shipped path opens one non-blocking connection per pool under one deadline; a host that
+     * injected `$poolProbe` keeps its own transport, and therefore its own one-at-a-time order.
+     */
+    private readonly ?\Closure $poolSweep;
+
+    /**
      * How the pooler's own admin console lists the pools it holds, or null when that question is
      * not asked. It is the fallback the front door needs: a pooler that authenticates before it
      * resolves a pool answers every name, and the console is the only statement left that names
@@ -312,6 +321,11 @@ final class PgcatConfigFlipper
         // the pooler's answer unexamined. Defaulted from `swrr.pgcat.pool_probe` below, and
         // injected so a test can answer without opening a socket.
         ?\Closure $poolProbe = null,
+        // How every declared pool is asked at once, under one deadline — the shipped reading of the
+        // front door when the console cannot be read. Defaulted beside the single probe below,
+        // and left null when a host injected its own probe: that closure is that host's transport,
+        // and this package should not open a second set of connections behind it.
+        ?\Closure $poolSweep = null,
         // How the pooler's own admin console lists what it holds — the reading the sweep asks
         // first, with the startup packets left for a console that cannot be read. Defaulted below
         // beside the probe, and injected so a test can answer without a console — and so an
@@ -348,6 +362,11 @@ final class PgcatConfigFlipper
         // on gets no closure, so nothing opens a socket on the poll path. The default is only
         // built from a config that asks for it.
         $this->poolProbe = $poolProbe ?? self::defaultPoolProbe($config);
+
+        // Only beside the default probe: a host that injected its own single-name probe has said
+        // how its pooler is reached, and batching names through this package's sockets beside it
+        // would ask the same pooler twice by two different rules.
+        $this->poolSweep = $poolSweep ?? ($poolProbe === null ? self::defaultPoolSweep($config) : null);
 
         // Only beside the default probe: an installation that injected its own probe has said how
         // its pooler is reached, and this package should not open a second connection to the
@@ -1895,16 +1914,22 @@ final class PgcatConfigFlipper
      *   status, its pool names and its own sentence — or the refusal that made the front door the
      *   reading instead, or null when no console was configured.
      *
+     *   The front-door fallback is one wave rather than one exchange per pool: every declared name
+     *   and the control are opened together with `PoolProbe::askMany()`, and a single deadline
+     *   bounds the lot, so a pooler that accepts and says nothing costs the configured timeout once
+     *   instead of once per pool. A name still unanswered at that deadline is `silent`, with the
+     *   same evidence shape a single exchange produces.
+     *
      *   `discriminates` is what makes a front-door `answered` pool a *proof* or only an answer, and
      *   it is only asked on the fallback path. It is read off one control name no configuration
      *   declares: a refusal means the pooler resolves a pool before it authenticates, so `answered`
      *   is evidence the pool exists; an answer means it authenticates first and answers every name,
      *   so every pool that answered is published as `indeterminate` instead — the reading cannot be
-     *   mistaken for a pass, which is what an `answered` pool would have been. `control` is that
-     *   exchange, or null when it was not needed
-     *   — a `missing` pool is itself the proof, and asking it again would be a socket for a fact
-     *   already settled — and null when the console answered, because there was nothing left for
-     *   the control to settle.
+     *   mistaken for a pass, which is what an `answered` pool would have been. The control travels
+     *   in the same wave as the pools, but `control` is published only when no pool was refused: a
+     *   `missing` pool is itself the proof and publishes null, and null is also what the console's
+     *   own answer leaves, because there was nothing left for the control to settle. The sentinel's
+     *   connection is paid for inside the wave rather than as a second wait.
      *
      *   `verified` is whether an `answered` pool is proof it exists: true when the console listed
      *   it or the control was refused; false when neither could be read; null while the control is
@@ -1953,7 +1978,7 @@ final class PgcatConfigFlipper
         // The shape a caller gets whenever nothing was asked, so a surface never has to test for a
         // key's absence to tell "the probe is off" from "the probe is on".
         $unasked = [
-            'enabled' => $this->poolProbe !== null,
+            'enabled' => $this->poolProbe !== null || $this->poolSweep !== null,
             'applicable' => false,
             'answered' => null,
             'discriminates' => null,
@@ -1974,9 +1999,12 @@ final class PgcatConfigFlipper
         // restarts the program, so nothing asks it anything. `enabled` still reports the switch, so
         // a reader can tell an installation that never armed the probe from one that armed it and
         // has no pgcat at all.
-        if ($this->poolProbe === null || !$this->isEnabled()) {
+        if (($this->poolProbe === null && $this->poolSweep === null) || !$this->isEnabled()) {
             return $unasked;
         }
+
+        $single = $this->poolProbe;
+        $sweep = $this->poolSweep;
 
         $mode = $this->resolver->currentModeName();
         $declared = $this->configuredPools($mode);
@@ -1991,7 +2019,7 @@ final class PgcatConfigFlipper
         $probed = ['host' => null, 'port' => null, 'address' => null];
 
         // The pooler's own inventory, asked first: `SHOW POOLS` is one connection for the whole
-        // sweep rather than one startup packet per pool, and it is the process naming the pools it
+        // sweep rather than a front-door exchange per pool, and it is the process naming the pools it
         // serves. Where it can be read it *is* the reading, and the front door is not asked at all
         // — the answerability of a pool then rests on the pooler's list rather than on how it
         // answers an anonymous packet, which is the one thing a pooler may decide before it looks
@@ -2029,15 +2057,32 @@ final class PgcatConfigFlipper
         }
 
         // The console could not be read — no credentials in the pooler's file, a refusal, a
-        // challenge this probe cannot meet, silence — so the front door is asked instead, one
-        // startup packet per pool. Nothing it says is proof on its own: `discriminates` and
-        // `verified` below say what the answers are worth, the reading the console replaced
-        // wherever it could be made.
+        // challenge this probe cannot meet, silence — so the front door is asked instead. Nothing
+        // it says is proof on its own: `discriminates` and `verified` below say what the answers
+        // are worth, the reading the console replaced wherever it could be made.
+        $controlName = PoolProbe::controlName();
+
+        $batched = [];
+
+        if ($sweep !== null) {
+            // One wave: every declared name and the sentinel are asked together, so the whole
+            // reading is covered by the one budget the sweep was given. The sentinel is asked even
+            // when a refusal will make it unnecessary — an extra connection in the same wave is
+            // cheaper than a second wait, and its answer is simply not published when a missing
+            // pool already proves the ordering.
+            $answers = $sweep([...$declared, $controlName]);
+
+            /** @var list<array<string, mixed>> $batched */
+            $batched = is_array($answers) ? array_values($answers) : [];
+        }
+
         $pools = [];
 
-        foreach ($declared as $database) {
-            /** @var array{status?: string, evidence?: string} $verdict */
-            $verdict = ($this->poolProbe)($database);
+        foreach ($declared as $index => $database) {
+            /** @var array<string, mixed> $verdict */
+            $verdict = $sweep !== null
+                ? (is_array($batched[$index] ?? null) ? $batched[$index] : [])
+                : ($single !== null ? $single($database) : []);
 
             $probed = self::probedAddress($probed, $verdict);
             $status = is_string($verdict['status'] ?? null) && $verdict['status'] !== ''
@@ -2057,16 +2102,18 @@ final class PgcatConfigFlipper
         $silent = array_values(array_filter($pools, static fn (array $pool): bool => $pool['status'] === PoolProbe::STATUS_SILENT));
 
         // A refusal of a declared pool already proves this pooler resolves pools before it
-        // authenticates, so the control is asked only when nothing was refused: one extra
-        // exchange that turns "the pooler answered" into "the pool exists" or into "the pooler
-        // answers everything", which no pool's answer alone can do.
+        // authenticates, so the control is published only when nothing was refused: it turns "the
+        // pooler answered" into "the pool exists" or into "the pooler answers everything", which
+        // no pool's answer alone can do. A sweep has already asked it in the same wave and its
+        // answer is used only here; a single-name probe is asked now, because it was not.
         $discriminates = true;
         $control = null;
 
         if ($missing === []) {
-            $controlName = PoolProbe::controlName();
-            /** @var array{status?: string, evidence?: string} $controlVerdict */
-            $controlVerdict = ($this->poolProbe)($controlName);
+            /** @var array<string, mixed> $controlVerdict */
+            $controlVerdict = $sweep !== null
+                ? (is_array($batched[count($declared)] ?? null) ? $batched[count($declared)] : [])
+                : ($single !== null ? $single($controlName) : []);
 
             // The same exchange as the pools, so this only ever fills in for a probe that named an
             // address on the control and not on a pool — never a second endpoint.
@@ -2983,6 +3030,42 @@ final class PgcatConfigFlipper
         $timeout = $endpoint['timeout'];
 
         return static fn (string $database): array => PoolProbe::ask($host, $port, $database, $user, $timeout);
+    }
+
+    /**
+     * The same probe over every declared name at once, under one timeout budget.
+     *
+     * Built from the same endpoint reading as the single probe — `poolProbeEndpoint()` is the one
+     * place the host, the port and the timeout are resolved — so the two closures cannot ask two
+     * different poolers. `PoolProbe::askMany()` opens one non-blocking connection per name and one
+     * deadline for the sweep, which is what keeps a large pool set from turning the fallback into
+     * a wait that grows with the configuration.
+     *
+     * @param array<string, mixed> $config the `swrr.pgcat` block
+     */
+    private static function defaultPoolSweep(array $config): ?\Closure
+    {
+        $endpoint = self::poolProbeEndpoint($config);
+
+        if ($endpoint === null) {
+            return null;
+        }
+
+        $probe = ConfigValue::assoc($config['pool_probe'] ?? null);
+        $user = ConfigValue::string($probe['user'] ?? null, 'postgres');
+        $host = $endpoint['host'];
+        $port = $endpoint['port'];
+        $timeout = $endpoint['timeout'];
+
+        return static function (array $databases) use ($host, $port, $user, $timeout): array {
+            /** @var list<string> $names */
+            $names = array_values(array_filter(
+                $databases,
+                static fn (mixed $name): bool => is_string($name) && $name !== '',
+            ));
+
+            return PoolProbe::askMany($host, $port, $names, $user, $timeout);
+        };
     }
 
     /**

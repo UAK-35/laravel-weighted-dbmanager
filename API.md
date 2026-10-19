@@ -9,7 +9,7 @@ release: a name that is not on this page is not part of the published API.
 | the record | rows |
 | --- | ---: |
 | files shipped | 50 |
-| public methods | 256 |
+| public methods | 257 |
 | config keys | 66 |
 | public constants | 160 |
 | environment variables read | 49 |
@@ -179,7 +179,7 @@ from here is a key a deployed config stops receiving.
 | `Uak35\WeightedDbManager\Pgcat\FlipSchedule` | 10 | `src/Pgcat/FlipSchedule.php` |
 | `Uak35\WeightedDbManager\Pgcat\FlipWindow` | 11 | `src/Pgcat/FlipWindow.php` |
 | `Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper` | 30 | `src/Pgcat/PgcatConfigFlipper.php` |
-| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 8 | `src/Pgcat/PoolProbe.php` |
+| `Uak35\WeightedDbManager\Pgcat\PoolProbe` | 9 | `src/Pgcat/PoolProbe.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleBeat` | 7 | `src/Pgcat/ScheduleBeat.php` |
 | `Uak35\WeightedDbManager\Pgcat\ScheduleCauses` | 4 | `src/Pgcat/ScheduleCauses.php` |
 | `Uak35\WeightedDbManager\Pgcat\SupervisorStep` | 14 | `src/Pgcat/SupervisorStep.php` |
@@ -546,7 +546,7 @@ Members: `DEFAULT_SECONDS`, `SOURCE_NO_STAMP`, `SOURCE_STAMPED`.
 
 | method | requires | arguments |
 | --- | ---: | --- |
-| `__construct()` | 4 of 21 | `private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=, ?\Closure $poolAdmin=, ?ScheduleBeat $beat=, private readonly ?string $auditFile=, private readonly array $connectionPools=, private readonly ?\Closure $hostResolver=` |
+| `__construct()` | 4 of 22 | `private readonly TimeWindowResolver $resolver, private readonly array $config, private readonly string $stateFile, private readonly string $lockFile, ?\Closure $fileCopier=, ?\Closure $commandRunner=, ?\Closure $lockAcquirer=, ?\Closure $lockReleaser=, ?string $timezone=, private readonly ?string $connectionName=, private readonly ?string $driver=, ?SupervisorStep $supervisorStep=, private readonly string $connectionSource=, ?\Closure $sleeper=, ?FlipWindow $window=, ?\Closure $poolProbe=, ?\Closure $poolSweep=, ?\Closure $poolAdmin=, ?ScheduleBeat $beat=, private readonly ?string $auditFile=, private readonly array $connectionPools=, private readonly ?\Closure $hostResolver=` |
 | `appliedMode()` | 0 of 0 | — |
 | `applyCurrentState()` | 0 of 0 | — |
 | `armedReason()` | 0 of 0 | — |
@@ -587,6 +587,7 @@ Members: `DEFAULT_MAX_REPAIRS_PER_WINDOW`, `DEFAULT_REPAIR_WINDOW_SECONDS`, `FIL
 | --- | ---: | --- |
 | `adminPools()` | 3 of 5 | `string $toml, string $host, int $port, int $timeoutMs=, ?\Closure $exchange=` |
 | `ask()` | 4 of 6 | `string $host, int $port, string $database, string $user, int $timeoutMs=, ?\Closure $exchange=` |
+| `askMany()` | 4 of 5 | `string $host, int $port, array $databases, string $user, int $timeoutMs=` |
 | `classify()` | 2 of 2 | `string $answer, string $database` |
 | `controlName()` | 0 of 0 | — |
 | `declaredPools()` | 1 of 1 | `string $toml` |

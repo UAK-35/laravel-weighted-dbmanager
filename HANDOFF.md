@@ -191,14 +191,14 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=8c34ffd
-  --> exit 1: the inventory is out of step with the tree at 8c34ffd
-      files.tsv: 2 line(s) stale
-      methods.tsv: 7 line(s) stale
-      surface.tsv: 4 line(s) stale
+php bin/inventory.php --check --at=f7cbad6
+  --> exit 1: the inventory is out of step with the tree at f7cbad6
+      files.tsv: 1 line(s) stale
+      methods.tsv: 3 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 50 files, 256 public methods, 289 key(s)/member(s), described as v0.2.0-alpha5
+  --> exit 0: inventory is current — 50 files, 257 public methods, 289 key(s)/member(s), described as v0.2.0-alpha5
 ```
 <!-- /handoff:records -->
 
@@ -233,9 +233,12 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `src/Support/WritableFile.php` | the one hand-back for files this package leaves behind — 0666 on the audit record and its lock, a flip's state file and its lock, read back from the mode rather than trusted, plus the file-or-directory writability reading the audit and the flipper share |
-| `tests/Unit/Pgcat/PoolProbeAgainstPgcatTest.php` | the live fixture: the probe's three answers held against a real pgcat from the published image, the console column it corrected, and the front-door ordering the image pins |
-| `tests/Unit/Support/WritableFileTest.php` | the guard on that helper: a read-only file handed back with its contents intact, a missing path answered false and not created, and the file-or-directory reading in both of its shapes |
+| `.agents/skills/lpr-issue/SKILL.md` | the skill that records an LPR fault as a markdown document: the `/lpr-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in |
+| `docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
+| `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
+| `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
+| `tests/Support/pool-probe-server.php` | the sweep fixture: a loopback listener that accepts every connection before answering any, so a serial sweep fails the barrier rather than merely slowing down, plus a silent mode that holds the connections open |
+| `tests/Unit/Pgcat/PoolProbeSweepTest.php` | the concurrent sweep held against that fixture — one wave for the answers, one budget for silence, the sentinel in the same wave, and an empty or refused sweep |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -252,10 +255,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `8c34ffd` — *docs: the published page and the inventories carry the batch's new surface* |
+| HEAD | `f7cbad6` — *docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back* |
 | `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
-| Unpushed | 11 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 6, feat 5 |
+| Unpushed | 14 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 7, feat 6, fix 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -284,6 +287,9 @@ travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+f7cbad6  docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back
+79750a6  fix: a read-only audit record is repaired, and the files this package writes stay writable
+dbb9482  feat: the pool probe reads the pooler's own inventory, on the port its file states
 8c34ffd  docs: the published page and the inventories carry the batch's new surface
 c65aa7e  docs: the records state what the probe dials, and how often a repair is too often
 703b228  docs: the rehearsal's step table lists the variant-shape read it already performs
@@ -291,9 +297,6 @@ db752f8  feat: both surfaces print the endpoint they dialled and the rate this c
 373dc7f  feat: the flip asks its pools one question with one policy, and dates the repairs it makes
 17eef52  feat: the probe can read a port out of the pooler's own file
 1662181  docs: the rehearsal's step list says why the pool read is reported rather than performed
-314e068  feat: the preflight names the paths the package writes, and counts the repairs it has made
-de7b9e7  feat: the pool probe asks a control name, so an answered pool is proof where the pooler answers everything
-5740f32  docs: the read-path cancellations are recipes, and the caller's explanation is its own page
 ```
 <!-- /handoff:log -->
 
@@ -306,7 +309,7 @@ register the range is ten commits longer than the ceiling, so the listing stops 
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
 is *unsatisfied* at this register — `HEAD` is twenty commits past `origin/dev` — so a `v0.2.0` needs the
-push below first, and after it only the Unreleased section, which carries nineteen entries where the
+push below first, and after it only the Unreleased section, which carries twenty entries where the
 release this cycle cut promoted sixteen. The plan in section 3 is what a run would print once the push
 is done.
 
@@ -327,8 +330,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5` |
 | The latest of them | `v0.2.0-alpha5` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 13 entries — 8 added, 0 fixed, 5 changed |
-| The notes weigh as | minor — eight additions beside five changes, which is the rung they take |
+| `## Unreleased` at the basis | 20 entries — 11 added, 2 fixed, 7 changed |
+| The notes weigh as | minor — eleven additions beside seven changes, which is the rung they take |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -336,11 +339,11 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries eight entries under `### Added` beside five under `### Changed` at the
-register, which the weighing reads as `minor`. The register is therefore a branch whose release
-would publish the pool probe's two surfaces and its console reading, the flip's repair history and
-the repair rate — a `minor` after a prerelease, with the version that has no suffix still ahead of
-it. The two repairs the release before this one carried are in `v0.2.0-alpha5`, whose own commit was
+and the section carries eleven entries under `### Added`, two under `### Fixed` beside seven under
+`### Changed` at the register, which the weighing reads as `minor`. The register is therefore a
+branch whose release would publish the pool probe's two surfaces, its console reading and its
+one-wave sweep, the flip's repair history and the repair rate — a `minor` after a prerelease, with
+the version that has no suffix still ahead of it. The two repairs the release before this one carried are in `v0.2.0-alpha5`, whose own commit was
 cut for them rather than for the suffixless version they alone called for.
 
 ### The release that cut this tag, and the three rows it could not write
@@ -485,7 +488,7 @@ repository is not an installation change until each of them happens.
 | PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.26). It is **not on `PATH`** in the shell, so a bare `php` does not resolve — which no longer decides which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
-| Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
+| Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy,lpr-issue}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
 | Checks | `php bin/checks.php --list` names thirteen; use `--only=` subsets. The full run and the whole `tests/` tree both exceed what a single agent command is allowed to take, so run one file or one directory at a time. The whole tree takes about a quarter of an hour on the machine that wrote this note, which is long enough for the JSON report `DbReplicaStatusTest` compares against a second reading of the file to land either side of a second boundary and fail on `checked_at` — a clock rather than a reading. `interpreter` is the one that reads the machine record — it fails on a `php.exe` that is gone, one that starts and cannot read the script it would be run on, one that reports another version, or one below the requirement the record carries. |
 | Style gate | `php bin/tool.php pint --test` (PSR-12). |
 | Static analysis | `phpstan.neon.dist`: level `max`, over `src/` only — a file under `tests/` is style-checked but not analysed. |
