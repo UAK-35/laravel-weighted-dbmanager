@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha7 - 2026-10-20
+
 ### Added
 
 - **Two skills record an LPR fault and an LPR investigation as a markdown document.** `wdm-issue`

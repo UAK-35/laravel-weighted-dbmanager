@@ -195,11 +195,10 @@ php bin/inventory.php --check --at=b49f3ac
   --> exit 1: the inventory is out of step with the tree at b49f3ac
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
-      surface.tsv: 2 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with the tree
-      surface.tsv: 1 line(s) stale
+  --> exit 0: inventory is current — 53 files, 261 public methods, 300 key(s)/member(s), described as v0.2.0-alpha7
 ```
 <!-- /handoff:records -->
 
@@ -309,8 +308,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6` |
-| The latest of them | `v0.2.0-alpha6` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7` |
+| The latest of them | `v0.2.0-alpha7` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 4 entries — 1 added, 3 fixed, 0 changed |
 | The notes weigh as | minor — one addition is the rung that decides it, and the fixes beside it do not raise it |
