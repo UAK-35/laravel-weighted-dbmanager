@@ -139,6 +139,20 @@ final class SupervisorStep
      */
     public const FAULT_UNSPAWNABLE = 'unspawnable';
 
+    /**
+     * supervisorctl ran, and could not reach supervisord: its control socket is missing, refused,
+     * or one this user may not open.
+     *
+     * A fault of its own rather than a kind of `errored`, because the repair is in supervisord's
+     * own configuration and nowhere near the others: `[unix_http_server]` owns the socket and its
+     * mode, and the process a flip runs in is the schedule's user rather than the one that started
+     * the daemon. A task whose socket is `root:root` mode `0700` — which was measured on one — lets
+     * `supervisorctl` answer only for `root`, so a flip refuses *before* it swaps a file and a pool
+     * the pooler cannot serve is never repaired; the sentence names the socket and the two lines
+     * (`chmod=0760`, `chown=root:www-data`) that let the application's group reach it.
+     */
+    public const FAULT_UNREACHABLE = 'unreachable';
+
     public const FAULT_ERRORED = 'errored';
 
     /**
@@ -762,9 +776,26 @@ final class SupervisorStep
                 );
             }
 
-            // supervisorctl's own words for "that program is not mine". A missing socket
-            // also says "no such file", which is a different repair — a user, or a
-            // running supervisord — so the generic fault below keeps it.
+            // The socket supervisorctl opens is not a program: it is missing, refused, or one
+            // this user may not open. A different repair from every branch above — the file is
+            // supervisord's own configuration and the user is the one a flip runs as — and the
+            // state a flip meets *before* it can swap anything, so a pool this pooler cannot
+            // serve is never repaired until it is fixed. Named here rather than left to the
+            // generic fault below, whose sentence says only that the command failed.
+            if (self::looksLikeAnUnreachableSocket($answer)) {
+                return $this->verdict(
+                    usable: false,
+                    fault: self::FAULT_UNREACHABLE,
+                    detail: sprintf(
+                        '%s could not reach supervisord: %s. What it opens is the daemon\'s control socket, not a program — so either supervisord is not running to answer on it, or the user a flip runs as cannot open it. The socket belongs to supervisord\'s own configuration: `[unix_http_server]` names it, and `chmod=0760` with `chown=root:www-data` lets the application\'s group reach it. Until one of the two is fixed a flip refuses before it swaps a file, so a pool the pooler cannot serve is never repaired.',
+                        $bin,
+                        $answerLines,
+                    ),
+                    context: $context,
+                );
+            }
+
+            // supervisorctl's own words for "that program is not mine".
             $unknown = stripos($answer, 'no such group') !== false || stripos($answer, 'no such process') !== false;
 
             if (! $unknown) {
@@ -887,6 +918,36 @@ final class SupervisorStep
         return $exit === 127
             || stripos($answer, 'command not found') !== false
             || stripos($answer, 'is not recognized as an internal or external command') !== false;
+    }
+
+    /**
+     * Whether supervisorctl's answer is about the socket it opened rather than about a program.
+     *
+     * Four refusals arrive in supervisorctl's own words, and they are told apart by what they name
+     * because the repair differs: `no such group`/`no such process` is a name supervisord does not
+     * have, a missing socket says `no such file`, a socket this user may not open says `Permission
+     * denied` (php-supervisor spells it `PermissionError`, `Errno 13`), and a daemon that is not
+     * running says `could not connect` or `Connection refused`. The first is a program fault and
+     * keeps its own branch; the other three are the socket, and none of them can be repaired by
+     * anything this package writes.
+     */
+    private static function looksLikeAnUnreachableSocket(string $answer): bool
+    {
+        foreach ([
+            'no such file',
+            'permission denied',
+            'permissionerror',
+            'errno 13',
+            'could not connect',
+            'connection refused',
+            'econnrefused',
+        ] as $needle) {
+            if (stripos($answer, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

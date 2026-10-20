@@ -2930,6 +2930,55 @@ class PgcatConfigFlipperTest extends TestCase
         // The record itself is here, so its path and mode are its own.
         $this->assertSame($record, $paths['audit_file']['path']);
         $this->assertStringContainsString('mode ', (string) $paths['audit_file']['facts']);
+
+        // The two a flip step never names are described by the table, not by this method: the label
+        // and the cost the row prints are the row's own fields, so the fault list and this inventory
+        // cannot describe one path two ways.
+        $table = (new \ReflectionClassConstant(PgcatConfigFlipper::class, 'UNNAMED_WRITTEN_PATHS'))->getValue();
+
+        $this->assertSame($table['boot_file']['label'], $paths['boot_file']['label']);
+        $this->assertSame($table['boot_file']['cost'], $paths['boot_file']['cost']);
+        $this->assertSame($table['audit_lock']['label'], $paths['audit_lock']['label']);
+        $this->assertSame($table['audit_lock']['cost'], $paths['audit_lock']['cost']);
+    }
+
+    /**
+     * The paths a flip never names are one table, and every row describes itself: the label and the
+     * cost both surfaces print, the config key the record names, where its path comes from, and
+     * whether it is judged only while the record it guards is usable.
+     *
+     * The count in `docs/boot-audit-surfaces.md` is derived from this table's length rather than
+     * restated beside it (`ProseNumbersTest`), which is only honest if a row cannot be added half
+     * described: a missing label or cost is a row the fault list and the inventory can print
+     * differently, and a missing config key is a setting the audit record cannot name. The config
+     * column is also what `fileSettingPaths()` returns, so the record's "where this is written" and
+     * the table are one list rather than two.
+     */
+    public function test_every_path_a_flip_never_names_is_described_by_its_own_row(): void
+    {
+        $table = (new \ReflectionClassConstant(PgcatConfigFlipper::class, 'UNNAMED_WRITTEN_PATHS'))->getValue();
+
+        $this->assertNotSame([], $table, 'the set is data, and an empty table would make every reader of it vacuous');
+
+        foreach ($table as $setting => $row) {
+            $this->assertNotSame('', $row['label'], "{$setting} has the label the row prints");
+            $this->assertNotSame('', $row['cost'], "{$setting} states what an unwritable one costs");
+            $this->assertStringStartsWith('swrr.', $row['config'], "{$setting} names the setting the audit record quotes");
+            $this->assertContains($row['from'], ['boot_file', 'audit_file'], "{$setting} says where its path comes from");
+            $this->assertIsBool($row['needs_record_writable'], "{$setting} says whether it waits for the record");
+        }
+
+        $this->assertSame(
+            array_keys($table),
+            array_keys(PgcatConfigFlipper::fileSettingPaths()),
+            'the record names every setting the table holds, in the order it holds them',
+        );
+
+        $this->assertSame(
+            array_column($table, 'config'),
+            array_values(PgcatConfigFlipper::fileSettingPaths()),
+            'and the config column is the one home for where each is written',
+        );
     }
 
     /**

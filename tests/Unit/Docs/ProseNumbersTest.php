@@ -12,6 +12,7 @@ use RuntimeException;
 use Uak35\WeightedDbManager\Console\Commands\DbDoctor;
 use Uak35\WeightedDbManager\Console\JsonEnvelope;
 use Uak35\WeightedDbManager\Database\Weighted\WeightResolver;
+use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\SupervisorStep;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Tests\Support\DocumentedExitCounts;
@@ -194,6 +195,12 @@ final class ProseNumbersTest extends TestCase
                 'pinned' => '/reason vocabulary is closed at (\w+)/',
                 'counts' => '`WeightResolver::EXCLUSION_REASONS`',
                 'expected' => count(WeightResolver::EXCLUSION_REASONS),
+            ],
+            'the paths on the fault list that are not pgcat\'s, as boot-audit-surfaces.md counts them' => [
+                'record' => 'docs/boot-audit-surfaces.md',
+                'pinned' => '/row prints: (\w+) paths on it are not pgcat/',
+                'counts' => '`PgcatConfigFlipper`\'s `UNNAMED_WRITTEN_PATHS` table',
+                'expected' => count(self::privateConstant(PgcatConfigFlipper::class, 'UNNAMED_WRITTEN_PATHS')),
             ],
             'the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them' => [
                 'record' => 'docs/pgcat-supervisor-preflight.md',

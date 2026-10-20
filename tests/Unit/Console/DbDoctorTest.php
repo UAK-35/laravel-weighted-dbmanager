@@ -1004,6 +1004,11 @@ class DbDoctorTest extends TestCase
      */
     public function test_the_write_paths_row_names_every_path_a_flip_writes_beside_the_mode_found(): void
     {
+        // The store is bound reachable rather than left to the machine: this test is about the
+        // write paths, and a runner with no Redis would make the reachability row fail and take
+        // the exit code with it — the write paths row would be right and the test red.
+        $this->bindRedis(reachable: true);
+
         $paths = $this->armPgcat([
             'boot_file' => $this->tempDir().'/container-booted-at',
         ]);
@@ -1255,8 +1260,9 @@ class DbDoctorTest extends TestCase
         $row = $this->rowContaining($output, 'pgcat supervisor');
 
         $this->assertStringStartsWith('FAIL  pgcat supervisor', $row);
-        $this->assertStringContainsString('could not answer for "pgcat:*" (exit 2)', $row);
+        $this->assertStringContainsString('could not reach supervisord', $row);
         $this->assertStringContainsString('unix:///var/run/supervisor.sock no such file', $row);
+        $this->assertStringContainsString('chmod=0760', $row, 'the row names the repair a preflight can act on');
         $this->assertStringNotContainsString('does not know', $row);
         $this->assertSame(1, $exit);
     }

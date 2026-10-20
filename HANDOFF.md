@@ -191,14 +191,15 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=80b60ff
-  --> exit 1: the inventory is out of step with the tree at 80b60ff
+php bin/inventory.php --check --at=455b3af
+  --> exit 1: the inventory is out of step with the tree at 455b3af
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
       surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 53 files, 261 public methods, 299 key(s)/member(s), described as v0.2.0-alpha6
+  --> exit 1: the inventory is out of step with the tree
+      surface.tsv: 1 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -234,8 +235,10 @@ the tree.
 | File | What it is |
 |---|---|
 | `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
+| `docs/issues/issue-release-v0-2-0-alpha6-ci-red.md` | the record of why the v0.2.0-alpha6 run is red: the tag's commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer |
 | `docs/pgcat-fleet-inspection.md` | the runbook for reading every task of a service rather than one: the three rows that carry loaded pools, supervisor state and flip writability, the ECS Exec loop that asks each task, why the report runs as `www-data` rather than the session's `root`, and what a task-level answer cannot say about the service |
 | `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
+| `tests/Unit/Docs/CommentCountsTest.php` | the guard that holds a count stated in an `src/` comment to the table beside it: each claim read out of the file's own comment tokens, with its expectation derived from the constant or the family the sentence names, so a table that grows a member fails until its sentence says so |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -252,10 +255,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `80b60ff` — *docs: the three pgcat investigations are committed records, not pending work* |
+| HEAD | `455b3af` — *feat: the boundary flip reports the repair it made* |
 | `origin/dev` | `26fe1b0` — *feat: two skills record an LPR issue and an LPR investigation* |
-| Unpushed | 1 commit — the one `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 1 |
+| Unpushed | 4 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 2, feat 2 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -281,9 +284,12 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The one most recent are the ones a reader is most likely to be standing in the middle of:
+The four most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+455b3af  feat: the boundary flip reports the repair it made
+a7e3dfc  feat: a flip that applies a mode reads the pooler back, wherever it ran
+9560607  docs: the gate record and the handoff note are refreshed together
 80b60ff  docs: the three pgcat investigations are committed records, not pending work
 ```
 <!-- /handoff:log -->
@@ -318,8 +324,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6` |
 | The latest of them | `v0.2.0-alpha6` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 1 entry — 1 added, 0 fixed, 0 changed |
-| The notes weigh as | minor — one addition and no changes, which is the rung they take |
+| `## Unreleased` at the basis | 2 entries — 1 added, 1 fixed, 0 changed |
+| The notes weigh as | minor — one addition is the rung that decides it, and a fix beside it does not raise it |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -327,7 +333,7 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries one entry under `### Added`, none under `### Fixed` and none under
+and the section carries one entry under `### Added`, one under `### Fixed` and none under
 `### Changed` at the register, which the weighing reads as `minor`. The register is therefore a
 branch whose release would publish the pool probe's two surfaces, its console reading and its
 one-wave sweep, the flip's repair history and the repair rate — a `minor` after a prerelease, with

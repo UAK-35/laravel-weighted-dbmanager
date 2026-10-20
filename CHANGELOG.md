@@ -17,6 +17,31 @@
 
 ### Fixed
 
+- **A release refuses a tree holding files no commit carries, so a tag cannot publish a handoff note
+  that names records the version does not contain.** `v0.2.0-alpha6` was cut from a checkout with three
+  uncommitted records and a skill rename beside it: `bin/release.php` asked git for tracked changes
+  only, so the tree read as clean, the note's pending table was rendered from exactly the set a clean
+  checkout lacks, and the note's guard — run in that same working tree — could not tell the difference.
+  The runner could, and the tag's own check suite failed on four paths the commit does not carry and a
+  skills index naming a skill the commit had removed. The release now asks `git ls-files --others` as
+  well and refuses before anything is written, naming the files; `--dry-run` warns and lists them, and
+  `--allow-dirty` remains the loud escape. The development tools are pinned exactly (`pint` 1.32.1,
+  `phpstan` 2.3.1, `phpunit` 11.5.57) as well, because a `require-dev` range is resolved afresh on the
+  runner and a gate green on an older phpstan is not a gate a tag can be cut behind. Recorded in
+  `docs/issues/issue-release-v0-2-0-alpha6-ci-red.md`.
+
+- **A supervisor that cannot be reached on its control socket is named, with its repair, rather than
+  reported as a timeout.** `SupervisorStep` already told three refusals apart — `proc_open` disabled,
+  the binary not on `PATH`, the step's own timeout — but a socket that is missing, refused, or one the
+  schedule's user may not open arrived as the generic `errored` and a `could not answer` sentence. It
+  is now its own fault (`unreachable`) with a sentence that names the socket and the two lines in
+  `[unix_http_server]` — `chmod=0760` with `chown=root:www-data` — that let the application's group
+  reach it, or says supervisord is not running to answer on it. That matters because a flip judges the
+  supervisor command *before* it swaps anything: a socket only `root` may open makes every flip refuse
+  before it can repair a pool, which is the state a live task was measured in. The `pgcat supervisor`
+  row prints the same sentence, so `db:doctor` names it before a deploy rehearses a flip, and the
+  deployment contract's `supervisor` requirement now states the socket.
+
 - **A flip that just applied a mode now reads the pooler back, so a signal pgcat ignored is a
   restart rather than a silent read outage.** `forceMode()` — the path `db:pgcat-window-flip` takes
   at every window boundary, and `db:pgcat-flip --force-mode` when an operator runs it — wrote the

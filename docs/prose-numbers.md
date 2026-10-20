@@ -152,7 +152,8 @@ row set now has.
 | the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty-four** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **twelve** values a run can reach" | the README's `kind` table |
 | the reasons a replica is excluded, as pool-exclusions.md counts them | "The reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
-| the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **nine** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
+| the paths on the fault list that are not pgcat's, as boot-audit-surfaces.md counts them | "**two** paths on it are not pgcat's at all" | the `UNNAMED_WRITTEN_PATHS` table on `PgcatConfigFlipper` |
+| the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **ten** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
 | the keys the envelope writes, as command-json-envelope.md counts them | "writes **five** keys, in the same order, for every report", "holds the **five** keys in the order", "one of the **five** core keys" | `JsonEnvelope::CORE` |
 | the metadata floors, as replica-metadata-refusal.md counts them | "the **three** `*_FLOOR` constants" | the `*_FLOOR` constants on `ReplicaMetadata` |
 | the classifier's cases, as replica-metadata-refusal.md counts them | "`ReplicaMetadataTest` (**nine** cases)" | the test methods `ReplicaMetadataTest` declares |
@@ -226,6 +227,15 @@ records rather than trusting them.
   every declared check, one verdict apiece, all green, a duration that can hold its rows. It is the
   `.tsv` records' rule at a different moment: what a record says is evidence, and what the suite can
   ask of evidence is that it be consistent, not that it be re-performed.
+  One of those numbers is the host's rather than the run's. The assertion total counts the
+  assertions that *ran*, and a few tests make their claim only on a host where it holds: the
+  file-mode assertions (`fileperms() & 0o777`) in `BootAuditTest`, `PgcatConfigFlipperTest`, the
+  provider's boot-audit test and `WritableFileTest` are made only off Windows, where `chmod()` is a
+  permission rather than the read-only attribute, and `SupervisorStepTest`'s cmd.exe cases and
+  `PoolProbeAgainstPgcatTest`'s live ones skip on the host they are not about. So two runs of one
+  tree agree — the same 1564 tests and the same total — and a run on the runner and a run on
+  Windows differ by exactly those assertions. That is why the record is held to its *shape* and not
+  its total: the total is a property of the host as well as of the tree.
 - **Numbers about a shape rather than a list.** "One accessor, two renderings", "the two halves",
   "three surfaces", "the two names are two readers, not two opinions" — these describe a design.
   There is no list in the code to compare with, and inventing one would be writing the answer down

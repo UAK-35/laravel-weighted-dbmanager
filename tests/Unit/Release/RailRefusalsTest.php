@@ -141,6 +141,56 @@ final class RailRefusalsTest extends TestCase
     }
 
     /**
+     * The other half of the dirty rail, and the half the alpha6 tag was cut past: a file this
+     * checkout has and no commit carries is not in the version, but every reading taken here sees
+     * it — the handoff note's pending table is derived from exactly that set. A tag cut beside it
+     * publishes a note naming records the version does not contain, and the first machine to
+     * notice is the runner reading a clean checkout.
+     */
+    public function test_a_file_no_commit_carries_has_to_be_committed_first(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+        $repo->write('uncommitted-record.md', "# A record no commit carries\n");
+
+        $run = $repo->release('--weigh', '--yes', '--skip-ci');
+
+        $this->assertSame(1, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->refused(
+                'This tree holds files no commit carries — commit them first, so the tag points at exactly'
+                . ' what was reviewed, and so the handoff note cannot name a record the version does not'
+                . ' contain.',
+            ),
+            $run->describe(),
+        );
+        $this->assertTrue($run->refused('uncommitted-record.md'), $run->describe());
+        $this->assertSame('', $run->plan('next version'), $run->describe());
+        $this->assertSame('v0.1.0', trim($repo->tags()), $run->describe());
+    }
+
+    /**
+     * And the plan says so too, naming the files: a dry run decides nothing, so the rail warns
+     * rather than refuses — the same shape the tracked-file half has had all along.
+     */
+    public function test_the_dry_run_warns_about_files_no_commit_carries(): void
+    {
+        $repo = ReleaseRepo::make(self::FIXED);
+        $repo->tag('v0.1.0');
+        $repo->write('uncommitted-record.md', "# A record no commit carries\n");
+
+        $run = $repo->release('--weigh', '--dry-run');
+
+        $this->assertSame(0, $run->exitCode, $run->describe());
+        $this->assertTrue(
+            $run->said('Working tree holds 1 file(s) no commit carries — ignored for this dry run.'),
+            $run->describe(),
+        );
+        $this->assertTrue($run->said('    uncommitted-record.md'), $run->describe());
+        $this->assertSame('v0.1.0', trim($repo->tags()), $run->describe());
+    }
+
+    /**
      * The same rail's documented exemption: a dry run warns instead of refusing, because a
      * plan decides nothing — and it says so three times, in a note, in the porcelain under
      * that note, and in the plan's own branch line, so a reader who scrolled to the version

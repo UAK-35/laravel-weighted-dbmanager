@@ -171,7 +171,8 @@ declare(strict_types=1);
  *   --push           Push the branch with --follow-tags when done.
  *   --branch=NAME    Branch to release from (default: main).
  *   --remote=NAME    Remote to push to (default: origin).
- *   --allow-dirty    Release even though tracked files have uncommitted changes.
+ *   --allow-dirty    Release even though the tree has uncommitted changes, or files no commit
+ *                    carries.
  *   --ignore-policy  Release even though the declared bump undersells the
  *                    changes. Loud on purpose, and printed in the plan.
  *   --allow-silent-notes
@@ -400,6 +401,33 @@ if ($dirty !== '' && !$options['allow-dirty'] && !$dryRun) {
         'Tracked files have uncommitted changes — commit them first, so the tag points at'
         . ' exactly what was reviewed.' . PHP_EOL . PHP_EOL . $dirty,
     );
+}
+
+// The other half of the same rail, and the one the alpha6 release walked past: a file this
+// checkout has and no commit carries is not in the version, but every reading taken here will
+// still see it. The note is the reading that matters — its pending table is derived from
+// exactly this set, so a tag cut beside it publishes a version that names records the version
+// does not contain, and the first machine to notice is the runner reading a clean checkout.
+// `--untracked-files=no` above answers a different question (what has been edited in a tracked
+// file), so the set is asked for directly.
+$untracked = trim(git($root, ['ls-files', '--others', '--exclude-standard', '--', '.'])['output']);
+
+if ($untracked !== '' && !$options['allow-dirty'] && !$dryRun) {
+    fail(
+        'This tree holds files no commit carries — commit them first, so the tag points at exactly'
+        . ' what was reviewed, and so the handoff note cannot name a record the version does not'
+        . ' contain.' . PHP_EOL . PHP_EOL . $untracked,
+    );
+}
+
+if ($untracked !== '' && $dryRun) {
+    $untrackedPaths = preg_split('/\R/', $untracked) ?: [];
+
+    note(sprintf('Working tree holds %d file(s) no commit carries — ignored for this dry run.', count($untrackedPaths)));
+
+    foreach ($untrackedPaths as $untrackedPath) {
+        echo '    ' . $untrackedPath . PHP_EOL;
+    }
 }
 
 if ($dirty !== '' && $dryRun) {
@@ -2199,7 +2227,7 @@ function usage(): void
           --branch=NAME    Branch to release from (default: main, or dev when the
                           version is a prerelease).
           --remote=NAME    Remote to push to (default: origin).
-          --allow-dirty    Allow uncommitted changes to tracked files.
+          --allow-dirty    Allow uncommitted changes, and files no commit carries.
           --skip-ci        Tag without asking CI: the commit being released has to
                            be the tip of the remote branch and its run has to have
                            passed. Set RELEASE_CI_COMMAND to ask a gh that lives

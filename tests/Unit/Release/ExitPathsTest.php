@@ -223,6 +223,25 @@ final class ExitPathsTest extends TestCase
                 ],
             ],
             [
+                'label' => 'a file no commit carries',
+                'site' => 'refusal',
+                'fixture' => static function (): ReleaseRepo {
+                    $repo = ReleaseRepo::make(self::FIXED);
+                    $repo->tag('v0.1.0');
+                    $repo->write('uncommitted-record.md', "# A record no commit carries\n");
+
+                    return $repo;
+                },
+                'arguments' => ['--weigh', '--yes', '--skip-ci'],
+                'exit' => 1,
+                'refused' => [
+                    'This tree holds files no commit carries — commit them first, so the tag points at exactly'
+                    . ' what was reviewed, and so the handoff note cannot name a record the version does not'
+                    . ' contain.',
+                    'uncommitted-record.md',
+                ],
+            ],
+            [
                 'label' => 'a changelog with no Unreleased heading to promote',
                 'site' => 'refusal',
                 'fixture' => static function (): ReleaseRepo {

@@ -69,19 +69,19 @@
 return [
     'pint' => [
         'package' => 'laravel/pint',
-        'pin' => '^1.25',
+        'pin' => '1.32.1',
         'entry' => 'vendor/laravel/pint/builds/pint',
         'purpose' => 'the formatter behind `composer lint`, and the style gate `composer test:lint` runs',
     ],
     'phpstan' => [
         'package' => 'phpstan/phpstan',
-        'pin' => '^2.0',
+        'pin' => '2.3.1',
         'entry' => 'vendor/phpstan/phpstan/phpstan.phar',
         'purpose' => 'static analysis of src/ at the level phpstan.neon.dist asks for',
     ],
     'phpunit' => [
         'package' => 'phpunit/phpunit',
-        'pin' => '^11.5',
+        'pin' => '11.5.57',
         'entry' => 'vendor/phpunit/phpunit/phpunit',
         'purpose' => 'the test runner the suite is written for',
     ],

@@ -397,6 +397,7 @@ row without one is a rail nobody has driven:
 | Not a git repository | Tags are the version; there is nothing to release into | `test_a_tree_that_is_not_a_repository_is_refused` |
 | `HEAD` is not the expected branch | A release is cut from `main`, a prerelease from `dev` — not from wherever you happen to be (see [prerelease tags](#prerelease-dev-tags)) | `test_a_release_cannot_be_cut_from_dev`, `test_a_prerelease_cannot_be_cut_from_main` |
 | Tracked files are dirty | The tag must point at exactly what was reviewed — commit first. Both readings name the files rather than counting them: the refusal appends git's porcelain, and `--dry-run` only warns, printing the same porcelain under its note | `test_tracked_files_have_to_be_committed_first`, `test_the_dry_run_warns_about_a_dirty_tree_instead_of_refusing` |
+| A file no commit carries | The other half of the same question, and the one the `v0.2.0-alpha6` tag walked past: a record sitting untracked beside the release is not in the version, but every reading taken here still sees it — and `HANDOFF.md`'s pending table is derived from exactly that set, so the tag published a note naming records the version does not contain. The refusal names the files, and `--dry-run` warns instead, printing them under its note | `test_a_file_no_commit_carries_has_to_be_committed_first`, `test_the_dry_run_warns_about_files_no_commit_carries` |
 | CI has not verified the commit being released | A tag is a version and publishing one is not undoable, so the commit a release is cut from has to be one the workflow built and passed: HEAD must be the tip of the remote branch, and its run must have finished green. A commit that was never pushed is not one CI can have an opinion about, a run still going is not a pass, and a failure beside a success is not a pass either. `--skip-ci` overrides it; `--dry-run` reports it instead of refusing | `test_a_failed_run_refuses_the_tag`, `test_a_run_that_has_not_finished_refuses_the_tag`, `test_a_dry_run_reports_the_state_without_refusing`, `test_skip_ci_tags_without_asking_anything` |
 | Target tag already exists | A published tag is never reused or moved (see below) | `test_the_refusal_names_the_next_free_number_in_the_lane` |
 | The version is not newer | A release cannot go backwards | `test_a_version_that_is_not_newer_is_refused` |
@@ -413,8 +414,12 @@ Every test named in this file is checked to exist, so a renamed test is a doc fa
 rather than a row that quietly stops proving anything.
 
 `--allow-dirty` exists for the first release of an already-populated repository,
-where the import and the release are the same commit. Both escapes are tested from the
-side that matters: `test_allow_dirty_releases_the_written_files_and_leaves_the_edit_out`
+where the import and the release are the same commit. It is the escape for both halves of the
+clean-tree rail — an edited tracked file and a file no commit carries — and the limit is the
+same for both: the commit carries the files the release writes, so an untracked record stays
+out of the version even when the release is allowed to proceed, and a note written beside it
+can name a file the tag does not contain. Commit the records, and the rail has nothing to
+refuse. Both escapes are tested from the side that matters: `test_allow_dirty_releases_the_written_files_and_leaves_the_edit_out`
 asserts that the tag holds the reviewed file and not the uncommitted edit, because an
 `--allow-dirty` that swept the tree into the tag would be the rail's own defect one flag
 away.

@@ -117,10 +117,10 @@ final class DeploymentContract
                 'note' => 'the rows report the mode and owner each path was found with rather than judging the user the schedule runs as, which is an entrypoint fact',
             ],
             'supervisor' => [
-                'statement' => 'a supervisor that can be spawned and knows the pooler\'s program',
+                'statement' => 'a supervisor that can be spawned, reached on its control socket, and knows the pooler\'s program',
                 'readings' => ['pgcat supervisor'],
                 'unread' => null,
-                'note' => null,
+                'note' => 'the row tells the four ways the command is refused apart — an empty command, an executable that does not resolve, a socket that is missing or one this user may not open, and a name supervisord does not have — because each is repaired in a different file, and a flip that cannot reach the socket refuses before it swaps anything',
             ],
             'health-check' => [
                 'statement' => 'a container health check that asks the pooler',

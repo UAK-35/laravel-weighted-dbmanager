@@ -475,7 +475,7 @@ try { $this->restartSupervisor(); }
 catch (\Throwable $e) { … $this->rollBack($target, …); }   // ← and put back if it fails anyway
 ```
 
-The first step catches all nine faults this record lists — its own four, and the states beside
+The first step catches all ten faults this record lists — its own four, and the states beside
 them that §2a and §2b tell apart — before the file moves. The second
 covers what a check cannot: supervisorctl answered `status` and then failed the command —
 it raced with a restart, or pgcat would not come back up. Rolling back is the only

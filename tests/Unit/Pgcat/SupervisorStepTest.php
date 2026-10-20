@@ -404,9 +404,37 @@ final class SupervisorStepTest extends TestCase
             ->inspect($binary . ' restart "pgcat:*"');
 
         $this->assertFalse($verdict['usable']);
-        $this->assertSame(SupervisorStep::FAULT_ERRORED, $verdict['fault']);
-        $this->assertStringContainsString('could not answer for "pgcat:*" (exit 2)', $verdict['detail']);
-        $this->assertStringContainsString('no such file', $verdict['detail']);
+        $this->assertSame(SupervisorStep::FAULT_UNREACHABLE, $verdict['fault']);
+        $this->assertStringContainsString('could not reach supervisord', $verdict['detail']);
+        $this->assertStringContainsString('unix:///var/run/supervisor.sock no such file', $verdict['detail']);
+        $this->assertStringContainsString('unix_http_server', $verdict['detail'], 'the sentence names the repair');
+        $this->assertStringContainsString('chmod=0760', $verdict['detail']);
+    }
+
+    /**
+     * The same socket, refused for the other reason: this user may not open it.
+     *
+     * It is the state measured on a live task — `supervisorctl` answered `PermissionError: [Errno 13]
+     * Permission denied` because `/var/run/supervisor.sock` was `root:root` mode `0700` — and the
+     * sentence has to name the repair, because while it stands a flip refuses *before* it swaps a
+     * file, so a pool the pooler cannot serve is never repaired.
+     */
+    public function test_a_socket_this_user_may_not_open_names_the_repair(): void
+    {
+        $binary = $this->fakeBinary($this->tempDir());
+        $ran = [];
+
+        $answer = "unix:///var/run/supervisor.sock refused connection\n"
+            . "<class 'PermissionError'>, [Errno 13] Permission denied: file: /usr/lib/python3/dist-packages/supervisor/xmlrpc.py\n";
+
+        $verdict = (new SupervisorStep($this->recorder($ran, '', $answer, 1)))
+            ->inspect($binary . ' restart "pgcat:*"');
+
+        $this->assertFalse($verdict['usable']);
+        $this->assertSame(SupervisorStep::FAULT_UNREACHABLE, $verdict['fault']);
+        $this->assertStringContainsString('Permission denied', $verdict['detail']);
+        $this->assertStringContainsString('chmod=0760', $verdict['detail']);
+        $this->assertStringContainsString('chown=root:www-data', $verdict['detail']);
     }
 
     public function test_inspect_refuses_a_supervisorctl_that_never_answered(): void
@@ -690,7 +718,7 @@ final class SupervisorStepTest extends TestCase
         $ran = [];
         $socket = (new SupervisorStep($this->recorder($ran, '', 'unix:///var/run/supervisor.sock no such file', 2)))
             ->inspect($binary . ' signal HUP "pgcat:*"');
-        $this->assertSame(SupervisorStep::FAULT_ERRORED, $socket['fault']);
+        $this->assertSame(SupervisorStep::FAULT_UNREACHABLE, $socket['fault']);
         $this->assertSame([$binary . ' status "pgcat:*"'], $ran, 'a socket that is not there is not a name to look up');
         $this->assertNull($socket['discovery_command']);
     }
@@ -776,7 +804,7 @@ final class SupervisorStepTest extends TestCase
             ->inspect($binary . ' restart "pgcat:*"');
 
         $this->assertFalse($socket['usable']);
-        $this->assertSame(SupervisorStep::FAULT_ERRORED, $socket['fault']);
+        $this->assertSame(SupervisorStep::FAULT_UNREACHABLE, $socket['fault']);
         $this->assertNull($socket['state']);
         $this->assertNull($socket['start_command']);
     }

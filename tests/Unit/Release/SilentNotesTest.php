@@ -129,6 +129,9 @@ final class SilentNotesTest extends TestCase
         $repo->tag('v0.1.0');
         $repo->refreshInventory();
         $repo->inventPublicMethod('Fixture\\Thing', 'ghost');
+        // Committed, because a release refuses a tree holding files no commit carries: the
+        // inventory is a record the version ships, and the rail this test is about is the notes'.
+        $repo->commit('chore: the inventory the surface is weighed against');
 
         $run = $repo->release('--weigh', '--yes', '--skip-ci');
 

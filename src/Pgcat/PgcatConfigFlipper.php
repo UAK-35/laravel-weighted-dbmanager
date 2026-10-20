@@ -1290,15 +1290,16 @@ final class PgcatConfigFlipper
             }
         }
 
-        // Two paths this package has to be able to write that no step of a flip names, judged
-        // beside the five above because an unwritable one is the same class of fault as the rest:
+        // The paths this package has to be able to write that no step of a flip names, judged
+        // beside every path above because an unwritable one is the same class of fault as the rest:
         // the boot stamp the container's entrypoint writes, and the `.lock` companion two boots
-        // serialise the audit record's write on — that second one only while the record itself is
-        // usable, which is writtenPaths()'s rule and the reason the count is at most two. They were
-        // the gap the deployment this list came from found — a container that passed every other
-        // gate and could not flip, logging that its target was not writable — so a preflight that
-        // answers "can this installation carry out what it is configured to do?" answers it about
-        // these too, in the row and the record that already list the other five. The record *file*
+        // serialise the audit record's write on. `writtenPaths()` is the set and its rule about when
+        // each is judged, so how many are added is that table's length rather than a number stated
+        // here. They were the gap the deployment this list came from found — a container that passed
+        // every other gate and could not flip, logging that its target was not writable — so a
+        // preflight that answers "can this installation carry out what it is configured to do?"
+        // answers it about these too, in the row and the record that already list the rest. The
+        // record *file*
         // is deliberately not among them: `store probe` and the boot audit's own finding judge it,
         // and a second sentence for it would be one fault reported twice.
         //
@@ -1366,8 +1367,9 @@ final class PgcatConfigFlipper
      * The path a reading names is the one whose mode decides the write — the file when it is
      * there, and the directory that will have to take it when it is not, which is the normal state
      * of the stamp and the record on a container that has not booted yet. `writtenPaths()` supplies
-     * the two that are not a flip step's own, so their labels and costs cannot drift between the
-     * fault and the inventory.
+     * the ones no flip step of its own names, so their labels and costs cannot drift between the
+     * fault and the inventory — and the set's length, which `docs/boot-audit-surfaces.md` counts, is
+     * the table's rather than a number either docblock states.
      *
      * @return list<array{setting: string, path: string, label: string, cost: string, writable: bool, facts: string|null}>
      */
@@ -1481,9 +1483,48 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * The paths a flip step never names, as one table: where each is configured, the label a row
+     * prints for it, what finding it unwritable costs, where its path comes from, and whether it is
+     * judged only while the record it guards is usable.
+     *
+     * A table rather than code that builds the same array, because these facts have three readers
+     * and one record counts them. `fileProblems()` judges each entry beside the paths a flip step
+     * names, `writePaths()` prints the labels and costs from here so the fault and the inventory
+     * cannot describe one path two ways, and `fileSettingPaths()` is the `config` column read back.
+     * `docs/boot-audit-surfaces.md` says how many of the fault list's paths are not pgcat's at all,
+     * and `ProseNumbersTest` binds that sentence to this table's length — so the count is derived
+     * from the set rather than restated beside it, and a third path added here is a record that
+     * fails until it says so rather than a sentence somebody has to remember to change.
+     *
+     * `boot_file` is judged whenever the window has a stamp path. `audit_lock` only while the record
+     * it locks is usable: a record that cannot be written is one finding already — `BootAudit`'s and
+     * the store probe's — and a lock judged beside it would be that same fault said twice.
+     *
+     * @var array<string, array{config: string, label: string, cost: string, from: string, needs_record_writable: bool}>
+     */
+    private const UNNAMED_WRITTEN_PATHS = [
+        'boot_file' => [
+            'config' => 'swrr.pgcat.boot_file',
+            'label' => 'boot stamp',
+            'cost' => 'the container cannot record when it booted, and the boot window never '
+                .'closes: the entry flips on every run instead of standing down after it',
+            'from' => 'boot_file',
+            'needs_record_writable' => false,
+        ],
+        'audit_lock' => [
+            'config' => 'swrr.audit.file.lock',
+            'label' => 'audit lock',
+            'cost' => 'two boots can write the record at once: one boot\'s findings are '
+                .'overwritten by the other\'s rather than merged with them',
+            'from' => 'audit_file',
+            'needs_record_writable' => true,
+        ],
+    ];
+
+    /**
      * The paths this package must be able to write while a flip is armed, and what an unwritable
-     * one costs — the two that are not a flip step's own path, the second of them only while the
-     * record it guards is usable.
+     * one costs — the ones in `UNNAMED_WRITTEN_PATHS`, one entry per setting, each kept only while
+     * the condition its row names holds.
      *
      * The consequences are the ones the faults were observed with rather than a general statement
      * about permissions: an unwritable boot stamp leaves `FlipWindow::closed()` permanently false,
@@ -1509,27 +1550,22 @@ final class PgcatConfigFlipper
     private function writtenPaths(): array
     {
         $auditFile = $this->auditFile ?? '';
+        $paths = [];
 
-        $paths = [
-            'boot_file' => [
-                'path' => $this->window->bootFile(),
-                'label' => 'boot stamp',
-                'cost' => 'the container cannot record when it booted, and the boot window never '
-                    .'closes: the entry flips on every run instead of standing down after it',
-            ],
-        ];
+        foreach (self::UNNAMED_WRITTEN_PATHS as $setting => $row) {
+            // The lock is judged only while the record itself is usable. A record that cannot be
+            // written is one finding — `BootAudit`'s own, the store probe's, which the row for the
+            // record prints — and the lock's state beside it is moot: the same unwritable directory
+            // would be two findings for one fault, and a reader would have to work out that they
+            // are one fault from two sentences.
+            if ($row['needs_record_writable'] && ($auditFile === '' || ! self::writable($auditFile))) {
+                continue;
+            }
 
-        // The lock is judged only while the record itself is usable. A record that cannot be
-        // written is one finding — `BootAudit`'s own, the store probe's, which the row for the
-        // record prints — and the lock's state beside it is moot: the same unwritable directory
-        // would be two findings for one fault, and a reader would have to work out that they are
-        // one fault from two sentences.
-        if ($auditFile !== '' && self::writable($auditFile)) {
-            $paths['audit_lock'] = [
-                'path' => $auditFile.'.lock',
-                'label' => 'audit lock',
-                'cost' => 'two boots can write the record at once: one boot\'s findings are '
-                    .'overwritten by the other\'s rather than merged with them',
+            $paths[$setting] = [
+                'path' => $row['from'] === 'boot_file' ? $this->window->bootFile() : $auditFile.'.lock',
+                'label' => $row['label'],
+                'cost' => $row['cost'],
             ];
         }
 
@@ -1540,14 +1576,20 @@ final class PgcatConfigFlipper
      * The config path each setting above is written at, for the record's context: neither is one of
      * pgcat's own — the boot stamp is the flip's and the lock is the audit record's.
      *
+     * Read out of the table rather than written down again, so a setting added to the set is one
+     * the record can name without a second line here to forget.
+     *
      * @return array<string, string>
      */
     public static function fileSettingPaths(): array
     {
-        return [
-            'boot_file' => 'swrr.pgcat.boot_file',
-            'audit_lock' => 'swrr.audit.file.lock',
-        ];
+        $paths = [];
+
+        foreach (self::UNNAMED_WRITTEN_PATHS as $setting => $row) {
+            $paths[$setting] = $row['config'];
+        }
+
+        return $paths;
     }
 
     /**
