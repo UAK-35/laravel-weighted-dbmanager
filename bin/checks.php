@@ -31,7 +31,8 @@ declare(strict_types=1);
  *   php bin/checks.php --audit          add `composer audit` (needs the network)
  *   php bin/checks.php --require-all    fail instead of skipping when a tool is missing
  *   php bin/checks.php --list           list the checks without running anything
- *   php bin/checks.php --record         also write the summary to .agents/gate.json
+ *   php bin/checks.php --record         also write the summary to .agents/gate.json, and re-render
+ *                                       the note's gate block from it
  *   php bin/checks.php --help
  *
  * THE RECORD
@@ -39,10 +40,19 @@ declare(strict_types=1);
  *   `--record` writes the summary this run printed — the totals, each check's verdict and
  *   seconds, and the run's date and interpreter — to `.agents/gate.json`, which is committed.
  *   The handoff note renders its summary from it, rather than a session copying the totals and the
- *   seconds out of a terminal, so a re-take moves those numbers instead of restating them. It is opt-in for
- *   the same reason a release is: an ordinary gate run is not a claim about anything, and a
- *   record rewritten by every run would make the note stale on the first green check somebody
- *   looked at.
+ *   seconds out of a terminal, so a re-take moves those numbers instead of restating them. The note
+ *   is re-rendered in the same breath: the record is written and then the `gate` block is rendered
+ *   from it, so the two halves of that quote cannot be taken separately. Taken separately they drift
+ *   in the one direction this exists to prevent — a note taken before a ten-minute run, and the run
+ *   recorded after it, is a note quoting the record before last — and the repair was a session
+ *   noticing, running `bin/handoff.php` again and believing its own edit. Only that block moves, and
+ *   the register stays the note's own, because a gate run is not a re-take: the pending set and the
+ *   listing are facts about the tree, and a run that refused on a pending file whose description
+ *   nobody had written yet would be a green gate failing over a sentence it never read.
+ *
+ *   It is opt-in for the same reason a release is: an ordinary gate run is not a claim about
+ *   anything, and a record rewritten by every run would make the note stale on the first green
+ *   check somebody looked at.
  *
  * Exit code is 0 when every check passed, 1 when any failed (or was skipped
  * under --require-all), 2 for a usage error.
@@ -503,6 +513,10 @@ if ($options['record'] && @file_put_contents(
     exit(1);
 }
 
+// The render is the second half of the same act, and it runs only once the record it reads exists:
+// a note left quoting the run before last is exactly the drift this pairing removes.
+$noteRun = $options['record'] ? renderNote($root) : null;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
@@ -536,6 +550,15 @@ foreach ($results as $key => $result) {
 
 if ($options['record']) {
     echo PHP_EOL . 'recorded ' . GATE_RECORD . PHP_EOL;
+
+    if ($noteRun === null) {
+        echo 'No HANDOFF.md in this checkout, so no block was rendered from the run.' . PHP_EOL;
+    } elseif ($noteRun['exit'] === 0) {
+        echo $noteRun['output'];
+    } else {
+        fwrite(STDERR, 'HANDOFF.md could not be re-rendered from the run just recorded, so the note still quotes '
+            .'the record before it:' . PHP_EOL . $noteRun['output']);
+    }
 }
 
 if ($failed !== []) {
@@ -559,7 +582,9 @@ if ($failed !== []) {
 
 echo PHP_EOL . 'All checks passed.' . PHP_EOL;
 
-exit(0);
+// A note that could not be rendered from the run leaves the same drift the render exists to remove,
+// so it is the command's failure even when every check passed.
+exit($noteRun !== null && $noteRun['exit'] !== 0 ? 1 : 0);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — the record
@@ -598,6 +623,41 @@ function gateRecord(array $results, float $elapsed): string
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 }
 
+/**
+ * The note's `gate` block, re-rendered from the record just written — or null when this checkout has
+ * no note to render.
+ *
+ * WHY THE COMMAND THAT WRITES THE RECORD ALSO RENDERS IT
+ * ------------------------------------------------------
+ *   The record and the block are one claim read in two places: the record is the run, and the block
+ *   is the note quoting it. Written by different commands at different moments they drift in exactly
+ *   one direction — a note taken, and then a ten-minute gate recorded under it, leaves the note
+ *   describing the run before last — and the repair was a session noticing, running `bin/handoff.php`
+ *   again and believing its own edit. So they are one step, and there is no order of the two in which
+ *   the note can quote a run it did not take.
+ *
+ * WHY ONE BLOCK AND NOT THE NOTE
+ * ------------------------------
+ *   The record is the only input this run changes, so the block rendered from it is the only region
+ *   that can be out of step because of it. A whole-note render would be a re-take by another name: it
+ *   would move the pending set and the listing to whatever the tree is at the moment the gate
+ *   finished, and refuse on a pending file whose description nobody has written yet — a green run
+ *   failing over a sentence it never read. `--block=gate` is that restriction, and `bin/handoff.php`
+ *   owns it: a second renderer here would be a second answer to what the block says.
+ *
+ * @return array{exit: int, output: string}|null
+ */
+function renderNote(string $root): ?array
+{
+    $script = $root.'/bin/handoff.php';
+
+    if (! is_file($script) || ! is_file($root.'/HANDOFF.md')) {
+        return null;
+    }
+
+    return runCommand([PHP_BINARY, $script, '--block=gate'], $root);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — argument handling
 // ─────────────────────────────────────────────────────────────────────────────
@@ -616,7 +676,7 @@ function usage(): void
           --audit       Also run `composer audit` (needs network access).
           --require-all Treat a missing tool as a failure instead of a skip.
           --list        List the checks and their skip conditions.
-          --record      Write the summary to .agents/gate.json for the handoff note.
+          --record      Write the summary to .agents/gate.json and re-render the note's gate block.
       -h, --help        Show this help.
 
     Exit code: 0 all green, 1 anything failed, 2 usage error.

@@ -114,9 +114,12 @@ deployment's contract with the machine-record sample and the two prose-path read
 
 The gate is green with this note in the tree, and the run that says so is the one recorded under
 `.agents/gate.json`: the summary and the per-check timings below are that run's, written by
-`php bin/checks.php --record` and rendered here by `php bin/handoff.php`, so a re-take moves them
-rather than restating them. The suite's own totals are in its row — tests, assertions and skips, read
-off PHPUnit's line — and the day and the interpreter are the record's rather than this sentence's.
+`php bin/checks.php --record`, which renders this block from the record it just wrote — the record and
+the quote are one step, so no order of the two leaves the note describing a run it did not take. The
+suite's own totals are in its row — tests, assertions and skips, read off PHPUnit's line — and the day
+and the interpreter are the record's rather than this sentence's. That day is read against the day in
+this note's title, so a note re-taken later cannot go on carrying a run from before it: a re-take that
+moves the title forces the gate that verifies it.
 
 <!-- handoff:gate -->
 ```
@@ -233,6 +236,13 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `.agents/skills/wdm-plan/SKILL.md` | the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in |
+| `docs/investigations/investigation-ecs-rev31-rollback.md` | the investigation of the two `lpr-backend-sites` tasks that were stopped minutes after they started: the CloudTrail and service-event record that makes them a rolled-back revision rather than crashed containers, the log-path permission fatal and the unwritable pooler state directory their boots produced, the boot that upgrades its own vendor tree, and the drain and health-check arithmetic that makes each rollout slow |
+| `docs/issues/issue-pgcat-hanging-query-wire-capture.md` | the issue record for capturing the wire traffic of a hanging query on a live ECS task: why the runbook's `tcpdump` is not in the image, the logging PostgreSQL proxy in `python3` that decodes both directions instead, the three things its decoder has to special-case, and the `SHOW POOLS` reading that tells a pooler-side checkout wait from a server-side one |
+| `docs/issues/issue-supervisord-socket-unreachable.md` | the issue record for the supervisor control socket being unreachable to the user a flip runs as: why every flip refused before it could swap a file, the `FAULT_UNREACHABLE` fault that names the socket and the `chmod=0760` with `chown=root:www-data` repair, and the application-side half this package cannot do |
+| `docs/planning/plan-pgcat-both-mechanisms-armed.md` | the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding's removal, and a bound on re-logging a standing finding — each with what verifies it |
+| `tests/Unit/Docs/ProseNumberAuditTest.php` | the completeness half of the prose-number guard: every number a record bolds, either read by a claim or declared prose in `docs/prose-numbers.md`, with each prose row's reason drawn from the categories that record gives |
+| `tests/Unit/Docs/QuotedRecordsTest.php` | the guard on the sentences one record quotes from another: every `"…"` span beside a backticked `.md` path is held to the record it names, with `CHANGELOG.md` out of the corpus because a changelog quotes the sentence a version published |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -469,7 +479,7 @@ repository is not an installation change until each of them happens.
 | PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.26). It is **not on `PATH`** in the shell, so a bare `php` does not resolve — which no longer decides which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
-| Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy,wdm-issue,wdm-investigation}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
+| Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy,wdm-issue,wdm-investigation,wdm-plan}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
 | Checks | `php bin/checks.php --list` names thirteen; use `--only=` subsets. The full run and the whole `tests/` tree both exceed what a single agent command is allowed to take, so run one file or one directory at a time. The whole tree takes about a quarter of an hour on the machine that wrote this note, which is long enough for the JSON report `DbReplicaStatusTest` compares against a second reading of the file to land either side of a second boundary and fail on `checked_at` — a clock rather than a reading. `interpreter` is the one that reads the machine record — it fails on a `php.exe` that is gone, one that starts and cannot read the script it would be run on, one that reports another version, or one below the requirement the record carries. |
 | Style gate | `php bin/tool.php pint --test` (PSR-12). |
 | Static analysis | `phpstan.neon.dist`: level `max`, over `src/` only — a file under `tests/` is style-checked but not analysed. |

@@ -614,8 +614,9 @@ final class Handoff
     private const LISTED = 10;
 
     /**
-     * What each pending file is, one line apiece: the prose column of section 1's table, which is
-     * the one part of a rendered block git cannot answer.
+     * What each pending file is, one line apiece, and the reading of that file the words were written
+     * against: the prose column of section 1's table, which is the one part of a rendered block git
+     * cannot answer.
      *
      * WHY THE WORDS LIVE HERE AND NOT IN THE NOTE
      * ------------------------------------------
@@ -639,39 +640,203 @@ final class Handoff
      *   the files the note in the tree is taken with: the gate's record and the deployment contract's
      *   pair.
      *
-     * @var array<string, string>
+     * WHY A LINE CARRIES A READING AS WELL AS ITS WORDS
+     * -------------------------------------------------
+     *   The words are a claim about a file, and a pending file is work in progress: it is edited, and
+     *   the sentence beside it goes on describing the file as it was. Nothing held that before — this
+     *   column was the one part of the table no derivation reached, so a line could describe a file
+     *   that had since become a different one, and the note asserted it anyway, to a reader who trusts
+     *   the note instead of opening the file.
+     *
+     *   So each line records the digest of the file at the moment its words were read, and the table
+     *   refuses a row whose words were read against other bytes. It refuses rather than warns because a
+     *   warning beside a sentence the note still prints is a sentence the note still stands behind; and
+     *   it refuses on *any* change, because a digest is the only reading that cannot agree with a file
+     *   which has become a different one — a length, a first heading or a class name all agree with
+     *   files that are no longer the file the line describes.
+     *
+     *   The repair is a re-reading, recorded by `php bin/handoff.php --reaffirm` (or `--reaffirm=<path>`
+     *   for one row): the command keeps the words and rewrites the reading, so what it records is that a
+     *   person read the file, not that a hash moved. A line whose file has changed and whose words still
+     *   hold is reaffirmed with nothing edited; a line whose file has become something else is reworded
+     *   first. Either way the table does not print a description nobody re-read.
+     *
+     * @var array<string, array{words: string, read: string}>
      */
     private const PENDING_DESCRIPTIONS = [
-        '.agents/gate.json' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-        'src/Support/DeploymentContract.php' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
-        'tests/Unit/Docs/DeploymentContractTest.php' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
-        'src/Support/PinnedQuery.php' => 'the one real query — `select 1`, through the application\'s own connection — with the answer the health endpoint and `db:doctor --real-test` both report',
-        'docs/read-path-escalation.md' => 'the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record\'s facts, written for the caller rather than for this package\'s maintainer',
-        'docs/pool-repair-rate.md' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
-        'docs/pgcat-fleet-inspection.md' => 'the runbook for reading every task of a service rather than one: the three rows that carry loaded pools, supervisor state and flip writability, the ECS Exec loop that asks each task, why the report runs as `www-data` rather than the session\'s `root`, and what a task-level answer cannot say about the service',
-        'docs/pgcat-pool-metrics.md' => 'the metric decision: why the probe needed a surface a monitor can scrape, why a pool the reading could not prove has no sample, the alert rules, and the shapes it rejected',
-        'src/Pgcat/PoolProbeMetrics.php' => 'the pool probe\'s verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on',
-        'src/Console/Commands/DbPgcatMetrics.php' => 'the command that writes that exposition to stdout, with `--strict` as the deploy step\'s exit code and the body unchanged by it',
-        'tests/Unit/Pgcat/PoolProbeMetricsTest.php' => 'the rendering held against verdicts written by hand: a held pool, a refused one, an unproven one with no sample, each family\'s HELP and TYPE, and the label escaping',
-        'tests/Unit/Console/DbPgcatMetricsCommandTest.php' => 'the command\'s two channels: the exposition a scrape archives and the code `--strict` adds, over a console answer or a probe the test supplies rather than a socket',
-        'tests/Unit/Pgcat/PoolProbeAgainstPgcatTest.php' => 'the live fixture: the probe\'s three answers held against a real pgcat from the published image, the console column it corrected, and the front-door ordering the image pins',
-        'src/Support/WritableFile.php' => 'the one hand-back for files this package leaves behind — 0666 on the audit record and its lock, a flip\'s state file and its lock, read back from the mode rather than trusted, plus the file-or-directory writability reading the audit and the flipper share',
-        'tests/Unit/Support/WritableFileTest.php' => 'the guard on that helper: a read-only file handed back with its contents intact, a missing path answered false and not created, and the file-or-directory reading in both of its shapes',
-        'tests/Support/pool-probe-server.php' => 'the sweep fixture: a loopback listener that accepts every connection before answering any, so a serial sweep fails the barrier rather than merely slowing down, plus a silent mode that holds the connections open',
-        'tests/Unit/Pgcat/PoolProbeSweepTest.php' => 'the concurrent sweep held against that fixture — one wave for the answers, one budget for silence, the sentinel in the same wave, and an empty or refused sweep',
-        'health-db-host-ip-plan.md' => 'the plan for reading eth1\'s IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch',
-        'docs/issues/issue-pgcat-flip-force-mode-readers.md' => 'the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix',
-        'docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md' => 'the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix',
-        'docs/investigations/investigation-pgcat-select-1-hang.md' => 'the investigation of the report that a bare `select 1` hangs through the pooler while `select 1 as ok` returns: the protocol matrix that could not reproduce it on pgcat 1.2.0, why an alias cannot reach the pooler at all, the named prepared-statement failure that does reproduce for both queries, and the checkout wait that is the only path a query genuinely waits on',
-        'docs/investigations/investigation-pgcat-flip-writer-to-readers-failed.md' => 'the investigation of why the pooler was not flipped from writer to readers on a live ECS task: the automatic flips failed because `supervisorctl` is unreachable to the `www-data` the schedule runs as (a `root:root` 0700 socket), the root-owned flip target and empty boot stamp that would still bite, and the fix',
-        '.agents/skills/wdm-issue/SKILL.md' => 'the skill that records an LPR fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
-        '.agents/skills/wdm-investigation/SKILL.md' => 'the skill that records an LPR investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an LPR investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
-        'docs/health-host-ip.md' => 'the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip`',
-        'src/Support/HostAddress.php' => 'the interface reader: `net_get_interfaces()` behind one null-answering call, and the pure `from()` that decides absent, down, IPv6-only, link-local and several-address listings without touching the machine',
-        'tests/Unit/Support/HostAddressTest.php' => 'the reader held against fixtures rather than this host: the published address, every state that answers `null`, the primary of several, and the refusal to fall back to another interface',
-        'tests/Unit/Docs/CommentCountsTest.php' => 'the guard that holds a count stated in an `src/` comment to the table beside it: each claim read out of the file\'s own comment tokens, with its expectation derived from the constant or the family the sentence names, so a table that grows a member fails until its sentence says so',
-        'docs/issues/issue-release-v0-2-0-alpha6-ci-red.md' => 'the record of why the v0.2.0-alpha6 run is red: the tag\'s commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer',
+        // The block `php bin/handoff.php --reaffirm` rewrites: the words each pending file is described
+        // by, and the reading those words were written against.
+        // @pending-descriptions
+        '.agents/gate.json' => [
+            'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
+            'read' => 'sha256:eea8e7369e22e38a49430959baf9810b5bf99a16dec6831185f73c41e1468019',
+        ],
+        'src/Support/DeploymentContract.php' => [
+            'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
+            'read' => 'sha256:0360ecb95dac0c976bae4be7bf0f3816a78fc3d4ccd0e74965736d06a94dec92',
+        ],
+        'tests/Unit/Docs/DeploymentContractTest.php' => [
+            'words' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
+            'read' => 'sha256:914ea5d843f8b2cf0c5c6ca4c47ba5a87f2f64d1d745c55efb844fc8ba7a88df',
+        ],
+        'src/Support/PinnedQuery.php' => [
+            'words' => 'the one real query — `select 1`, through the application\'s own connection — with the answer the health endpoint and `db:doctor --real-test` both report',
+            'read' => 'sha256:000cebefc618f1e1917c83bc5e42363e7c603d57efdf871abfdcf0de6e97fd4e',
+        ],
+        'docs/read-path-escalation.md' => [
+            'words' => 'the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record\'s facts, written for the caller rather than for this package\'s maintainer',
+            'read' => 'sha256:767070b7a3b7fd108c742d53c821bc593c4bc00d7a017da823da05b76d8d233b',
+        ],
+        'docs/pool-repair-rate.md' => [
+            'words' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
+            'read' => 'sha256:702f662e19138ee87e5d0b25a0c068c9454eaaded51aada87df4aad1a6b1ee6b',
+        ],
+        'docs/pgcat-fleet-inspection.md' => [
+            'words' => 'the runbook for reading every task of a service rather than one: the three rows that carry loaded pools, supervisor state and flip writability, the ECS Exec loop that asks each task, why the report runs as `www-data` rather than the session\'s `root`, and what a task-level answer cannot say about the service',
+            'read' => 'sha256:50578154e3749bda7138d5ebf3ceb68ca381b7f1ba33514db31ee48b675f147f',
+        ],
+        'docs/pgcat-pool-metrics.md' => [
+            'words' => 'the metric decision: why the probe needed a surface a monitor can scrape, why a pool the reading could not prove has no sample, the alert rules, and the shapes it rejected',
+            'read' => 'sha256:0a9cf28c19561d69f5409f779b7d48e19890985c22649fbb13278853ef139869',
+        ],
+        'src/Pgcat/PoolProbeMetrics.php' => [
+            'words' => 'the pool probe\'s verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on',
+            'read' => 'sha256:a0bc7e6d336787efa3499d0baa726cf5c5f109f05b9120be3feacf7778eb3c1e',
+        ],
+        'src/Console/Commands/DbPgcatMetrics.php' => [
+            'words' => 'the command that writes that exposition to stdout, with `--strict` as the deploy step\'s exit code and the body unchanged by it',
+            'read' => 'sha256:1fdb30b5c3ee595b7e763493189ed21e2805a6e8ad2aa85932c44c6bd8639ae5',
+        ],
+        'tests/Unit/Pgcat/PoolProbeMetricsTest.php' => [
+            'words' => 'the rendering held against verdicts written by hand: a held pool, a refused one, an unproven one with no sample, each family\'s HELP and TYPE, and the label escaping',
+            'read' => 'sha256:c032dcc41b01171a43d4db7a40e85bf5ec7c5f1fed74f0c2ccb93fc6fac505fd',
+        ],
+        'tests/Unit/Console/DbPgcatMetricsCommandTest.php' => [
+            'words' => 'the command\'s two channels: the exposition a scrape archives and the code `--strict` adds, over a console answer or a probe the test supplies rather than a socket',
+            'read' => 'sha256:9c3adcf793e2934f41e2e595e4a602dca3fed542e178d1ead46b35a1bdd13717',
+        ],
+        'tests/Unit/Pgcat/PoolProbeAgainstPgcatTest.php' => [
+            'words' => 'the live fixture: the probe\'s three answers held against a real pgcat from the published image, the console column it corrected, and the front-door ordering the image pins',
+            'read' => 'sha256:aaaa38ac2a0118e2283f889ebac8054d7399ccc8ac7f8a4e11614319f17e4cee',
+        ],
+        'src/Support/WritableFile.php' => [
+            'words' => 'the one hand-back for files this package leaves behind — 0666 on the audit record and its lock, a flip\'s state file and its lock, read back from the mode rather than trusted, plus the file-or-directory writability reading the audit and the flipper share',
+            'read' => 'sha256:3f03f1010dc48d6cb52db491f05883543b7bca7df1b6d1471f23c1d050fd5ffc',
+        ],
+        'tests/Unit/Support/WritableFileTest.php' => [
+            'words' => 'the guard on that helper: a read-only file handed back with its contents intact, a missing path answered false and not created, and the file-or-directory reading in both of its shapes',
+            'read' => 'sha256:df5b644410d87e1d2076bbc87e081f73db86fe7c9bb7497197983f6d2777395a',
+        ],
+        'tests/Support/pool-probe-server.php' => [
+            'words' => 'the sweep fixture: a loopback listener that accepts every connection before answering any, so a serial sweep fails the barrier rather than merely slowing down, plus a silent mode that holds the connections open',
+            'read' => 'sha256:092d1ee3f3d391dea2ed4bf5b084c3d660370f9f5e47159313269bc0cc9db0d1',
+        ],
+        'tests/Unit/Pgcat/PoolProbeSweepTest.php' => [
+            'words' => 'the concurrent sweep held against that fixture — one wave for the answers, one budget for silence, the sentinel in the same wave, and an empty or refused sweep',
+            'read' => 'sha256:8e91c7b542dd72507f8b95186b5f1565c8f27f48c6cb79879623167932fac6a9',
+        ],
+        'health-db-host-ip-plan.md' => [
+            'words' => 'the plan for reading eth1\'s IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch',
+            'read' => 'sha256:a89f3262bedca663817329546e0655ba2de3a50610adc736c6a1dd5761c8e73f',
+        ],
+        'docs/issues/issue-pgcat-flip-force-mode-readers.md' => [
+            'words' => 'the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix',
+            'read' => 'sha256:bd416e7b3d55ef32513f0fb9c46c918a95d624812f3b933dcd34ba60704d493f',
+        ],
+        'docs/issues/issue-supervisord-socket-unreachable.md' => [
+            'words' => 'the issue record for the supervisor control socket being unreachable to the user a flip runs as: why every flip refused before it could swap a file, the `FAULT_UNREACHABLE` fault that names the socket and the `chmod=0760` with `chown=root:www-data` repair, and the application-side half this package cannot do',
+            'read' => 'sha256:b0aaa11bc2439c92266e4783f041424b54eebc6c0f770e2dca2eadd74513198d',
+        ],
+        'docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md' => [
+            'words' => 'the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix',
+            'read' => 'sha256:21c805aa8e3decd754a3bf771cdd9eb605e706742e93cb853ef2e5315084f863',
+        ],
+        'docs/investigations/investigation-pgcat-select-1-hang.md' => [
+            'words' => 'the investigation of the report that a bare `select 1` hangs through the pooler while `select 1 as ok` returns: the protocol matrix that could not reproduce it on pgcat 1.2.0, why an alias cannot reach the pooler at all, the named prepared-statement failure that does reproduce for both queries, and the checkout wait that is the only path a query genuinely waits on',
+            'read' => 'sha256:3849df95add361dff950c6ffee1554013b81e9406573ec1b2239ca4e169eafca',
+        ],
+        'docs/investigations/investigation-pgcat-flip-writer-to-readers-failed.md' => [
+            'words' => 'the investigation of why the pooler was not flipped from writer to readers on a live ECS task: the automatic flips failed because `supervisorctl` is unreachable to the `www-data` the schedule runs as (a `root:root` 0700 socket), the root-owned flip target and empty boot stamp that would still bite, and the fix',
+            'read' => 'sha256:2acaa17fbb4378a97d43688d4a2537cf7c51b766b2ece5f2eccf1c0803e076c3',
+        ],
+        '.agents/skills/wdm-issue/SKILL.md' => [
+            'words' => 'the skill that records an WDM fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an WDM issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
+            'read' => 'sha256:9e80213c44d53ee82b718b8c1959b1d0d3d1529694c41bdf8ce6594348d25eec',
+        ],
+        '.agents/skills/wdm-investigation/SKILL.md' => [
+            'words' => 'the skill that records an WDM investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
+            'read' => 'sha256:4865a82fde33b60e5859d88809355c7dd1e979fcfd52c15a21acdd8eab84cebe',
+        ],
+        'docs/health-host-ip.md' => [
+            'words' => 'the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip`',
+            'read' => 'sha256:30d3f2ff48139ffa63a4b679c4a346384436b29efb78d09ff37a8fdb23e4a00f',
+        ],
+        'src/Support/HostAddress.php' => [
+            'words' => 'the interface reader: `net_get_interfaces()` behind one null-answering call, and the pure `from()` that decides absent, down, IPv6-only, link-local and several-address listings without touching the machine',
+            'read' => 'sha256:2b5cd03d07a6a0d2a583cb737a9922e8d987c606edce4f877646630dc0a87ecc',
+        ],
+        'tests/Unit/Support/HostAddressTest.php' => [
+            'words' => 'the reader held against fixtures rather than this host: the published address, every state that answers `null`, the primary of several, and the refusal to fall back to another interface',
+            'read' => 'sha256:faf6453742fd736c07a1c443398ea31ae03ecf71b2d57be3333876eb4828f556',
+        ],
+        'tests/Unit/Docs/CommentCountsTest.php' => [
+            'words' => 'the guard that holds a count stated in an `src/` comment to the table beside it: each claim read out of the file\'s own comment tokens, with its expectation derived from the constant or the family the sentence names, so a table that grows a member fails until its sentence says so',
+            'read' => 'sha256:e3bf2d3f3d643998834cf54185844f697b4788442a0d85c328c2e88853ad89e6',
+        ],
+        'docs/issues/issue-release-v0-2-0-alpha6-ci-red.md' => [
+            'words' => 'the record of why the v0.2.0-alpha6 run is red: the tag\'s commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer',
+            'read' => 'sha256:22a8c20761104bd63e3fd909eb9c5f8a1e3c66199e06163e7fc9450a19182a87',
+        ],
+        'tests/Unit/Docs/ProseNumberAuditTest.php' => [
+            'words' => 'the completeness half of the prose-number guard: every number a record bolds, either read by a claim or declared prose in `docs/prose-numbers.md`, with each prose row\'s reason drawn from the categories that record gives',
+            'read' => 'sha256:8c8e8169b3cced05beccb6c585f3651949170ded93aab1f9000d19ff636925b3',
+        ],
+        'tests/Unit/Docs/QuotedRecordsTest.php' => [
+            'words' => 'the guard on the sentences one record quotes from another: every `"…"` span beside a backticked `.md` path is held to the record it names, with `CHANGELOG.md` out of the corpus because a changelog quotes the sentence a version published',
+            'read' => 'sha256:073d5b6d3e303fd35844f01e9345f52901c7b61d0854612d5562ac4d1abc4d04',
+        ],
+        'docs/investigations/investigation-ecs-rev31-rollback.md' => [
+            'words' => 'the investigation of the two `lpr-backend-sites` tasks that were stopped minutes after they started: the CloudTrail and service-event record that makes them a rolled-back revision rather than crashed containers, the log-path permission fatal and the unwritable pooler state directory their boots produced, the boot that upgrades its own vendor tree, and the drain and health-check arithmetic that makes each rollout slow',
+            'read' => 'sha256:da35a399141ad258635fdc8920809ffbf8a92006d168018998392fbd9b2f1508',
+        ],
+        'docs/issues/issue-pgcat-hanging-query-wire-capture.md' => [
+            'words' => 'the issue record for capturing the wire traffic of a hanging query on a live ECS task: why the runbook\'s `tcpdump` is not in the image, the logging PostgreSQL proxy in `python3` that decodes both directions instead, the three things its decoder has to special-case, and the `SHOW POOLS` reading that tells a pooler-side checkout wait from a server-side one',
+            'read' => 'sha256:3dfab806eaac113453df96296ecba01dd0f13bb00fd5147854d4ec91dc8510cb',
+        ],
+        '.agents/skills/wdm-plan/SKILL.md' => [
+            'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
+            'read' => 'sha256:f2dbc8a018bb7f5a861f44e2c2a236035905e05a7c37e92a001cda555e77c319',
+        ],
+        'docs/planning/plan-pgcat-both-mechanisms-armed.md' => [
+            'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
+            'read' => 'sha256:9dcc1dc69f847d9f7acacaaf5babebd0a71ff65d1f12520385b0297a65d7d6e6',
+        ],
+        // @pending-descriptions-end
     ];
+
+    /**
+     * The two lines `php bin/handoff.php --reaffirm` writes the declaration block between, and the file
+     * that block is in — the command owns the writing, this class owns the reading.
+     */
+    public const DECLARATIONS = '// @pending-descriptions';
+
+    public const DECLARATIONS_END = '// @pending-descriptions-end';
+
+    public const DECLARATIONS_FILE = 'tests/Support/Handoff.php';
+
+    /**
+     * The paths a line is declared for, in the order the block holds them.
+     *
+     * A list rather than the map, because what a guard asks of it is a set of subjects — every declared
+     * row is read against its file — and a caller that had the words could quote them back as if it had
+     * read the file.
+     *
+     * @return list<string>
+     */
+    public static function declared(): array
+    {
+        return array_keys(self::PENDING_DESCRIPTIONS);
+    }
 
     /**
      * The blocks the note carries, so a test can ask for each of them by name.
@@ -1013,7 +1178,8 @@ final class Handoff
      *
      *   So the run is recorded instead: `bin/checks.php --record` writes what it printed, once, and
      *   this reads it. What the guard can hold is what the record has to be — internally consistent,
-     *   all green, and a run of every check the gate declares — and what it cannot hold is that the
+     *   all green, a run of every check the gate declares, and no older than the day the note says it
+     *   was taken, which `taken()` reads out of the title — and what it cannot hold is that the
      *   record is *true*, which is the same thing that cannot be held about the three `.tsv` files
      *   and for the same reason: a record is evidence of a moment, and the moment is not the suite's
      *   to re-live.
@@ -1030,7 +1196,8 @@ final class Handoff
         if ($raw === false) {
             throw new RuntimeException(sprintf(
                 'This checkout has no gate record at %s, and HANDOFF.md section 1 quotes one. Run '
-                .'`php bin/checks.php --record` (the whole gate, ten minutes of it), then `php bin/handoff.php`.',
+                .'`php bin/checks.php --record` (the whole gate, ten minutes of it), which writes the record and '
+                .'re-renders the block that quotes it.',
                 self::GATE,
             ));
         }
@@ -1357,18 +1524,115 @@ final class Handoff
     }
 
     /**
-     * The words one pending file is described by.
+     * The words one pending file is described by — once the reading they were written against is the
+     * file's own.
      *
-     * @throws RuntimeException when the file the register does not carry has no line declared for it
+     * `$read` is the reading the caller has of the file, and it is a parameter for the one caller that
+     * must not take one: a test that asks what the table would say about a file which has changed. The
+     * renderer passes nothing and the file is read here, so a row cannot be written from a reading
+     * somebody else supplied.
+     *
+     * @throws RuntimeException when no line declares the file, when the file is not there, or when the
+     *                          line was read against other bytes
      */
-    private static function words(string $path): string
+    public static function words(string $path, ?string $read = null): string
     {
-        return self::PENDING_DESCRIPTIONS[$path] ?? throw new RuntimeException(sprintf(
+        $declared = self::PENDING_DESCRIPTIONS[$path] ?? throw new RuntimeException(sprintf(
             'The register does not carry %s and no words are declared for it. A prose column cannot be derived, so '
             .'add one line about it to Handoff::PENDING_DESCRIPTIONS — or take the file out of the tree, since a file '
             .'that is not work is one .gitignore should carry.',
             $path,
         ));
+
+        $read ??= self::fingerprint($path);
+
+        if ($declared['read'] === $read) {
+            return $declared['words'];
+        }
+
+        throw new RuntimeException(sprintf(
+            "The words HANDOFF.md gives for %s were read against other bytes: they were written at %s, and the file\n"
+            ."is now %s. A pending file is work in progress, so the line beside it describes the file as it was — and\n"
+            ."the table refuses rather than renders a sentence nobody has re-read.\n\n"
+            ."Read %s again, reword its line if the file is no longer the one it describes, then record the reading\n"
+            .'with `php bin/handoff.php --reaffirm=%s`.',
+            $path,
+            $declared['read'] === '' ? 'no reading at all' : $declared['read'],
+            $read,
+            $path,
+            $path,
+        ));
+    }
+
+    /**
+     * The reading of one file: what it is, in the one form a description cannot drift from.
+     *
+     * A digest of the bytes, deliberately: the question the table refuses on is only ever whether the
+     * file this line describes is the file in the tree, and every cheaper reading agrees with files
+     * that are no longer that one.
+     *
+     * @throws RuntimeException when there is no such file to read
+     */
+    private static function fingerprint(string $path): string
+    {
+        $full = self::ROOT.'/'.$path;
+
+        $digest = is_file($full) ? @hash_file('sha256', $full) : false;
+
+        if ($digest === false) {
+            throw new RuntimeException(sprintf(
+                'The register does not carry %s and this checkout has no such file, so there is nothing to read its '
+                .'description against. A pending row names a file; a row for a file that is not there is one to take '
+                .'out of the table.',
+                $path,
+            ));
+        }
+
+        return 'sha256:'.$digest;
+    }
+
+    /**
+     * The declaration block, rewritten with the reading every named file has now.
+     *
+     * The words are kept exactly as declared: re-reading a file is a human act, and this records that it
+     * was done rather than deciding it. A path no line declares is refused by name — a typo would
+     * otherwise be a reading of nothing, and the row it was meant for would still be stale.
+     *
+     * Returns the text that belongs between the two markers, and how many lines it re-read, so the
+     * command that owns the file is the one that writes it.
+     *
+     * @param list<string> $paths the rows to re-read, or none for every row
+     * @return array{block: string, read: int}
+     *
+     * @throws RuntimeException when a named path has no line, or a file is not there
+     */
+    public static function pendingReadings(array $paths = []): array
+    {
+        $declared = self::PENDING_DESCRIPTIONS;
+
+        foreach ($paths === [] ? array_keys($declared) : $paths as $path) {
+            if (! isset($declared[$path])) {
+                throw new RuntimeException(sprintf(
+                    'There is no line for %s in Handoff::PENDING_DESCRIPTIONS, so there is nothing to re-read: a '
+                    .'reading is the second half of a description, and a file nothing describes is not one the '
+                    .'pending table carries.',
+                    $path,
+                ));
+            }
+
+            $declared[$path]['read'] = self::fingerprint($path);
+        }
+
+        $block = [];
+
+        foreach ($declared as $path => $entry) {
+            $block[] = '        '.var_export($path, true).' => [';
+            $block[] = '            ' . var_export('words', true) . ' => ' . var_export($entry['words'], true) . ',';
+            $block[] = '            ' . var_export('read', true) . ' => ' . var_export($entry['read'], true) . ',';
+            $block[] = '        ],';
+        }
+
+        return ['block' => implode("\n", $block), 'read' => count($paths) ?: count($declared)];
     }
 
     /** One commit's abbreviated id, as git abbreviates it rather than as a fixed slice of it. */

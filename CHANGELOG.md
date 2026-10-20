@@ -49,8 +49,32 @@
   from both sides, and a quote shorter than a dozen characters is not read at all. A paraphrase is
   therefore not a quote: the reading is exact words, which is the reading a citation makes.
 
+- **The handoff note's prose column is a reading, and a stale one is refused.** Section 1's pending
+  table is the one part of a rendered block git cannot answer, so its words are declared in
+  `Handoff::PENDING_DESCRIPTIONS` — and each line now carries the digest of the file it was written
+  against. A pending file that changed since leaves the table refusing that row by name rather than
+  printing a sentence nobody re-read, and `php bin/handoff.php --reaffirm` (or `--reaffirm=<path>` for
+  one row) is the repair: it keeps the words, takes the reading the file has now, and rewrites the
+  declaration block, so a re-reading is something somebody ran rather than a hash that drifted.
+
 ### Changed
 
+- **The gate record and the note that quotes it are written by one command.** `php bin/checks.php
+  --record` writes `.agents/gate.json` and then renders the note's `gate` block from the record it
+  just wrote, so the two halves of that quote cannot be taken separately — a note taken before a
+  ten-minute run and the run recorded after it is a note quoting the record before last. Only that
+  block moves, at the register the note already names, because a gate run is not a re-take. A render
+  that fails fails the command even when every check passed, since the note then still describes the
+  run before it.
+- **`php bin/handoff.php --block=NAME[,NAME]`** renders only the regions named, at the snapshot the
+  note already records — a render rather than a re-take, so no other row moves — and refuses a name
+  that is not a block with exit 2. It is the narrow render `--record` uses for the block it just
+  rewrote.
+- **The gate record may not predate the note that quotes it.** The note is dated in its title, and
+  the guard now reads the recorded run's day against that date: a note re-taken on a later day can no
+  longer go on carrying the run from before it, and the refusal names both days and the command that
+  writes them together. A run taken the same day as its take still passes, and a note re-taken to fix
+  a typo on the day of its run is not made to pay for another gate.
 - **The `connector` row's second failure is held to the framework's own sentence.** A connection that
   resolves a connector and still cannot be built is the state where the row has to say both things:
   the class that would build it, and the framework's refusal after the colon. The new test binds a

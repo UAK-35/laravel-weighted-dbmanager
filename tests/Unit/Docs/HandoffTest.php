@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Uak35\WeightedDbManager\Tests\Unit\Docs;
 
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use Uak35\WeightedDbManager\Tests\Support\Handoff;
 use Uak35\WeightedDbManager\Tests\Support\NumberWords;
 use Uak35\WeightedDbManager\Tests\Support\SkillDescriptions;
@@ -189,6 +190,109 @@ final class HandoffTest extends TestCase
     }
 
     /**
+     * `--block=gate` renders the one region it names, at the snapshot the note records, and a name
+     * that is not a block is refused rather than rendered as nothing.
+     *
+     * WHY A RENDER HAS A NARROWER FORM THAN A TAKE
+     * --------------------------------------------
+     *   The gate block has a second writer: `bin/checks.php --record` writes the record and renders the
+     *   block from it, because a note taken before a ten-minute run and the record written after it leave
+     *   the note quoting the run before last. What that command may move is one region — the record is the
+     *   only input its run changes — so the renderer has to be able to write one block without becoming a
+     *   take: rendering all five would move the pending set and the listing to whatever the tree is when
+     *   the gate finishes, and refuse on a pending file whose description nobody has written yet.
+     *
+     *   In a checkout where every block is in step nothing is written here, which is the shape a partial
+     *   render can be held to without editing the note: it reports one block, names no other, and leaves
+     *   the bytes on disk alone. That it writes the block it names follows from the rendering being the
+     *   same `Handoff::rendered()` a take writes through — the guard on the note itself is that comparison.
+     */
+    public function test_a_partial_render_names_one_block_and_leaves_the_others_alone(): void
+    {
+        $path = Handoff::root().'/HANDOFF.md';
+        $before = (string) file_get_contents($path);
+
+        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/handoff.php', '--block=gate']);
+
+        self::assertSame(0, $run['exit'], sprintf(
+            "bin/handoff.php --block=gate reports the gate block out of step with the record it reads:\n%s%s",
+            $run['output'],
+            $run['error'],
+        ));
+        self::assertStringContainsString(
+            '1 block(s)',
+            $run['output'],
+            'A partial render reports every block it rendered, and this one was asked for a single block.',
+        );
+
+        foreach (array_diff(Handoff::blocks(), ['gate']) as $other) {
+            self::assertStringNotContainsString(
+                $other,
+                $run['output'],
+                sprintf(
+                    '`--block=gate` rendered [%s] as well, so the region it was asked for is not the region it moved.',
+                    $other,
+                ),
+            );
+        }
+
+        self::assertSame(
+            $before,
+            (string) file_get_contents($path),
+            'A partial render changed the note in a checkout where every block is already in step.',
+        );
+
+        $refused = Handoff::run([PHP_BINARY, Handoff::root().'/bin/handoff.php', '--block=gatep']);
+
+        self::assertSame(2, $refused['exit'], sprintf(
+            "bin/handoff.php --block=gatep exits %d, and a name that is not a block is a usage error rather "
+            ."than a render that found nothing to write:\n%s%s",
+            $refused['exit'],
+            $refused['output'],
+            $refused['error'],
+        ));
+        self::assertStringContainsString('Unknown block(s): gatep', $refused['error'], 'A refused block name has to name the name it refused.');
+    }
+
+    /**
+     * The one command that records a run also renders the block quoting it, so the two cannot be taken
+     * apart in either order.
+     *
+     * WHY THIS IS READ OFF THE SOURCE
+     * -------------------------------
+     *   The claim is a pairing, and the pair cannot be run here: `--record` is the whole gate, which is
+     *   ten minutes of the suite that would be doing the asserting, so its `--record` path is the one part
+     *   of `bin/checks.php` no test can execute. What can be held is that the path still has both halves —
+     *   the record is written, and the note is re-rendered from it — and that the render is the narrow one
+     *   the previous test covers rather than a take. Remove either and the drift is silent again: the note
+     *   keeps quoting the run before last, `bin/handoff.php --check` goes red, and the repair is a session
+     *   re-running the renderer instead of the command it had just run.
+     *
+     *   The limitation is the one `test_the_gate_writes_the_record_the_note_reads` writes down: a `bin/`
+     *   script does not read a test support class, so the two spellings cannot be brought together here —
+     *   only the fact that this one names what the other one answers.
+     */
+    public function test_recording_a_run_also_renders_the_note_that_quotes_it(): void
+    {
+        $source = @file_get_contents(Handoff::root().'/bin/checks.php');
+
+        self::assertIsString($source, 'bin/checks.php could not be read, so the half of `--record` that renders the note cannot be held.');
+
+        self::assertStringContainsString(
+            "'/bin/handoff.php'",
+            $source,
+            'bin/checks.php --record writes the record and no longer runs the note renderer, so the note can be left '
+            .'quoting the run before last — which is the pair this command exists to keep together.',
+        );
+        self::assertStringContainsString(
+            "'--block=gate'",
+            $source,
+            'The render `--record` runs is not the narrow one: a whole-note render here would be a take, moving the '
+            .'pending set and the listing to a tree the run never read.',
+        );
+    }
+
+    /**
      * The other direction, and the one that rots: every file this checkout has that the register
      * does not carry at all has to be named in section 1.
      *
@@ -225,6 +329,149 @@ final class HandoffTest extends TestCase
             count($listed),
             implode("\n  - ", $missing),
         ));
+    }
+
+    /**
+     * The prose column's other half: a row whose words were read against other bytes is refused.
+     *
+     * WHY THIS REFUSES RATHER THAN WARNS
+     * ----------------------------------
+     *   A pending file is work in progress, and the sentence beside it in section 1 is the one part of
+     *   the table no derivation reaches. So the declared line carries the reading of the file its words
+     *   were written against, and a file that has changed since makes the row unrenderable: the note
+     *   either prints a description somebody read, or it refuses to print one. A warning would leave the
+     *   stale sentence in the note a reader trusts, which is the state this exists to make impossible.
+     *
+     *   The sentence has to name the repair as well as the fault, because the fault is not one a
+     *   session can argue with: the digest moved, and the only answer is to read the file again.
+     */
+    public function test_a_pending_row_whose_file_changed_after_its_words_were_read_is_refused(): void
+    {
+        // A declared row rather than one the note happens to list: the declaration outlives the working
+        // tree, so this reads the same path in a checkout with nothing pending as in this one.
+        $declared = Handoff::declared();
+
+        self::assertNotSame([], $declared, 'the prose column declares no line at all');
+
+        $path = $declared[0];
+
+        // The reading a changed file would have: anything but the one the line declares.
+        $other = 'sha256:'.str_repeat('0', 64);
+
+        try {
+            Handoff::words($path, $other);
+
+            self::fail('A row whose file no longer matches its declared reading was rendered.');
+        } catch (RuntimeException $refused) {
+            self::assertStringContainsString(
+                'The words HANDOFF.md gives for '.$path.' were read against other bytes',
+                $refused->getMessage(),
+                'The refusal has to say which row it is and why, or a reader is left to diff two digests.',
+            );
+            self::assertStringContainsString($other, $refused->getMessage(), 'The reading the file has now is the half a session acts on.');
+            self::assertStringContainsString(
+                '--reaffirm='.$path,
+                $refused->getMessage(),
+                'The repair is a command, so the refusal names it rather than leaving one to be invented.',
+            );
+        }
+    }
+
+    /**
+     * The same claim in the direction the suite runs in: every row the note prints is read against the
+     * file in the tree.
+     *
+     * On a checkout whose pending files have not moved since the readings were taken this reads
+     * everything and passes, which is the state a clone is in — and it is the state that has to keep
+     * holding, because a declared line is a sentence about a file a reader will open next.
+     */
+    public function test_every_pending_row_is_read_against_the_file_it_names(): void
+    {
+        $stale = [];
+
+        foreach (Handoff::pending() as $row) {
+            try {
+                Handoff::words($row['path']);
+            } catch (RuntimeException $refused) {
+                $stale[] = $refused->getMessage();
+            }
+        }
+
+        self::assertSame(
+            [],
+            $stale,
+            sprintf(
+                "%d row(s) of section 1 describe a file that has changed since their words were read:\n\n%s",
+                count($stale),
+                implode("\n\n", $stale),
+            ),
+        );
+    }
+
+    /**
+     * The repair, held the way the other writer is: in a checkout where every reading is current it
+     * writes nothing at all.
+     *
+     * A command that rewrote the declaration block on every run would be blessing whatever the files had
+     * become — the hashes would always agree, and the refusal would never fire. So the recorded half is
+     * held to the state it records: nothing to re-read means no bytes written.
+     */
+    public function test_reaffirm_writes_nothing_where_every_reading_is_current(): void
+    {
+        $file = Handoff::root().'/'.Handoff::DECLARATIONS_FILE;
+        $before = (string) file_get_contents($file);
+
+        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/handoff.php', '--reaffirm']);
+
+        self::assertSame(0, $run['exit'], sprintf(
+            "bin/handoff.php --reaffirm reports a reading out of step with the file it describes:\n%s%s",
+            $run['output'],
+            $run['error'],
+        ));
+        self::assertStringContainsString(
+            'nothing was written',
+            $run['output'],
+            'A re-reading wrote the declaration block in a checkout where every reading is already current.',
+        );
+        self::assertSame($before, (string) file_get_contents($file), 'A re-reading changed the block, and it changes nothing where the files have not moved.');
+    }
+
+    /**
+     * A reading is the second half of a description, so a path nothing describes has nothing to
+     * re-read: a typo in the command has to be red rather than recorded as a reading of nothing.
+     */
+    public function test_a_path_no_line_describes_cannot_be_reaffirmed(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('There is no line for no/such/file.php in Handoff::PENDING_DESCRIPTIONS');
+
+        Handoff::pendingReadings(['no/such/file.php']);
+    }
+
+    /**
+     * The declaration block is the reader's own output, held to the file byte for byte.
+     *
+     * The block is written by a command and read by this class, and the two have to be the same shape:
+     * a hand-edited entry — a digest pasted in, a words string that drifted — is what the round trip
+     * through `pendingReadings()` makes red, so the only way to change a reading is the command that
+     * takes one.
+     */
+    public function test_the_declared_block_is_what_the_reader_renders(): void
+    {
+        $source = (string) file_get_contents(Handoff::root().'/'.Handoff::DECLARATIONS_FILE);
+
+        $found = preg_match(
+            '/'.preg_quote(Handoff::DECLARATIONS, '/')."[^\n]*\n(.*)\n\s*".preg_quote(Handoff::DECLARATIONS_END, '/').'/s',
+            $source,
+            $matches,
+        );
+
+        self::assertSame(1, $found, 'The markers the declaration block is written between are gone.');
+        self::assertSame(
+            Handoff::pendingReadings()['block'],
+            $matches[1],
+            'A declared reading is not what the command writes, so it was edited by hand rather than taken.',
+        );
     }
 
     /**
@@ -1335,6 +1582,109 @@ final class HandoffTest extends TestCase
     }
 
     /**
+     * The transcript's other reading: a register whose records are current renders exit 0, and says so
+     * in the tool's own sentence.
+     *
+     * WHY THIS CASE EXISTS
+     * --------------------
+     *   The block quotes two runs, and the one a release depends on is the first: a release rewrites the
+     *   three `.tsv` records at its own commit and then refreshes this block there, so the register run
+     *   exits 0 and the note has to read that way rather than claiming a drift. The note in the tree
+     *   cannot reach that state — its register is older than the records, which is why the first run it
+     *   quotes exits 1 — so the branch was pinned by nothing, and the two things that can silently break
+     *   it are cheap to write: quoting the run's preamble (`reading the tree at … out of git, not the
+     *   checkout`) instead of its verdict, or writing `exit 0` with an empty reading beside it.
+     *
+     *   The register is the one the records name in their own header rather than `HEAD`, so the case is
+     *   about the branch rather than about one afternoon's tree: a record and the tag it describes travel
+     *   together, and `--check --at=<that tag>` is the reading that must exit 0.
+     */
+    public function test_a_register_whose_records_are_current_renders_exit_zero(): void
+    {
+        $stamp = self::recordStamp();
+
+        $resolved = Handoff::git('rev-parse', $stamp.'^{commit}');
+
+        self::assertSame(0, $resolved['exit'], sprintf(
+            "files.tsv says it describes the tree at %s, and git resolves no such ref — a record of a tag "
+            ."nothing has is a transcript about a tree a reader cannot open%s",
+            $stamp,
+            $resolved['error'],
+        ));
+
+        $register = trim($resolved['output']);
+        $block = Handoff::rendered('records', ['register' => $register, 'origin' => $register, 'branch' => 'dev']);
+
+        // The run the block quotes, asked directly: what it says beside `exit 0` has to be the tool's
+        // own sentence rather than this renderer's idea of one.
+        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/inventory.php', '--check', '--at='.$stamp]);
+
+        self::assertSame(0, $run['exit'], sprintf(
+            "files.tsv is stamped for %s and `bin/inventory.php --check --at=%s` exits %d:\n%s%s",
+            $stamp,
+            $stamp,
+            $run['exit'],
+            $run['output'],
+            $run['error'],
+        ));
+
+        $lines = explode("\n", $block);
+        $command = null;
+
+        foreach ($lines as $index => $line) {
+            if (str_starts_with($line, 'php bin/inventory.php --check --at=')) {
+                $command = $index;
+            }
+        }
+
+        self::assertIsInt($command, 'The records block quotes no `--check --at=` run at all.');
+
+        // The tool's own verdict, taken off the run rather than written here: a sentence in this file
+        // would be a second copy of the counts, and would go stale on the first file the tree gains.
+        $bullets = array_values(array_filter(
+            Handoff::outputLines($run['output']."\n".$run['error']),
+            static fn (string $line): bool => str_starts_with($line, '•'),
+        ));
+
+        self::assertNotSame([], $bullets, 'the run found the records current and said nothing a transcript can quote');
+
+        $said = trim(ltrim((string) end($bullets), '•'));
+
+        self::assertStringStartsWith(
+            'inventory is current',
+            $said,
+            'The run\'s last word is the reading the section is about, so the verdict is taken from it.',
+        );
+        self::assertSame(
+            '  --> exit 0: '.$said,
+            $lines[$command + 1],
+            'A register whose records are current has to read as the tool reads it: the verdict, not the run\'s '
+            .'preamble and not an exit code with nothing beside it.',
+        );
+
+        self::assertSame(
+            '',
+            $lines[$command + 2] ?? null,
+            'A current run listed a record under it, so the transcript claims a drift the tool did not find.',
+        );
+    }
+
+    /**
+     * The tag an inventory record is stamped for, read off the record's own header — where the tool puts
+     * it, and the only place it is written for a reader rather than for a comparison.
+     */
+    private static function recordStamp(): string
+    {
+        $header = (string) file_get_contents(Handoff::root().'/files.tsv');
+
+        if (preg_match('/^# .*describes the tree at (\S+)\s*$/m', $header, $matches) !== 1) {
+            self::fail('files.tsv no longer says which tree it describes, and a record without a stamp cannot be read against one.');
+        }
+
+        return $matches[1];
+    }
+
+    /**
      * The gate record, held to being the run the note quotes: every check the gate declares, one
      * verdict apiece, all green, and a duration that can hold the rows under it.
      *
@@ -1343,11 +1693,13 @@ final class HandoffTest extends TestCase
      *   A record is evidence of a run, not the run: nothing here re-runs a ten-minute gate inside the
      *   suite the gate is running, so what is checked is the shape a run leaves rather than that this
      *   afternoon happened. What that shape can still be wrong about is everything a session could
-     *   have typed by hand, which is the point — a record with fourteen rows and a summary saying
-     *   thirteen, a row whose verdict is neither PASS, FAIL nor SKIP, a run shorter than its longest
-     *   check, an exit code at odds with the rows, or a missing check would each make the block above
-     *   it a claim the gate does not make. The names are compared with `bin/checks.php --list` rather
-     *   than with a list here, so a check added to the gate is a record that has to be taken again.
+ *   have typed by hand, which is the point — a record with fourteen rows and a summary saying
+ *   thirteen, a row whose verdict is neither PASS, FAIL nor SKIP, a run shorter than its longest
+ *   check, an exit code at odds with the rows, a missing check, or a run dated before the note that
+ *   quotes it would each make the block above it a claim the gate does not make. The names are
+ *   compared with `bin/checks.php --list` rather than with a list here, so a check added to the gate
+ *   is a record that has to be taken again; the two dates are compared with the note's own title,
+ *   because a note re-taken on a later day is otherwise free to carry the run from before it.
      */
     public function test_the_gate_record_is_a_run_of_every_check_the_gate_declares(): void
     {
@@ -1404,15 +1756,36 @@ final class HandoffTest extends TestCase
 
         // A day of slack, because the record is written on a machine whose clock is the record's and
         // read on whatever machine runs the suite: what is refused is a date no run could have written,
-        // not a timezone. How *old* the run may be is deliberately not held — a note re-taken to fix a
-        // typo should not force a ten-minute gate — so the sentence above the block says the record is
-        // the last one taken rather than claiming the run happened this afternoon.
+        // not a timezone.
         self::assertLessThanOrEqual(
             strtotime(date('Y-m-d')) + 86400,
             strtotime($record['taken']),
             sprintf(
                 'The gate record is dated %s, which is in the future: a run cannot have been taken after the day '
                 .'the note quoting it is being read.',
+                $record['taken'],
+            ),
+        );
+
+        // The other end of the same question, and the one a reader is actually misled by. The note is
+        // dated in its title, which is the only claim in it about the note rather than about the tree,
+        // and a record older than that date is a run taken before the note existed to quote it — a note
+        // re-taken a week later still carrying last week's run, with section 1's sentence calling it
+        // this note's verification. So the two dates are read against each other, and the failure names
+        // the command that writes both halves in one step.
+        //
+        // What is still *not* held is how old the run is within the note's own day: a take made the same
+        // day as its run is the ordinary case, and a typo fixed an hour later should not demand another
+        // ten minutes of gate. The day is the unit because the day is what the note states.
+        self::assertGreaterThanOrEqual(
+            strtotime(Handoff::taken()),
+            strtotime($record['taken']),
+            sprintf(
+                'HANDOFF.md was taken on %s and its gate block quotes a run recorded on %s, which predates the '
+                .'note. A run from before the day it is quoted in cannot be this note\'s verification, however '
+                .'green it was: run `php bin/checks.php --record`, which writes the record and re-renders this '
+                .'block from it, or take the note again on the day of the run it quotes.',
+                Handoff::taken(),
                 $record['taken'],
             ),
         );
