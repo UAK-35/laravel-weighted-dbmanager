@@ -49,6 +49,16 @@
   from both sides, and a quote shorter than a dozen characters is not read at all. A paraphrase is
   therefore not a quote: the reading is exact words, which is the reading a citation makes.
 
+### Changed
+
+- **The `connector` row's second failure is held to the framework's own sentence.** A connection that
+  resolves a connector and still cannot be built is the state where the row has to say both things:
+  the class that would build it, and the framework's refusal after the colon. The new test binds a
+  connector for a driver the framework has no connection class for, so `createConnector()` answers and
+  the build that follows refuses, and it reads the sentence the row quotes out of that same factory
+  rather than comparing it with a paraphrase. The behaviour is unchanged — this is the test that stops
+  a rewording from passing.
+
 ### Fixed
 
 - **`docs/db-doctor-json.md` no longer quotes a phrase `docs/pgcat-flip-json.md` does not contain.**

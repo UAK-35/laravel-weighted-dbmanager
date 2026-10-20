@@ -364,6 +364,79 @@ class DbDoctorTest extends TestCase
     }
 
     /**
+     * The other failure a build can produce: a connector that answered and a connection that
+     * still could not be constructed.
+     *
+     * The framework keeps two maps, and only the first consults `db.connector.<driver>`:
+     * `createConnector()` picks the connector from the driver, `createConnection()` picks the
+     * class that connector's PDO is wrapped in. An installation that adds a connector for a
+     * driver the framework has no connection class for therefore passes the first step and
+     * fails the second — the state in which the reading can name the connector and still has
+     * no connection to name, so the row has to say both: which class would build it, and why
+     * nothing was built. The sentence after the colon is the framework's own refusal rather
+     * than a second way of saying it, which is what makes it actionable at all.
+     */
+    public function test_the_connector_row_fails_with_the_frameworks_sentence_when_the_connection_cannot_be_built(): void
+    {
+        $this->bindRedis(reachable: true);
+
+        // Any connector at all, bound for a driver the framework has no connection class for:
+        // the binding is what `createConnector()` takes, and the build that follows it is the
+        // one that refuses. `clickhouse` is this test's name for such a driver — the row is read
+        // for the sentence, and the sentence is the framework's whether the driver is real.
+        $connector = new class () extends PostgresConnector {};
+
+        config()->set('database.connections.warehouse', ['driver' => 'clickhouse', 'database' => 'warehouse']);
+        config()->set('db-manager.swrr.connection', 'warehouse');
+        $this->app->instance('db.connector.clickhouse', $connector);
+
+        // A switch armed over a driver pgcat can never act on is a failure of the pgcat rows,
+        // and this is not the test for those: this one reads the refusal the build raised.
+        config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+        $this->app->forgetInstance(PgcatConfigFlipper::class);
+
+        [$output, $exit] = $this->doctor();
+        $report = $this->report($this->doctorJson()[0]);
+        $row = $this->checkNamed($report, 'connector');
+
+        $this->assertSame('FAIL', $row['verdict']);
+        $this->assertSame(
+            'connection [warehouse] (driver clickhouse) is built by '.$connector::class
+            .', but the connection itself could not be built: Unsupported driver [clickhouse].',
+            $row['detail'],
+            'neither half is dropped: the connector that answered, and the framework\'s reason for building nothing',
+        );
+        $this->assertSame([], $row['suggestions'], 'the repair is a connection class, and a class is not a config line');
+        $this->assertStringStartsWith('FAIL  connector', $this->rowContaining($output, 'connector'));
+
+        // The claim is about the framework, so the framework is asked in the same breath: the
+        // connector step takes the binding, and the build step raises the sentence the row quotes.
+        $factory = new ConnectionFactory($this->app);
+
+        $this->assertSame($connector::class, $factory->createConnector(['driver' => 'clickhouse'])::class);
+
+        try {
+            $factory->make(['driver' => 'clickhouse', 'database' => 'warehouse'], 'warehouse');
+
+            $this->fail('the framework has no connection class for this driver, so the build cannot succeed');
+        } catch (InvalidArgumentException $refused) {
+            $this->assertSame(
+                'Unsupported driver [clickhouse].',
+                $refused->getMessage(),
+                'the sentence after the colon is the one the build raised, not a paraphrase of it',
+            );
+        }
+
+        $failed = array_values(array_map(
+            static fn (array $check): string => (string) $check['name'],
+            array_filter($report['checks'], static fn (array $check): bool => $check['verdict'] === 'FAIL'),
+        ));
+
+        $this->assertSame(['connector'], $failed, 'this row is the run\'s only failure, so the code is its');
+        $this->assertSame(1, $exit);
+    }
+
+    /**
      * A `db.factory` that cannot be asked. The binding is the framework's extension point for
      * the whole class, so a reading that guessed past it would describe a factory this
      * installation does not have — and its own fault is `weighted factory`'s to report.
