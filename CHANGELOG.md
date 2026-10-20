@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- **Three records of application-side work are added, and the plan that came out of one of them.**
+  `docs/investigations/investigation-ecs-rev31-rollback.md` follows the two `lpr-backend-sites`
+  tasks that stopped minutes after they started to the revision they were rolled back from — the
+  log-path permission fatal and the unwritable pooler state directory their boots produced, and the
+  drain arithmetic that makes each rollout slow. `docs/issues/issue-pgcat-hanging-query-wire-capture.md`
+  carries the `python3` proxy that decodes a hanging query's wire traffic in both directions, and the
+  `SHOW POOLS` reading that tells a pooler-side wait from a server-side one.
+  `docs/issues/issue-supervisord-socket-unreachable.md` records the control socket every flip refused
+  on, the `FAULT_UNREACHABLE` fault that names it, and the `chmod=0760` with `chown=root:www-data`
+  repair. `docs/planning/plan-pgcat-both-mechanisms-armed.md` is the plan for keeping both pgcat
+  scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` finding is retired: why the
+  per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs
+  `/health/db`, and the four code changes with what verifies each. Nothing under `src/` or `config/`
+  moves.
+
 ## 0.2.0-alpha7 - 2026-10-20
 
 ### Added
