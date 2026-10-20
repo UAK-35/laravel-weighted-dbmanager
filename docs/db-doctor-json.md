@@ -461,5 +461,5 @@ it reports is a row the same rule can bind, and one the set test can measure.
 | `README.md` | the envelope, the sample object, the `jq` examples, the deploy gate a pipeline pastes, and the verdict table |
 | `tests/Unit/Docs/DoctorGateTest.php` | the gate run rather than read: a real report it must ship, two it must refuse, and the rows it names checked against the ones a run produces |
 | `docs/documented-exit-codes.md` | the same idea one level up: documenting a code and enforcing it |
-| `docs/pgcat-flip-json.md` | the flip's object, whose flag, key-set rule and "the code travels inside it" this follows |
+| `docs/pgcat-flip-json.md` | the flip's object, whose flag, key-set rule and "code inside it" this follows |
 | `docs/command-json-envelope.md` | the five keys as one class, shared with `db:probe-replicas` and `db:replica-status`, and why this object does not take them |

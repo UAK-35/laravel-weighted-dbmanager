@@ -41,6 +41,20 @@
   — `switch-values.md`'s "Only **three** settings are covered" counts the provider's `SWITCHES`
   table — so that sentence is bound in `ProseNumbersTest` rather than excused.
 
+- **A guard holds every sentence one record quotes from another to the record it names.**
+  `QuotedRecordsTest` reads every `"…"` span beside a backticked `.md` path across the four root
+  records and every `.md` under `docs/` — `CHANGELOG.md` is out, because a changelog quotes the
+  sentence a version published rather than a record on disk. An ellipsis means "the rest of the
+  sentence" and the fragments have to appear in that order, emphasis and quote marks are dropped
+  from both sides, and a quote shorter than a dozen characters is not read at all. A paraphrase is
+  therefore not a quote: the reading is exact words, which is the reading a citation makes.
+
+### Fixed
+
+- **`docs/db-doctor-json.md` no longer quotes a phrase `docs/pgcat-flip-json.md` does not contain.**
+  The citation said "the code travels inside it"; the record says "code inside it", and the two had
+  drifted apart with no diff to show it — which is what the new guard reads.
+
 ## 0.2.0-alpha7 - 2026-10-20
 
 ### Added
