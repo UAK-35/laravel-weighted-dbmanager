@@ -191,11 +191,11 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=455b3af
-  --> exit 1: the inventory is out of step with the tree at 455b3af
+php bin/inventory.php --check --at=b49f3ac
+  --> exit 1: the inventory is out of step with the tree at b49f3ac
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
-      surface.tsv: 1 line(s) stale
+      surface.tsv: 2 line(s) stale
 
 php bin/inventory.php --check
   --> exit 1: the inventory is out of step with the tree
@@ -234,11 +234,6 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
-| `docs/issues/issue-release-v0-2-0-alpha6-ci-red.md` | the record of why the v0.2.0-alpha6 run is red: the tag's commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer |
-| `docs/pgcat-fleet-inspection.md` | the runbook for reading every task of a service rather than one: the three rows that carry loaded pools, supervisor state and flip writability, the ECS Exec loop that asks each task, why the report runs as `www-data` rather than the session's `root`, and what a task-level answer cannot say about the service |
-| `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
-| `tests/Unit/Docs/CommentCountsTest.php` | the guard that holds a count stated in an `src/` comment to the table beside it: each claim read out of the file's own comment tokens, with its expectation derived from the constant or the family the sentence names, so a table that grows a member fails until its sentence says so |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -255,10 +250,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `455b3af` — *feat: the boundary flip reports the repair it made* |
-| `origin/dev` | `26fe1b0` — *feat: two skills record an LPR issue and an LPR investigation* |
-| Unpushed | 4 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 2, feat 2 |
+| HEAD | `b49f3ac` — *fix: a release refuses a tree holding files no commit carries* |
+| `origin/dev` | `b49f3ac` — *fix: a release refuses a tree holding files no commit carries* |
+| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
+| Since the last tag | none |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -284,14 +279,7 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The four most recent are the ones a reader is most likely to be standing in the middle of:
-
-```
-455b3af  feat: the boundary flip reports the repair it made
-a7e3dfc  feat: a flip that applies a mode reads the pooler back, wherever it ran
-9560607  docs: the gate record and the handoff note are refreshed together
-80b60ff  docs: the three pgcat investigations are committed records, not pending work
-```
+Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
 <!-- /handoff:log -->
 
 The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
