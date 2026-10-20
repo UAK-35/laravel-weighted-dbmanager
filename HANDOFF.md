@@ -121,21 +121,21 @@ off PHPUnit's line — and the day and the interpreter are the record's rather t
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 599.4s
-      recorded 2026-10-17, PHP 8.4.26
-      syntax     PASS    18.8s  152 files, no syntax errors
-      ast        PASS     2.3s  152 files parsed
-      writeback  PASS     0.6s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     4.2s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.1s  20 platform requirements satisfied
-      interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 681.3s
+      recorded 2026-10-20, PHP 8.4.26
+      syntax     PASS    21.4s  163 files, no syntax errors
+      ast        PASS     2.6s  163 files parsed
+      writeback  PASS     0.7s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     3.6s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     3.2s  20 platform requirements satisfied
+      interpreter PASS     0.2s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.30.4, phpstan 2.2.14, phpunit 11.5.56, yaml-lint v7.4.18
-      yaml       PASS     2.3s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     0.9s  54 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.1s  8555 prose line(s) in 28 record(s), no fused sentence; the detector agreed wi…
-      phpstan    PASS     8.9s  [OK] No errors
-      pint       PASS     6.9s  PASS … 153 files
-      tests      PASS   551.2s  Tests: 1442, Assertions: 9580, Skipped: 5.
+      yaml       PASS     2.5s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     1.0s  54 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.1s  9575 prose line(s) in 32 record(s), no fused sentence; the detector agreed wi…
+      phpstan    PASS    11.9s  [OK] No errors
+      pint       PASS     7.8s  PASS … 164 files
+      tests      PASS   626.5s  Tests: 1560, Assertions: 10446, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
@@ -191,11 +191,11 @@ the note before this one cut:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=41f05d0
-  --> exit 1: the inventory is out of step with the tree at 41f05d0
-      files.tsv: 3 line(s) stale
-      methods.tsv: 3 line(s) stale
-      surface.tsv: 9 line(s) stale
+php bin/inventory.php --check --at=80b60ff
+  --> exit 1: the inventory is out of step with the tree at 80b60ff
+      files.tsv: 1 line(s) stale
+      methods.tsv: 1 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
   --> exit 0: inventory is current — 53 files, 261 public methods, 299 key(s)/member(s), described as v0.2.0-alpha6
@@ -233,17 +233,9 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `.agents/skills/wdm-investigation/SKILL.md` | the skill that records an LPR investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an LPR investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in |
-| `.agents/skills/wdm-issue/SKILL.md` | the skill that records an LPR fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an LPR issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in |
-| `docs/investigations/investigation-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
-| `docs/investigations/investigation-pgcat-flip-writer-to-readers-failed.md` | the investigation of why the pooler was not flipped from writer to readers on a live ECS task: the automatic flips failed because `supervisorctl` is unreachable to the `www-data` the schedule runs as (a `root:root` 0700 socket), the root-owned flip target and empty boot stamp that would still bite, and the fix |
 | `docs/issues/issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
-| `docs/pgcat-pool-metrics.md` | the metric decision: why the probe needed a surface a monitor can scrape, why a pool the reading could not prove has no sample, the alert rules, and the shapes it rejected |
+| `docs/pgcat-fleet-inspection.md` | the runbook for reading every task of a service rather than one: the three rows that carry loaded pools, supervisor state and flip writability, the ECS Exec loop that asks each task, why the report runs as `www-data` rather than the session's `root`, and what a task-level answer cannot say about the service |
 | `health-db-host-ip-plan.md` | the plan for reading eth1's IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch |
-| `src/Console/Commands/DbPgcatMetrics.php` | the command that writes that exposition to stdout, with `--strict` as the deploy step's exit code and the body unchanged by it |
-| `src/Pgcat/PoolProbeMetrics.php` | the pool probe's verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on |
-| `tests/Unit/Console/DbPgcatMetricsCommandTest.php` | the command's two channels: the exposition a scrape archives and the code `--strict` adds, over a console answer or a probe the test supplies rather than a socket |
-| `tests/Unit/Pgcat/PoolProbeMetricsTest.php` | the rendering held against verdicts written by hand: a held pool, a refused one, an unproven one with no sample, each family's HELP and TYPE, and the label escaping |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -260,10 +252,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `41f05d0` — *feat: the pinned host address reads an interface the config names* |
-| `origin/dev` | `a284b44` — *Release v0.2.0-alpha5* |
-| Unpushed | 17 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 7, feat 9, fix 1 |
+| HEAD | `80b60ff` — *docs: the three pgcat investigations are committed records, not pending work* |
+| `origin/dev` | `26fe1b0` — *feat: two skills record an LPR issue and an LPR investigation* |
+| Unpushed | 1 commit — the one `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -289,19 +281,10 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The ten most recent are the ones a reader is most likely to be standing in the middle of:
+The one most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
-41f05d0  feat: the pinned host address reads an interface the config names
-de6fa2c  feat: /health/db says which host answered it, as pinned.host_ip
-628ca9e  feat: the pool probe asks every declared pool in one wave
-f7cbad6  docs: the records carry the batch — the inventory reading, the pooler's port, the writable hand-back
-79750a6  fix: a read-only audit record is repaired, and the files this package writes stay writable
-dbb9482  feat: the pool probe reads the pooler's own inventory, on the port its file states
-8c34ffd  docs: the published page and the inventories carry the batch's new surface
-c65aa7e  docs: the records state what the probe dials, and how often a repair is too often
-703b228  docs: the rehearsal's step table lists the variant-shape read it already performs
-db752f8  feat: both surfaces print the endpoint they dialled and the rate this container repairs at
+80b60ff  docs: the three pgcat investigations are committed records, not pending work
 ```
 <!-- /handoff:log -->
 
@@ -335,8 +318,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6` |
 | The latest of them | `v0.2.0-alpha6` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 21 entries — 11 added, 2 fixed, 8 changed |
-| The notes weigh as | minor — eleven additions beside eight changes, which is the rung they take |
+| `## Unreleased` at the basis | 1 entry — 1 added, 0 fixed, 0 changed |
+| The notes weigh as | minor — one addition and no changes, which is the rung they take |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -344,7 +327,7 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries eleven entries under `### Added`, two under `### Fixed` beside eight under
+and the section carries one entry under `### Added`, none under `### Fixed` and none under
 `### Changed` at the register, which the weighing reads as `minor`. The register is therefore a
 branch whose release would publish the pool probe's two surfaces, its console reading and its
 one-wave sweep, the flip's repair history and the repair rate — a `minor` after a prerelease, with

@@ -1,43 +1,43 @@
 {
-    "taken": "2026-10-17",
+    "taken": "2026-10-20",
     "php": "8.4.26",
     "exit": 0,
-    "elapsed": 599.4,
+    "elapsed": 681.3,
     "checks": [
         {
             "name": "syntax",
             "status": "PASS",
-            "seconds": 18.8,
-            "note": "152 files, no syntax errors"
+            "seconds": 21.4,
+            "note": "163 files, no syntax errors"
         },
         {
             "name": "ast",
             "status": "PASS",
-            "seconds": 2.3,
-            "note": "152 files parsed"
+            "seconds": 2.6,
+            "note": "163 files parsed"
         },
         {
             "name": "writeback",
             "status": "PASS",
-            "seconds": 0.6,
+            "seconds": 0.7,
             "note": "3 write-back(s) in the shipped tree, every one declared; the detector agreed …"
         },
         {
             "name": "schema",
             "status": "PASS",
-            "seconds": 4.2,
+            "seconds": 3.6,
             "note": "composer.json is valid; composer.lock is not part of this repository, so it is not checked"
         },
         {
             "name": "platform",
             "status": "PASS",
-            "seconds": 3.1,
+            "seconds": 3.2,
             "note": "20 platform requirements satisfied"
         },
         {
             "name": "interpreter",
             "status": "PASS",
-            "seconds": 0.1,
+            "seconds": 0.2,
             "note": "PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4"
         },
         {
@@ -49,38 +49,38 @@
         {
             "name": "yaml",
             "status": "PASS",
-            "seconds": 2.3,
+            "seconds": 2.5,
             "note": "[OK] All 1 YAML files contain valid syntax."
         },
         {
             "name": "counts",
             "status": "PASS",
-            "seconds": 0.9,
+            "seconds": 1,
             "note": "54 count(s) across 12 record(s), all in step with their derivations."
         },
         {
             "name": "sentences",
             "status": "PASS",
             "seconds": 0.1,
-            "note": "8555 prose line(s) in 28 record(s), no fused sentence; the detector agreed wi…"
+            "note": "9575 prose line(s) in 32 record(s), no fused sentence; the detector agreed wi…"
         },
         {
             "name": "phpstan",
             "status": "PASS",
-            "seconds": 8.9,
+            "seconds": 11.9,
             "note": "[OK] No errors"
         },
         {
             "name": "pint",
             "status": "PASS",
-            "seconds": 6.9,
-            "note": "PASS … 153 files"
+            "seconds": 7.8,
+            "note": "PASS … 164 files"
         },
         {
             "name": "tests",
             "status": "PASS",
-            "seconds": 551.2,
-            "note": "Tests: 1442, Assertions: 9580, Skipped: 5."
+            "seconds": 626.5,
+            "note": "Tests: 1560, Assertions: 10446, Skipped: 10."
         }
     ]
 }
