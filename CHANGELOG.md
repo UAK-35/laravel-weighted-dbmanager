@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- **Two skills record an LPR fault and an LPR investigation as a markdown document.** `wdm-issue`
+  fires on a `/wdm-issue` marker, or asks *"Is this an LPR issue?"* for a prompt that mentions a
+  problem or an issue; `wdm-investigation` fires on a `/wdm-investigation` marker, or asks *"Is
+  this an LPR investigation?"* for a prompt that says investigate or "find out why". Each answers
+  the prompt first and then writes the response into the folder its subject owns —
+  `docs/issues/` for a fault with a fix, `docs/investigations/` for a why-or-how that has none —
+  with the evidence, the root cause and the fix a reader who was not in the session can act on.
+  Both live under `.agents/`, so a consumer's tarball carries neither, and the change also
+  corrects the skills index, which listed an `lpr-issue` skill whose folder was not in the tree.
+  Nothing under `src/` or `config/` moves.
+
 ## 0.2.0-alpha6 - 2026-10-19
 
 ### Added

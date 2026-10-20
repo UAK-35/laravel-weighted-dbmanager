@@ -12,7 +12,8 @@ them; the frontmatter `description` is what decides when one is invoked.
 | `pkg-commit` | commit a change here: the message shape `bin/weighing.php` reads back, the `## Unreleased` entry that decides the bump, the signature, and the two files that are never committed |
 | `pkg-push` | get commits and annotated tags onto GitHub from PowerShell 7, recognise the two refusals, and prove the tag landed in three layers |
 | `pkg-deploy` | publish a version: weigh the bump, promote the CHANGELOG, tag it, push it, confirm Packagist knows it, and hand the consumer the pin to raise |
-| `lpr-issue` | record an LPR fault as a markdown document: activate on the `/lpr-issue` marker, or for a prompt mentioning a problem or an issue once the user answers yes to "Is this an LPR issue?", then write the response into the issue or investigation folder |
+| `wdm-issue` | record an LPR fault as a markdown document: activate on the `/wdm-issue` marker, or for a prompt mentioning a problem or an issue once the user answers yes to "Is this an LPR issue?", then write the response into the issue or investigation folder |
+| `wdm-investigation` | record an LPR investigation as a markdown document: activate on the `/wdm-investigation` marker, or for a prompt containing investigate or "find out why" once the user answers yes to "Is this an LPR investigation?", then write the response into `docs/investigations/` |
 
 The written-down procedures they wrap are [`RELEASING.md`](../RELEASING.md) (what a release
 is, and what `bin/release.php` does at each step) and [`PUSHING.md`](../PUSHING.md) (the
