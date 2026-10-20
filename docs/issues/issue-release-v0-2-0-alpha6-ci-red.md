@@ -155,16 +155,39 @@ git ls-tree --name-only 57ba1e8 docs/issues/
 git show 57ba1e8:HANDOFF.md
 ```
 
-## Status
+## What was done
 
-Diagnosed, and the release gate is repaired in the same branch: `bin/release.php` now refuses a tree
-holding files no commit carries, and the development tools are pinned to the versions the runner
-installed, so the gate a tag is cut behind is the gate the runner runs. Both are held by tests
-(`test_a_file_no_commit_carries_has_to_be_committed_first`,
-`test_the_dry_run_warns_about_files_no_commit_carries`, and the exit-path census that refuses to let
-a refusal exist without a row).
+The gate defect was repaired rather than the tag: `bin/release.php` now asks `git ls-files --others`
+as well and refuses a tree holding files no commit carries, before anything is written, naming them.
+`--dry-run` warns and prints the same list, and `--allow-dirty` stays the loud escape. That closes
+the loop the alpha6 release went through: the note's pending table is derived from exactly that set,
+so the working tree cannot hold a record the version will not contain without the release saying so.
+The development tools were pinned to the versions CI installs (pint 1.32.1, phpstan 2.3.1, phpunit
+11.5.57), because `require-dev` ranges are resolved afresh on a runner and the gate record had been
+taken on an older phpstan.
 
-The tag's own run cannot go green without moving the tag. The plan is the other way: land this
-branch, cut the next prerelease from it, and let its tag-triggered run be the green one — the alpha6
-failure then stands as the record of what the gate was missing. The two runner-only failures above
-are still open, and are the first thing to read in that new run.
+Both are held by tests: `test_a_file_no_commit_carries_has_to_be_committed_first`,
+`test_the_dry_run_warns_about_files_no_commit_carries`, a row in the exit-path census, and the rail
+table in `RELEASING.md`, which `ReleasingDocTest` checks names tests that exist.
+
+## Outcome
+
+`v0.2.0-alpha7` was cut from `dev` at `2a771cc` and pushed with the branch, and **both runs are
+green**:
+
+| Run | Ref | Result |
+|---|---|---|
+| [39469491120](https://github.com/UAK-35/laravel-weighted-dbmanager/actions/runs/39469491120) | tag `v0.2.0-alpha7` | **success** — 13 checks, 12 passed, 1 skipped (the interpreter, absent on a runner) |
+| [39469492648](https://github.com/UAK-35/laravel-weighted-dbmanager/actions/runs/39469492648) | `dev` | **success** |
+
+The tag run's own numbers: `phpstan` PASS, `pint` PASS over 164 files, `tests` PASS with 1589 tests
+and 10514 assertions (18 skipped), and `pgcat pool probe (live)` PASS against the pinned image. The
+`v0.2.0-alpha6` run stays red, which is what a published version's own run should say about the tree
+it froze.
+
+The two runner-only failures did not recur, and no code was changed for either. Both read the tree
+the release had just refreshed — one is the fixture that takes the package's own `HANDOFF.md` as its
+note, the other a doctor row that exits on a row other than the one it names — which puts them in
+the same family as the note paths rather than in a family of their own. That is an inference from a
+single green commit, not a repro; the next tag cut from a tree that is *not* a release commit is
+what would settle it.
