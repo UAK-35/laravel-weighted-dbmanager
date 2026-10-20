@@ -312,8 +312,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6` |
 | The latest of them | `v0.2.0-alpha6` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 2 entries — 1 added, 1 fixed, 0 changed |
-| The notes weigh as | minor — one addition is the rung that decides it, and a fix beside it does not raise it |
+| `## Unreleased` at the basis | 4 entries — 1 added, 3 fixed, 0 changed |
+| The notes weigh as | minor — one addition is the rung that decides it, and the fixes beside it do not raise it |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -321,7 +321,7 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries one entry under `### Added`, one under `### Fixed` and none under
+and the section carries one entry under `### Added`, three under `### Fixed` and none under
 `### Changed` at the register, which the weighing reads as `minor`. The register is therefore a
 branch whose release would publish the pool probe's two surfaces, its console reading and its
 one-wave sweep, the flip's repair history and the repair rate — a `minor` after a prerelease, with
