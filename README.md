@@ -1410,7 +1410,11 @@ is: resolve the boundary, ask the mode's target with one `SELECT 1` on a throwaw
 — only at the boundary, and only when the target answered — apply the mode through the flipper's
 **forced** path. `forceMode()` has no boot window, because the boot window is a fact about starting
 up rather than about the time of day, and it records no run, so a mode applied at 10:00 cannot move
-the convergence verdict `/health/db` reports for the container.
+the convergence verdict `/health/db` reports for the container. It does ask the pooler the second
+question every applied mode asks — is the process holding the pools the new variant declares — with
+the same bounded retry the scheduled flip uses, and a pooler that did not act on the signal is
+restarted on the file just written and counted as a repair (`pool_repairs`), so a boundary that
+would otherwise have left every read to a new pool failing reports `repaired` instead of `flipped`.
 
 | Setting | Default | What it decides |
 |---|---|---|

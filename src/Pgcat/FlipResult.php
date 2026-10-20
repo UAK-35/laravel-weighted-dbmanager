@@ -38,11 +38,14 @@ final class FlipResult
      * connected to. It exits 0 for the same reason a flip does: the run did what it was asked
      * to, and the state it leaves behind is `/health/db`'s to report rather than a run's.
      *
-     * There are two runs that reach it. One found the mode already applied, where the repair
-     * is a re-application rather than a transition — the mode never changed. The other has just
-     * *applied* a mode and read the pooler back, and the pooler did not pick it up: there the
-     * mode did move, and the repair is a restart on the file that was written, because a signal
-     * pgcat did not act on needs a process that reads the file to happen at all.
+     * Three runs reach it, and the two after the first are the same question asked of a mode that
+     * has just moved. One found the mode already applied, where the repair is a re-application
+     * rather than a transition — the mode never changed. One has just *applied* a mode on the
+     * scheduled path and read the pooler back, and the pooler did not pick it up. The third is
+     * the forced path — the reader-window tasks at a boundary, `db:pgcat-flip --force-mode` by
+     * hand — which has applied a mode for the same reason and asked the same read-back question.
+     * In the two that moved the mode the repair is a restart on the file that was written, because
+     * a signal pgcat did not act on needs a process that reads the file to happen at all.
      */
     public const KIND_REPAIRED = 'repaired';
 

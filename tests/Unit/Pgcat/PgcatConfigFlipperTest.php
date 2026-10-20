@@ -1625,6 +1625,145 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertCount(1, $this->flipCommands());
     }
 
+    /**
+     * The forced path applies a mode too, so it asks the same second question: the file is in place
+     * and the pooler is not answering for the pool it declares.
+     *
+     * This is the path `db:pgcat-window-flip` takes at every boundary, in the middle of the day, and
+     * nothing re-applies the file on the next poll afterwards — the per-minute entry has nothing to
+     * do once the mode is recorded. So the run reads the pools back with the retry a pooler that was
+     * just signalled needs, restarts it on the file it wrote when that refusal stands, reads them
+     * once more, and reports `repaired` rather than a clean `flipped`.
+     *
+     * What it still does not do is record a run: `runs`, `last_kind` and `converged_at` are the boot
+     * window's evidence, and a mode applied at 10:00 must not be able to move the verdict a
+     * deployment gate reads. The repair is counted, though, because that is a fact about the pooler
+     * and the same count a boot-window repair lands in.
+     */
+    public function test_a_forced_flip_whose_pooler_did_not_pick_the_mode_up_is_repaired(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $restarted = false;
+        $answers = [];
+
+        $flipper = $this->build(
+            'writer',
+            ['use_reload' => true, 'start_retry_delay_ms' => 0],
+            runner: function (string $cmd) use (&$restarted): array {
+                if (str_contains($cmd, 'restart')) {
+                    $restarted = true;
+                }
+
+                return [0, 'pgcat: started', ''];
+            },
+            poolProbe: function (string $database) use (&$restarted, &$answers): array {
+                $answers[] = $restarted ? 'answered' : 'missing';
+
+                return $restarted
+                    ? ['status' => 'answered', 'evidence' => 'the pooler answered for pool "reader_db_2"']
+                    : ['status' => 'missing', 'evidence' => 'pgcat is running but has no pool "reader_db_2"'];
+            },
+        );
+
+        $result = $flipper->forceMode('readers');
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $result->kind());
+        $this->assertSame(0, $result->exitCode(), 'the mode is applied and the run did what it was asked to');
+        $this->assertSame('readers', $result->mode);
+
+        // `FlipResult::repaired()` carries the mode that is now applied and no transition, whether the
+        // run was a re-application or a mode that needed a restart — so the mode it moved away from
+        // is in the `writer → readers` half of the sentence below and nowhere else.
+        $this->assertNull($result->previousMode);
+        $this->assertTrue($restarted, 'the file was written and the pooler was restarted on it');
+        $this->assertSame(
+            ['missing', 'missing', 'missing', 'answered'],
+            $answers,
+            'the refusal is read three times — the retry bound — and the restart is followed by one read that answers',
+        );
+        $this->assertSame(
+            ['supervisorctl signal HUP pgcat', 'supervisorctl restart pgcat'],
+            array_column($this->flipCommands(), 0),
+            'the swap signals the pooler and the refusal escalates to a restart, in that order',
+        );
+        $this->assertStringContainsString('writer → readers', $result->reason);
+        $this->assertStringContainsString('did not answer for pool "reader_db_2"', $result->reason);
+        $this->assertStringContainsString('restarted on the file the flip wrote', $result->reason);
+        $this->assertStringContainsString('then answered for every pool', $result->reason);
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertSame('readers', $state['last_mode'], 'the mode it applied is on record');
+        $this->assertSame(1, $state['pool_repairs'], 'the repair is counted, wherever the flip ran');
+        $this->assertSame('reader_db_2', $state['last_repair_pool']);
+        $this->assertSame('readers', $state['last_repair_mode']);
+        $this->assertCount(1, $state['pool_repair_times'], 'and dated, which is what a rate is counted over');
+
+        // The half that is deliberately absent: no run, no kind, no convergence. A boundary is not a
+        // boot, and a record that moved here would fail the container it came up in.
+        $this->assertArrayNotHasKey('runs', $state);
+        $this->assertArrayNotHasKey('last_kind', $state);
+        $this->assertArrayNotHasKey('converged_at', $state);
+    }
+
+    /**
+     * The other half of the forced flip: a pooler that answered for every pool of the mode it was
+     * given is left alone, so an ordinary boundary costs one read and the commands the swap already
+     * runs — no restart, and nothing recorded as a repair.
+     */
+    public function test_a_forced_flip_asks_the_pooler_and_leaves_a_pooler_that_answered_alone(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $probed = [];
+
+        $flipper = $this->build('writer', ['use_reload' => true], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'answered', 'evidence' => 'the pooler answered for pool "reader_db_2"'];
+        });
+
+        $result = $flipper->forceMode('readers');
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame(['reader_db_2'], $probed, 'the mode that was applied is the variant the pooler is asked about');
+        $this->assertSame(['supervisorctl signal HUP pgcat'], array_column($this->flipCommands(), 0), 'the swap\'s own signal and no restart');
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertSame('readers', $state['last_mode']);
+        $this->assertArrayNotHasKey('pool_repairs', $state, 'a pooler that answered is not a repair');
+    }
+
+    /**
+     * The line that keeps a probe pointed at the wrong address from restarting a healthy pooler,
+     * asked of the forced path as well: a pooler that answered nothing has said nothing about its
+     * pools, so the boundary flip reports the transition it made and restarts nothing.
+     */
+    public function test_a_forced_flip_that_answered_nothing_is_not_repaired(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.reader_db_2]\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'writer']));
+
+        $probed = [];
+
+        $flipper = $this->build('writer', ['use_reload' => true], poolProbe: function (string $database) use (&$probed): array {
+            $probed[] = $database;
+
+            return ['status' => 'silent', 'evidence' => 'tcp://127.0.0.1:6432 did not answer for pool "reader_db_2"'];
+        });
+
+        $result = $flipper->forceMode('readers');
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame(['reader_db_2'], $probed, 'silence is not a refusal, so there is nothing to retry');
+        $this->assertSame(['supervisorctl signal HUP pgcat'], array_column($this->flipCommands(), 0));
+        $this->assertArrayNotHasKey('pool_repairs', json_decode((string) file_get_contents($this->stateFile), true));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // What the default probe dials — the port the pooler's own file names
     // ─────────────────────────────────────────────────────────────────────────

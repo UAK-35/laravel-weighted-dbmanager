@@ -139,7 +139,7 @@ final class PgcatConfigFlipper
     /**
      * The state key the repair times are kept under, beside the count they belong to.
      *
-     * A constant because three readers ask for it by name — the writer in `recordRun()`, the
+     * A constant because three readers ask for it by name — the writer in `withRepair()`, the
      * reading in `poolRepairRate()`, and a test that seeds a state file to be read — and a
      * hand-written string in each of them is how the writer and the reader begin to disagree
      * about one file without either of them looking wrong.
@@ -150,12 +150,13 @@ final class PgcatConfigFlipper
      * How often a repair is too often, when the configuration does not say: more than three in an
      * hour is the shipped line.
      *
-     * A repair is only possible inside the boot window, because `applyCurrentState()` returns
-     * before it takes the lock once the window has closed, so the repairs a container can record
-     * are the ones its first eight minutes produced. Three of them in that window is a pooler that
-     * refused the pools it was just given more than once; a single repair is the self-heal doing
-     * its job, and the hour is wide enough that a container booting twice inside it is not read as
-     * one pooler failing twice.
+     * A repair is only possible on a run that applies a mode or finds the mode already applied
+     * inside the boot window — the flip's two repair paths — so the repairs a container can
+     * record are the ones its first eight minutes produced and the ones a mode it applied at a
+     * boundary asked for. The first eight minutes alone can produce three, and a pooler that
+     * refused the pools it was just given more than once is the one worth reading; a single repair
+     * is the self-heal doing its job, and the hour is wide enough that a container booting twice
+     * inside it is not read as one pooler failing twice.
      */
     public const DEFAULT_MAX_REPAIRS_PER_WINDOW = 3;
 
@@ -172,9 +173,9 @@ final class PgcatConfigFlipper
     /**
      * The most repair times the state file keeps, whatever the window asks for.
      *
-     * The window is the bound that matters — repairs are only possible inside a boot window — and
-     * this is the ceiling that keeps a hand-edited or misconfigured state file from growing one
-     * array for the life of a container.
+     * The window is the bound that matters — a repair needs a flip that is applying a mode or is
+     * inside its boot window — and this is the ceiling that keeps a hand-edited or misconfigured
+     * state file from growing one array for the life of a container.
      */
     private const REPAIR_HISTORY_LIMIT = 100;
 
@@ -596,6 +597,22 @@ final class PgcatConfigFlipper
     /**
      * Force the flipper into a specific mode regardless of resolver state.
      * Useful for manual ops ("force into readers" before maintenance).
+     *
+     * It applies a mode, so it asks the same second question the scheduled flip asks: the file is
+     * one fact and the pooler holding it is another — see `refusalAfterApply()`. This is the path
+     * the reader-window tasks take at every boundary, in the middle of the day, which is exactly
+     * when a pooler that did not act on the reload leaves every read to a pool the new variant
+     * declares failing while `pgcat mode` compares two files and finds them in step. So a forced
+     * flip reads the pools back with the retry a pooler that was just signalled needs, escalates a
+     * refusal to `restart_command`, reads them once more, and reports `repaired` rather than
+     * `flipped` when the pooler did not pick the mode up.
+     *
+     * What it still does not do is record a *run*. `runs`, `last_kind` and `converged_at` are the
+     * boot window's evidence — a mode applied at 10:00 must not be able to move the convergence
+     * verdict a deployment gate reads — so a forced run writes `last_mode` and nothing else about
+     * itself. A repair is different: it is a fact about the pooler rather than about the window,
+     * and it is counted through `withRepair()` wherever it happens, so a boundary the pooler
+     * refused is in the same `pool_repairs` reading a boot-window repair lands in.
      */
     public function forceMode(string $mode): FlipResult
     {
@@ -619,7 +636,31 @@ final class PgcatConfigFlipper
         try {
             $lastMode = $this->readLastMode();
             $this->swap($mode);
+
+            // The flip has applied the mode; whether the pooler holds it is the question the file
+            // cannot answer. Same read, same policy and same escalation as the scheduled flip's
+            // apply path (`applyCurrentState()`), because it is the same fault — only the reason
+            // the mode moved is different.
+            $refusal = $this->refusalAfterApply($mode);
+            $clause = '';
+            $after = $refusal;
+
+            if ($refusal !== null) {
+                $repair = $this->restartOnAppliedFile();
+                $clause = $repair['clause'];
+                $after = $repair['attempted'] ? $this->refusalAfterApply($mode) : $refusal;
+            }
+
             $this->writeLastMode($mode, $lastMode);
+
+            if ($refusal !== null) {
+                $this->writeState($this->withRepair($this->readState(), $mode, $refusal['database']));
+
+                return FlipResult::repaired(
+                    mode: $mode,
+                    reason: $this->appliedPoolReason($mode, $lastMode, $refusal, $clause, $after),
+                );
+            }
 
             return FlipResult::flipped(newMode: $mode, previousMode: $lastMode);
         } catch (\Throwable $e) {
@@ -1885,11 +1926,13 @@ final class PgcatConfigFlipper
      *   `poolFault()` is the *repair* half of the pool-answerability self-heal, and it only ever runs
      *   inside a flip: `applyCurrentState()` reads it when the mode is already applied, and only
      *   while the container's boot window is open — the window tasks apply through `forceMode()`,
-     *   which has no window and no pool check at all. So the state this reading exists for is the one
-     *   nothing else can report: a container past its boot window whose pgcat is RUNNING and holds no
-     *   pool for a database the applied variant declares. Every read to that pool fails, supervisord
-     *   calls the program healthy, `pgcat mode` compares two files and finds them in step, and the
-     *   repair path will not run again. `/health/db`'s `pool_probe` block and `db:doctor`'s `pool
+     *   which has no window, and which reads the pools back only on the run that applies a mode
+     *   rather than on a poll afterwards. So the state this reading exists for is the one nothing
+     *   else can report: a container past its boot window whose pgcat is RUNNING and holds no pool
+     *   for a database the applied variant declares. Every read to that pool fails, supervisord
+     *   calls the program healthy, `pgcat mode` compares two files and finds them in step, the
+     *   forced path's one read was taken when it applied that mode, and the repair path will not
+     *   run again. `/health/db`'s `pool_probe` block and `db:doctor`'s `pool
      *   probe` row are the two surfaces that say so, and both read this — so they cannot disagree.
      *
      * WHAT IT REPORTS
@@ -2141,7 +2184,7 @@ final class PgcatConfigFlipper
         // said cannot be taken as evidence. The sentinel's own answer stays in `control`.
         $indeterminate = [];
 
-        if ($discriminates === false && $control !== null) {
+        if ($control !== null && $discriminates === false) {
             foreach ($pools as $index => $pool) {
                 if ($pool['status'] !== PoolProbe::STATUS_ANSWERED) {
                     continue;
@@ -2150,7 +2193,10 @@ final class PgcatConfigFlipper
                 $pools[$index]['status'] = PoolProbe::STATUS_INDETERMINATE;
                 $pools[$index]['evidence'] = sprintf(
                     'the pooler also answered the sentinel name "%s", which no configuration declares, so its answer for pool "%s" does not show that the pool exists',
-                    $control['database'],
+                    // The name the sentinel was asked under, which is `$control`'s own `database` by
+                    // construction — read from the variable rather than off the array so the
+                    // sentence does not depend on the reader narrowing a nullable to get it.
+                    $controlName,
                     $pool['database'],
                 );
 
@@ -2295,8 +2341,9 @@ final class PgcatConfigFlipper
      * The sentence ends on the same distinction the verdict is judged by, because the two readings of
      * one answer call for different work. Past the boot window a missing pool is the whole reason
      * this reading exists — the repair path is `applyCurrentState()`, which stops at the end of the
-     * window, and the window tasks apply through `forceMode()`, which never asks the pooler anything,
-     * so nothing re-applies the file again — and inside it the same answer is a container that is
+     * window, and the window tasks apply through `forceMode()`, which asks once, on the run that
+     * applies a mode, so a pooler that loses a pool afterwards is never re-applied again — and inside
+     * it the same answer is a container that is
      * still coming up. A pooler that answered nothing is neither: it is reported and never repaired,
      * which is the line that keeps a probe pointed at the wrong address from failing a pooler that is
      * fine. A pooler that answered the sentinel as well is a third case: it spoke, and what it said
@@ -3847,8 +3894,10 @@ final class PgcatConfigFlipper
      *
      * A repair is counted as well as run: `pool_repairs` and `last_pool_repair_at` are the two
      * facts `db:pgcat-flip --status` reports, and they are written where the run is rather than
-     * at either of the two call sites — a pool repair happens on both, and a counter that only
-     * one path moved would be a pooler that keeps needing repair read as one that never did.
+     * at the call sites — a pool repair happens on both of this method's paths, and a counter
+     * that only one path moved would be a pooler that keeps needing repair read as one that never
+     * did. The five facts themselves are `withRepair()`'s, so the repair a `forceMode()` flip
+     * makes at a boundary lands in the same count even though that path records no run at all.
      *
      * `last_repair_pool` and `last_repair_mode` ride with them, and for the same reason they are
      * written here rather than by a caller: they are the answer to the question the count opens —
@@ -3868,11 +3917,7 @@ final class PgcatConfigFlipper
         $state['last_mode_active'] = $mode;
 
         if ($kind === FlipResult::KIND_REPAIRED) {
-            $state['pool_repairs'] = ConfigValue::int($state['pool_repairs'] ?? null, 0) + 1;
-            $state['last_pool_repair_at'] = $this->nowIso();
-            $state['last_repair_pool'] = $pool;
-            $state['last_repair_mode'] = $mode;
-            $state[self::REPAIR_HISTORY_KEY] = $this->recordRepairTime($state[self::REPAIR_HISTORY_KEY] ?? null);
+            $state = $this->withRepair($state, $mode, $pool);
         }
 
         if ($usable && !isset($state['converged_at'])) {
@@ -3881,6 +3926,35 @@ final class PgcatConfigFlipper
         }
 
         $this->writeState($state);
+    }
+
+    /**
+     * The state a repair leaves: the count, the moment, the pool and the mode, and one more entry in
+     * the history the rate is read from.
+     *
+     * A pure function of the state it is given rather than a second writer, because two paths count
+     * repairs and only one of them may write a run: `recordRun()` merges this into the run it is
+     * already recording (one write), and `forceMode()` merges it into a state file it has just written
+     * its mode into (one more). The facts are the same either way — a repair is a repair wherever a
+     * flip made it — and a copy of these five lines in `forceMode()` is how the forced path's repairs
+     * would end up counted somewhere `--status` and `/health/db` do not read.
+     *
+     * `$pool` is the name the refusing probe gave; null leaves the key null rather than carrying the
+     * previous repair's pool into a new record, so a repair with no pool to name cannot make the last
+     * one read as current.
+     *
+     * @param array<string, mixed> $state
+     * @return array<string, mixed>
+     */
+    private function withRepair(array $state, string $mode, ?string $pool): array
+    {
+        $state['pool_repairs'] = ConfigValue::int($state['pool_repairs'] ?? null, 0) + 1;
+        $state['last_pool_repair_at'] = $this->nowIso();
+        $state['last_repair_pool'] = $pool;
+        $state['last_repair_mode'] = $mode;
+        $state[self::REPAIR_HISTORY_KEY] = $this->recordRepairTime($state[self::REPAIR_HISTORY_KEY] ?? null);
+
+        return $state;
     }
 
     /**

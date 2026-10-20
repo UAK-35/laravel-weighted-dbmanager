@@ -15,6 +15,24 @@
   corrects the skills index, which listed an `lpr-issue` skill whose folder was not in the tree.
   Nothing under `src/` or `config/` moves.
 
+### Fixed
+
+- **A flip that just applied a mode now reads the pooler back, so a signal pgcat ignored is a
+  restart rather than a silent read outage.** `forceMode()` — the path `db:pgcat-window-flip` takes
+  at every window boundary, and `db:pgcat-flip --force-mode` when an operator runs it — wrote the
+  variant and signalled supervisord, and asked nothing about whether the pooler had re-read it. The
+  mode moved at, say, 10:00, and every read to a pool the new variant declares failed while `pgcat
+  mode` compared two files and found them in step: nothing re-applies the file afterwards, because
+  the mode on record already matches. It asks the same question the scheduled flip asks after it
+  applies a mode (`refusalAfterApply()`): the pools the mode's variant declares, read with the
+  bounded retry and delay a pooler that was just signalled needs, and a `missing` pool escalates to
+  `restart_command` before the pools are read once more. A pooler that answered nothing is still
+  never restarted, so a probe pointed at the wrong port cannot take a healthy pooler down at a
+  boundary. The run reports `repaired` rather than `flipped` and exits `0` either way, counts the
+  repair in the same `pool_repairs` reading a boot-window repair lands in, and still records no run
+  — `runs` and `converged_at` are the boot window's evidence, and a mode applied at 10:00 must not
+  be able to move the convergence verdict a deployment gate reads.
+
 ## 0.2.0-alpha6 - 2026-10-19
 
 ### Added

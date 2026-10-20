@@ -304,14 +304,20 @@ records the `repaired` kind. A run that has just *applied* a mode asks `refusalA
 the same read with the retry a pooler that was signalled a moment ago needs: a reload returns before
 pgcat has re-read anything and a restart returns inside supervisor's `startsecs` window, so a refusal
 is re-read with the same bounded attempts and delay a repair's starts use, and one that survives
-escalates to `restart_command` before the pools are read back once more. The two questions are one
+escalates to `restart_command` before the pools are read back once more. Both ways of applying a
+mode ask it — the scheduled flip and `forceMode()`, which is what `db:pgcat-window-flip` calls at
+every boundary and what `db:pgcat-flip --force-mode` applies by hand. A forced flip is the one that
+needs it most: the mode moves in the middle of the day, when nothing re-applies the file on the next
+poll, and a pooler that ignored the signal leaves every read to a pool the new variant declares
+failing while `pgcat mode` compares two files and finds them in step. The two questions are one
 read, `refusalFor()`, with the policy as an argument: the count and the delay have one home
 (`startAttempts()` and `startRetryDelayMs()`, which `status()` reports and the start loop is bounded
 by), so the poll path and the apply path can disagree about *when* to ask but not about how often or
 how long, which is the drift two loops over one read would eventually produce — and the source scan in
-`PgcatConfigFlipperTest` is what keeps a second reader from arriving. Both paths record the run,
-and a repair is counted in the state file as well — `pool_repairs` and `last_pool_repair_at`, printed
-by `db:pgcat-flip --status` and reported as `db:doctor`'s `pool repairs` row from the same reading —
+`PgcatConfigFlipperTest` is what keeps a second reader from arriving. The two scheduled paths record
+the run, and a repair is counted in the state file as well — `pool_repairs` and
+`last_pool_repair_at`, printed by `db:pgcat-flip --status` and reported as `db:doctor`'s `pool
+repairs` row from the same reading —
 because a run's kind cannot tell a one-off from a pooler that keeps needing repair. The repair
 records the pool it was refused for and the mode whose variant declares it, as `last_repair_pool`
 and `last_repair_mode` beside the count, printed as rows of their own: the count opens the question
@@ -360,7 +366,8 @@ column is what a reader of that surface sees.
 |---|---|---|
 | `applyCurrentState()` → `flipped` | the copy and the supervisor command exiting `0`, when the probe is not armed | a pipeline reading `kind`, the scheduler's log, the `flip_runs` row |
 | `applyCurrentState()` → `flipped`, probe armed | the same commands, when the variant declares no pool: `configuredPools()` is empty, so `refusalAfterApply()` has nothing to ask and returns null | as above |
-| `forceMode()` → `flipped` | the same commands and nothing more: this path has no boot window, no `poolFault()` and no `refusalAfterApply()` | `db:pgcat-window-flip` at every boundary, and `db:pgcat-flip --force-mode` run by hand |
+| `forceMode()` → `flipped` | the same commands, and the pools read back with `refusalAfterApply()` when the probe is armed; there is no boot window and no `poolFault()`, because this path is always a mode that moved | `db:pgcat-window-flip` at every boundary, and `db:pgcat-flip --force-mode` run by hand |
+| `forceMode()` → `repaired` | the pools read back after the swap, then the restart command's exit code and the pools read once more — the run itself is not recorded, the repair is | the boundary task's own line and JSON `kind`, and `pool_repairs` in `--status` |
 | the mode-unchanged repair → `repaired` | the refusal read from the pooler before the re-application, then the re-application's exit codes; the pools are *not* read again | the `pool_repairs` and `flip_runs` rows, and `--status --json` |
 | `swap()`'s supervisor command | the command exiting `0`. The program's state is read *before* the swap (`SupervisorStep::inspect()`) and never after it | the run's own outcome: a restart that leaves pgcat `FATAL` reads like one that worked |
 
@@ -448,7 +455,10 @@ The repair: `PgcatConfigFlipperTest::test_a_running_pooler_that_has_no_pool_is_r
 `PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_is_not_repaired()`,
 `PgcatConfigFlipperTest::test_a_flip_verifies_the_pooler_picked_the_mode_up()`,
 `PgcatConfigFlipperTest::test_a_flip_whose_pooler_did_not_pick_the_config_up_is_repaired_by_a_restart()`,
-and `PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_after_a_flip_is_not_repaired()`.
+`PgcatConfigFlipperTest::test_a_pooler_that_answered_nothing_after_a_flip_is_not_repaired()`,
+`PgcatConfigFlipperTest::test_a_forced_flip_whose_pooler_did_not_pick_the_mode_up_is_repaired()`,
+`PgcatConfigFlipperTest::test_a_forced_flip_asks_the_pooler_and_leaves_a_pooler_that_answered_alone()`,
+and `PgcatConfigFlipperTest::test_a_forced_flip_that_answered_nothing_is_not_repaired()`.
 
 The verdict: `PgcatConfigFlipperTest::test_a_pool_the_pooler_does_not_hold_fails_the_pool_probe_verdict()`,
 `PgcatConfigFlipperTest::test_a_missing_pool_is_not_judged_while_the_boot_window_is_open()`,
