@@ -11,3 +11,8 @@
 /dataSources/
 /dataSources.local.xml
 /*.iml
+# Laravel plugin's project settings: the source directory it found, and the per-project flag
+# beside it. The IDE writes both when the project is opened, and neither is work this package
+# carries — a file no commit carries is a pending file to the handoff note.
+/laravel-idea.xml
+/laravel-idea-personal.xml
