@@ -19,6 +19,16 @@
   `/health/db`, and the four code changes with what verifies each. Nothing under `src/` or `config/`
   moves.
 
+- **A third recording skill, `wdm-plan`, and the two that came before it answer for WDM rather than
+  LPR.** `wdm-plan` activates on a `/wdm-plan` marker, or asks *"Is this an WDM plan?"* for a prompt
+  containing "plan a", "plan the" or "need a plan", then writes the response into `docs/planning/`
+  — the folder the both-armed plan above landed in. `wdm-issue` and `wdm-investigation` asked *"Is
+  this an LPR issue?"*, naming the application repository in a package anybody installs, and now
+  ask about a WDM issue or investigation. Both also say what a record costs the handoff note: a line
+  in `Handoff::PENDING_DESCRIPTIONS`, `--reaffirm=<path>` to record the reading those words were
+  written against, and `--recorded` to re-render the note's pending block. Nothing under `src/` or
+  `config/` moves, and none of the three skills ships in the tarball.
+
 ## 0.2.0-alpha7 - 2026-10-20
 
 ### Added

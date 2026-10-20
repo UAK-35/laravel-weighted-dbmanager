@@ -1,9 +1,9 @@
 ---
 name: wdm-investigation
-description: Invoke on @wdm-investigation mentions, on a prompt that opens with the `/wdm-investigation` marker, or on any prompt containing the word investigate or the phrase "find out why" once the user has answered yes to "Is this an LPR investigation?" — it records the investigation as a markdown document under docs/investigations/.
+description: Invoke on @wdm-investigation mentions, on a prompt that opens with the `/wdm-investigation` marker, or on any prompt containing the word investigate or the phrase "find out why" once the user has answered yes to "Is this an WDM investigation?" — it records the investigation as a markdown document under docs/investigations/.
 ---
 
-# `wdm-investigation` — record an LPR investigation as a markdown document
+# `wdm-investigation` — record an WDM investigation as a markdown document
 
 ## When it activates
 
@@ -15,7 +15,7 @@ Two ways in, and only one of them asks:
    `investigate` or the phrase `find out why`, ask the user one yes/no question **before doing
    anything else**:
 
-   > Is this an LPR investigation?
+   > Is this an WDM investigation?
 
    - **Yes** → activate this skill before writing the response.
    - **No** → do not activate it; answer the prompt as normal.
@@ -42,8 +42,10 @@ prompt says, and the question is never asked.
 This package holds its own records to the tree, and a new file under `docs/` is no exception:
 
 - add a line for the new document to `Handoff::PENDING_DESCRIPTIONS` in
-  `tests/Support/Handoff.php`, then run `php bin/handoff.php --recorded` to re-render the note's
-  pending block;
+  `tests/Support/Handoff.php`, then run `php bin/handoff.php --reaffirm=<path>` to record the
+  reading those words were written against, and `php bin/handoff.php --recorded` to re-render the
+  note's pending block — a line without a current reading is refused, so the table cannot describe
+  a file nobody read;
 - keep paths in the document absolute-Unix only — no drive letters, home directories or network
   shares — so `AGENTS.md` section 0's walk and the machine-path guard stay quiet;
 - do not commit unless the user asks; the document is the deliverable.
