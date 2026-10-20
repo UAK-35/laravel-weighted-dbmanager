@@ -76,10 +76,12 @@ use Uak35\WeightedDbManager\Tests\Unit\Weighted\WeightedDatabaseServiceProviderT
  * A number that counts *surfaces* or *design kinds* rather than a list the code holds — "one
  * classifier, three callers", "the three steps that cannot be undone", the four states the
  * `Audit:` block is rendered in — is prose about the design rather than a restatement of a fact
- * in the code, and there is nothing to compare it with. Those are named here so the boundary is
- * written down rather than implied; every number that *would* break a build is bound, and the
- * ones that need the command to run (the README's check table, the doctor's row counts, the rows
- * that can carry a suggestion) are bound in `DbDoctorTest`, where the fixtures are.
+ * in the code, and there is nothing to compare it with. Those are named in
+ * `docs/prose-numbers.md`, and `ProseNumberAuditTest` holds the record to that list: a number the
+ * record marks but no claim reads is either declared prose there or it fails. Every number that
+ * *would* break a build is bound, and the ones that need the command to run (the README's check
+ * table, the doctor's row counts, the rows that can carry a suggestion) are bound in
+ * `DbDoctorTest`, where the fixtures are.
  *
  * The record that states the rule, the full list of bound claims, and how to add one is
  * [docs/prose-numbers.md](../../../docs/prose-numbers.md).
@@ -229,6 +231,16 @@ final class ProseNumbersTest extends TestCase
             'the refusal keys for the switches, as switch-values.md counts them' => [
                 'record' => 'docs/switch-values.md',
                 'pinned' => '/(\w+) keys, not one `switches.refused`/',
+                'counts' => 'the provider\'s `SWITCHES` table',
+                'expected' => count(self::privateConstant(WeightedDatabaseServiceProvider::class, 'SWITCHES')),
+            ],
+            // The same table, counted a second time in the record's own known limitations: the audit in
+            // `ProseNumberAuditTest` found the sentence as a marked number no claim read, which is what
+            // the audit is for. The two claims share one derivation, so the table is still the thing
+            // that decides the number.
+            'the settings a switch record covers, as switch-values.md counts them' => [
+                'record' => 'docs/switch-values.md',
+                'pinned' => '/Only (\w+) settings are covered/',
                 'counts' => 'the provider\'s `SWITCHES` table',
                 'expected' => count(self::privateConstant(WeightedDatabaseServiceProvider::class, 'SWITCHES')),
             ],

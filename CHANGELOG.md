@@ -29,6 +29,18 @@
   written against, and `--recorded` to re-render the note's pending block. Nothing under `src/` or
   `config/` moves, and none of the three skills ships in the tarball.
 
+- **The prose-number guard has a completeness half: every number a record marks is either read by a
+  claim or declared prose.** `ProseNumbersTest` could hold a number a claim names to the code, and
+  could not say that a number in a record is named by no claim at all — which is how two bold
+  headings and a `ways` count stayed prose while the sentence under them was rendered.
+  `ProseNumberAuditTest` reads the mark instead: a record bolds a number when it is stating a count,
+  so every marked number a claim does not capture has to be a row of
+  `docs/prose-numbers.md`'s prose table, and every row has to still match a mark and give one of the
+  categories that record declares. Two directions fail, which is what makes the table a boundary
+  rather than a list of excuses. The audit also found a claim the records had been stating all along
+  — `switch-values.md`'s "Only **three** settings are covered" counts the provider's `SWITCHES`
+  table — so that sentence is bound in `ProseNumbersTest` rather than excused.
+
 ## 0.2.0-alpha7 - 2026-10-20
 
 ### Added

@@ -7,7 +7,9 @@ compared with it — and a record can go one step further: the counts in
 [docs/documented-exit-codes.md](documented-exit-codes.md) are *rendered* from their derivations by
 `bin/counts.php`, so nobody writes them at all. The rest are checked by `ProseNumbersTest` (and
 three tests in `DbDoctorTest` where the claim needs the command to have run); the ones that cannot
-be are named below with the reason, so the boundary is written down rather than implied.
+be are named in a table below, and `ProseNumberAuditTest` holds the records to it: a number a
+record marks as a claim is either read by a claim or listed there with the reason it is prose, so
+the boundary is enforced rather than implied.
 
 ---
 
@@ -63,6 +65,12 @@ builds — are counted out of the file they are written in. That is a check rath
 and it is the honest one: the taxonomy *is* those branches, so the alternative is a constant
 somebody has to keep in step with them, which is the restatement this guard exists to catch.
 
+The rule has a second half, and it is what "the numbers a record marks but does not claim" below
+is: **a number a record marks is read by a claim, or it is declared prose.** The three properties
+above are about the claims; that one is about the numbers nobody claimed, which is where the drift
+this record was written for first appeared — the sentences under two bold headings were rendered
+while the headings themselves were read by nothing.
+
 ## Rendered, or checked
 
 Two ways to keep a number in step, and the choice between them is a choice about how much prose a
@@ -114,7 +122,7 @@ written beside the pattern, so the example and the number are claims about one f
 an example is "the rest of the sentence", and the fragments around it must appear in the record in
 that order — a quote assembled from two different sentences is not a sentence the record writes.
 Two were stale when the guard was written: `pool-exclusions.md` had capitalised its sentence and
-bolded it whole, and `db-doctor-json.md` had gone from "three rows can offer one" to the four the
+bolded it whole, and `db-doctor-json.md` had gone from three rows offering one to the four the
 row set now has.
 
 | Claim | The sentence, as the record writes it | What it counts, and what the number is derived from |
@@ -158,6 +166,7 @@ row set now has.
 | the metadata floors, as replica-metadata-refusal.md counts them | "the **three** `*_FLOOR` constants" | the `*_FLOOR` constants on `ReplicaMetadata` |
 | the classifier's cases, as replica-metadata-refusal.md counts them | "`ReplicaMetadataTest` (**nine** cases)" | the test methods `ReplicaMetadataTest` declares |
 | the refusal keys for the switches, as switch-values.md counts them | "**Three** keys, not one `switches.refused`" | the provider's `SWITCHES` table |
+| the settings a switch record covers, as switch-values.md counts them | "Only **three** settings are covered" | the provider's `SWITCHES` table — the audit found this sentence as a mark no claim read, and binding it was the repair |
 
 The claims that need the command to have run are bound in `DbDoctorTest`, where the fixtures are,
 and each one is pinned to the sentence with the same mechanism: the number is read out of the
@@ -284,8 +293,94 @@ records rather than trusting them.
   it does not own, and the claim that matters is that the string is passed through unchanged.
 
 If a number in the first list later gains a list behind it, it belongs in the bound table above.
-That move is the repair; leaving it in this list is a decision, and this list is where it is
-written down.
+That move is the repair; leaving it in this list is a decision, and this list is where it is written
+down.
+
+## The numbers a record marks but does not claim
+
+The bound table is every number a claim *reads*. It cannot say that a number in a record is read by
+no claim at all — and that is the half that let two bold headings sit as prose while the sentence
+under them was rendered. This section closes it from the other end, with the one thing the records
+already have and a sweep of every word does not: **the mark.**
+
+A record bolds a number when it is stating a count. Every sentence in the bound table bolds the
+number its claim is about, the renderer writes its output where that number was, and the categories
+above bold the numbers they name. So the mark is the record's own declaration that the number is a
+claim, and "is every marked number read?" is a question about a list of marks.
+
+A sweep of every spelled number would not be: these records say "one of the two", "one per row",
+"one step later" the way any English sentence does, and a table of those is an inventory of the
+language rather than a boundary — a check that failed on them would fail on every prose edit, which
+is the check somebody switches off. That is why this half was deferred when the bound table was
+written, and the mark is the line the records draw instead.
+
+**The rule: a number a record marks is read by a claim, or it is listed below with the reason it is
+prose.** Both directions fail. A mark with no row is a claim nobody reads, which is the defect this
+exists for; a row whose mark the record no longer writes is an exception that has outlived its
+sentence, which is how a list of excuses rots. Each reason is one of the categories above, quoted
+by its heading, so a number that fits no category has no row until the category is written down
+first.
+
+One of these was a claim the record had been stating all along: `switch-values.md`'s "Only three
+settings are covered" counts the provider's `SWITCHES`, so the audit found it and it is bound above
+rather than excused here. The rest are prose for the reason in their row.
+
+| Record | Number | The sentence the record marks | Why it is prose |
+|---|---|---|---|
+| `docs/boot-audit-surfaces.md` | `two` | "Publish them on the two surfaces an operator already opens…" | Numbers about a shape rather than a list |
+| `docs/boot-audit-surfaces.md` | `one` | "publish both, from one accessor" | Numbers about a shape rather than a list |
+| `docs/boot-audit-surfaces.md` | `two` | "`severity` and `available` are two questions…" | How an argument is put |
+| `docs/boot-audit-surfaces.md` | `one` | "Every unreadable shape is named, and one of them cannot be driven from a test." | Numbers about the test suite |
+| `docs/boot-audit-surfaces.md` | `two` | "A key two branches agree on keeps one of the two sentences." | How an argument is put |
+| `docs/boot-audit-surfaces.md` | `one` | "A key two branches agree on keeps one of the two sentences." | How an argument is put |
+| `README.md` | `one` | "What fails, one step later in the container's life." | Numbers about a shape rather than a list |
+| `README.md` | `one` | "What fails, one step further along and only once the pooler has been asked." | Numbers about a shape rather than a list |
+| `docs/boot-audit-finding-keys.md` | `one` | "One of the two sentences is still not remembered." | How an argument is put |
+| `docs/boot-audit-finding-keys.md` | `two` | "One of the two sentences is still not remembered." | How an argument is put |
+| `docs/boot-audit-finding-keys.md` | `two` | "Two boots in flight can disagree about a key, and the record keeps the finding." | How an argument is put |
+| `docs/boot-audit-finding-keys.md` | `one` | "A write that could not take the lock is the one write that can still lose an entry." | How an argument is put |
+| `docs/boot-audit-finding-keys.md` | `one` | "If the record were one file per boot." | Numbers about a shape rather than a list |
+| `docs/db-doctor-json.md` | `one` | "One JSON object on stdout, with a fixed key set…" | Numbers about a shape rather than a list |
+| `docs/db-doctor-json.md` | `one` | "both named, in one sentence" | How an argument is put |
+| `docs/db-doctor-json.md` | `one` | "one, named at the front of the sentence" | How an argument is put |
+| `docs/db-doctor-json.md` | `one` | "one store of answers, read as one" | Numbers about a shape rather than a list |
+| `docs/db-doctor-json.md` | `one` | "one reading, two facts" | Numbers about a shape rather than a list |
+| `docs/db-doctor-json.md` | `two` | "one reading, two facts" | Numbers about a shape rather than a list |
+| `docs/db-doctor-json.md` | `two` | "two mutually exclusive states in one sentence each" | How an argument is put |
+| `docs/db-doctor-json.md` | `one` | "two mutually exclusive states in one sentence each" | How an argument is put |
+| `docs/db-doctor-json.md` | `one` | "The gap this record opened with is closed, and one difference is left on purpose." | How an argument is put |
+| `docs/db-doctor-json.md` | `three` | "If the three command reports' envelope became this one's too." | A relationship between two records |
+| `docs/db-doctor-json.md` | `one` | "If the three command reports' envelope became this one's too." | A relationship between two records |
+| `docs/pool-exclusions.md` | `one` | "One resolution returns a pair — the pool…" | Numbers about a shape rather than a list |
+| `docs/pool-exclusions.md` | `one` | "A filtered exclusion is a fact about one call, not about the installation." | Numbers about a shape rather than a list |
+| `docs/pool-exclusions.md` | `one` | "The report is per resolution, so a caller has to ask for the right one." | How an argument is put |
+| `docs/pool-exclusions.md` | `one` | "If a consumer wanted one structure instead of a pair." | Numbers about a shape rather than a list |
+| `docs/pgcat-supervisor-preflight.md` | `one` | "One user's `PATH`." | Numbers about an external system |
+| `docs/command-json-envelope.md` | `one` | "and each command declares its own evidence after them, so `db:pgcat-flip`, `db:probe-replicas` and `db:replica-status` are read by one rule…" | Numbers about a shape rather than a list |
+| `docs/command-json-envelope.md` | `five` | "…are read by one rule: the five, then whatever that command's evidence table says is in the object." | Numbers about a shape rather than a list |
+| `docs/command-json-envelope.md` | `one` | "The vocabulary is one declaration too." | Numbers about a shape rather than a list |
+| `docs/command-json-envelope.md` | `two` | "`status` means two things across surfaces." | How an argument is put |
+| `docs/command-json-envelope.md` | `one` | "A kind table is bound per command, and the set of words is now held in one place." | Numbers about a shape rather than a list |
+| `docs/command-json-envelope.md` | `one` | "If a gate wanted one key name across all four commands." | How an argument is put |
+| `docs/command-json-envelope.md` | `four` | "If a gate wanted one key name across all four commands." | How an argument is put |
+| `docs/command-json-envelope.md` | `two` | "If two commands reached the same verdict word for different meanings." | How an argument is put |
+| `docs/replica-metadata-refusal.md` | `one` | "The value is refused at boot and failed by the row, both from one classifier that reads the *configured* replicas…" | Numbers about a shape rather than a list |
+| `docs/replica-metadata-refusal.md` | `one` | "One key per setting, so two bad replicas share a date." | Numbers about a shape rather than a list |
+| `docs/replica-metadata-refusal.md` | `two` | "One key per setting, so two bad replicas share a date." | Numbers about a shape rather than a list |
+| `docs/replica-metadata-refusal.md` | `one` | "One number in `resolveWeight()` is deliberately not a floor." | How an argument is put |
+| `docs/replica-metadata-refusal.md` | `two` | "The row's verdict and the resolver's consequence are two readings of one configuration." | How an argument is put |
+| `docs/replica-metadata-refusal.md` | `one` | "The row's verdict and the resolver's consequence are two readings of one configuration." | How an argument is put |
+| `docs/replica-metadata-refusal.md` | `one` | "A bool is a number to `ConfigValue`, so the row treats it as one." | How an argument is put |
+| `docs/documented-exit-codes.md` | `two` | "The distribution's cells are the guard's two returns." | How an argument is put |
+| `docs/documented-exit-codes.md` | `four` | "The four failure modes." | A count of a list the sentence itself writes |
+| `docs/documented-exit-codes.md` | `two` | "Two documented behaviours of `db:pgcat-flip` are still prose." | A count of a list the sentence itself writes |
+
+Three things are outside the audit, and each is a boundary rather than an omission. A number that
+is not marked is not read: the rule is about what a record declares, and a count written plain is
+the convention broken rather than a guard missing it. A numeral is not read: the records spell the
+counts they state, so `**24**` is a quoted value — a run's total, a config's `0` — and `NumberWords`
+is the vocabulary of a count. And this record is not audited: its numbers are the claim names and
+their derivations, and the bound table above is already the list of them.
 
 ## Tests that pin the rules
 
@@ -299,11 +394,16 @@ written down.
 | `HandoffTest::test_section_1_names_the_derivation_for_the_pending_set_rather_than_a_count` | section 1's size sentence names `git status --short`, and states no count of the pending set |
 | `HandoffTest::test_the_pending_set_refusal_reads_a_count_the_vocabulary_cannot_spell` | the refusal reads a count by shape — a numeral, a compound, a scale word — rather than by the spelling table's ceiling |
 | `DocCitationsTest::test_every_test_a_record_cites_is_one_this_package_declares` | every `test_…` the records cite, and the class each one credits |
+| `ProseNumberAuditTest::test_every_number_a_record_marks_is_claimed_or_listed_as_prose` | every number a record marks: either a claim's capture, or a row of the prose table — and every row still matching a mark |
+| `ProseNumberAuditTest::test_every_reason_a_prose_row_states_is_a_category_the_record_gives` | every prose row's reason, against the categories above |
 | `bin/counts.php --check`, run as a check by `bin/checks.php` | the rendered half: every count in `docs/documented-exit-codes.md` is the number its derivation has |
 
 Checked by mutation as well as by argument: adding a `KEY_*` constant without the sentence, dropping
 a `...$this` spread from `reportBootAudit()`, renaming a sentence the guard is pinned to, and adding
-a switch to one table only each fail with a message naming the record and the sentence.
+a switch to one table only each fail with a message naming the record and the sentence. The audit's
+half was checked the same way: bolding a number no claim reads fails with the table row to add,
+quoting a sentence the record no longer marks fails with the row to drop or repair, and giving a
+prose row a reason the record does not hold fails with the categories it does.
 
 ## Files
 
@@ -312,6 +412,7 @@ a switch to one table only each fail with a message naming the record and the se
 | `tests/Unit/Docs/ProseNumbersTest.php` | the claim table, the number words, the derivations, the quoted examples' reader, and the two records-independent rules |
 | `tests/Unit/Console/DbDoctorTest.php` | the two claims that need the command to run, and `numberClaim()` |
 | `tests/Support/Readme.php` | the README read as data — the tables the claims count |
+| `tests/Unit/Docs/ProseNumberAuditTest.php` | the completeness half: the marked numbers no claim reads, the prose table, and the categories a row's reason is drawn from |
 | `tests/Unit/Docs/DocCitationsTest.php` | the name half: the records' test citations against the classes that declare them |
 | `tests/Unit/Docs/HandoffTest.php` | the working-tree half: that section 1 of the handoff note names the derivation for the size of the pending set rather than stating a count, and that the refusal reads a count past the vocabulary's ceiling |
 | `tests/Support/DocumentedExitCounts.php` | the rendered counts: what `docs/documented-exit-codes.md` states, and the derivation of each |
@@ -344,6 +445,11 @@ a switch to one table only each fail with a message naming the record and the se
 - **A count can agree while the thing counted is wrong.** This guard compares a sentence with the
   code's list; it cannot tell that the list itself is right. Correctness stays with the tests named
   in each record.
+- **The completeness audit reads the mark, not every word.** A number a record states without
+  bolding it is prose nothing compares: a count written plain passes. Bolding is a convention these
+  records keep — the bound table bolds what it counts — so breaking it takes that number out of the
+  audit's reach. The alternative was a sweep of every spelled number, which is a table of the
+  language's own grammar and fails on prose edits rather than on drift.
 - **The sources counted out of a file are counted by pattern.** `spreadCount()` looks for
   `...$this->` inside `reportBootAudit()`, and the call-site count looks for `self::logContext(`. A
   refactor that changed the idiom would fail this guard loudly rather than silently undercount,
@@ -351,15 +457,12 @@ a switch to one table only each fail with a message naming the record and the se
 
 ## What would change this decision
 
-- **A completeness check, rather than a boundary.** The guard asserts that every number a claim
-  *names* is the number the code has; it cannot tell that a number in a record is named by no claim
-  at all, which is how the two bold headings and the flip's "ways" counts stayed prose while the
-  sentences under them were rendered. That is findable — every number word in a record, checked
-  against the claims' captures — but it needs the other half: the number words that are prose, named
-  one by one, because a check that fails on "one input" is a check somebody switches off. The
-  bullets above are that list for the records with the most prose; turning them into a table a guard
-  reads would make the boundary enforced rather than described. When the audit is written, the
-  headings and the "ways" counts are what it will find first — they were found by hand here.
+- **A subject wider than the mark.** The completeness audit reads the numbers a record bolds,
+  because the mark is the record's own declaration that the number is a claim; every spelled number
+  would be a sweep of the language, and a table of those fails on a sentence rather than on drift. A
+  reading that told a count from grammar mechanically would let the audit take the whole record
+  instead of the marked half. There is no such reading yet, and the second half of this idea — the
+  prose numbers, named one by one — is the table above.
 - **A generator, rather than a guard.** If the records were assembled from the code — the claims
   rendered rather than checked — the sentences could not drift because nobody would write them. It
   is more machinery than this package has, and it would cost the prose its reason: the interesting
