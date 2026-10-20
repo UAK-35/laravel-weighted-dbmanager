@@ -168,7 +168,9 @@ flip is in. So the row states the read instead of performing it, and says which 
 positions the installation is in: armed (`swrr.pgcat.pool_probe.enabled`), where a pool the
 pooler refuses would be repaired by a restart on the file just written
 (`refusalAfterApply()`), or not armed, where the transition is taken on supervisord's word.
-Only a refusal is repaired at all — a pooler that answered nothing is reported and left
+Both ways of applying a mode ask that read — the scheduled flip, and the forced one
+`db:pgcat-window-flip` calls at a boundary — so the row describes either rehearsal on the
+same terms. Only a refusal is repaired at all — a pooler that answered nothing is reported and left
 alone; [pgcat-pool-probe.md](pgcat-pool-probe.md) is the record of those three answers.
 
 The gates are not re-implemented. A scheduled rehearsal asks `disabledReason()` and a

@@ -391,6 +391,67 @@ final class DbWindowFlipCommandTest extends TestCase
     }
 
     /**
+     * The boundary flip applies a mode, so it asks the question an applied mode raises — and this is
+     * the report that says the pooler was not holding it.
+     *
+     * The forced path reads the pools back after the swap, restarts the pooler on the file it wrote
+     * when the refusal stands, and reports `repaired`; the command keeps that verdict rather than
+     * folding it into `flipped`, because what a reader has to act on is the pooler rather than the
+     * file. The exit code does not move — the mode is applied and the file is the flip's job, which
+     * is the line `FlipResult::KIND_REPAIRED` draws — and the repair is counted in the reading
+     * `--status` prints, while the run itself stays out of the convergence bookkeeping.
+     */
+    public function test_a_boundary_flip_whose_pooler_did_not_pick_the_mode_up_reports_the_repair(): void
+    {
+        $this->layOut('armed');
+
+        // The readers variant now declares a pool, which is what there is to ask the pooler about.
+        file_put_contents(
+            $this->installation->path('readers_path'),
+            "[pools.reader_db_2]\npool_mode = 'transaction'\n",
+        );
+
+        $restarted = false;
+
+        // A flipper whose pooler refuses the pool until it has been restarted, bound at the seam the
+        // command resolves — the same shape `withTheLockHeldElsewhere()` uses for the lock.
+        $this->app->instance(PgcatConfigFlipper::class, new PgcatConfigFlipper(
+            resolver: $this->app->make(TimeWindowResolver::class),
+            config: [...$this->installation->config(), 'use_reload' => true, 'start_retry_delay_ms' => 0],
+            stateFile: $this->installation->path('state_file'),
+            lockFile: $this->installation->path('lock_file'),
+            commandRunner: function (string $command) use (&$restarted): array {
+                if (str_contains($command, 'restart')) {
+                    $restarted = true;
+                }
+
+                return [0, 'pgcat: started', ''];
+            },
+            poolProbe: function (string $database) use (&$restarted): array {
+                return $restarted
+                    ? ['status' => 'answered', 'evidence' => sprintf('the pooler answered for pool "%s"', $database)]
+                    : ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)];
+            },
+        ));
+
+        $exit = Artisan::call(WindowFlipSchedule::COMMAND, ['--mode' => 'readers', '--at' => self::boundary(-4)]);
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exit, $output);
+        $this->assertStringContainsString('repaired', $output, 'the report says what the run did about the pooler, not only that the mode was applied');
+        $this->assertStringContainsString('reader_db_2', $output);
+        $this->assertStringContainsString('restarted on the file the flip wrote', $output);
+        $this->assertTrue($restarted, 'the pooler was restarted on the file the boundary just wrote');
+
+        $status = $this->flipper()->status();
+
+        $this->assertSame('readers', $status['last_mode']);
+        $this->assertSame(1, $status['window']['pool_repairs'], 'the repair is counted in the reading --status prints');
+        $this->assertSame('reader_db_2', $status['window']['last_repair_pool']);
+        $this->assertSame(0, $status['window']['runs'], 'and the run itself is still not a boot convergence');
+    }
+
+    /**
      * The verbose rows are a field in one channel and nothing in the other: a per-host row printed
      * beside the object would make stdout two things, and a job reading it would have to skip a line
      * before it could parse anything.

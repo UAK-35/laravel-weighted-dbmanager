@@ -42,12 +42,24 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
  *   mode this task applies cannot move the convergence verdict a deployment gate reads. The two
  *   are deliberately separate paths, and this is the one for "the time of day says so".
  *
+ *   It is the only thing the forced path shares with the scheduled one, and it shares it on
+ *   purpose: the pooler is read back after the mode is applied, because a mode applied at a
+ *   boundary is a read outage if pgcat never acted on the signal — every read to a pool the new
+ *   variant declares fails while `pgcat mode` compares two files and finds them in step. A
+ *   refusal escalates to `restart_command` and is counted as a repair, which is a fact about the
+ *   pooler rather than about the window, so it does not touch the run record this task leaves out.
+ *
  * THE ROUTES, AND THE EXIT CODE EACH ONE CARRIES
  *   early       a firing outside this task's own lead window — the cron expression covers a whole
  *               hour's worth of minutes, so these exist; nothing was asked, exit 0.
  *   waiting     inside the lead window and before the boundary: the target was asked, nothing is
  *               applied yet, exit 0. This is the probing the task is for.
  *   flipped     the boundary had arrived and the target answered: the mode was applied, exit 0.
+ *   repaired    the mode was applied and the pooler did not answer for a pool of it, so the pooler
+ *               was restarted on the file just written (or a refusal that survived the restart is
+ *               named). Exit 0 for `FlipResult::KIND_REPAIRED`'s reason: the file and the mode are
+ *               both in place and the run did what it was asked to; a pooler that still refuses is
+ *               `/health/db`'s `pool_probe` block to report.
  *   no_change   the flipper already has that mode applied, so there was nothing to do, exit 0.
  *   deferred    the boundary had arrived and the target did not answer: nothing was applied, exit
  *               1. The task exists to change the mode and this run could not, which is the one
@@ -369,6 +381,18 @@ class DbWindowFlipCommand extends Command
                 'the boundary at %s arrived and %s — mode applied',
                 $boundaryAt,
                 $this->probeSentence($probe),
+            ),
+            // The mode is applied and the pooler was not holding it. The transition is the part a
+            // reader of the boundary needs, and the flipper's own sentence carries the pool, what
+            // was done about it and what was seen afterwards — so it is quoted rather than
+            // summarized a second time here.
+            FlipResult::KIND_REPAIRED => sprintf(
+                'the boundary at %s arrived and %s — %s',
+                $boundaryAt,
+                $this->probeSentence($probe),
+                $result?->reason !== null && $result->reason !== ''
+                    ? $result->reason
+                    : 'the mode was applied and the pooler did not answer for a pool of it',
             ),
             FlipResult::KIND_FAILED => 'the flip threw' . ($result?->error !== null ? ': ' . $result->error : ''),
             default => $result?->summary() ?? sprintf('the flipper did not change the mode for the boundary at %s', $boundaryAt),
