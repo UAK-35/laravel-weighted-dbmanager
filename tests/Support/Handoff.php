@@ -1007,6 +1007,32 @@ final class Handoff
         return $names;
     }
 
+    /**
+     * The tags this branch carries: every tag merged into `HEAD`, plus the one a release is about to
+     * create.
+     *
+     * The note describes a *lane*, and a tag cut on a branch this one cannot reach is a real release
+     * and still not this lane's: `bin/surface.php`'s `latestTag()` and `bin/release.php`'s rung are
+     * read with the same rule written out ("a tag on a branch HEAD cannot reach is a real tag and not
+     * one of this line's"), and `RELEASING.md` builds a release from "the most recent `v*` tag that is
+     * an ancestor of `HEAD`". So the two lists answer two different questions and both are needed:
+     * `tagNames()` is the register a claim is checked *against* — a name the note writes has to exist
+     * here, wherever it was cut — and this one is what a "the latest of them" claim is read *from*.
+     *
+     * @return list<string>
+     */
+    public static function branchTagNames(): array
+    {
+        $names = self::outputLines(self::git('tag', '--merged', 'HEAD', '--list', 'v*')['output']);
+        $pending = self::pendingTag();
+
+        if ($pending !== null && !in_array($pending, $names, true)) {
+            $names[] = $pending;
+        }
+
+        return $names;
+    }
+
     /** The commit a write renders at: the one this checkout is standing on, which is the new register. */
     public static function head(): string
     {

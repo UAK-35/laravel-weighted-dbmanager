@@ -254,7 +254,7 @@ final class PublicApiReportTest extends TestCase
             "the page printed for {$stale} is the blob at that tag, which is the page its release left behind",
         );
         $this->assertNotSame(self::normalise($published->getOutput()), self::normalise($older->getOutput()), 'two tags, one page');
-        $this->assertSame(self::published($newest), self::page(), 'the checkout\'s page has moved on from the newest tag, which this test assumes');
+        $this->assertSame(self::published($newest), self::page(), 'the checkout\'s page has moved on from the newest tag this branch carries, which this test assumes');
 
         // Each page says which tree it describes, and the note about where it came from is on the
         // other stream — a note in front of the bytes is a page that does not render.
@@ -276,11 +276,21 @@ final class PublicApiReportTest extends TestCase
      * tag or with it as the newest is a history this test cannot ask about, which is said rather
      * than asserted on an empty string.
      *
+     * The newest tag is the newest one **this branch carries** — `--merged HEAD` — rather than the
+     * newest tag in the repository, and the two are not the same list. A release cut on a branch this
+     * checkout cannot reach is a real tag and not a release this history contains: `RELEASING.md`
+     * builds a release from "the most recent `v*` tag that is an ancestor of `HEAD`", `bin/surface.php`
+     * reads its base with the same rule ("a tag on a branch HEAD cannot reach is a real tag and not
+     * one of this line's"), and `BumpWeighingTest::test_a_tag_this_branch_cannot_reach_is_not_the_base`
+     * pins it. Reading the global newest instead made this test demand that the checkout already be
+     * that tag — a page describing `v0.2.0-alpha7` is current on a `dev` that has not taken the
+     * `v0.2.0-alpha8` release branch, and the guard failed on a page that was right.
+     *
      * @return array{0: string, 1: string}
      */
     private static function pageTags(): array
     {
-        $process = new Process(['git', 'tag', '--list', 'v*', '--sort=-v:refname'], self::root());
+        $process = new Process(['git', 'tag', '--merged', 'HEAD', '--list', 'v*', '--sort=-v:refname'], self::root());
         $process->setTimeout(30);
         $process->run();
 

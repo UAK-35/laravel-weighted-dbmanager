@@ -1155,6 +1155,19 @@ final class HandoffTest extends TestCase
         return Handoff::tagNames();
     }
 
+    /**
+     * The row says which tag is the latest *of the ones on the branch*, so the claim is read against
+     * the tags this branch carries, not every tag in the repository.
+     *
+     * The two lists are not the same list, and the difference is a release cut on a branch this one
+     * cannot reach: a real tag, and not a release this lane has taken. `RELEASING.md` builds a release
+     * from "the most recent `v*` tag that is an ancestor of `HEAD`", `bin/surface.php` and
+     * `bin/release.php` each read their base with it, and
+     * `BumpWeighingTest::test_a_tag_this_branch_cannot_reach_is_not_the_base` pins that rule for the
+     * base version — so a note whose latest row named the newest tag *anywhere* would be claiming a
+     * release this history does not contain. The existence check above it still reads every tag: a
+     * name the note writes has to resolve wherever it was cut.
+     */
     public function test_the_tag_it_calls_latest_is_still_the_newest(): void
     {
         $known = self::knownTags();
@@ -1170,14 +1183,15 @@ final class HandoffTest extends TestCase
             ),
         );
 
-        $newest = self::newest($known);
+        $newest = self::newest(Handoff::branchTagNames());
 
         self::assertSame(
             Handoff::latest(),
             $newest,
             sprintf(
-                'HANDOFF.md says %s is the latest tag, and %s is — so the lane the note describes has been '.
-                'released past, and section 3 has to be re-taken before the next tag is cut.',
+                'HANDOFF.md says %s is the latest tag, and %s is the newest one this branch carries — so '
+                .'the lane the note describes has been released past, and section 3 has to be re-taken '
+                .'before the next tag is cut.',
                 Handoff::latest(),
                 $newest,
             ),

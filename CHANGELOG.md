@@ -181,6 +181,20 @@
 
 ### Fixed
 
+- **The two guards that read every tag in the repository now read the tags this branch carries.**
+  `PublicApiReportTest` and `HANDOFF.md`'s latest-row guard both took the newest tag *anywhere* as
+  the release a checkout is standing on, so a release cut on a branch `dev` cannot reach — a real
+  tag, and not a release this line has taken — failed both on a tree that was right: the page
+  described `v0.2.0-alpha7` while `v0.2.0-alpha8` sat on `release/v0.2.0-alpha8`, and the note's
+  section 3 said the same of its three tag rows. `Handoff::branchTagNames()` reads
+  `git tag --merged HEAD` — the question `RELEASING.md` builds a release from, `bin/surface.php`'s
+  `latestTag()` asks, and
+  `BumpWeighingTest::test_a_tag_this_branch_cannot_reach_is_not_the_base` pins for the base version
+  — and the page guard asks it directly. The existence check is untouched: a tag the note writes
+  still has to resolve in the repository, wherever it was cut, and the page's own freshness is
+  still read against the record, so a checkout that lags a release it *does* carry is red as
+  before.
+
 - **`docs/db-doctor-json.md` no longer quotes a phrase `docs/pgcat-flip-json.md` does not contain.**
   The citation said "the code travels inside it"; the record says "code inside it", and the two had
   drifted apart with no diff to show it — which is what the new guard reads.
