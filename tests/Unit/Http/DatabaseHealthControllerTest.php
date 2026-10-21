@@ -840,6 +840,20 @@ class DatabaseHealthControllerTest extends TestCase
             $causes,
             'the endpoint and the command describe one silent schedule with one set of readings',
         );
+
+        // The two numbers the tolerance is made of travel with the block for the same reason the
+        // readings do: a monitor holding `stale_after_seconds` alone can say a beat is late, and
+        // cannot say late by how many runs of what cadence. Both are the command's values, not a
+        // second reading of the configuration that could drift from it.
+        $this->assertSame(5, $response->json('schedule.missed_runs'), 'the shipped tolerance, in runs');
+        $this->assertSame(1, $response->json('schedule.interval_minutes'), 'the shipped one-minute cadence');
+        $this->assertSame($report['missed_runs'], $response->json('schedule.missed_runs'));
+        $this->assertSame($report['interval_minutes'], $response->json('schedule.interval_minutes'));
+        $this->assertSame(
+            $response->json('schedule.stale_after_seconds'),
+            $response->json('schedule.missed_runs') * $response->json('schedule.interval_minutes') * 60,
+            'the three numbers in the block agree, so a monitor can derive the bound rather than trust it',
+        );
     }
 
     /**
@@ -860,11 +874,50 @@ class DatabaseHealthControllerTest extends TestCase
 
         $response->assertJsonPath('schedule.causes', []);
 
+        // A disarmed entry still has the cadence and the count written down, and the command still
+        // prints them: the pair says what the installation was asked to tolerate, which is a fact
+        // about the configuration rather than about the verdict. Dropping them here would make the
+        // block's shape depend on whether somebody switched the entry off.
+        $response->assertJsonPath('schedule.missed_runs', 5)
+            ->assertJsonPath('schedule.interval_minutes', 1);
+
         $this->assertSame(0, Artisan::call('db:scheduler-watchdog', ['--json' => true]));
 
         $report = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
 
         $this->assertSame([], $report['causes']);
+        $this->assertSame($report['missed_runs'], $response->json('schedule.missed_runs'));
+        $this->assertSame($report['interval_minutes'], $response->json('schedule.interval_minutes'));
+    }
+
+    /**
+     * A container with no flipper has no schedule to read a cadence from, and says so with `null`
+     * rather than with nothing.
+     *
+     * The keys are the command's absent shape, which reports `null` for both on the `unbound` route
+     * for the same reason: a monitor that plots the tolerance cannot tell a value that was never
+     * read from one that was zero, and a missing key is the silence this block exists to avoid. The
+     * keys are present, `applicable` is false, and no cadence is invented for a flipper that is not
+     * there.
+     */
+    public function test_a_container_with_no_flipper_reports_no_cadence_rather_than_none_at_all(): void
+    {
+        $this->app->instance(DatabaseHealthController::class, new DatabaseHealthController());
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('pgcat', null)
+            ->assertJsonPath('schedule.applicable', false)
+            ->assertJsonPath('schedule.failed', false)
+            ->assertJsonPath('schedule.stale_after_seconds', 0)
+            ->assertJsonPath('schedule.missed_runs', null)
+            ->assertJsonPath('schedule.interval_minutes', null)
+            ->assertJsonPath('schedule.causes', []);
     }
 
     /**

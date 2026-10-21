@@ -7,6 +7,7 @@ namespace Uak35\WeightedDbManager\Http\Controllers;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
+use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
@@ -62,7 +63,10 @@ use Throwable;
  *     carries `causes`, the three readings `db:scheduler-watchdog` reports — the mutex
  *     store (named, not asked), the entry count and the boot stamp — read through
  *     `ScheduleCauses`, so the monitor and the healthcheck explain one silence with the
- *     same sentences — see scheduleCauses()
+ *     same sentences — see scheduleCauses() — and beside them the two numbers the
+ *     tolerance is made of, `missed_runs` and `interval_minutes`, so a monitor comparing
+ *     an age with a bound can also say how many runs of what cadence that bound is —
+ *     see scheduleBounds()
  *   • whether that pooler is still in step with the reader windows that move the
  *     mode every day — `reader_window`, which holds what the windows ask for right
  *     now beside what pgcat's own file actually is. The boot window above can only
@@ -359,15 +363,26 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * for an installation whose entry is not scheduled, which is also the one case where reading
      * them resolves no schedule.
      *
+     * `missed_runs` and `interval_minutes` are the other two numbers `db:scheduler-watchdog` prints,
+     * and until now the block was missing them: `stale_after_seconds` is their product, so a monitor
+     * that wanted to say *how* late a stale beat was — five runs of a one-minute entry, or five of a
+     * twenty-five-minute one — had to trust a number it could not decompose. They are read the way
+     * the command reads them, from the same setting the tolerance comes from, so the two surfaces
+     * cannot print two cadences for one configuration. Like the command's, they are present on every
+     * route, `null` only where there is no flipper to read a schedule from, and present even when
+     * nothing is judged — a switched-off entry has a cadence and a tolerance written down, and it is
+     * the pair, not the verdict, that says what the installation was asked to tolerate.
+     *
      * @param array<string, mixed>|null $pgcat the summary `index()` already read
      *
-     * @return array{applicable: bool, failed: bool, reason: string|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, causes: list<array{key: string, reading: string}>}
+     * @return array{applicable: bool, failed: bool, reason: string|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, missed_runs: int|null, interval_minutes: int|null, causes: list<array{key: string, reading: string}>}
      */
     private function scheduleVerdict(?array $pgcat): array
     {
         /** @var array<string, mixed>|null $schedule */
         $schedule = is_array($pgcat['schedule'] ?? null) ? $pgcat['schedule'] : null;
         $applicable = $pgcat !== null && ($schedule['applicable'] ?? false) === true;
+        $bounds = $this->scheduleBounds();
 
         return [
             'applicable' => $applicable,
@@ -387,7 +402,45 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'stale_after_seconds' => is_int($schedule['stale_after_seconds'] ?? null)
                 ? $schedule['stale_after_seconds']
                 : 0,
+            // The two settings the line above is made of, in the command's order and from the
+            // command's readers: `FlipSchedule::options()` for the cadence, `ScheduleBeat::missedRuns()`
+            // for the count. Read here rather than off the summary because the summary's `schedule`
+            // block is the verdict's and does not carry them; read from the same block it does, so a
+            // monitor multiplying the two gets the `stale_after_seconds` beside them.
+            'missed_runs' => $bounds['missed_runs'],
+            'interval_minutes' => $bounds['interval_minutes'],
             'causes' => $this->scheduleCauses(),
+        ];
+    }
+
+    /**
+     * The two settings the schedule's tolerance is made of — `missed_runs` and `interval_minutes`.
+     *
+     * `db:scheduler-watchdog` prints both beside its verdict, because "five minutes late" is a
+     * different claim at a one-minute cadence than at a twenty-five-minute one, and a monitor that
+     * received only the product would be comparing an age with a number it could not interpret.
+     * This endpoint publishes the same pair from the same two readers the command uses, so the two
+     * surfaces agree by construction rather than by both being copied from one config file carefully.
+     *
+     * Both are `null` where there is no flipper: with nothing watching a schedule there is no
+     * cadence to report, which is the one value the command's evidence takes for the same absence.
+     * A flipper that is present answers even when the verdict is not judged — an installation with
+     * the entry switched off still configured a cadence and a count, and a monitor plotting the
+     * tolerance over time should not see it vanish the moment somebody disarms the entry.
+     *
+     * @return array{missed_runs: int|null, interval_minutes: int|null}
+     */
+    private function scheduleBounds(): array
+    {
+        if ($this->pgcat === null) {
+            return ['missed_runs' => null, 'interval_minutes' => null];
+        }
+
+        $config = config();
+
+        return [
+            'missed_runs' => ScheduleBeat::missedRuns($config->get('db-manager.swrr.pgcat.schedule')),
+            'interval_minutes' => FlipSchedule::options($config)['interval_minutes'],
         ];
     }
 

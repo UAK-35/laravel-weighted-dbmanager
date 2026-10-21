@@ -1563,7 +1563,8 @@ jq -e '.causes | map(.key) | length == 3' beat.json
 ```
 
 Two other surfaces answer the same question, and neither of them is this one. `/health/db` publishes
-the block under `schedule` — the beat, the tolerance and these three readings under `causes` — and
+the block under `schedule` — the beat, the tolerance, the two settings it is made of
+(`missed_runs`, `interval_minutes`) and these three readings under `causes` — and
 returns `503` when the beat has stopped, for the monitor *outside* the container; `db:doctor`'s `schedule beat` row fails, and `--strict` fails a release, for the preflight
 *before* one. This command is for the healthcheck *inside* the container, which has no HTTP client to
 call the endpoint with and no preflight to run: `CMD php artisan db:scheduler-watchdog --strict` is

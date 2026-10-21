@@ -57,6 +57,18 @@
   one row) is the repair: it keeps the words, takes the reading the file has now, and rewrites the
   declaration block, so a re-reading is something somebody ran rather than a hash that drifted.
 
+- **`/health/db`'s `schedule` block carries the two settings its tolerance is made of.**
+  `db:scheduler-watchdog` has always printed `missed_runs` and `interval_minutes` beside its verdict,
+  and the endpoint published only the product — `stale_after_seconds` — so a monitor could read
+  `schedule.failed` and say a beat was late without being able to say late by how many runs of what
+  cadence, or to check the bound against the settings it came from. The block now carries both, in
+  the command's order and read through the command's two readers, so the endpoint and the healthcheck
+  cannot print two cadences for one configuration. They are `null` only where there is no flipper,
+  the value the command's evidence takes for the same absence, and they are present when nothing is
+  judged: a disarmed entry still has a cadence and a count written down. `DatabaseHealthControllerTest`
+  holds the pair to the command's report and holds `stale_after_seconds` to their product, so the
+  three numbers in the block cannot drift apart.
+
 ### Changed
 
 - **The gate record and the note that quotes it are written by one command.** `php bin/checks.php

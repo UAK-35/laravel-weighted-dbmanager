@@ -130,6 +130,25 @@ Both read them through this class and both print its sentences, and `DatabaseHea
 compares the two arrays field for field, so a monitor and a healthcheck cannot drift into two
 accounts of one silence.
 
+## The bound, in the runs it is made of
+
+`stale_after_seconds` is one number derived from two settings, and a monitor that receives only the
+product can say a beat is late without saying late by how many runs of what cadence — which is the
+difference between a schedule that has been down for five minutes and one that has been down for
+five runs of a pace somebody deliberately slowed to twenty-five minutes. The command has always
+printed both (`missed_runs`, `interval_minutes`); the endpoint did not, so a dashboard could read
+`schedule.failed` and be unable to explain the bound that produced it without the configuration.
+
+The `schedule` block carries them now, in the command's order and from the command's two readers —
+`ScheduleBeat::missedRuns()` for the count, `FlipSchedule::options()` for the cadence — rather than
+from the verdict's own block, which carries neither. They are `null` only where there is no flipper
+to read a schedule from, matching the command's evidence for the same absence, and they are present
+when nothing is judged: a disarmed entry still has a cadence and a count written down, and the pair
+is a fact about what the installation was asked to tolerate rather than about this run's verdict.
+Because they are the same two numbers `stale_after_seconds` multiplies, the block holds together —
+`missed_runs * interval_minutes * 60` is the bound beside it — and the suite asserts that arithmetic
+rather than the three values separately.
+
 An installation whose per-minute entry is not scheduled reads nothing at all, and its schedule is not
 even resolved: resolving the schedule is what *registers* this package's entry, so a reading taken for
 an installation that never armed it would hand that installation an entry it never asked for. That is
@@ -206,7 +225,7 @@ is wrong.
 | `src/Pgcat/PgcatConfigFlipper.php` | stamps `beat_at` on every run (`beat()`) and publishes the verdict (`scheduleStatus()`) |
 | `src/Pgcat/ScheduleCauses.php` | the three readings beside the verdict — what a silence is checked against, and which run asks for each |
 | `src/Console/Commands/DbSchedulerWatchdog.php` | the healthcheck: one route table, `--strict`, `--json`, and no work |
-| `src/Http/Controllers/DatabaseHealthController.php` | the `schedule` block, and the third `failed` that reaches `$allHealthy` |
+| `src/Http/Controllers/DatabaseHealthController.php` | the `schedule` block — the beat, the bound and the two settings it is made of — and the third `failed` that reaches `$allHealthy` |
 | `src/Console/Commands/DbDoctor.php` | the `schedule beat` row |
 | `config/db-manager.php` | `swrr.pgcat.schedule.stale_after_missed_runs`, and why it is a count of runs |
 | `tests/Unit/Console/DbSchedulerWatchdogTest.php` | the matrix — routes against the flag and the two channels — the sentences each route carries, and the readings beside them |
