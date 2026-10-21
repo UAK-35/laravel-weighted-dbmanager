@@ -819,6 +819,14 @@ final class Handoff
             'words' => 'the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen',
             'read' => 'sha256:a7d5599e2b4f82a36ec5e47506429acdcd01acfe6e58e2d649ff980ede27b593',
         ],
+        'tests/Support/PortPlan.php' => [
+            'words' => 'the port plan\'s status section, read as data: the phase and the commit each phase says it landed as, with the shapes a hand-edited table can take',
+            'read' => 'sha256:6c19b8a8712bda3e83d1f22e2710bf6ad1cc2bed2c3fd5aba80dce0030d176f7',
+        ],
+        'tests/Unit/Docs/PortPlanStatusTest.php' => [
+            'words' => 'the guard that holds that status table to the tree: every sha it names is a commit this repository has, and every phase it claims is one the plan still declares',
+            'read' => 'sha256:24c9aa8ce9e76dfeb7c5c6d83885668e9049b71bcda9a6cf6698dfc3008ae6cc',
+        ],
         // @pending-descriptions-end
     ];
 

@@ -238,6 +238,8 @@ the tree.
 | File | What it is |
 |---|---|
 | `docs/health-payload.md` | the payload contract: why the shape a monitor reads by name is pinned rather than left to each block's tests, what the tables' cells mean, the open shapes and why they are open, and every path and key the endpoint publishes |
+| `tests/Support/PortPlan.php` | the port plan's status section, read as data: the phase and the commit each phase says it landed as, with the shapes a hand-edited table can take |
+| `tests/Unit/Docs/PortPlanStatusTest.php` | the guard that holds that status table to the tree: every sha it names is a commit this repository has, and every phase it claims is one the plan still declares |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released

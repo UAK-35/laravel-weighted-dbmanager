@@ -257,6 +257,13 @@ A reading of the tree rather than a part of the plan: what each phase landed as,
 this list is still on the other side of the boundary. It is the section a later thread updates,
 because the phases above describe work rather than a state.
 
+`PortPlanStatusTest` holds it to the tree in three directions: every `## Phase N` heading above needs
+a row here and every numbered row needs a phase above it, every commit the table names — and the one
+this heading is taken at — has to resolve, and each of them has to be an ancestor of `HEAD`, because
+the column says the work *landed* here rather than that a commit exists somewhere. A rebase that
+rewrites the history under these cells fails the guard rather than quietly turning seven characters
+of prose into a string that names nothing.
+
 | Phase | Landed in | Read it in |
 |---|---|---|
 | 1 | `bbfd422` | `Support\ConfigSchema`, the sample's `generation`, the `published config` row, [docs/config-generations.md](docs/config-generations.md) |

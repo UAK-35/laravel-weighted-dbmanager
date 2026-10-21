@@ -4,6 +4,18 @@
 
 ### Added
 
+- **The port plan's status table is held to the tree.** The section that says which commit each phase
+  landed as is the one reading in the plan about this repository rather than about work to do, and
+  nothing read it: seven characters of prose stop naming anything the moment history is rewritten, and
+  no diff of the plan shows it because the text did not change. `PortPlanStatusTest` reads the table
+  through a new `Tests\Support\PortPlan` — which raises rather than returning an empty reading when
+  the heading, a column or a row's shape is not what it expects — and asserts it in three directions:
+  every `## Phase N` heading has a row and every numbered row names a phase that still exists; every
+  commit in the `Landed in` column, and the one the section's heading is taken at, resolves here; and
+  each of them is an ancestor of `HEAD`, since a commit on a branch nobody merged has not landed
+  anywhere the table can point at. The plan names the guard beside the table, so the next thread that
+  re-takes the section knows what will fail if it edits the table without the tree.
+
 - **A connection the package follows and cannot build is a boot finding, not only a doctor row.**
   `db:doctor`'s `connector` row fails when the followed connection names no driver, names one no
   connector is registered for, or is built by a connector whose connection build throws — and it
