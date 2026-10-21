@@ -669,7 +669,7 @@ final class Handoff
         // @pending-descriptions
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-            'read' => 'sha256:f5a002b5ea09a9f243d09a41de27497526b2a53f1c5eb2e23ce0d773c6774be7',
+            'read' => 'sha256:846dcfa1596b81e9f517161317d4ea263de3c5abf335c69643457b0dc0311425',
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
@@ -2000,7 +2000,7 @@ final class Handoff
      * one entry needs. What the row calls the number is untouched — it is still digits, and the four
      * numbers still have to be there.
      *
-     * @return array{total: int, added: int, fixed: int, changed: int, severity: string}
+     * @return array{total: int, added: int, fixed: int, changed: int, removed: int, severity: string}
      *
      * @throws RuntimeException when either row stops saying it in the shape this reads
      */
@@ -2008,10 +2008,15 @@ final class Handoff
     {
         $counts = self::claim(self::UNRELEASED, '## Unreleased at the basis');
 
-        if (preg_match('/^(\d+) '.self::counted('entry').' — (\d+) added, (\d+) fixed, (\d+) changed$/', self::plain($counts['value']), $matches) !== 1) {
+        // The fourth heading is optional because a section need not have retired anything: the row
+        // stated three counts for as long as no `### Removed` entry existed, and it is the heading that
+        // decides the weighing reads `breaking` — so a note that is describing one has to be able to
+        // say how many entries are under it, and a note describing none states nothing rather than
+        // writing a zero for a heading the changelog does not have.
+        if (preg_match('/^(\d+) '.self::counted('entry').' — (\d+) added, (\d+) fixed, (\d+) changed(?:, (\d+) removed)?$/', self::plain($counts['value']), $matches) !== 1) {
             throw new RuntimeException(sprintf(
                 'HANDOFF.md line %d no longer states the Unreleased section as [total entry/entries — a Added, b '.
-                'Fixed, c Changed]: [%s]',
+                'Fixed, c Changed], with `, d Removed` when the section has one: [%s]',
                 $counts['source'],
                 trim($counts['value']),
             ));
@@ -2033,6 +2038,7 @@ final class Handoff
             'added' => (int) $matches[2],
             'fixed' => (int) $matches[3],
             'changed' => (int) $matches[4],
+            'removed' => (int) ($matches[5] ?? 0),
             'severity' => $severity,
         ];
     }

@@ -1636,11 +1636,20 @@ final class HandoffTest extends TestCase
         // untouched — a heading that *is* there is reported with its count, so a note that calls
         // it empty fails, and a heading the note does not name (say `### Security`) is a key it
         // does not have.
-        foreach (['added', 'fixed', 'changed'] as $heading) {
+        // Every heading the weighing reports is a key the note has to state, `removed` included: it is
+        // the heading that decides a `breaking`, and the note's row has said `, d removed` since the
+        // first section that retired anything. A heading the section does not carry counts zero rather
+        // than being absent, so a note taken where nothing was removed still names all four.
+        foreach (['added', 'fixed', 'changed', 'removed'] as $heading) {
             $counts[$heading] ??= 0;
         }
 
-        $claimed = ['added' => $claim['added'], 'fixed' => $claim['fixed'], 'changed' => $claim['changed']];
+        $claimed = [
+            'added' => $claim['added'],
+            'fixed' => $claim['fixed'],
+            'changed' => $claim['changed'],
+            'removed' => $claim['removed'],
+        ];
         ksort($counts);
         ksort($claimed);
 
