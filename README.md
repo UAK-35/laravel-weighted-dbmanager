@@ -700,10 +700,10 @@ deploy gate running `jq -e '.pinned.ok'` — and none of them fails when a block
 twice, here and in [docs/health-payload.md](docs/health-payload.md), and
 `DatabaseHealthControllerTest::test_every_block_and_key_the_payload_publishes_is_documented` reads
 both tables and a real payload: a block or key added, renamed or dropped without both tables is a
-failing test, in either direction. Keys are listed alphabetically — the set is the contract, not
-the order the array literal happens to have. An em dash marks a path whose value is a scalar, a
-list, or an object documented under another heading, and `<connection>` is the one name the payload
-chooses at runtime: `replicas` is keyed by the connection the package follows.
+failing test, in either direction. Keys are listed once each and compared as a set, so the set is
+the contract rather than the order the array literal happens to have. An em dash marks a path whose
+value is a scalar, a list, or an object documented under another heading, and `<connection>` is the
+one name the payload chooses at runtime: `replicas` is keyed by the connection the package follows.
 
 | path | keys | what it is |
 |---|---|---|
