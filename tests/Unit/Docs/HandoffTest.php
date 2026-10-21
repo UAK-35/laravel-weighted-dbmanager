@@ -1598,10 +1598,56 @@ final class HandoffTest extends TestCase
      *   The register is the one the records name in their own header rather than `HEAD`, so the case is
      *   about the branch rather than about one afternoon's tree: a record and the tag it describes travel
      *   together, and `--check --at=<that tag>` is the reading that must exit 0.
+     *
+     *   The one register git cannot resolve is the release's own. `bin/release.php` runs this guard
+     *   *before* it tags, and stamps the record with the version it is about to cut, so the stamp names
+     *   a ref that does not exist yet — the state `HANDOFF_PENDING_TAG` exists for. That case is read as
+     *   the plain `--check` the release itself takes, because the tag is not there to ask `--at` about;
+     *   a guard that insisted on resolving it would refuse every release rather than the wrong one.
      */
     public function test_a_register_whose_records_are_current_renders_exit_zero(): void
     {
         $stamp = self::recordStamp();
+
+        if ($stamp === Handoff::pendingTag()) {
+            $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/inventory.php', '--check']);
+
+            self::assertSame(0, $run['exit'], sprintf(
+                "files.tsv is stamped for %s, the tag this release is about to cut, and the plain "
+                ."`bin/inventory.php --check` exits %d:\n%s%s",
+                $stamp,
+                $run['exit'],
+                $run['output'],
+                $run['error'],
+            ));
+
+            $bullets = array_values(array_filter(
+                Handoff::outputLines($run['output']."\n".$run['error']),
+                static fn (string $line): bool => str_starts_with($line, '•'),
+            ));
+
+            self::assertNotSame(
+                [],
+                $bullets,
+                'A release found its own records current and said nothing a transcript can quote.',
+            );
+
+            $said = trim(ltrim((string) end($bullets), '•'));
+
+            self::assertStringStartsWith(
+                'inventory is current',
+                $said,
+                'The release\'s register is current, so the run has to say so in its own words.',
+            );
+            self::assertStringContainsString(
+                $stamp,
+                $said,
+                'The reading the release sees has to name the tag it is cutting, or the register is another '
+                .'release\'s and this guard just read the wrong tree.',
+            );
+
+            return;
+        }
 
         $resolved = Handoff::git('rev-parse', $stamp.'^{commit}');
 

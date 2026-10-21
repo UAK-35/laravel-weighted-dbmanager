@@ -97,6 +97,17 @@
 
 ### Fixed
 
+- **A release no longer refuses on the tag it has not cut yet.** `bin/release.php` stamps the three
+  inventory files with the version it is cutting and then runs `HandoffTest` against the commit it
+  is about to tag, so `test_a_register_whose_records_are_current_renders_exit_zero` asked git to
+  resolve a ref that by definition did not exist, and every release since the note's blocks became
+  readings was refused by its own guard. The pending tag was already the note's business everywhere
+  else — `Handoff::tagNames()` admits it, and the three tag rows are moved to it — so this case
+  reads it the same way: the register is the commit about to be tagged and the reading is the plain
+  `--check` the release takes, because `--at=<that tag>` cannot be asked of a ref that is not there.
+  Every register that does exist is still read with `--at`, so what the guard proves is unchanged —
+  a release still tags nothing whose note it could not read.
+
 - **`docs/db-doctor-json.md` no longer quotes a phrase `docs/pgcat-flip-json.md` does not contain.**
   The citation said "the code travels inside it"; the record says "code inside it", and the two had
   drifted apart with no diff to show it — which is what the new guard reads.
