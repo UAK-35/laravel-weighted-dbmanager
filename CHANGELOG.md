@@ -211,8 +211,6 @@
   armed and says what each is doing, and the pair is a supported arrangement rather than halfway
   through a migration. Arming both is what buys a container its first minutes *and* the day.
 
-### Fixed
-
 - **`/health/db` no longer reports `degraded` for ever on a container whose pooler a boundary task is
   keeping in step.** `converged_at` is written only by the per-minute entry, so with the reader-window
   tasks armed and the entry disarmed — the migration this package used to document — `window.failed`
