@@ -143,6 +143,18 @@
 
 ### Changed
 
+- **The `published config` row's fresh-install state is written the same way in the three places that
+  state it.** The port plan's phase 1 said a fresh install that has never published is silent, while
+  the row warns that the package sample is in use — its documented policy since before the generation
+  reading existed. The plan, the README's row and [docs/config-generations.md](docs/config-generations.md)
+  now say one thing: a copy that is missing, or still byte-identical to the sample, is answered before
+  the generation is read, so a fresh install is the sample-in-use warning and adds no second verdict,
+  and the comparison only ever judges a file the installation has written itself. Nothing under
+  `src/` moves: the row always behaved this way, and the sentence was the half that had drifted. The
+  ordering is asserted now as well — a published copy still byte-identical to the sample warns with
+  the sample's own, current, generation in front of it — so the early answer is a test rather than a
+  reading of the method.
+
 - **The gate record and the note that quotes it are written by one command.** `php bin/checks.php
   --record` writes `.agents/gate.json` and then renders the note's `gate` block from the record it
   just wrote, so the two halves of that quote cannot be taken separately — a note taken before a

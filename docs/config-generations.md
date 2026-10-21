@@ -45,7 +45,11 @@ consumer can install.
 
 `db:doctor`'s `published config` row asks it, in the same row that already reports whether an
 application published the file at all and whether anything in it was reviewed. That row has four
-answers now, and each of them is its own state rather than a shared silence:
+answers now, and each of them is its own state rather than a shared silence. The two states that are
+answered before the generation is read — no file at all, and one still byte-identical to the sample —
+keep the verdicts they already had: a fresh install is the sample-in-use warning, not a comparison
+against a key set nobody wrote, and the generation is only ever asked of a file the installation has
+written itself.
 
 | The file | The row | Why that verdict |
 |---|---|---|

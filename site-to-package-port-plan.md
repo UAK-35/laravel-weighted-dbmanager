@@ -27,16 +27,20 @@ thirteen-keyed-line diff against this package's sample — the `(bool)` casts in
 `stale_after_missed_runs`.
 
 **Work.** A schema generation in the sample config — one number, owned by the class that reads it —
-and a `db:doctor` row that compares the published file's value with the package's: equal is silent,
-older is a warning naming the release it was published at, and absent is a warning that says the file
-predates the key. A warning and not a failure, deliberately: running an older published config is not
-a fault, it is a fact a preflight should state. Then a short record under `docs/` on what a publisher
-must not do to the keys this package reads as switches — the casts and the connection fallback chain
-are the worked example, and they are the application's lines to remove.
+and a comparison in the `db:doctor` row that already reads the published file: equal is silent, older
+is a warning naming the release it was published at, and absent is a warning that says the file
+predates the key. The row already answers a copy that is missing or still byte-identical to the
+sample before any generation is read, so the comparison is only ever asked of a file the installation
+has written itself. A warning and not a failure, deliberately: running an older published config is
+not a fault, it is a fact a preflight should state. Then a short record under `docs/` on what a
+publisher must not do to the keys this package reads as switches — the casts and the connection
+fallback chain are the worked example, and they are the application's lines to remove.
 
-**Done when.** A fresh install that has never published is silent; a config published from an older
-release is reported by name; this package's own sample reads as current; the row appears in
-`db:doctor --json`; and the record is registered like every other.
+**Done when.** A fresh install that has never published is reported by that row's sample-in-use
+warning and by nothing else: there is no file to read a key set out of, so the generation is never
+asked and adds no second verdict. A config published from an older release is reported by name;
+this package's own sample reads as current; the row appears in `db:doctor --json`; and the record is
+registered like every other.
 
 **Check.** `php bin/tool.php phpunit tests/Unit/Console/DbDoctorTest.php` plus the JSON fixture the
 doctor's key set is pinned by; `php bin/counts.php --check`; `tests/Unit/Docs`.
@@ -302,11 +306,7 @@ can be retired — a change in that repository, on a release that carries this.
 Nothing here is in a tag yet — the newest is `v0.2.0-alpha3` — so the application's pin cannot move
 until a release carries the phases above.
 
-### Two sentences the tree reads differently
+### A sentence the tree reads differently
 
-* Phase 1's "a fresh install that has never published is silent": the `published config` row still
-  warns when the sample is in use, which is its documented policy
-  ([docs/config-generations.md](docs/config-generations.md)); the generation reading adds no warning
-  of its own.
 * Phase 2's `audit.file`: the record file is judged by `store probe` and its own boot finding rather
   than by `pgcat files`, and README says so. The lock companion is on the row.

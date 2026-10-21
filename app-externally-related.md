@@ -317,9 +317,12 @@ package's: equal is silent, older is a warning naming the release it was publish
 warning naming the difficulty (the file predates the key, so its age cannot be read) rather than a
 failure. The row is a warning and not a failure on purpose: running an older published config is
 not a fault, it is a fact a preflight should state, and the app's copy in 4.1 is precisely a config
-that looks fine and behaves as this package did two releases ago.
+that looks fine and behaves as this package did two releases ago. A copy that is missing or still
+byte-identical to the sample is answered by the row before any generation is read, so the comparison
+is only ever asked of a file the installation has written itself.
 
-*Done when:* a fresh install that has never published is silent; a config published from an older
+*Done when:* a fresh install that has never published is reported by the row's sample-in-use warning
+and by nothing else, since no file means no generation is read; a config published from an older
 release is reported by name; the sample's own copy reads as current; and the row appears in
 `db:doctor --json`.
 *Check:* `php bin/tool.php phpunit tests/Unit/Console/DbDoctorTest.php` plus the JSON fixture the

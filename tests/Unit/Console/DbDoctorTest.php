@@ -3128,6 +3128,26 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('vendor:publish --tag=db-manager-config', $row);
     }
 
+    public function test_it_warns_when_the_published_copy_is_the_sample_unchanged(): void
+    {
+        // The second state that is answered before the generation is read: a copy published and
+        // never edited declares the sample's own key set, which is *current*, so a row that
+        // compared generations would pass this file. It warns instead, and that is the ordering the
+        // sentence in `docs/config-generations.md` says is there.
+        $dir = $this->tempDir();
+
+        file_put_contents($dir.'/db-manager.php', (string) file_get_contents(dirname(__DIR__, 3).'/config/db-manager.php'));
+
+        $this->app->useConfigPath($dir);
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'published config');
+
+        $this->assertStringStartsWith('WARN  published config', $row);
+        $this->assertStringContainsString('byte-identical to the sample', $row);
+        $this->assertStringNotContainsString('current key set', $row);
+    }
+
     /**
      * What a published file's own *key set* is worth saying — the half a published copy cannot keep
      * in step on its own, because nothing writes over it again unless somebody asks for `--force`.
