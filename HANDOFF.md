@@ -1,4 +1,4 @@
-# Handoff — the state of this package, taken 2026-10-16
+# Handoff — the state of this package, taken 2026-10-21
 
 This is a snapshot for whoever opens a thread in **this** repository next: what is written
 but uncommitted, what is committed but unpushed, what is not in any release a consumer can
@@ -29,26 +29,26 @@ php bin/release.php --weigh --branch=dev --dry-run  # what a release would do ri
 ```
 
 Every number below that the register holds — sections 2 and 3 — was read off this machine when this
-note was re-taken, on 2026-10-16, from the refs this checkout holds; the take before this one had
-asked the remote directly (`git ls-remote`, which named the same commit the local `origin/dev` ref
-does) rather than trusting the local ref. Section 1 was re-taken on 2026-10-16,
-the date above, and it is the one part of this file that describes *now* rather than the commit it is
-read against — which this time means the batches the notes before this one carried are committed, and
-the two section 1 describes are the ones this working tree still holds.
+note was re-taken, on 2026-10-21, from the refs this checkout holds; the remote was asked directly
+(`git ls-remote`, which named the same commit the local `origin/dev` ref does) rather than trusted
+from the local ref. Section 1 was re-taken on 2026-10-21, the date above, and it is the one part of
+this file that describes *now* rather than the commit it is read against — which this time means the
+batches the notes before this one carried are committed and pushed, and the one section 1 describes
+is the one this working tree still holds.
 
 ---
 
 ## 1. Pending — written, green, uncommitted
 
-**Two batches are pending: the schedule's causes on `/health/db`, and the deployment contract as a
-preflight mode.** Neither is committed. The first is the changelog's newest entry of the two — the
-endpoint carries the watchdog's three causes under `schedule.causes`, read from `Pgcat\ScheduleCauses`
-so the report and the healthcheck cannot explain one silence with different evidence. The second is
-`db:doctor --contract`: the requirements `docs/deployment-contract.md` states as rows named by their
-keys, folded from the same readings a plain run asks, with the mapping in
-`Support\DeploymentContract` and its record held to the class by `DeploymentContractTest`. That batch
-is why section 1's table below names files as well as batches: what no commit has yet is a set, and
-the table is where it is stated. Everything the notes
+**One batch is pending: the two numbers the watchdog's bound is made of on `/health/db`, and beside it
+the record of the release CI did not gate.** Neither is committed. The batch puts `missed_runs` and
+`interval_minutes` into the endpoint's `schedule` block, read through the command's own
+`ScheduleBeat::missedRuns()` and `FlipSchedule::options()` so a monitor can decompose the bound
+instead of trusting it: `missed_runs * interval_minutes * 60` is the `stale_after_seconds` printed
+beside them. Beside it sits `docs/issues/issue-release-v0-2-0-alpha7-ci-ungated.md` — the tag's run
+was green twenty seconds after publication, the rail that should have held it took the skip, and the
+commit it was cut from has no run at all. That is why section 1's table below names files as well as
+batches: what no commit has yet is a set, and the table is where it is stated. Everything the notes
 before this one carried is committed on `dev` and unpushed, and section 2 lists those commits. Section
 3's `### Added` is where the prose of a landed batch belongs — a capability a consumer can install
 rather than a file somebody has to be told about. Three of them are worth naming anyway, because the
@@ -124,37 +124,37 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 681.3s
-      recorded 2026-10-20, PHP 8.4.26
-      syntax     PASS    21.4s  163 files, no syntax errors
-      ast        PASS     2.6s  163 files parsed
-      writeback  PASS     0.7s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     3.6s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.2s  20 platform requirements satisfied
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 708.9s
+      recorded 2026-10-21, PHP 8.4.26
+      syntax     PASS    23.7s  166 files, no syntax errors
+      ast        PASS     2.6s  166 files parsed
+      writeback  PASS     0.6s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     5.0s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     4.6s  20 platform requirements satisfied
       interpreter PASS     0.2s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
-      tools      PASS     0.0s  4 installed: pint v1.30.4, phpstan 2.2.14, phpunit 11.5.56, yaml-lint v7.4.18
-      yaml       PASS     2.5s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     1.0s  54 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.1s  9575 prose line(s) in 32 record(s), no fused sentence; the detector agreed wi…
-      phpstan    PASS    11.9s  [OK] No errors
-      pint       PASS     7.8s  PASS … 164 files
-      tests      PASS   626.5s  Tests: 1560, Assertions: 10446, Skipped: 10.
+      tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
+      yaml       PASS     3.7s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     0.8s  56 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.1s  9829 prose line(s) in 33 record(s), no fused sentence; the detector agreed wi…
+      phpstan    PASS     9.1s  [OK] No errors
+      pint       PASS    12.1s  PASS … 167 files
+      tests      PASS   646.4s  Tests: 1604, Assertions: 10649, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
 The batches the notes before this one called pending are section 3's `### Added` now rather than files
 here.
 
-**The release.** `33afd4e` — *Release v0.2.0-alpha3* — is what `bin/release.php` wrote: the sixteen
-entries under `## Unreleased` promoted into `## 0.2.0-alpha3 - 2026-10-11` (six `### Added`, six
-`### Changed`, four `### Fixed`), the three `.tsv` records rewritten with the stamp of the new tag,
-and `API.md` re-rendered from the record it writes. It was cut on `8742456` and not on `--skip-ci`:
-the script's CI rail refuses to tag a commit no run has verified, and `8742456`'s run — `38166276765`,
-success in 1m9s — is the one it read. The tag is an annotated one (`8b6aa3da` the tag object,
-`33afd4e` the commit it peels to) and both are on the remote, pushed with `git push origin dev
---follow-tags` from PowerShell 7 as `PUSHING.md` and `@pkg-push` require. The commit the release made
-is red on CI's runner, and that is a finding rather than an accident — section 3 has it, because it is
-about the rows a release now writes.
+**The release.** `2a771cc` — *Release v0.2.0-alpha7* — is what `bin/release.php` wrote: the entries
+under `## Unreleased` promoted into `## 0.2.0-alpha7 - 2026-10-20`, the three `.tsv` records rewritten
+with the stamp of the new tag, `API.md` re-rendered from the record it writes, and this file's three
+tag rows moved to the version being cut. It was cut with the CI rail skipped: the commit under it,
+`563ed95`, had never been pushed and had no run, and the last pushed commit, `b49f3ac`, was red over a
+stale `surface.tsv` line — so the tag's own run is the first thing that checked the tree it points
+at, and it is green. `docs/issues/issue-release-v0-2-0-alpha7-ci-ungated.md` is the record of that.
+The tag is an annotated one (`7b4560c` the tag object, `2a771cc` the commit it peels to) and both are
+on the remote, pushed with `git push origin dev --follow-tags` from PowerShell 7 as `PUSHING.md` and
+`@pkg-push` require.
 
 **The two repairs before it.** Both were found on the runner rather than on the machine that wrote
 them, and both carry the `### Fixed` entries the release then promoted. `929094b` reads section 2 at
@@ -165,14 +165,14 @@ five tests to the store they judge: four of them read a run's exit code without 
 `db:doctor`'s `store reachability` row PINGs, so on a workstation with a Redis answering they passed
 by accident and on the runner all four failed while every row they assert on read correctly.
 
-**What this note lands with.** The register commit it describes is `44a33da`, and what that one changes
-is a release that moves this file's three tag rows: `moveHandoffTagRows()` in `bin/release.php`, the
-plan line and the note that name the rows it moved, and `HandoffNoteTest` against a copy of this note,
-so the rows a release moves are the rows `Handoff::tagRowLines()` reads rather than three lines a test
-wrote back to the writer. Under that register sits the batch the note before this one described —
-`53d6352`'s `connector` row and `Support\ConnectorInUse` — with the deployment contract, the variant
-shape, the bounded `--connection-only` preflight and the boot environment beside it, the read path's
-caps, standby feedback and pinned pair, and the schedule that can be watched.
+**What this note lands with.** The register commit it describes is `fa29fb8` — *feat: the handoff
+note's blocks are readings, and the run that quotes them is one command* — the commit that made
+`php bin/checks.php --record` write the record and render the gate block from it, gave
+`bin/handoff.php` a `--block=NAME` render, and put the note's prose column behind a declared reading.
+Under it sits `2a771cc`, *Release v0.2.0-alpha7*, and the commits the release left on `dev`: the
+alpha6 record, the three application-side records and the plan beside them, the recording skills, the
+prose-number guard's completeness half, the doctor record's words, the connector's refusal, the
+Laravel plugin's settings, and the note's own one-command blocks.
 The note itself is prose only, which is what a re-take is: the rendered blocks come out of git, the
 inventory check and the last recorded gate run, and nothing else in it claims a fact a command could
 not answer. A release reads it too now: `bin/release.php` refreshes the five blocks at the register
@@ -184,18 +184,17 @@ version nobody is handed rather than a runner finding out after the push.
 
 ### The records carry the stamp of the tag they were written at
 
-The three `.tsv` records describe the tree `v0.2.0-alpha3` was cut from, and they say so in their
+The three `.tsv` records describe the tree `v0.2.0-alpha7` was cut from, and they say so in their
 header line — the release rewrites them, which is why the record of one tag is the record of no later
-tree. That is the check reading the stamp and the rows: against the register this note names the
-record on disk describes another tag, so it exits 1 on one line per file — the header — and, in
-`methods.tsv`, on the rows this batch has added since, which the record carries and that commit does
-not; and against this checkout it exits 0, naming the tag those rows describe, which is the release
-the note before this one cut:
+tree. That is the check reading the stamp and the rows: against the register this note names it exits
+1 on one line per record, because the tree that commit carries is not the tree the records were
+written at; and against this checkout it exits 0, naming the tag those rows describe, which is the
+tag section 3 calls latest:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=b49f3ac
-  --> exit 1: the inventory is out of step with the tree at b49f3ac
+php bin/inventory.php --check --at=fa29fb8
+  --> exit 1: the inventory is out of step with the tree at fa29fb8
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
       surface.tsv: 1 line(s) stale
@@ -236,13 +235,7 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `.agents/skills/wdm-plan/SKILL.md` | the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in |
-| `docs/investigations/investigation-ecs-rev31-rollback.md` | the investigation of the two `lpr-backend-sites` tasks that were stopped minutes after they started: the CloudTrail and service-event record that makes them a rolled-back revision rather than crashed containers, the log-path permission fatal and the unwritable pooler state directory their boots produced, the boot that upgrades its own vendor tree, and the drain and health-check arithmetic that makes each rollout slow |
-| `docs/issues/issue-pgcat-hanging-query-wire-capture.md` | the issue record for capturing the wire traffic of a hanging query on a live ECS task: why the runbook's `tcpdump` is not in the image, the logging PostgreSQL proxy in `python3` that decodes both directions instead, the three things its decoder has to special-case, and the `SHOW POOLS` reading that tells a pooler-side checkout wait from a server-side one |
-| `docs/issues/issue-supervisord-socket-unreachable.md` | the issue record for the supervisor control socket being unreachable to the user a flip runs as: why every flip refused before it could swap a file, the `FAULT_UNREACHABLE` fault that names the socket and the `chmod=0760` with `chown=root:www-data` repair, and the application-side half this package cannot do |
-| `docs/planning/plan-pgcat-both-mechanisms-armed.md` | the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding's removal, and a bound on re-logging a standing finding — each with what verifies it |
-| `tests/Unit/Docs/ProseNumberAuditTest.php` | the completeness half of the prose-number guard: every number a record bolds, either read by a claim or declared prose in `docs/prose-numbers.md`, with each prose row's reason drawn from the categories that record gives |
-| `tests/Unit/Docs/QuotedRecordsTest.php` | the guard on the sentences one record quotes from another: every `"…"` span beside a backticked `.md` path is held to the record it names, with `CHANGELOG.md` out of the corpus because a changelog quotes the sentence a version published |
+| `docs/issues/issue-release-v0-2-0-alpha7-ci-ungated.md` | the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -259,10 +252,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `b49f3ac` — *fix: a release refuses a tree holding files no commit carries* |
-| `origin/dev` | `b49f3ac` — *fix: a release refuses a tree holding files no commit carries* |
-| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
-| Since the last tag | none |
+| HEAD | `fa29fb8` — *feat: the handoff note's blocks are readings, and the run that quotes them is one command* |
+| `origin/dev` | `3dc70db` — *docs: the alpha6 CI record carries its outcome, and the green run that answers it* |
+| Unpushed | 7 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1, docs 2, feat 1, fix 1, test 2 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -271,38 +264,44 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is twenty commits ahead of `origin/dev`: the guarded commit path that moved out of the
-consuming application's `git/commit_paths.py` and into this repository's own `git/`, the readings and
-the port plan, the re-takes this cycle's notes were taken in, this cycle's eight capabilities —
-the schedule that can be watched, the api page a past tree renders, the published config that says
-which key set it is, the file preconditions that cover a whole flip cycle, the supervisor's three
-failures, the two mechanisms that can move the pooler being reported by name, the read path's three
-readings with the bounded preflight beside them, and the shape of the file a flip would swap in —
-and the repair `44a33da` lands: the tag rows a release moves.
-Unpushed at the register means what it says, twenty commits no remote has — which is the state the
-release this cycle cut was *not* in, since it was cut from the tip of `origin/dev` and pushed by the
-same run. That is what the `ci` line of a plan refuses over until the push below happens:
-`bin/release.php` refuses to tag while `HEAD` is
+The register is seven commits ahead of `origin/dev`: the three application-side records and the plan
+beside them, the recording skills, the prose-number guard's completeness half, the doctor record's
+words, the connector's second failure, the Laravel plugin's settings, and the handoff note's
+one-command blocks — the release commit itself, `2a771cc`, and the alpha6 record, `3dc70db`, are on
+the remote already.
+Unpushed at the register means what it says, seven commits no remote has — which is the state the
+release this cycle cut was *not* in: it was cut with the CI rail skipped, from a commit that was not
+the tip of `origin/dev`, and section 1's release paragraph records that. The `ci` line of a plan is
+what refuses over it until the push below happens: `bin/release.php` refuses to tag while `HEAD` is
 not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every commit
 the release made is one a consumer can fetch. This note is the commit *after* the register, and it
 travels on the push below.
 
 <!-- handoff:log -->
-Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
+The seven most recent are the ones a reader is most likely to be standing in the middle of:
+
+```
+fa29fb8  feat: the handoff note's blocks are readings, and the run that quotes them is one command
+1ae30ba  chore: the Laravel plugin's settings are the IDE's, not the package's
+f068e83  test: the connector row carries the framework's refusal and both halves of the state
+7228276  fix: the doctor record cites words the flip record writes, and a guard reads the rest
+3c304b5  test: the prose-number guard reads the numbers no claim reads
+954ec4d  docs: the recording skills answer for WDM, and a third one records a plan
+30c6cd4  docs: three records of application-side work, and the plan that follows one
+```
 <!-- /handoff:log -->
 
 The fence is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
 block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
 commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
-register the range is ten commits longer than the ceiling, so the listing stops at `5af2df5`, and
-`5ce2422` is the oldest of the ten it does not carry — both of them named there by
-`git log --oneline origin/dev..HEAD`, which is the whole of it in every state.
+register the range is seven commits, under the ten the block holds, so the listing carries all seven
+and no commit is left to the command.
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
-is *unsatisfied* at this register — `HEAD` is twenty commits past `origin/dev` — so a `v0.2.0` needs the
-push below first, and after it only the Unreleased section, which carries twenty-one entries where
-the release this cycle cut promoted sixteen. The plan in section 3 is what a run would print once the push
-is done.
+is *unsatisfied* at this register — `HEAD` is seven commits past `origin/dev` — so the next version needs
+the push below first, and after it only the Unreleased section, which carries ten entries where the
+release this cycle cut promoted four. Section 3's plan is a transcript taken before this cycle's tags;
+a run against this register would plan a prerelease above `v0.2.0-alpha7`.
 
 The push itself goes through PowerShell 7 and nothing else; `PUSHING.md` is the runbook, and
 `@pkg-push` wraps it:
@@ -321,8 +320,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7` |
 | The latest of them | `v0.2.0-alpha7` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 4 entries — 1 added, 3 fixed, 0 changed |
-| The notes weigh as | minor — one addition is the rung that decides it, and the fixes beside it do not raise it |
+| `## Unreleased` at the basis | 10 entries — 5 added, 1 fixed, 4 changed |
+| The notes weigh as | minor — the `### Added` heading is the rung that decides it, and the four `### Changed` and one `### Fixed` beside it do not raise it |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -330,12 +329,12 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the
 weighing reads are the `### Added`, `### Fixed` and `### Changed` a Keep a Changelog section writes,
-and the section carries one entry under `### Added`, three under `### Fixed` and none under
-`### Changed` at the register, which the weighing reads as `minor`. The register is therefore a
-branch whose release would publish the pool probe's two surfaces, its console reading and its
-one-wave sweep, the flip's repair history and the repair rate — a `minor` after a prerelease, with
-the version that has no suffix still ahead of it. The two repairs the release before this one carried are in `v0.2.0-alpha5`, whose own commit was
-cut for them rather than for the suffixless version they alone called for.
+and the section carries five entries under `### Added`, four under `### Changed` and one under
+`### Fixed` at the register, which the weighing reads as `minor`. The register is therefore a branch
+whose release would publish the three application-side records and the plan beside them, the third
+recording skill, the two halves of the prose-number guard and the quoted-records guard, the handoff
+note's prose column as a reading, and the release-gate changes that put the record and the note in one
+command — a `minor` after a prerelease, with the version that has no suffix still ahead of it.
 
 ### The release that cut this tag, and the three rows it could not write
 

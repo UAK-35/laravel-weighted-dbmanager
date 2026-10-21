@@ -669,7 +669,7 @@ final class Handoff
         // @pending-descriptions
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-            'read' => 'sha256:eea8e7369e22e38a49430959baf9810b5bf99a16dec6831185f73c41e1468019',
+            'read' => 'sha256:0f0395bedfe5a9981369dde03274c84af92be391b053bcc85170841350391264',
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
@@ -810,6 +810,10 @@ final class Handoff
         'docs/planning/plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
             'read' => 'sha256:9dcc1dc69f847d9f7acacaaf5babebd0a71ff65d1f12520385b0297a65d7d6e6',
+        ],
+        'docs/issues/issue-release-v0-2-0-alpha7-ci-ungated.md' => [
+            'words' => 'the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen',
+            'read' => 'sha256:a7d5599e2b4f82a36ec5e47506429acdcd01acfe6e58e2d649ff980ede27b593',
         ],
         // @pending-descriptions-end
     ];
