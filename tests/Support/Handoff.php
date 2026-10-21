@@ -669,7 +669,7 @@ final class Handoff
         // @pending-descriptions
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-            'read' => 'sha256:0f0395bedfe5a9981369dde03274c84af92be391b053bcc85170841350391264',
+            'read' => 'sha256:f5a002b5ea09a9f243d09a41de27497526b2a53f1c5eb2e23ce0d773c6774be7',
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
@@ -993,11 +993,16 @@ final class Handoff
      * One reader for the list, so a claim that asks "is this the newest" and the claim that asks "is this
      * one behind the register" cannot disagree about which tags count.
      *
+     * `$root` is the repository the reading is taken in, and it is a parameter for one reason: a guard
+     * that asks whether these two lists differ needs a repository where they *do*, and this one stops
+     * being that the day a release branch is merged. `HandoffTest` plants one; every reader of the note
+     * leaves it out and gets this checkout.
+     *
      * @return list<string>
      */
-    public static function tagNames(): array
+    public static function tagNames(?string $root = null): array
     {
-        $names = self::outputLines(self::git('tag', '--list', 'v*')['output']);
+        $names = self::outputLines(self::gitIn($root ?? self::ROOT, 'tag', '--list', 'v*')['output']);
         $pending = self::pendingTag();
 
         if ($pending !== null && !in_array($pending, $names, true)) {
@@ -1019,11 +1024,15 @@ final class Handoff
      * `tagNames()` is the register a claim is checked *against* — a name the note writes has to exist
      * here, wherever it was cut — and this one is what a "the latest of them" claim is read *from*.
      *
+     * `$root` is here for the same reason it is on `tagNames()`: the difference between the two lists is
+     * only visible in a repository that has a tag behind a branch this one cannot reach, and the fixture
+     * that has one is a temp directory rather than this checkout.
+     *
      * @return list<string>
      */
-    public static function branchTagNames(): array
+    public static function branchTagNames(?string $root = null): array
     {
-        $names = self::outputLines(self::git('tag', '--merged', 'HEAD', '--list', 'v*')['output']);
+        $names = self::outputLines(self::gitIn($root ?? self::ROOT, 'tag', '--merged', 'HEAD', '--list', 'v*')['output']);
         $pending = self::pendingTag();
 
         if ($pending !== null && !in_array($pending, $names, true)) {
@@ -2640,25 +2649,37 @@ final class Handoff
      */
     public static function git(string ...$arguments): array
     {
+        return self::gitIn(self::ROOT, ...$arguments);
+    }
+
+    /**
+     * The same git, in a repository other than this one: how a reading is pinned on history this
+     * checkout does not have. The flags are `git()`'s and are not restated here, so a read-only guard
+     * cannot be given a different git from the one the note is read with.
+     *
+     * @return array{exit: int, output: string, error: string}
+     */
+    public static function gitIn(string $root, string ...$arguments): array
+    {
         return self::run([
             'git',
             '-c', 'color.ui=false',
             '-c', 'log.showSignature=false',
             '-c', 'core.quotepath=false',
             ...$arguments,
-        ]);
+        ], $root);
     }
 
     /**
-     * One child process in the package root: the whole interface this file has to the tools the
-     * claims are about.
+     * One child process in the package root — or in `$root`, for the readings that are pinned on a
+     * fixture: the whole interface this file has to the tools the claims are about.
      *
      * @param list<string> $command
      * @return array{exit: int, output: string, error: string}
      */
-    public static function run(array $command): array
+    public static function run(array $command, ?string $root = null): array
     {
-        $process = new Process($command, self::ROOT);
+        $process = new Process($command, $root ?? self::ROOT);
         $process->setTimeout(120);
         $process->run(null, [
             'GIT_TERMINAL_PROMPT' => '0',

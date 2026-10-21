@@ -6,6 +6,7 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Docs;
 
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 use Uak35\WeightedDbManager\Tests\Support\Handoff;
 use Uak35\WeightedDbManager\Tests\Support\NumberWords;
 use Uak35\WeightedDbManager\Tests\Support\SkillDescriptions;
@@ -1206,6 +1207,154 @@ final class HandoffTest extends TestCase
                 Handoff::absent(),
             ),
         );
+    }
+
+    /**
+     * The two readings are two questions, and this test is the repository where the answers differ.
+     *
+     * `tagNames()` is the register a claim is checked against, so it is every `v*` tag the repository
+     * has; `branchTagNames()` is what "the latest of them" is read from, so it is the tags `HEAD` can
+     * reach. This package's own history is what put the guards in touch with the difference —
+     * `v0.2.0-alpha8` was cut on a release branch `dev` has never merged — and that is exactly why the
+     * difference is planted here instead: a guard whose two readings only differ on whatever history
+     * happens to be lying around stops saying anything the day that branch is merged, and the next
+     * release branch to be cut teaches the lesson again. The fixture is two tags, one of them behind a
+     * branch `main` cannot reach, and what is asserted is what each list is for.
+     *
+     * The pending tag is asserted on both lists, because the release names it before it exists and both
+     * readings have to take it: the note may name the tag it is about to cut, and a tag cut at `HEAD`
+     * is the newest of this lane.
+     */
+    public function test_the_two_tag_lists_answer_two_different_questions(): void
+    {
+        $root = self::plantedTags();
+        $previous = getenv('HANDOFF_PENDING_TAG');
+
+        try {
+            self::assertSame(
+                ['v0.1.0', 'v0.2.0-alpha8'],
+                Handoff::tagNames($root),
+                'the register is every tag the repository has, and the fixture has one on a branch this one cannot reach',
+            );
+
+            self::assertSame(
+                ['v0.1.0'],
+                Handoff::branchTagNames($root),
+                'the tags this branch carries are the ones `HEAD` can reach, and the fixture\'s second tag is behind a branch it cannot',
+            );
+
+            self::assertSame(
+                'v0.2.0-alpha8',
+                self::newest(Handoff::tagNames($root)),
+                'read as "the newest tag anywhere", the newest is the release this branch does not contain',
+            );
+
+            self::assertSame(
+                'v0.1.0',
+                self::newest(Handoff::branchTagNames($root)),
+                'read as "the tags on the branch", the newest is the newest release this lane has taken',
+            );
+
+            putenv('HANDOFF_PENDING_TAG=v0.2.0-alpha9');
+
+            self::assertContains(
+                'v0.2.0-alpha9',
+                Handoff::tagNames($root),
+                'a release names the tag it is about to cut, and the register has to take it before it exists',
+            );
+
+            self::assertSame(
+                'v0.2.0-alpha9',
+                self::newest(Handoff::branchTagNames($root)),
+                'the tag a release is about to cut is made at `HEAD`, so it is the newest of the branch it is cut on',
+            );
+        } finally {
+            if ($previous === false) {
+                putenv('HANDOFF_PENDING_TAG');
+            } else {
+                putenv('HANDOFF_PENDING_TAG=' . $previous);
+            }
+
+            self::removeTree($root);
+        }
+    }
+
+    /**
+     * A repository with two tags — one on `main`, one on a release branch `main` cannot reach — and the
+     * path it is in.
+     *
+     * Planted in the system temp directory, with a git config of its own (`GIT_CONFIG_GLOBAL` and
+     * `GIT_CONFIG_NOSYSTEM`), for the reason `ReleaseRepo` gives: the developer's global config — a
+     * signing key, an `init.defaultBranch`, a `core.hooksPath` pointing at this repository's hooks —
+     * must not be able to decide what a guard sees. The tag on the side branch is the only thing this
+     * fixture exists for; the commits are what a tag has to point at.
+     */
+    private static function plantedTags(): string
+    {
+        $root = sys_get_temp_dir() . '/swrr-tags-' . bin2hex(random_bytes(6));
+        $config = $root . '.gitconfig';
+
+        if (!mkdir($root, 0777, true) && !is_dir($root)) {
+            self::fail('the tag fixture could not be created at ' . $root);
+        }
+
+        file_put_contents($config, "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n[user]\n\tname = Tag Fixture\n\temail = fixture@example.test\n");
+
+        $git = static function (string ...$arguments) use ($root, $config): void {
+            $process = new Process(['git', ...$arguments], $root, [
+                'GIT_CONFIG_GLOBAL' => $config,
+                'GIT_CONFIG_NOSYSTEM' => '1',
+                'GIT_TERMINAL_PROMPT' => '0',
+            ]);
+
+            $process->setTimeout(60);
+
+            if ($process->run() !== 0) {
+                self::fail(sprintf(
+                    'git %s failed in the tag fixture: %s',
+                    implode(' ', $arguments),
+                    $process->getErrorOutput(),
+                ));
+            }
+        };
+
+        $git('init', '--quiet');
+        file_put_contents($root . '/README.md', "this lane\n");
+        $git('add', 'README.md');
+        $git('commit', '--quiet', '-m', 'the release this branch carries');
+        $git('tag', 'v0.1.0');
+
+        $git('checkout', '--quiet', '-b', 'release/v0.2.0-alpha8');
+        file_put_contents($root . '/README.md', "the other lane\n");
+        $git('commit', '--quiet', '-am', 'the release cut on a branch this one cannot reach');
+        $git('tag', 'v0.2.0-alpha8');
+        $git('checkout', '--quiet', 'main');
+
+        return $root;
+    }
+
+    /** Remove a planted repository, config file and all; nothing a guard leaves behind belongs on disk. */
+    private static function removeTree(string $path): void
+    {
+        if (!file_exists($path)) {
+            return;
+        }
+
+        if (is_dir($path) && !is_link($path)) {
+            foreach (scandir($path) ?: [] as $entry) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
+                }
+
+                self::removeTree($path . '/' . $entry);
+            }
+
+            @rmdir($path);
+
+            return;
+        }
+
+        @unlink($path);
     }
 
     public function test_each_tag_it_names_is_on_the_branch_it_describes(): void
