@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha8 - 2026-10-21
+
 ### Added
 
 - **Three records of application-side work are added, and the plan that came out of one of them.**

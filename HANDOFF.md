@@ -200,7 +200,7 @@ php bin/inventory.php --check --at=fa29fb8
       surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 53 files, 261 public methods, 300 key(s)/member(s), described as v0.2.0-alpha7
+  --> exit 0: inventory is current — 53 files, 261 public methods, 300 key(s)/member(s), described as v0.2.0-alpha8
 ```
 <!-- /handoff:records -->
 
@@ -317,8 +317,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7` |
-| The latest of them | `v0.2.0-alpha7` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha8` |
+| The latest of them | `v0.2.0-alpha8` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 10 entries — 5 added, 1 fixed, 4 changed |
 | The notes weigh as | minor — the `### Added` heading is the rung that decides it, and the four `### Changed` and one `### Fixed` beside it do not raise it |
