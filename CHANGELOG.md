@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`/health/db` publishes `connector` — the class that builds the followed connection's PDO.**
+  `db:doctor`'s `connector` row answers whether an installation bound `db.connector.<driver>` or
+  registered `Connection::resolverFor()`, and neither is written in `config/database.php`, so the
+  answer lived in a preflight run from a terminal — which is not where an installation is watched.
+  The endpoint now carries the same reading, `ConnectorInUse::resolve()`, the call that row makes,
+  so the two surfaces cannot name different classes for one installation. Every key is present and
+  `null` in the states it does not describe, so a monitor compares `binding` and `resolver` with
+  `null` rather than interpreting a class name, and `connection_class` beside `resolver_applied` is
+  the one state no configuration shows: a resolver registered after the connection in use was built.
+  A replacement never moves `status` — it is the framework's extension point and `db:doctor` passes
+  it too — and a connector that cannot be built is already a `pinned` failure. The reading
+  constructs the connection object and resolves no PDO closure, so it opens no socket.
+
 - **Three records of application-side work are added, and the plan that came out of one of them.**
   `docs/investigations/investigation-ecs-rev31-rollback.md` follows the two `lpr-backend-sites`
   tasks that stopped minutes after they started to the revision they were rolled back from — the

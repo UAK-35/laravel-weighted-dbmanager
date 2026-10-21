@@ -771,6 +771,60 @@ left the query on, because it describes the host rather than the statement. The 
 rejected alternatives and the deployment check are in
 [docs/health-host-ip.md](docs/health-host-ip.md).
 
+### The class that builds the connection
+
+`connector` is the reading `db:doctor`'s `connector` row prints, published here so an installation
+that replaced the framework's PostgreSQL connector is visible to a monitor rather than only to a
+preflight. Two things can be replaced and neither is in configuration: a `db.connector.pgsql`
+binding is what `createConnector()` takes first, and `Connection::resolverFor('pgsql', …)` replaces
+the class every pgsql connection is built as. So an installation whose option path only reaches
+PDO because its own connector adds it reads exactly like one whose options never arrive.
+
+```json
+{
+    "connector": {
+        "connection": "pgsql_proxy",
+        "source": "db-manager.swrr.connection",
+        "driver": "pgsql",
+        "binding": null,
+        "factory": "Uak35\\WeightedDbManager\\Database\\Weighted\\WeightedConnectionFactory",
+        "factory_error": null,
+        "connector": "Illuminate\\Database\\Connectors\\PostgresConnector",
+        "error": null,
+        "connection_class": "Illuminate\\Database\\PostgresConnection",
+        "connection_driver": "pgsql",
+        "connection_error": null,
+        "resolver": null,
+        "resolver_applied": null
+    }
+}
+```
+
+| key | what it is |
+|---|---|
+| `connection`, `source` | the connection the package follows and the config key its name came from — the pair `pinned` carries |
+| `driver` | that connection's driver, which is what decides the connector |
+| `binding` | `db.connector.<driver>` when the container holds one — the first branch `createConnector()` takes — or `null` for the framework's own map |
+| `factory`, `factory_error` | what `db.factory` resolved to, and what it said when it could not be asked at all |
+| `connector`, `error` | the class the factory would build, or the framework's own sentence for why it builds none (`A driver must be specified.`, `Unsupported driver [oracle].`) |
+| `connection_class`, `connection_driver`, `connection_error` | the class the followed connection resolves to, its driver, and why it could not be built |
+| `resolver` | the driver whose class an installation replaced with `Connection::resolverFor()`, or `null` when none is registered |
+| `resolver_applied` | whether the connection in use was built through that resolver; `false` is a resolver registered after the connection was built, which no configuration and no other field here can show |
+
+Two rules hold. A key that does not describe this installation is `null` rather than absent, so a
+monitor compares `binding` and `resolver` with `null` instead of interpreting a class name — and a
+payload whose key list depended on the answer could not be compared with the state before it. And
+the block never moves `status`: a replacement is the framework's extension point and `db:doctor`
+passes it too, so a rule that paged on "somebody bound a connector" would page on a supported
+configuration. A connector that cannot be built is already a connection that cannot answer, which
+is `pinned`'s failure to report.
+
+The reading constructs the connection object — and an installation's connector, whose constructor
+belongs to the application that wrote it — but resolves no PDO closure, so it opens no socket: one
+object per poll rather than one connection. It is
+`Uak35\WeightedDbManager\Support\ConnectorInUse`, the class the preflight's row reads, so the two
+surfaces cannot name different classes for one installation.
+
 Alongside it the payload carries one `pgcat` block — the same
 snapshot `db:replica-status` prints and `db:pgcat-flip --status` shows, so the three
 cannot disagree about whether flipping is active:

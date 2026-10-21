@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Uak35\WeightedDbManager\Tests\Unit\Http;
 
+use Illuminate\Database\Connection;
+use Illuminate\Database\Connectors\SQLiteConnector;
+use Illuminate\Database\SQLiteConnection;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use ReflectionProperty;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
+use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
@@ -252,6 +257,104 @@ class DatabaseHealthControllerTest extends TestCase
             $response->assertJsonPath('pinned.host_ip', 'eth1');
             $this->assertSame('eth1', $response->json('pinned.host_ip'), "the {$case} setting answers the documented default");
         }
+    }
+
+    /**
+     * The class that builds the followed connection's PDO is published, not left to a preflight.
+     *
+     * An installation replaces the PostgreSQL connector by binding `db.connector.pgsql`, and
+     * `.env` says nothing about it, so the only places the answer lived were a terminal running
+     * `db:doctor` and the reading inside it. A dashboard is where an installation is watched, and
+     * a block whose shape changes with the answer — keys present only when somebody replaced
+     * something — would make a monitor's reading depend on the state it is comparing against. So
+     * every key is present and the ones that do not describe this installation are `null`.
+     */
+    public function test_the_connector_block_names_the_class_that_builds_the_followed_connection(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('connector.connection', self::PINNED)
+            ->assertJsonPath('connector.source', 'database.default')
+            ->assertJsonPath('connector.driver', 'sqlite')
+            ->assertJsonPath('connector.binding', null)
+            ->assertJsonPath('connector.factory', WeightedConnectionFactory::class)
+            ->assertJsonPath('connector.factory_error', null)
+            ->assertJsonPath('connector.connector', SQLiteConnector::class)
+            ->assertJsonPath('connector.error', null)
+            ->assertJsonPath('connector.connection_class', SQLiteConnection::class)
+            ->assertJsonPath('connector.connection_driver', 'sqlite')
+            ->assertJsonPath('connector.connection_error', null)
+            ->assertJsonPath('connector.resolver', null)
+            ->assertJsonPath('connector.resolver_applied', null);
+
+        // The factory named is the one this package binds — the weighted factory, which builds
+        // the same connector the framework's own would — so the block describes this installation
+        // rather than the framework in general.
+        $response->assertJsonPath('status', 'ok');
+    }
+
+    /**
+     * The state the block exists for: an installation's own connector, named with the binding that
+     * answered it — and no movement in the status, because replacing a connector is a documented
+     * extension point rather than a fault. A monitor that paged on "somebody bound a connector"
+     * would page on a supported configuration.
+     */
+    public function test_a_replaced_connector_is_published_and_does_not_move_the_status(): void
+    {
+        $stub = new class () extends SQLiteConnector {};
+        $this->app->instance('db.connector.sqlite', $stub);
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('connector.binding', 'db.connector.sqlite')
+            ->assertJsonPath('connector.connector', $stub::class)
+            ->assertJsonPath('connector.error', null)
+            ->assertJsonPath('connector.connection_class', SQLiteConnection::class)
+            ->assertJsonPath('status', 'ok');
+    }
+
+    /**
+     * The other way a class can be somebody else's, and the one no connector binding shows:
+     * `Connection::resolverFor()` replaces the class every connection of that driver is built as.
+     * It is published with whether it reached the connection in use, which is the answer a
+     * registry cannot give — a resolver registered after the connection was built is a
+     * replacement that is in the container and not in the connection.
+     *
+     * The registry is static and has no unregister, so the case puts back what it found: a leaked
+     * resolver would make every later connection in this process an anonymous class.
+     */
+    public function test_a_connection_resolver_is_published_and_does_not_move_the_status(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $class = (new class ('', 'database', '', ['driver' => 'sqlite']) extends SQLiteConnection {})::class;
+        $resolvers = (new ReflectionProperty(Connection::class, 'resolvers'))->getValue();
+
+        try {
+            Connection::resolverFor('sqlite', static fn ($pdo, $database, $prefix, $config) => new $class($pdo, $database, $prefix, $config));
+
+            $response = $this->getJson('/health/db')->assertOk();
+        } finally {
+            (new ReflectionProperty(Connection::class, 'resolvers'))->setValue(null, is_array($resolvers) ? $resolvers : []);
+        }
+
+        $response->assertJsonPath('connector.resolver', 'sqlite')
+            ->assertJsonPath('connector.resolver_applied', true)
+            ->assertJsonPath('connector.connection_class', $class)
+            ->assertJsonPath('status', 'ok');
     }
 
     /**

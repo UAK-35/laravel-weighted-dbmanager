@@ -12,6 +12,7 @@ use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\ConnectorInUse;
 use Uak35\WeightedDbManager\Support\HostAddress;
 use Uak35\WeightedDbManager\Support\PinnedQuery;
 use Uak35\WeightedDbManager\Support\SwitchValue;
@@ -90,6 +91,12 @@ use Throwable;
  *     off the probe's own answer, because a probe aimed at the wrong port reports
  *     the same silence as a pooler that is down and the pool names alone cannot
  *     tell those apart
+ *   • which class builds that connection's PDO — `connector`, the same reading `db:doctor`'s
+ *     `connector` row prints, so an installation that bound `db.connector.<driver>` or
+ *     registered a connection resolver is visible to a dashboard rather than only to a
+ *     preflight. It is a fact about configuration and never moves `status`: a replacement is
+ *     the framework's own extension point, and the one thing that could fail — building the
+ *     connection — already fails `pinned`'s query — see connectorBlock()
  *
  * EVERY FAILURE IS ALSO LOGGED
  *   A payload nobody is looking at is not a signal. Each response that is not
@@ -229,6 +236,13 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         // stays with the blocks that answer "is this installation serving now".
         $poolRepairs = $this->poolRepairVerdict($this->pgcat);
 
+        // Which class is building the followed connection, read out of the container the same way
+        // the query is built through it. Reported and never judged: an installation's connector is
+        // a documented extension point, and the class being somebody else's is a fact a dashboard
+        // should be able to show — a connector that cannot be built is already a query that cannot
+        // run, which `pinned` reports as the failure it is.
+        $connector = $this->connectorBlock();
+
         // pgcat being off is not ill health — on a MySQL connection there is
         // simply nothing to flip — so it does not feed $allHealthy. Neither does the
         // audit: a configuration that cannot act is not a database that cannot answer.
@@ -264,6 +278,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         return response()->json([
             'status' => $allHealthy ? 'ok' : 'degraded',
             'pinned' => $probe,
+            'connector' => $connector,
             'replicas' => $replicas,
             'pgcat' => $pgcat,
             'flip' => $flip,
@@ -875,6 +890,50 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
     private function audit(): array
     {
         return BootAudit::reported($this->audit);
+    }
+
+    /**
+     * The class that builds the followed connection's PDO, and the two ways it can be somebody else's.
+     *
+     * WHY THIS BLOCK IS HERE
+     * ----------------------
+     *   An installation replaces the PostgreSQL connector by binding `db.connector.pgsql`, which is
+     *   the first branch the framework's own `createConnector()` takes, or replaces the *class* every
+     *   pgsql connection is built as by registering `Connection::resolverFor()`. Neither is written in
+     *   `config/database.php`, so an installation whose options reach PDO through its own connector
+     *   reads exactly like one whose options do not — until a query is written against an option the
+     *   framework's connector never passes. `db:doctor`'s `connector` row answers that question; it
+     *   answers it once, from a terminal, which is not where an installation is watched.
+     *
+     *   This is the same reading — `ConnectorInUse::resolve()`, the call the row makes — so the two
+     *   surfaces cannot name different classes for one installation rather than agreeing by both
+     *   being copied from one config file carefully. Every key of it is published, including the ones
+     *   that are `null` in the state they do not describe: a monitor comparing `binding` and `resolver`
+     *   against `null` says whether anything was replaced at all without interpreting a class name,
+     *   and `connection_class` beside `resolver_applied` is the one state no configuration shows — a
+     *   resolver that is registered after the connection in use was built reaches neither.
+     *
+     * WHY IT NEVER MOVES THE STATUS
+     * ----------------------------
+     *   A replaced connector is a pass in the preflight, deliberately: it is the framework's
+     *   extension point and the replacement is the installation's own code. A monitoring rule that
+     *   paged on "somebody bound a connector" would page on a supported configuration, so this block
+     *   is a reading and not a verdict — the line `audit` and `pool_repairs` draw, and for the same
+     *   reason: the status answers "is this installation serving now", and the failure this reading
+     *   can name — a connector that cannot be built, or one whose construction throws — is already a
+     *   connection that cannot answer, which `pinned` reports as the failure it is.
+     *
+     *   Nothing here opens a socket. The connection object is constructed and its lazy PDO closure is
+     *   left unresolved, which is the price of the question being answerable at all (a replacement's
+     *   constructor belongs to the application that wrote it) and the reason the block costs one
+     *   object per poll rather than one connection. The followed connection is read with its `read`
+     *   list removed so the weighted factory does not choose a replica for a question about a class.
+     *
+     * @return array<string, mixed>
+     */
+    private function connectorBlock(): array
+    {
+        return ConnectorInUse::resolve(config(), app());
     }
 
     private function markFirstReplicaFailed(WeightedDatabaseManager $manager, string $connection): void
