@@ -365,15 +365,17 @@ return [
                 // and reported: the pool stays where it was rather than being pointed at
                 // something that is not there.
                 //
-                // LEFT OFF, AND DELIBERATELY SO. Turn this on and turn `enabled` above off in the
-                // same change. The two read the same resolver and cannot both act on one boundary
-                // — the per-minute entry checks the boot window before it takes its lock, so once
-                // a container has converged it does nothing at a boundary — so this is a choice
-                // about which mechanism owns the mode rather than a race to avoid. A mode this
-                // pair applies goes through the flipper's forced path, which is deliberately not
-                // recorded as a boot convergence, so the two do not share a record of what they
-                // did either. `db:doctor`'s `flip schedule` row reports which of the two answers
-                // a boundary, and warns when neither does.
+                // LEFT OFF, AND DELIBERATELY SO — but armed *beside* the entry rather than instead
+                // of it is supported, and is what an installation that keeps both wants. The entry
+                // converges a container in its first minutes and stops at the end of the boot
+                // window; these tasks follow the day for as long as the container lives. The two
+                // read the same resolver and cannot both act on one boundary — the entry checks the
+                // boot window before it takes its lock, so once a container has converged it does
+                // nothing at a boundary — and they share the record of what they did: either one's
+                // application writes the mode, the moment and the mechanism that applied it, which
+                // is what `db:doctor`'s `pgcat mode` row and `/health/db` read. Disarming the entry
+                // while these are on is a choice about who converges a container at boot, not a
+                // requirement: it trades a container's first minutes for nothing.
                 'windows' => [
                     'enabled' => env('SWRR_PGCAT_WINDOW_FLIP_ENABLED', false),
                     // How long before a boundary the probing starts. Eight minutes, the same eight
@@ -414,12 +416,19 @@ return [
         // `db:doctor` fails on that, and the record itself is never locked — the write
         // replaces it by renaming a temp over it.
         //
-        // `store_probe_seconds` is the only entry that costs anything: it is how often
-        // the primary store may be PINGed, which is what keeps the probe off the
-        // request path under PHP-FPM (0 never probes).
+        // `store_probe_seconds` and `finding_seconds` are the two entries that bound
+        // something, and both are about the same fact: under PHP-FPM the application
+        // boots per request, so "once per process" means "once per request".
+        // `store_probe_seconds` is how often the primary store may be PINGed, which keeps
+        // the probe off the request path (0 never probes); `finding_seconds` is how often
+        // one standing finding may be *logged* again, which keeps a configuration state
+        // from burying the log that would show a state which changed (0 logs every boot).
+        // Neither bound touches a transition: a finding is logged by the boot that first
+        // sees it whatever the interval says, and the line that closes it is written once.
         'audit' => [
             'file' => env('SWRR_AUDIT_FILE', sys_get_temp_dir() . '/swrr-audit.json'),
             'store_probe_seconds' => (int) env('SWRR_AUDIT_STORE_PROBE_SECONDS', 60),
+            'finding_seconds' => (int) env('SWRR_AUDIT_FINDING_SECONDS', 60),
         ],
 
         // ── Health endpoint (optional) ───────────────────────────────────────────

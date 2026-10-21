@@ -107,6 +107,7 @@ use DateTimeZone;
  * ----------
  *   Path: configured via `state_file` (default sys_get_temp_dir())
  *   Format: JSON { "last_mode": "readers"|"writer", "last_flipped_at": ISO,
+ *                  "flipped_via": "schedule"|"window"|"manual",
  *                  "pool_repairs": N, "last_pool_repair_at": ISO,
  *                  "last_repair_pool": NAME, "last_repair_mode": MODE,
  *                  "pool_repair_times": [ISO, ...], ... }
@@ -119,6 +120,22 @@ final class PgcatConfigFlipper
      * flipping is disabled for those connections.
      */
     public const SUPPORTED_DRIVERS = ['pgsql', 'postgres', 'postgresql'];
+
+    /**
+     * Which mechanism applied the mode the state file records last: the `flipped_via` key.
+     *
+     * One value per path that can move the pooler — the scheduled entry's own apply, a
+     * reader-window task, and an operator running `db:pgcat-flip --force-mode`. The vocabulary is
+     * closed for the same reason `FlipResult::KIND_*` is: a surface reads one of these to say
+     * *who* moved the mode, and a fourth spelling would be a reading nothing can render.
+     * `manual` is what a caller that does not say gets, because a caller this class does not
+     * know is somebody's hand rather than a schedule.
+     */
+    public const VIA_SCHEDULE = 'schedule';
+
+    public const VIA_WINDOW = 'window';
+
+    public const VIA_MANUAL = 'manual';
 
     /**
      * The one documented home for what each switch means when it is not written: the
@@ -556,7 +573,7 @@ final class PgcatConfigFlipper
                 $after = $repair['attempted'] ? $this->refusalAfterApply($currentMode) : $refusal;
             }
 
-            $this->writeLastMode($currentMode, $lastMode);
+            $this->writeLastMode($currentMode, $lastMode, self::VIA_SCHEDULE);
 
             // Applied, and the pooler did not answer for a pool the file declares. The run
             // reports the repair rather than the transition: the file and the mode are the
@@ -613,8 +630,16 @@ final class PgcatConfigFlipper
      * itself. A repair is different: it is a fact about the pooler rather than about the window,
      * and it is counted through `withRepair()` wherever it happens, so a boundary the pooler
      * refused is in the same `pool_repairs` reading a boot-window repair lands in.
+     *
+     * WHAT IT DOES WRITE IS WHO MOVED THE MODE
+     *   `$via` is the mechanism, and it lands in the state file as `flipped_via` beside the
+     *   `last_mode` and `last_flipped_at` that both writers already leave there. That is what
+     *   lets a reading say which mechanism last moved the pooler *without* claiming the move was
+     *   a convergence: the run record stays the boot window's, and the mode record is the one
+     *   both owners keep. A caller that does not say gets `manual` — this class knows the two
+     *   commands that call it, and a third caller is somebody's hand.
      */
-    public function forceMode(string $mode): FlipResult
+    public function forceMode(string $mode, string $via = self::VIA_MANUAL): FlipResult
     {
         $mode = $mode === 'readers' ? 'readers' : 'writer';
 
@@ -651,7 +676,7 @@ final class PgcatConfigFlipper
                 $after = $repair['attempted'] ? $this->refusalAfterApply($mode) : $refusal;
             }
 
-            $this->writeLastMode($mode, $lastMode);
+            $this->writeLastMode($mode, $lastMode, $via);
 
             if ($refusal !== null) {
                 $this->writeState($this->withRepair($this->readState(), $mode, $refusal['database']));
@@ -2772,14 +2797,24 @@ final class PgcatConfigFlipper
      * `failed` is the field `/health/db` acts on, and it is deliberately only ever true *after*
      * the window has closed: while a container is still inside its window, a flip that has not
      * converged yet is a container still starting, not a broken one. The three ways to be
-     * `failed` are told apart in `reason`, because they call for different work — a scheduler
-     * that never ran the flip, a flip that ran and kept failing, and a flip that succeeded
-     * outside the window (which means the container was too slow, not that anything is broken).
+     * `failed` are told apart in `reason`, because they call for different work — nothing at all
+     * applied a mode inside the window, a flip that ran and kept failing, and a flip that
+     * succeeded outside the window (which means the container was too slow, not that anything is
+     * broken).
      *
      * `converged` is sticky for the container's life: it is set by the first run that reached a
      * usable mode, and never cleared, so a later failure cannot retroactively un-work a
      * container that did come up. `runs` counts every recorded run, which is what makes "the
      * flip is scheduled" observable at all.
+     *
+     * `applied`, `applied_at`, `applied_mode` and `applied_via` are the other half of that, and
+     * they are what a second mechanism made necessary: `converged` is written only by the
+     * per-minute entry, which stops acting when the window closes, while the reader-window tasks
+     * go on moving the mode through the forced path. Both write the same mode record — see
+     * `writeLastMode()` — so this half answers *what the pooler is in and who put it there* for
+     * the container's whole life, and `failed` is the pair: a container that reached no usable
+     * mode by either mechanism inside its window is the one that failed, and one whose pooler a
+     * boundary task is keeping in step is not.
      *
      * `pool_repairs` is the sibling of `runs` that answers a different question: a running
      * pooler that was not answering for a pool was re-applied (or restarted on the file that was
@@ -2806,11 +2841,25 @@ final class PgcatConfigFlipper
         $runs = ConfigValue::int($state['runs'] ?? null, 0);
         $closed = (bool) $window['closed'];
 
+        // What the pooler is *in*, whichever mechanism put it there. `converged` above is the
+        // per-minute entry's own evidence and stops at the window's end; this reading goes on
+        // being written by the window tasks for as long as the container lives, because both
+        // paths write `last_mode`/`last_flipped_at`/`flipped_via` — so a container whose pooler
+        // is in step reads as settled rather than as a flip that never converged. The mechanism
+        // is named for the reason the pair exists: the two do not share a *run* record, so a
+        // reading that could not say which one moved the mode would describe the entry at the
+        // moment the tasks took over.
+        $appliedAt = $this->stateTime($state, 'last_flipped_at');
+        $applied = $appliedAt !== null && $this->window->contains($appliedAt);
+        $settled = $converged || $applied;
+        $appliedMode = $state['last_mode'] ?? null;
+        $appliedVia = $state['flipped_via'] ?? null;
+
         $reason = null;
 
-        if ($closed && !$converged) {
+        if ($closed && !$settled) {
             $reason = match (true) {
-                $runs === 0 => 'the flip never ran inside this container\'s window: db:pgcat-flip is not being scheduled, or it cannot reach the flipper',
+                $runs === 0 && $appliedAt === null => 'nothing applied a mode inside this container\'s window: db:pgcat-flip is not being scheduled and no reader-window task acted, or neither can reach the flipper',
                 $convergedAt !== null => 'every flip run inside the window failed',
                 default => 'the flip has not reached a usable mode inside the window',
             };
@@ -2828,7 +2877,11 @@ final class PgcatConfigFlipper
             'converged' => $converged,
             'converged_at' => $state['converged_at'] ?? null,
             'converged_mode' => $state['converged_mode'] ?? null,
-            'failed' => $closed && !$converged,
+            'applied' => $applied,
+            'applied_at' => is_string($state['last_flipped_at'] ?? null) ? $state['last_flipped_at'] : null,
+            'applied_mode' => is_string($appliedMode) ? $appliedMode : null,
+            'applied_via' => is_string($appliedVia) ? $appliedVia : null,
+            'failed' => $closed && !$settled,
             'failed_reason' => $reason,
         ];
     }
@@ -3880,7 +3933,17 @@ final class PgcatConfigFlipper
         return is_string($lastMode) ? $lastMode : null;
     }
 
-    private function writeLastMode(string $mode, ?string $previousMode): void
+    /**
+     * The mode record, and the mechanism that wrote it.
+     *
+     * Both mechanisms write this file — the scheduled entry's apply and the forced path — so
+     * `$via` is what makes the record answer *who moved the pooler* rather than only *what mode
+     * it is in*. A reading that cannot tell the two apart is one that describes the mechanism
+     * which has stopped acting, which is the whole of what `windowStatus()` has to be able to
+     * say: the per-minute entry stops at the boot window, and the tasks go on moving the mode
+     * for as long as the container lives.
+     */
+    private function writeLastMode(string $mode, ?string $previousMode, string $via): void
     {
         $this->writeState([
             ...$this->readState(),
@@ -3888,6 +3951,7 @@ final class PgcatConfigFlipper
             'previous_mode' => $previousMode,
             'last_flipped_at' => $this->nowIso(),
             'flipped_by' => 'pgcat-flipper',
+            'flipped_via' => $via,
         ]);
     }
 

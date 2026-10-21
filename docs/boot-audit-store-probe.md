@@ -447,4 +447,4 @@ probe` case is no longer the only test that would notice a row regressing to its
 | `src/Support/RedisAccess.php` | the facade-free path to Redis, and the reasons it can fail |
 | `src/Database/Weighted/RedisAtomicStateStore.php` | `isHealthy()` — evidence, not proof |
 | `src/Console/Commands/DbDoctor.php` | the unthrottled, operator-run probe, and the `store probe` row that reports when the audit's own probe can never run |
-| `config/db-manager.php` | `swrr.audit.file`, `swrr.audit.store_probe_seconds` |
+| `config/db-manager.php` | `swrr.audit.file`, `swrr.audit.store_probe_seconds`, `swrr.audit.finding_seconds` |

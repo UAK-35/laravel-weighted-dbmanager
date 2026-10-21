@@ -7,7 +7,9 @@ namespace Uak35\WeightedDbManager\Tests\Unit\Weighted;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Connectors\ConnectionFactory;
+use Illuminate\Database\Connectors\PostgresConnector;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
@@ -1128,7 +1130,11 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->collectLogs($records);
         $this->reportBootAudit();
 
-        $this->assertCount(1, $records, 'the warning is still logged every boot');
+        // The second boot is inside the re-logging bound (`swrr.audit.finding_seconds`), so it is
+        // quiet: the line count is evidence that the boot ran rather than the subject here, and
+        // `BootAuditTest` owns the rule itself. The subject is the record, and the pair is the
+        // whole of it — nothing logged, and nothing rewritten.
+        $this->assertSame([], $records, 'a boot inside the bound logs nothing, and the finding still stands');
         $this->assertStringContainsString('keep-me', (string) file_get_contents($this->auditFile()));
     }
 
@@ -1368,19 +1374,19 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     }
 
     /**
-     * Two mechanisms armed at once: one mode, two owners, and a record only one of them writes.
+     * Two mechanisms armed at once, and nothing said about it: the pair is a supported arrangement
+     * rather than a state to warn about.
      *
-     * Recorded under one key, with the sentence `db:doctor`'s `flip schedule` row prints — two
-     * switches read one way, so neither surface may phrase it differently — and at `warning` level,
-     * because the documented migration is to disarm this entry in the same change that arms the
-     * tasks: an installation caught halfway through that change is doing the right thing slowly, and
-     * a preflight that failed it would refuse exactly that one.
-     *
-     * What the finding adds over the row is the date: the row describes this boot, the record says
-     * how long the pair has been armed. So both halves are asserted here — the line the first boot
-     * logs, and the resolution the boot that disarms one of the two logs instead.
+     * It used to be a finding, and the reason it was one is worth keeping written down: the two do
+     * not share a *run* record — the per-minute entry converges a container and stops, a boundary
+     * task applies a mode and records no run — so a surface reading the convergence described a
+     * mechanism that had stopped acting. They now share the **mode** record instead: either one's
+     * application writes the mode, the moment and the mechanism, which is what
+     * `PgcatConfigFlipper::windowStatus()` publishes as `applied`/`applied_at`/`applied_mode`/
+     * `applied_via`. So the boot is silent, no key is recorded, and there is nothing left for a
+     * resolution to close out.
      */
-    public function test_two_mechanisms_armed_at_once_are_recorded_and_closed_out(): void
+    public function test_two_mechanisms_armed_at_once_are_not_a_finding(): void
     {
         $this->armTheFlip();
         // Both switches inside the one block they are read from: the entry armed on its own switch
@@ -1393,35 +1399,8 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         $this->collectLogs($records);
         $this->reportBootAudit();
 
-        $this->assertCount(1, $records, 'one finding, one line');
-        $this->assertSame('warning', $records[0]['level'], 'an installation mid-migration is warned about, not failed');
-        $this->assertStringContainsString('two mechanisms own the pooler', $records[0]['message']);
-        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled are both on', $records[0]['message']);
-        $this->assertStringContainsString('not written as a boot convergence', $records[0]['message']);
-        $this->assertSame(
-            WeightedDatabaseServiceProvider::KEY_FLIP_MECHANISMS_CONTENDED,
-            $records[0]['context']['finding'],
-        );
-        $this->assertSame(
-            ['swrr.pgcat.schedule.both_armed'],
-            $this->recordedKeys(),
-            'the key is what dates the pair, so it is the record that carries it',
-        );
-
-        // Disarming one of the two closes it out: one mechanism owns the mode again, which is the
-        // other half of every finding this boot writes. The switch is written rather than deleted,
-        // because a block that says nothing is the *inherited* state, which here is armed.
-        $this->usePgcat(['schedule' => ['enabled' => false, 'windows' => ['enabled' => true]]]);
-        self::resetBootAuditGuard();
-
-        // The same listener as the boot above, because `collectLogs()` appends to the list it was
-        // given: a second call would register a second listener writing into the same array.
-        $this->reportBootAudit();
-
-        $this->assertCount(2, $records, 'the resolution, and nothing else');
-        $this->assertStringContainsString('One mechanism owns the mode again', $records[1]['message']);
-        $this->assertStringContainsString('swrr.pgcat.schedule.enabled', $records[1]['message'], 'the resolution names the switch that closes it');
-        $this->assertSame([], $this->recordedKeys());
+        $this->assertSame([], $records, 'both mechanisms armed is an arrangement, not a warning');
+        $this->assertSame([], $this->recordedKeys(), 'and there is no key to date either');
     }
 
     /**
@@ -2383,6 +2362,120 @@ use Uak35\WeightedDbManager\Tests\TestCase;
     }
 
     /**
+     * `swrr.connector.unusable`: a connection the package follows and cannot build, said at boot.
+     *
+     * WHY THIS IS A BOOT FINDING
+     * --------------------------
+     *   `db:doctor`'s `connector` row fails when the followed connection resolves no connector, or
+     *   when a connector resolves and the connection it builds throws. Both are states an
+     *   installation discovers by running a preflight — and a preflight is a command somebody has to
+     *   think to run. The connection itself fails on its first query, so a boot is already the place
+     *   the failure happens; what was missing was the sentence naming *why*, and the date a record
+     *   can give it.
+     *
+     *   The three states are told apart here the way the row tells them apart: a driver no connector
+     *   is registered for, and a connector whose connection build throws, are findings; a
+     *   `db.factory` that cannot be asked is not, because that binding is the package's own swap and
+     *   `weighted factory` is its row — and because a boot that could not ask has no verdict to
+     *   record, which is why the key is left out of the checked set rather than resolved.
+     *
+     * The finding is read out of the record rather than out of the log: the record is what dates it,
+     * and the sentence is kept beside the date for a reader who has the file and not the log.
+     */
+    public function test_a_connection_whose_driver_resolves_no_connector_is_reported_at_boot(): void
+    {
+        $this->followConnection(['driver' => 'oracle', 'database' => 'app']);
+        self::resetBootAuditGuard();
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $this->reportBootAudit();
+
+        // The point of the finding is that the boot *says* it — the record only keeps the date.
+        $logged = array_values(array_filter(
+            $records,
+            static fn (array $record): bool => ($record['context']['finding'] ?? null) === WeightedDatabaseServiceProvider::KEY_CONNECTOR_UNUSABLE,
+        ));
+
+        $this->assertCount(1, $logged, 'the boot logged the connector finding once');
+        $this->assertSame('warning', $logged[0]['level']);
+
+        $finding = $this->recordedFinding(WeightedDatabaseServiceProvider::KEY_CONNECTOR_UNUSABLE);
+
+        self::assertSame('warning', $finding['level'], 'a connection that cannot be built is a warning, not a refused value');
+        self::assertStringContainsString('Unsupported driver [oracle].', $finding['warning'], 'the framework\'s own sentence is the one an operator greps for');
+        self::assertStringContainsString('[broken]', $finding['warning']);
+        self::assertSame('no_connector', $finding['context']['cause']);
+        self::assertSame('broken', $finding['context']['connection']);
+        self::assertSame('oracle', $finding['context']['driver']);
+    }
+
+    /**
+     * A connector that resolves and a connection that still cannot be built: the state the resolver
+     * half of the reading exists for, and the one an installation cannot see from configuration.
+     *
+     * The registry is static and has no unregister, so the case puts back what it found — a leaked
+     * resolver would make every later connection in this process an anonymous class.
+     */
+    public function test_a_connector_whose_connection_cannot_be_built_is_reported_with_the_error(): void
+    {
+        $this->followConnection(['driver' => 'pgsql', 'database' => 'app']);
+        self::resetBootAuditGuard();
+
+        $resolvers = (new ReflectionProperty(Connection::class, 'resolvers'))->getValue();
+
+        try {
+            Connection::resolverFor('pgsql', static fn (): never => throw new RuntimeException('the resolver refused'));
+
+            $this->reportBootAudit();
+        } finally {
+            (new ReflectionProperty(Connection::class, 'resolvers'))->setValue(null, is_array($resolvers) ? $resolvers : []);
+        }
+
+        $finding = $this->recordedFinding(WeightedDatabaseServiceProvider::KEY_CONNECTOR_UNUSABLE);
+
+        self::assertSame('build_failed', $finding['context']['cause']);
+        self::assertStringContainsString('the resolver refused', $finding['warning']);
+        self::assertStringContainsString(PostgresConnector::class, $finding['warning']);
+    }
+
+    /**
+     * A connection that builds produces nothing, which is the state almost every boot is in. A
+     * finding that fired on a working installation would be a warning in every log, and an audit
+     * that cries wolf on the ordinary case is one an operator learns to skip.
+     */
+    public function test_a_connection_that_builds_produces_no_connector_finding(): void
+    {
+        $this->followConnection(['driver' => 'pgsql', 'database' => 'app']);
+        self::resetBootAuditGuard();
+
+        $this->reportBootAudit();
+
+        self::assertNotContains(
+            WeightedDatabaseServiceProvider::KEY_CONNECTOR_UNUSABLE,
+            $this->recordedKeys(),
+            'the followed connection builds, so there is nothing to say about its connector',
+        );
+    }
+
+    /**
+     * A replaced connector is the extension point, not a fault. The replacement here is a subclass
+     * of the framework's own, so the connection still builds; what the case pins is that the audit
+     * says nothing about the class being somebody else's.
+     */
+    public function test_a_replaced_connector_that_builds_produces_no_connector_finding(): void
+    {
+        $this->app->instance('db.connector.pgsql', new class () extends PostgresConnector {});
+        $this->followConnection(['driver' => 'pgsql', 'database' => 'app']);
+        self::resetBootAuditGuard();
+
+        $this->reportBootAudit();
+
+        self::assertNotContains(WeightedDatabaseServiceProvider::KEY_CONNECTOR_UNUSABLE, $this->recordedKeys());
+    }
+
+    /**
      * A default connection pgcat cannot front, so the flipper is inert whatever the
      * switch says.
      */
@@ -2506,6 +2599,46 @@ use Uak35\WeightedDbManager\Tests\TestCase;
         return is_array($decoded) && is_array($decoded['findings'] ?? null)
             ? array_values(array_map('strval', array_keys($decoded['findings'])))
             : [];
+    }
+
+    /**
+     * One finding on record, by key — the entry a later boot reads, dates and closes out.
+     *
+     * Reading the record rather than the log is deliberate: the record is what gives a finding its
+     * date, and the sentence is kept beside the date for a reader who has the file and not the log.
+     *
+     * @return array{warning: string, level: string, context: array<string, mixed>}
+     */
+    private function recordedFinding(string $key): array
+    {
+        $file = $this->auditFile();
+
+        $this->assertFileExists($file, 'the boot recorded nothing, so there is no finding to read');
+
+        $decoded = json_decode((string) file_get_contents($file), true);
+        $findings = is_array($decoded) && is_array($decoded['findings'] ?? null) ? $decoded['findings'] : [];
+
+        $this->assertArrayHasKey(
+            $key,
+            $findings,
+            'the boot did not record '.$key.'; it recorded: '.(array_keys($findings) === [] ? 'nothing' : implode(', ', array_map('strval', array_keys($findings)))),
+        );
+
+        /** @var array{warning: string, level: string, context: array<string, mixed>} */
+        return $findings[$key];
+    }
+
+    /**
+     * Point the package at a connection of this test's own, which is `database.default` — the name
+     * `ActiveConnection` falls back to. The suite's `weighted` connection stays declared and is
+     * simply not followed.
+     *
+     * @param array<string, mixed> $connection
+     */
+    private function followConnection(array $connection): void
+    {
+        config()->set('database.connections.broken', $connection);
+        config()->set('database.default', 'broken');
     }
 
     /**

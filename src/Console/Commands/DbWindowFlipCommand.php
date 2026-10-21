@@ -216,7 +216,7 @@ class DbWindowFlipCommand extends Command
         }
 
         try {
-            $result = $flipper->forceMode($mode);
+            $result = $flipper->forceMode($mode, PgcatConfigFlipper::VIA_WINDOW);
         } catch (Throwable $e) {
             return $this->report(FlipResult::KIND_FAILED, $mode, $at, $boundary, $now, $applied, $probe, null, $e->getMessage(), self::FAILURE);
         }

@@ -687,6 +687,10 @@ final class Handoff
             'words' => 'the reader-facing explanation of the two read cancellations, the cap asymmetry that makes escalation possible and the decisions left to the application — the record\'s facts, written for the caller rather than for this package\'s maintainer',
             'read' => 'sha256:767070b7a3b7fd108c742d53c821bc593c4bc00d7a017da823da05b76d8d233b',
         ],
+        'docs/health-payload.md' => [
+            'words' => 'the payload contract: why the shape a monitor reads by name is pinned rather than left to each block\'s tests, what the tables\' cells mean, the open shapes and why they are open, and every path and key the endpoint publishes',
+            'read' => 'sha256:cb46df1ed194b38bc2ef8f735422411c28c4c3a58c3d07d40f7dde0cd7e6f9d2',
+        ],
         'docs/pool-repair-rate.md' => [
             'words' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
             'read' => 'sha256:702f662e19138ee87e5d0b25a0c068c9454eaaded51aada87df4aad1a6b1ee6b',

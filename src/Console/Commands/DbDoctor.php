@@ -3175,14 +3175,18 @@ class DbDoctor extends Command
      *   the per-minute entry alone is *converged at boot, and no further*, which the sentence says
      *   rather than implying a fault; the window tasks alone are *the pooler follows the day*.
      *
-     *   Both on is not a warning, and the reason is worth writing down because the README used to
-     *   claim the opposite. The per-minute entry checks the boot window before it takes its lock
+     *   Both on is not a warning, and there are two reasons rather than one. No boundary is
+     *   contended: the per-minute entry checks the boot window before it takes its lock
      *   (`PgcatConfigFlipper::applyCurrentState()`), so after a container has converged it does not
-     *   act at all — it returns `window_closed` and exits without reading or writing a file. The
-     *   two therefore cannot write different modes for one boundary; inside the boot window they
-     *   read the same resolver and agree, and the flipper's own `flock` serialises the two runs
-     *   anyway. What is left is a second process a minute and a second line in the log, which the
-     *   row names so the choice to keep both is made rather than inherited.
+     *   act at all — it returns `window_closed` and exits without reading or writing a file — and
+     *   inside the boot window the two read the same resolver and agree, with the flipper's own
+     *   `flock` serialising the two runs anyway. And they share the record that used to be the
+     *   problem: either one's application writes the mode, the moment and the mechanism
+     *   (`PgcatConfigFlipper::VIA_SCHEDULE`, `VIA_WINDOW`, `VIA_MANUAL`), so `pgcat mode` and
+     *   `/health/db` say which mechanism last moved the pooler rather than describing the one that
+     *   has stopped acting — see `PgcatConfigFlipper::windowStatus()`. A row used to *warn* about the
+     *   pair while only one of the two had an account of itself; the warning is gone rather than
+     *   reworded, because what it warned about is no longer true.
      *
      * A REFUSED SWITCH IS THE THIRD STATE, AND IT HAS NO OTHER READER
      *   Both switches are read by the class that owns them (`FlipSchedule::options()`,
@@ -3191,9 +3195,10 @@ class DbDoctor extends Command
      *   to the value their setting documents rather than to garbage, which is what the sentence
      *   says: a typo is named and does not disarm the repair.
      *
-     * Nothing is suggested. The repair for the one warning is a choice between two settings, and a
-     * `suggestion` is a value a gate may apply without reading it — so which one to point at the
-     * boundary is the operator's to make, and the row names both keys instead.
+     * Nothing is suggested. Which mechanism answers a boundary is a choice between two settings and
+     * both arrangements are documented, and a `suggestion` is a value a gate may apply without
+     * reading it — so pointing at one of the two is the operator's to do, and the row names the
+     * mechanism and its boundaries instead.
      *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
@@ -3291,39 +3296,28 @@ class DbDoctor extends Command
                     )).'.',
                 'suggestion' => null,
             ];
-        } elseif ($windows['enabled'] && $perMinute['enabled']) {
-            // Both mechanisms armed: one mode, two owners. Neither arrangement is malformed and an
-            // installation may be halfway through the documented migration — disarm this entry in
-            // the same change that arms the tasks — so it is a warning that names both keys rather
-            // than a failure. The sentence is `FlipSchedule::bothArmedSentence()`'s, the same words
-            // the boot finding logs, and the key is what dates it: this row describes this boot,
-            // the record says how long the pair has been armed.
-            $problems[] = [
-                'status' => self::WARN,
-                'key' => WeightedDatabaseServiceProvider::KEY_FLIP_MECHANISMS_CONTENDED,
-                'sentence' => sprintf(
-                    'the pooler follows the day: %d boundary task(s) — %s — each probing from %ds before '
-                    .'its boundary to %ds after it. %s',
-                    count($plan['entries']),
-                    implode(', ', array_column($plan['entries'], 'name')),
-                    $windows['lead_seconds'],
-                    $windows['grace_seconds'],
-                    (string) FlipSchedule::bothArmedSentence($perMinute, $windows, $flipper->window()->seconds()),
-                ),
-                'suggestion' => null,
-            ];
         } elseif ($windows['enabled']) {
+            // The tasks own the day, and the per-minute entry may or may not be armed beside them.
+            // Both arrangements are supported: the entry converges a container in its first
+            // minutes and stops at the end of the boot window, the tasks follow the day for as
+            // long as it lives, and no boundary is contended because the two read the same
+            // resolver. The pair is a *pass* rather than a warning because the two now share the
+            // record that used to be the problem — either one's application writes the mode, the
+            // moment and the mechanism — so neither surface describes a mechanism that has stopped
+            // acting. `windowStatus()` is where that is read.
             $problems[] = [
                 'status' => self::PASS,
                 'key' => null,
                 'sentence' => sprintf(
                     'the pooler follows the day: %d boundary task(s) — %s — each probing from %ds before '
-                    .'its boundary to %ds after it, and the per-minute entry is off, so one mechanism '
-                    .'decides the mode.',
+                    .'its boundary to %ds after it, and %s',
                     count($plan['entries']),
                     implode(', ', array_column($plan['entries'], 'name')),
                     $windows['lead_seconds'],
                     $windows['grace_seconds'],
+                    $perMinute['enabled']
+                        ? 'the per-minute entry is armed beside them, so a container also converges in its first minutes; either one\'s application records the mode, the moment and the mechanism that applied it.'
+                        : 'the per-minute entry is off, so one mechanism decides the mode.',
                 ),
                 'suggestion' => null,
             ];
@@ -3382,10 +3376,9 @@ class DbDoctor extends Command
      *   The three states that are not a failure are not a pass by omission either — each says why it
      *   is not one:
      *
-     *   - **Not scheduled**: the per-minute entry is off, so nothing stamps a beat. The row prints
-     *     the flipper's sentence and leaves the *choice* between the two mechanisms to `flip
-     *     schedule`, which is where it is judged — two rows arguing one setting is how a reader
-     *     learns to skim them.
+     *   - **Not scheduled**: the per-minute entry is off, so nothing stamps a beat. Nothing here
+     *     judges which mechanism answers a boundary — `flip schedule` is the row that names it —
+     *     and two rows arguing one setting is how a reader learns to skim them.
      *   - **Switched off**: the tolerance is zero, which is the documented way to keep this verdict
      *     off. It *warns* rather than failing: an installation that has switched off the only check
      *     that notices a dead cron is a fact a preflight should put in front of somebody, and

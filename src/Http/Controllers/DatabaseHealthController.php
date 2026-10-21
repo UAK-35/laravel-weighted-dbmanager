@@ -295,7 +295,8 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * What this container's flip window says, as one block.
      *
      * `failed` is true in exactly one situation: pgcat applies here, the window has closed, and
-     * no flip run reached a usable mode inside it. That is narrow on purpose.
+     * neither mechanism reached a usable mode inside it — the per-minute entry recorded no
+     * convergence *and* no application is on record inside the window. That is narrow on purpose.
      *
      * - **While the window is open** nothing fails. A container one minute past boot whose flip
      *   has not converged yet is a container starting up, and an endpoint that failed it would
@@ -306,10 +307,15 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * - **When no boot time was recorded** nothing fails either: `window.closed` is false
      *   because there is nothing to compare against, and the endpoint stays quiet rather than
      *   inventing a deadline. `window.source` is the field that tells the two apart.
+     * - **When a boundary task applied the mode** nothing fails either, and `window.applied_via`
+     *   names it. The reader-window tasks write no run — a mode applied at a boundary must not be
+     *   able to move the convergence verdict a deploy gate reads — so the window's own
+     *   `converged_at` cannot see them, and a pooler the tasks are keeping in step is not a
+     *   container that failed to converge.
      *
      * The three ways to be `failed` are spelled out in `reason` because they call for different
-     * work: a scheduler that never ran the flip, a flip that ran and kept failing, and a flip
-     * that only reached a usable mode after the window had closed.
+     * work: nothing applied a mode at all, a flip that ran and kept failing, and one that only
+     * reached a usable mode after the window had closed.
      *
      * @param array<string, mixed>|null $pgcat the summary `index()` already read
      *
@@ -338,7 +344,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'reason' => $failed
                 ? (is_string($window['failed_reason'] ?? null) && $window['failed_reason'] !== ''
                     ? $window['failed_reason']
-                    : 'the flip did not converge inside this container\'s window')
+                    : 'neither mechanism reached a usable mode inside this container\'s window')
                 : null,
             'window' => $window,
         ];

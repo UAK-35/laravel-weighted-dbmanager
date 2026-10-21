@@ -2571,6 +2571,47 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame('readers', $status['last_mode']);
     }
 
+    /**
+     * The mode record says *who moved the pooler*, which is the half a second mechanism made
+     * necessary: both writers leave the mode and the moment, and only this tells a reading which
+     * of the two is still acting. One value per path, and a caller that does not say is a hand.
+     */
+    public function test_each_mechanism_names_itself_in_the_mode_record(): void
+    {
+        $this->build('readers')->applyCurrentState();
+
+        $this->assertSame(
+            PgcatConfigFlipper::VIA_SCHEDULE,
+            $this->recordedVia(),
+            'the scheduled entry\'s own apply is the cadence',
+        );
+
+        $this->build('readers')->forceMode('writer', PgcatConfigFlipper::VIA_WINDOW);
+
+        $this->assertSame(
+            PgcatConfigFlipper::VIA_WINDOW,
+            $this->recordedVia(),
+            'a reader-window task applies the mode at a boundary',
+        );
+
+        $this->build('readers')->forceMode('writer');
+
+        $this->assertSame(
+            PgcatConfigFlipper::VIA_MANUAL,
+            $this->recordedVia(),
+            'a caller that does not name a mechanism is somebody\'s hand',
+        );
+    }
+
+    /** The mechanism the state file records, as the JSON holds it. */
+    private function recordedVia(): mixed
+    {
+        /** @var array<string, mixed> $state */
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        return $state['flipped_via'] ?? null;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // reload vs restart mode
     // ─────────────────────────────────────────────────────────────────────────
@@ -3859,10 +3900,10 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
-     * The verdict `/health/db` acts on, told apart from "not scheduled": no run was ever recorded, so
-     * the reason names the schedule rather than the pooler.
+     * The verdict `/health/db` acts on, told apart from "not scheduled": no run was recorded and no
+     * mechanism applied a mode, so the reason names both mechanisms rather than the pooler.
      */
-    public function test_a_window_that_closed_with_no_runs_blames_the_missing_schedule(): void
+    public function test_a_window_that_closed_with_no_runs_blames_the_mechanisms_that_never_acted(): void
     {
         $flipper = $this->build('readers', [
             'boot_file' => $this->stampBoot(time() - 3600),
@@ -3874,9 +3915,74 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertTrue($window['closed']);
         $this->assertTrue($window['failed']);
         $this->assertFalse($window['converged']);
+        $this->assertFalse($window['applied'], 'nothing applied a mode inside the window either');
         $this->assertSame(0, $window['runs']);
-        $this->assertStringContainsString('never ran', (string) $window['failed_reason']);
+        $this->assertStringContainsString('nothing applied a mode inside', (string) $window['failed_reason']);
         $this->assertStringContainsString('is not being scheduled', (string) $window['failed_reason']);
+        $this->assertStringContainsString('no reader-window task acted', (string) $window['failed_reason']);
+    }
+
+    /**
+     * The pair the second mechanism made necessary.
+     *
+     * `converged_at` is written only by the per-minute entry, which stops acting when the boot
+     * window closes, while a boundary task goes on moving the mode for the container's whole life
+     * and records no run. So a container whose pooler a window run is keeping in step has to read
+     * as settled — and the reading has to name the mechanism, because the two do not share a run
+     * record and "which one moved it" is exactly what the boot window's evidence cannot say.
+     */
+    public function test_a_boundary_application_is_not_failed_for_a_convergence_it_never_had(): void
+    {
+        $booted = time() - 3600;
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot($booted),
+            'flip_window_seconds' => 480,
+        ]);
+
+        file_put_contents($this->stateFile, json_encode([
+            'last_mode' => 'writer',
+            'last_flipped_at' => gmdate(DATE_ATOM, $booted + 120),
+            'flipped_by' => 'pgcat-flipper',
+            'flipped_via' => PgcatConfigFlipper::VIA_WINDOW,
+        ]));
+
+        $window = $flipper->windowStatus();
+
+        $this->assertTrue($window['closed']);
+        $this->assertFalse($window['converged'], 'no run reached a usable mode, and none recorded one');
+        $this->assertSame(0, $window['runs']);
+        $this->assertTrue($window['applied']);
+        $this->assertSame('writer', $window['applied_mode']);
+        $this->assertSame(PgcatConfigFlipper::VIA_WINDOW, $window['applied_via']);
+        $this->assertFalse($window['failed'], 'a pooler a boundary task is keeping in step is not a failure');
+        $this->assertNull($window['failed_reason']);
+    }
+
+    /**
+     * A mode applied *outside* the boot window is not a convergence either: the container was too
+     * slow, and the pair has to keep saying so.
+     */
+    public function test_an_application_outside_the_window_does_not_settle_the_container(): void
+    {
+        $booted = time() - 3600;
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot($booted),
+            'flip_window_seconds' => 480,
+        ]);
+
+        file_put_contents($this->stateFile, json_encode([
+            'last_mode' => 'writer',
+            'last_flipped_at' => gmdate(DATE_ATOM, $booted + 600),
+            'flipped_via' => PgcatConfigFlipper::VIA_WINDOW,
+        ]));
+
+        $window = $flipper->windowStatus();
+
+        $this->assertFalse($window['applied']);
+        $this->assertTrue($window['failed']);
+        $this->assertStringContainsString('has not reached a usable mode', (string) $window['failed_reason']);
     }
 
     /**

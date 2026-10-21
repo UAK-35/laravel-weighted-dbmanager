@@ -193,14 +193,16 @@ tag section 3 calls latest:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=fa29fb8
-  --> exit 1: the inventory is out of step with the tree at fa29fb8
+php bin/inventory.php --check --at=eb3a48a
+  --> exit 1: the inventory is out of step with the tree at eb3a48a
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
       surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 53 files, 261 public methods, 300 key(s)/member(s), described as v0.2.0-alpha7
+  --> exit 1: the inventory is out of step with the tree
+      methods.tsv: 3 line(s) stale
+      surface.tsv: 6 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -235,7 +237,7 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/issues/issue-release-v0-2-0-alpha7-ci-ungated.md` | the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen |
+| `docs/health-payload.md` | the payload contract: why the shape a monitor reads by name is pinned rather than left to each block's tests, what the tables' cells mean, the open shapes and why they are open, and every path and key the endpoint publishes |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carries was described by the note before this one and is released
@@ -252,10 +254,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `fa29fb8` — *feat: the handoff note's blocks are readings, and the run that quotes them is one command* |
+| HEAD | `eb3a48a` — *feat: /health/db publishes the connector that builds the followed connection* |
 | `origin/dev` | `3dc70db` — *docs: the alpha6 CI record carries its outcome, and the green run that answers it* |
-| Unpushed | 7 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 2, feat 1, fix 1, test 2 |
+| Unpushed | 10 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1, docs 3, feat 3, fix 1, test 2 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -278,9 +280,12 @@ the release made is one a consumer can fetch. This note is the commit *after* th
 travels on the push below.
 
 <!-- handoff:log -->
-The seven most recent are the ones a reader is most likely to be standing in the middle of:
+The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+eb3a48a  feat: /health/db publishes the connector that builds the followed connection
+a130243  feat: /health/db's schedule block names the two settings its tolerance is made of
+39300fc  docs: the handoff note is re-taken at the alpha7 commits, and its gate is this run
 fa29fb8  feat: the handoff note's blocks are readings, and the run that quotes them is one command
 1ae30ba  chore: the Laravel plugin's settings are the IDE's, not the package's
 f068e83  test: the connector row carries the framework's refusal and both halves of the state
@@ -320,7 +325,7 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7` |
 | The latest of them | `v0.2.0-alpha7` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 10 entries — 5 added, 1 fixed, 4 changed |
+| `## Unreleased` at the basis | 12 entries — 7 added, 1 fixed, 4 changed |
 | The notes weigh as | minor — the `### Added` heading is the rung that decides it, and the four `### Changed` and one `### Fixed` beside it do not raise it |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it

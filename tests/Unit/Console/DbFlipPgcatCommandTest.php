@@ -886,7 +886,8 @@ final class DbFlipPgcatCommandTest extends TestCase
         $this->assertStringContainsString('flip_window_state', $output);
         $this->assertStringContainsString('closed at', $output);
         $this->assertStringContainsString('flip_converged', $output);
-        $this->assertStringContainsString('never ran', $output, 'the repair differs: a missing schedule is not a pooler that will not start');
+        $this->assertStringContainsString('nothing applied a mode inside', $output, 'the repair differs: a missing schedule is not a pooler that will not start');
+        $this->assertStringContainsString('no reader-window task acted', $output, 'and neither mechanism acting is the state, not one of them');
         $this->assertStringContainsString('0 recorded (last never at never)', $output);
 
         // And the same block in the report a machine reads, unsubstituted.

@@ -120,7 +120,7 @@ where "what does this installation say about itself" is answered.
 (`PgcatConfigFlipper::healthSummary()`) is read by three surfaces, and it is scoped to one
 feature: is flipping armed, and can it act. The audit is the opposite: its keys are
 `swrr.pgcat.enabled.refused`, `swrr.pgcat.use_reload.refused`,
-`swrr.allow_local_fallback.refused`, `swrr.pgcat.gate`, `swrr.pgcat.schedule.both_armed`,
+`swrr.allow_local_fallback.refused`, `swrr.pgcat.gate`,
 `swrr.reader_windows.refused`,
 `swrr.reader_days.refused`, `swrr.reader_fallback.always_readers`,
 `swrr.reader_fallback.always_writer`, `swrr.reader_fallback.unmatchable_windows`,
@@ -147,6 +147,24 @@ are keyed because the row reporting them has to be able to say how long the inst
 unable to check its store. Filing all of those under
 `pgcat` would put twenty-five keys' worth of claims inside one feature's block, and a finding about
 the weight formula would disappear for an installation that has no pgcat wiring at all.
+
+One key is not a setting at all, and it is documented here rather than in a record of its own
+because it answers the same question this section does — what the audit is *for*.
+`swrr.connector.unusable` is the connection the package follows, when nothing can build it: a driver
+no connector is registered for, or a connector that resolves and whose connection build throws. Both
+throw on first use, which the scope note at the top of `BootAudit` puts out of bounds, and this is
+the exception that shows which way the rule runs: what a throwing misconfiguration already has is a
+runtime line, and what it does not have is a sentence naming the driver or the class that failed —
+`db:doctor`'s `connector` row is the only surface that says it, and a preflight is a command
+somebody has to think to run. The finding is a warning rather than an error because `error` is the
+level for a value this package refuses to interpret, and this is not a refusal: the framework's own
+sentence travels in the finding's context. A `db.factory` that cannot be asked is not this key's —
+that binding is the package's own swap and `weighted factory` is its row, and one cause reported
+twice reads as two problems. A boot that could not ask also leaves the key out of the checked set
+rather than reporting it as cleared, so a finding recorded by an earlier boot is carried over: the
+same "not evaluated" distinction the store's reachability draws, and for the same reason. A replaced
+connector is not a finding either — binding `db.connector.<driver>` is the framework's documented
+extension point, and an audit that reported it would report the installations doing the right thing.
 
 ### E — let the findings move the endpoint's status
 

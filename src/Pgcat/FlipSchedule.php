@@ -67,6 +67,16 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *   `supervisorctl status`, and letting `schedule:run` wait for it puts a failure in the schedule's
  *   own log rather than in a detached process nobody reads.
  *
+ * THE OTHER MECHANISM, AND THE RECORD THE TWO SHARE
+ *   The reader-window tasks move the same mode at each boundary ({@see WindowFlipSchedule}), and
+ *   both may be armed at once: this entry converges at container start and stops at the end of the
+ *   boot window, the tasks follow the day for as long as the container lives, and no boundary is
+ *   contended because the two read the same resolver. What they must not be is *silently* two: a
+ *   mode either of them applies is written to the same record with the mechanism that applied it
+ *   (`PgcatConfigFlipper::VIA_SCHEDULE`, `VIA_WINDOW`, `VIA_MANUAL`), so `db:doctor`'s `pgcat mode`
+ *   row and `/health/db` say which mechanism last moved the pooler rather than describing the one
+ *   that has stopped acting.
+ *
  * WHEN IT IS REGISTERED, AND WHEN IT IS NOT
  *   The provider registers this the first time the container's `Schedule` is resolved — which is
  *   what `schedule:run` and `schedule:list` do — so the configuration is read at the moment the
@@ -295,50 +305,6 @@ final class FlipSchedule
         }
 
         return $entries;
-    }
-
-    /**
-     * What is worth saying when both mechanisms that can move the pooler are armed at once, or null
-     * when only one of them owns the mode.
-     *
-     * TWO MECHANISMS, ONE MODE, ONE RECORD THAT ONLY ONE OF THEM WRITES
-     * ----------------------------------------------------------------
-     *   This entry converges the pool at container start and is a no-op for the rest of the
-     *   container's life, bounded by `swrr.pgcat.flip_window_seconds`; the reader-window tasks move
-     *   the pool at each boundary, for as long as the container lives. Read the same resolver, they
-     *   cannot both act on one boundary — but they do not share a *record* of what they did either:
-     *   a mode the window tasks apply goes through the flipper's forced path, which is deliberately
-     *   not written as a boot convergence, so the two surfaces that read that record (`db:doctor`'s
-     *   `pgcat mode` row and `/health/db`) describe the entry's convergence while the tasks are the
-     *   thing actually moving the file.
-     *
-     *   It is a *warning* rather than a failure because neither arrangement is malformed: an
-     *   installation may be mid-migration between the two mechanisms — the documented migration is
-     *   to disarm this entry in the same change that arms the tasks — and a preflight that failed a
-     *   release for the state in the middle of that change would be refusing exactly the
-     *   installation that is doing the right thing slowly. What it must not be is silent: the two
-     *   keys are named, so the reader knows which pair to look at.
-     *
-     * @param array<string, mixed> $perMinute the answer {@see self::options()} gave
-     * @param array<string, mixed> $windows   the answer `WindowFlipSchedule::settings()` gave
-     */
-    public static function bothArmedSentence(array $perMinute, array $windows, int $windowSeconds): ?string
-    {
-        if (!($perMinute['enabled'] ?? false) || !($windows['enabled'] ?? false)) {
-            return null;
-        }
-
-        return sprintf(
-            'two mechanisms own the pooler\'s mode: swrr.pgcat.schedule.enabled and '
-            .'swrr.pgcat.schedule.windows.enabled are both on. They read the same resolver, so no '
-            .'boundary is contended — this entry stops at the end of the boot window (%ds after the '
-            .'container starts) — but they do not share a record of what they did: a mode the window '
-            .'tasks apply goes through the flipper\'s forced path, which is not written as a boot '
-            .'convergence, so the readings that describe the entry\'s convergence describe a mechanism '
-            .'that has stopped acting. Arm one and disarm the other in the same change: this is a '
-            .'warning rather than a failure because an installation may be halfway through that.',
-            $windowSeconds,
-        );
     }
 
     /**

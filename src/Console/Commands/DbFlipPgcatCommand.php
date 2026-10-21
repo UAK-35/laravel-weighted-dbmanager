@@ -169,7 +169,7 @@ class DbFlipPgcatCommand extends Command
 
         // --force-mode: bypass the resolver
         if ($forced !== null) {
-            return $this->renderResult($flipper->forceMode($forced));
+            return $this->renderResult($flipper->forceMode($forced, PgcatConfigFlipper::VIA_MANUAL));
         }
 
         // --watch: daemon loop

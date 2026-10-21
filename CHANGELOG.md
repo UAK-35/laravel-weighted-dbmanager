@@ -4,6 +4,24 @@
 
 ### Added
 
+- **A connection the package follows and cannot build is a boot finding, not only a doctor row.**
+  `db:doctor`'s `connector` row fails when the followed connection names no driver, names one no
+  connector is registered for, or is built by a connector whose connection build throws — and it
+  answers only when somebody runs it. The boot now asks the same reading,
+  `ConnectorInUse::resolve()`, and records `swrr.connector.unusable` with the framework's own
+  sentence and the cause (`no_connector` or `build_failed`) in its context, so the first boot after
+  a bad deploy says what the first failing query does not: which driver, or which class, could not
+  build the connection — and the record dates how long it has been that way. It is a warning rather
+  than an error, because `error` is the level for a value the package refuses to interpret and this
+  is a failure to build rather than a value it substitutes for. A replaced connector that works is
+  no finding at all: binding `db.connector.<driver>` is the framework's extension point and
+  `db:doctor` passes it too, so the audit does not warn on the installations doing the right thing.
+  A `db.factory` that cannot be asked stays `weighted factory`'s to report, so the finding is silent
+  there rather than counting one cause twice — and the key is left out of the checked set on those
+  boots, so a finding an earlier boot recorded is carried over rather than cleared. The reading
+  costs one connector and one connection object per boot and connects to nothing, the same price the
+  row pays for the same answer.
+
 - **`/health/db` publishes `connector` — the class that builds the followed connection's PDO.**
   `db:doctor`'s `connector` row answers whether an installation bound `db.connector.<driver>` or
   registered `Connection::resolverFor()`, and neither is written in `config/database.php`, so the
@@ -82,6 +100,35 @@
   holds the pair to the command's report and holds `stale_after_seconds` to their product, so the
   three numbers in the block cannot drift apart.
 
+- **`swrr.audit.finding_seconds` bounds how often one standing finding is logged.** A finding is
+  remembered while it stands and was logged on every boot, and under PHP-FPM a boot is a request: a
+  configuration state that cannot change without an edit and a restart was ~250 lines a minute on
+  the deployment this was measured on. The record now carries `last_logged_at` beside the
+  `first_reported_at` the age is read from, and a finding is logged again only once the interval has
+  passed — the same shape as the store probe's throttle, and for the same reason. The two
+  transitions are deliberately not bounded: the boot that first sees a finding logs it whatever the
+  interval says, and the single `resolved: true` line that closes it is written once. Default 60
+  seconds; `0` lifts the bound and logs every boot.
+
+- **`/health/db`'s shape is pinned to two tables, so a block or a key cannot move without them.**
+  Each field of the payload had a test, and the object they hang on had none: renaming a block or
+  adding a key to one passed the whole suite, and the readers this payload exists for — an alert
+  rule comparing `flip.failed`, a gate's `jq -e '.pinned.ok'`, a dashboard column bound to
+  `pool_repairs.count` — do not fail on a rename. They read `null`, which this payload uses for the
+  documented nothing, and report a quiet installation. So the paths are written down twice, in the
+  README under "Every block, and every key in it" and in the new record `docs/health-payload.md`
+  under "Every path", and `DatabaseHealthControllerTest`'s shape guard builds the richest payload
+  the fixture can and compares all three. The two tables are compared with each other first, so an
+  edit to one of them alone fails rather than half-updating a contract, and the payload is checked in
+  both directions: a path it publishes and neither table names, a path a table names and it has
+  stopped publishing, and a key set that has drifted inside one path. A `keys` cell is read as a set,
+  because insertion order is a property of the array literal rather than of the contract; an em dash
+  marks a path whose value is a scalar, a list, or an object written down under another heading —
+  `flip.window` and `pgcat.window` are one array, documented key by key under "The window block" —
+  and `<connection>` is the one name the payload chooses at runtime, `replicas` being keyed by the
+  connection the package follows. The record states which shapes are deliberately open and why, so an
+  em dash is a decision rather than a gap.
+
 ### Changed
 
 - **The gate record and the note that quotes it are written by one command.** `php bin/checks.php
@@ -113,6 +160,37 @@
 - **`docs/db-doctor-json.md` no longer quotes a phrase `docs/pgcat-flip-json.md` does not contain.**
   The citation said "the code travels inside it"; the record says "code inside it", and the two had
   drifted apart with no diff to show it — which is what the new guard reads.
+
+- **The pooler's mode record names the mechanism that applied it, and the two mechanisms may be
+  armed together without a warning.** `PgcatConfigFlipper::writeLastMode()` now writes `flipped_via`
+  — `schedule`, `window` or `manual` — beside the `last_mode` and `last_flipped_at` both writers
+  already leave there, and `windowStatus()` publishes the reading as
+  `applied`/`applied_at`/`applied_mode`/`applied_via`. That is what the retired boot finding was
+  about: the per-minute entry records `converged_at` and stops at the end of the boot window, a
+  reader-window task applies a mode through the forced path and records no run, so a surface reading
+  the convergence described a mechanism that had stopped acting. The two now share the record, so
+  the finding has nothing left to make — `db:doctor`'s `flip schedule` row **passes** when both are
+  armed and says what each is doing, and the pair is a supported arrangement rather than halfway
+  through a migration. Arming both is what buys a container its first minutes *and* the day.
+
+### Fixed
+
+- **`/health/db` no longer reports `degraded` for ever on a container whose pooler a boundary task is
+  keeping in step.** `converged_at` is written only by the per-minute entry, so with the reader-window
+  tasks armed and the entry disarmed — the migration this package used to document — `window.failed`
+  was true from eight minutes after every boot, for the rest of the container's life, with a reason
+  that was true and nothing could repair. `failed` is the pair now: a container that reached no
+  usable mode by either mechanism inside its window. The reason it is not failed names both
+  mechanisms, and the applied reading names the one that last moved the pooler.
+
+### Removed
+
+- **The boot finding `swrr.pgcat.schedule.both_armed`, and the constant that named it.** Two
+  mechanisms armed at once is a supported arrangement now that they share the mode record, so the
+  pair is no longer a state to warn about: `--strict` stops failing it and `db:doctor`'s
+  `flip schedule` row reports a pass where it reported a warning. A record holding the key from an
+  earlier boot is closed out rather than left standing — the boot names it as retired, finds nothing,
+  and writes the one `resolved: true` line any key that stopped applying is closed with.
 
 ## 0.2.0-alpha7 - 2026-10-20
 

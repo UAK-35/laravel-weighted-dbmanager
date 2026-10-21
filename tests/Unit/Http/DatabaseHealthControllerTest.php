@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use ReflectionProperty;
+use RuntimeException;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory;
 use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
@@ -51,6 +52,9 @@ class DatabaseHealthControllerTest extends TestCase
 {
     /** The connection the probe follows: whatever `database.default` names in this file. */
     private const PINNED = 'pinned_sqlite';
+
+    /** The README heading the payload's path table lives under, read by the shape guard. */
+    private const PAYLOAD_INDEX = '### Every block, and every key in it';
 
     /** @var list<string> the temp directories the window tests built, cleaned up in tearDown() */
     private array $tempDirs = [];
@@ -624,9 +628,11 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('pgcat.window.converged', false)
             ->assertJsonPath('pgcat.window.runs', 0);
 
-        // The three reasons are told apart, and this one names the scheduler — the repair differs.
-        $this->assertStringContainsString('never ran', (string) $response->json('flip.reason'));
+        // The three reasons are told apart, and this one names both mechanisms — the repair
+        // differs, and neither one acting is a different state from one that ran and failed.
+        $this->assertStringContainsString('nothing applied a mode inside', (string) $response->json('flip.reason'));
         $this->assertStringContainsString('is not being scheduled', (string) $response->json('flip.reason'));
+        $this->assertStringContainsString('no reader-window task acted', (string) $response->json('flip.reason'));
 
         // And the failure is in the log, with the window beside it: an endpoint that only moved
         // its status code would leave an operator with a number and no sentence.
@@ -1557,6 +1563,317 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
+     * Every block, and every key in every block, pinned to the two tables that document them.
+     *
+     * WHY THE WHOLE SHAPE AND NOT THE FIELDS A TEST HAPPENS TO READ
+     * -------------------------------------------------------------
+     *   A payload is a contract with whoever compares JSON: a monitor's rule, a deploy gate's `jq`,
+     *   a dashboard's column. Those readers do not fail when a block is renamed — they go on reading
+     *   `null` and reporting it as a quiet installation, which is the failure mode every field here
+     *   was written to avoid. Each block's own tests assert the values it publishes; this one asserts
+     *   the *shape*, in both directions, so a block or a key cannot arrive or leave without the two
+     *   tables that document it saying so.
+     *
+     *   The two tables are the README's — what a consumer reads — and `docs/health-payload.md`'s — the
+     *   record of why the shape is a promise. They are compared with each other first, because a
+     *   README that has moved on from the record is the same defect one level up: the repair is two
+     *   edits, and a guard that read only one of them would let the other rot.
+     *
+     * WHAT THE TABLE HAS TO SAY
+     * -------------------------
+     *   One row per path the payload publishes: a block, or a nested object inside one. The `keys`
+     *   cell is a backticked list, compared as a set, or an em dash for a path whose value is a
+     *   scalar, a list, or an object documented under another heading — `flip.window` and
+     *   `pgcat.window` are one array documented key by key under "The window block". A path that is
+     *   a map keyed by something the installation names is written with `<connection>` for that key,
+     *   which is the one name the payload chooses at runtime.
+     *
+     *   The richest payload this fixture can build is used deliberately: pgcat armed with a closed
+     *   window, a mode applied, pools declared and repairs on record, so every block is an array
+     *   rather than the `null` a quiet installation publishes. A shape pinned against the quiet
+     *   payload would pass while the armed one had grown a key.
+     */
+    public function test_every_block_and_key_the_payload_publishes_is_documented(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            stateExtra: ['pool_repairs' => 2, 'last_pool_repair_at' => gmdate(DATE_ATOM)],
+        );
+
+        $payload = $this->getJson('/health/db')->assertOk()->json();
+
+        $readme = self::documentedPaths(Readme::section(self::PAYLOAD_INDEX), null);
+        $record = self::documentedPaths(
+            (string) file_get_contents(dirname(__DIR__, 3).'/docs/health-payload.md'),
+            '## Every path',
+        );
+
+        $this->assertSame(
+            $record,
+            $readme,
+            'the README table and docs/health-payload.md are one list; a path added to one is added to both',
+        );
+
+        $published = self::publishedPaths($payload, $readme);
+
+        $unnamed = array_keys(array_diff_key($published, $readme));
+        $stale = array_keys(array_diff_key($readme, $published));
+
+        $this->assertSame([], $unnamed, self::repair(
+            'the payload publishes a path neither table names',
+            $unnamed,
+            'Add each row to the README under '.self::PAYLOAD_INDEX.' and to docs/health-payload.md.',
+        ));
+
+        $this->assertSame([], $stale, self::repair(
+            'the tables name a path the payload does not publish',
+            $stale,
+            'A block or key was renamed or dropped, so the two tables are the repair.',
+        ));
+
+        foreach ($readme as $path => $keys) {
+            if ($keys === []) {
+                continue;   // the em dash: a scalar, a list, or a shape documented under another heading
+            }
+
+            $this->assertNotNull(
+                $published[$path],
+                "the payload publishes `{$path}` as a scalar or a list where the tables name its keys",
+            );
+
+            $this->assertSame(
+                $keys,
+                $published[$path],
+                "the tables and the payload disagree about the keys of `{$path}`; both tables are the repair",
+            );
+        }
+    }
+
+    /**
+     * The pair the second mechanism made necessary, at the endpoint that acts on it.
+     *
+     * The per-minute entry records `converged_at` and stops acting when the boot window closes; a
+     * reader-window task moves the mode through the forced path and records no run. So the state
+     * here is a boundary task's own: a mode, the moment it moved, and the mechanism — no run, and
+     * no convergence. Before the pair was read, this container was `degraded` for the rest of its
+     * life, eight minutes after every boot, with a reason that was true and nothing could repair.
+     */
+    public function test_a_boundary_application_inside_the_window_keeps_the_status_ok(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(bootedSecondsAgo: 3600, appliedMode: 'readers', converged: false);
+
+        Log::spy();
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('flip.failed', false)
+            ->assertJsonPath('flip.reason', null)
+            // The boot window's own evidence is still empty, and the reading says so rather than
+            // borrowing the other mechanism's mode for it.
+            ->assertJsonPath('pgcat.window.converged', false)
+            ->assertJsonPath('pgcat.window.runs', 0)
+            ->assertJsonPath('pgcat.window.applied', true)
+            ->assertJsonPath('pgcat.window.applied_mode', 'readers')
+            ->assertJsonPath('pgcat.window.applied_via', 'window');
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The rows of the first table under `$heading` in `$markdown`, as `path => keys`.
+     *
+     * One reader for both tables — the README section a consumer reads and the record that says why
+     * the shape is a promise — because two readers would be two chances to parse one of them
+     * differently and agree with a payload neither table describes.
+     *
+     * A `keys` cell is a backticked list read as a set, or an em dash for a path whose value is a
+     * scalar, a list, or an object documented under another heading. Both are read from the table
+     * rather than from a list in this file: a table that cannot be read fails here instead of being
+     * silently compared with nothing.
+     *
+     * @return array<string, list<string>>
+     */
+    private static function documentedPaths(string $markdown, ?string $heading): array
+    {
+        $lines = preg_split('/\R/', $markdown) ?: [];
+        $at = 0;
+
+        if ($heading !== null) {
+            $found = array_search($heading, array_map('trim', $lines), true);
+
+            if ($found === false) {
+                throw new RuntimeException("the tables no longer have the heading [{$heading}], which a guard reads the payload's paths under");
+            }
+
+            $at = $found;
+        }
+
+        $header = null;
+        $paths = [];
+
+        foreach (array_slice($lines, $at + 1) as $line) {
+            $trimmed = trim($line);
+
+            if (!str_starts_with($trimmed, '|')) {
+                if ($header !== null) {
+                    break;      // the table has ended: the prose under it is not rows
+                }
+
+                continue;       // the paragraph between the heading and its table
+            }
+
+            $cells = array_map('trim', array_slice(explode('|', $trimmed), 1, -1));
+
+            if ($header === null) {
+                $header = $cells;
+
+                continue;
+            }
+
+            if (self::isSeparator($cells[0])) {
+                continue;
+            }
+
+            $row = array_combine($header, $cells);
+
+            // The path is written in backticks because it is code in a sentence; the payload's own
+            // keys are not, so the marker is read off here rather than remembered by every row.
+            $paths[trim(str_replace('`', '', $row['path']))] = self::keyNames($row['keys']);
+        }
+
+        return $paths;
+    }
+
+    /** Whether a cell is the `|---|` row under a table's header. */
+    private static function isSeparator(string $cell): bool
+    {
+        return preg_match('/^:?-{3,}:?$/', str_replace(' ', '', $cell)) === 1;
+    }
+
+    /**
+     * The key names in a `keys` cell, sorted, or an empty list for the em dash.
+     *
+     * Sorted because a key set is a set: the payload publishes insertion order, which is a
+     * property of the array literal rather than of the contract, and a reordering inside `index()`
+     * is not a change a monitor sees.
+     *
+     * @return list<string>
+     */
+    private static function keyNames(string $cell): array
+    {
+        if (preg_match_all('/`([^`]+)`/', $cell, $matches) === 0) {
+            return [];
+        }
+
+        $keys = array_map('strval', $matches[1]);
+        sort($keys);
+
+        return $keys;
+    }
+
+    /**
+     * Every path the payload publishes, each with the keys it has there — `null` where the value is
+     * a scalar or a list, which is what the tables' em dash stands for.
+     *
+     * Descent stops at a path the tables mark as opaque: a path documented with an em dash is one
+     * whose interior is documented somewhere else, and a path no table names at all is already the
+     * failure, so listing its children as well would bury the first line.
+     *
+     * @param array<string, mixed>             $payload
+     * @param array<string, list<string>> $documented
+     *
+     * @return array<string, list<string>|null>
+     */
+    private static function publishedPaths(array $payload, array $documented): array
+    {
+        $paths = [];
+
+        foreach ($payload as $path => $value) {
+            $paths[(string) $path] = self::pathKeys($value, (string) $path);
+
+            if (is_array($value) && !array_is_list($value) && ($documented[$path] ?? []) !== []) {
+                self::collectChildren($value, (string) $path, $documented, $paths);
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * The keys of one path, or `null` where the value is a scalar or a list — the em dash, read the
+     * other way round.
+     *
+     * @return list<string>|null
+     */
+    private static function pathKeys(mixed $value, string $path): ?array
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            return null;
+        }
+
+        // `replicas` is the one path whose key the installation chooses — the name of the connection
+        // the package follows — so the tables write `<connection>` for it and the payload is read
+        // with the same placeholder rather than with a name this fixture happens to use.
+        $keys = $path === 'replicas'
+            ? ['<connection>']
+            : array_map('strval', array_keys($value));
+
+        sort($keys);
+
+        return $keys;
+    }
+
+    /**
+     * The nested objects under one path, each as a path of its own.
+     *
+     * Only arrays are descended into: a scalar or a list under `$path` is one of `$path`'s keys and
+     * is already compared with the table that way, so recording it as a path too would report every
+     * leaf of every block as an undocumented block.
+     *
+     * @param array<string, mixed>             $value
+     * @param array<string, list<string>> $documented
+     * @param array<string, list<string>|null> $paths
+     */
+    private static function collectChildren(array $value, string $path, array $documented, array &$paths): void
+    {
+        foreach ($value as $name => $child) {
+            if (!is_array($child) || array_is_list($child)) {
+                continue;
+            }
+
+            $segment = $path === 'replicas' ? '<connection>' : (string) $name;
+            $childPath = $path.'.'.$segment;
+
+            $paths[$childPath] = self::pathKeys($child, $childPath);
+
+            if (($documented[$childPath] ?? []) !== []) {
+                self::collectChildren($child, $childPath, $documented, $paths);
+            }
+        }
+    }
+
+    /**
+     * One failure message with its paths listed under it, and what the repair is.
+     *
+     * @param list<string> $paths
+     */
+    private static function repair(string $problem, array $paths, string $repair): string
+    {
+        return $problem.":\n  - ".implode("\n  - ", $paths)."\n".$repair;
+    }
+
+    /**
      * Point the connection the package follows at SQLite.
      *
      * `$database` is a file, `:memory:` or a path under a directory that does not exist — the
@@ -1618,6 +1935,7 @@ class DatabaseHealthControllerTest extends TestCase
         ?string $beatAt = null,
         bool $stampBeat = true,
         array $stateExtra = [],
+        bool $converged = true,
     ): PgcatConfigFlipper {
         $dir = sys_get_temp_dir().'/swrr-health-window-'.bin2hex(random_bytes(4));
 
@@ -1683,6 +2001,19 @@ class DatabaseHealthControllerTest extends TestCase
                     'converged_mode' => $appliedMode,
                 ];
 
+                // The other mechanism's record, and the one that has no run in it: a boundary task
+                // applies the mode through the forced path, which writes the mode, the moment and
+                // the mechanism and deliberately records no convergence — a mode applied at 10:00
+                // must not be able to move the verdict a deploy gate reads.
+                if (!$converged) {
+                    $state = [
+                        'last_mode' => $appliedMode,
+                        'last_flipped_at' => $convergedAt,
+                        'flipped_by' => 'pgcat-flipper',
+                        'flipped_via' => 'window',
+                    ];
+                }
+
                 // The absence is a state of its own rather than a null to fall back from: a
                 // container that has never run the entry is exactly the 85-minute incident, and
                 // it is the case this endpoint used to answer `ok` to.
@@ -1717,4 +2048,5 @@ class DatabaseHealthControllerTest extends TestCase
 
         return $flipper;
     }
+
 }

@@ -1272,6 +1272,116 @@ class BootAuditTest extends TestCase
     }
 
     /**
+     * The second bound, held where the class docblock puts it: a configuration state is not news
+     * on every request, and under PHP-FPM every boot is a request.
+     */
+    public function test_a_boot_inside_the_interval_does_not_log_the_same_finding_again(): void
+    {
+        $audit = $this->audit();
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+        $audit->report($audit->read(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(1, $records, 'the first line is the news, and the boot inside the interval adds none');
+        $this->assertCount(1, $audit->standing(), 'the finding still stands, and is still remembered');
+    }
+
+    public function test_a_boot_past_the_interval_logs_the_finding_again(): void
+    {
+        $audit = $this->audit();
+
+        $this->putRecord([
+            'swrr.pgcat.gate' => [...$this->finding($this->ago('-1 hour')), 'last_logged_at' => time() - 61],
+        ]);
+
+        $records = [];
+        $this->collectLogs($records);
+        $audit->report($audit->read(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(1, $records, 'a boot past the interval says the setting is still wrong');
+        $this->assertStringContainsString('pgcat will never act.', $records[0]['message']);
+        $this->assertSame('swrr.pgcat.gate', $records[0]['context']['finding']);
+    }
+
+    /**
+     * The half the bound must not touch: the line a pager is written on, which is a transition
+     * rather than a repeat.
+     */
+    public function test_the_boot_that_first_sees_a_finding_logs_it_whatever_the_interval_says(): void
+    {
+        $this->auditFile = $this->tempDir() . '/audit.json';
+        $audit = new BootAudit((string) $this->auditFile, 0, 3600);
+
+        $records = [];
+        $this->collectLogs($records);
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(1, $records, 'a first sighting is logged even with the bound at an hour');
+    }
+
+    public function test_the_line_that_closes_a_finding_is_written_once_whatever_the_interval_says(): void
+    {
+        $audit = $this->audit();
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+        $audit->report($audit->read(), [], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(2, $records);
+        $this->assertStringContainsString('The pgcat mismatch no longer applies.', $records[1]['message']);
+        $this->assertTrue($records[1]['context']['resolved'] ?? false, 'the closing line is the transition, and carries it');
+
+        // Nothing is left to remember, so a third boot says nothing at all — the closing line is
+        // not a standing finding and is not on any interval.
+        $audit->report($audit->read(), [], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(2, $records);
+    }
+
+    /**
+     * The two bounds are two settings, and neither is the other's: the probe's schedule is read
+     * from `store_probe_seconds` and survives a findings interval an hour long.
+     */
+    public function test_the_two_bounds_are_read_from_their_own_parameters(): void
+    {
+        $this->auditFile = $this->tempDir() . '/audit.json';
+        $audit = new BootAudit((string) $this->auditFile, 120, 3600);
+
+        $this->assertSame(120, $audit->storeProbeStatus()['seconds']);
+        $this->assertFalse($audit->storeProbeDue(['findings' => [], 'store_probed_at' => time() - 119]));
+        $this->assertTrue($audit->storeProbeDue(['findings' => [], 'store_probed_at' => time() - 121]));
+    }
+
+    public function test_an_interval_of_zero_logs_the_finding_on_every_boot(): void
+    {
+        $this->auditFile = $this->tempDir() . '/audit.json';
+        $audit = new BootAudit((string) $this->auditFile, 0, 0);
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+        $audit->report($audit->read(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(2, $records, '0 lifts the bound, which is the loud direction');
+    }
+
+    /** The finding the bound's tests are written on: one setting, one sentence. */
+    private function gateFinding(): BootAuditFinding
+    {
+        return new BootAuditFinding(
+            key: 'swrr.pgcat.gate',
+            warning: 'pgcat will never act.',
+            resolution: 'The pgcat mismatch no longer applies.',
+        );
+    }
+
+    /**
      * Collect the records the code under test writes, deliberately unmocked, so the
      * assertions run against what Laravel really emits.
      *

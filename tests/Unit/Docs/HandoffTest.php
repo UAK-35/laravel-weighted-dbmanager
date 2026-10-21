@@ -1570,12 +1570,30 @@ final class HandoffTest extends TestCase
                     ),
                 );
 
-                foreach (['files.tsv', 'methods.tsv', 'surface.tsv'] as $record) {
-                    self::assertStringContainsString(
-                        $record,
-                        $said,
-                        sprintf('The records are out of step without naming %s, which is a record the note lists.', $record),
-                    );
+                // Which of the three has drifted is the working tree's fact rather than the
+                // sentence's, and it is not always all three: a change that only edits files
+                // leaves `files.tsv` — the files and the symbols in them — current, so the reading
+                // names the records that moved. What has to hold is the other direction: every
+                // record the reading names is one the section is about, so the note cannot be
+                // quoting a drift about something else.
+                preg_match_all('/([a-z]+\.tsv): \d+ line\(s\) stale/', $said, $drifted);
+
+                self::assertNotSame([], $drifted[1], sprintf(
+                    'HANDOFF.md line %d quotes `%s` failing, and the reading names none of the three '
+                    .'records the section is about — so the note is quoting a drift whose subject it '
+                    .'does not state.',
+                    $quoted['source'],
+                    implode(' ', $quoted['command']),
+                ));
+
+                foreach ($drifted[1] as $named) {
+                    self::assertContains($named, ['files.tsv', 'methods.tsv', 'surface.tsv'], sprintf(
+                        'HANDOFF.md line %d quotes `%s` failing, and the reading names %s, which is not one '
+                        .'of the three records the section is about.',
+                        $quoted['source'],
+                        implode(' ', $quoted['command']),
+                        $named,
+                    ));
                 }
             }
         }

@@ -22,13 +22,19 @@ use Illuminate\Support\Facades\Log;
  *                                 one that cannot be reached
  *   swrr.default_weight_formula   a formula that silently runs as linear
  *   swrr.pgcat.*                  pgcat switched on where it cannot act
+ *   swrr.connector.*              a connector that cannot build the connection the
+ *                                 package follows
  *   database.read.*               replica metadata the resolver does not read as
  *                                 written, including the weight that quietly
  *                                 takes a replica out of the pool
  *
  * A misconfiguration that throws on first use is deliberately out of scope: the
  * runtime logs it, `db:doctor` reports it, and a flip reports it as a failure. The
- * audit exists for the states nothing else would ever mention.
+ * audit exists for the states nothing else would ever mention. The connector is an
+ * exception, and it is here because the rule's reason does not hold for it: a
+ * connection that cannot be built does throw on its first query, but the *reason* is
+ * named by no log line and by one preflight somebody has to think to run — so the
+ * boot asks the same reading and says so (`swrr.connector.unusable`).
  *
  * WHY IT REMEMBERS THINGS ON DISK
  * -------------------------------
@@ -67,6 +73,22 @@ use Illuminate\Support\Facades\Log;
  * covered by the runtime (degrading logs an error, recovering logs a warning) and
  * by `db:doctor`, which probes on demand.
  *
+ * THE RE-LOGGING OF A STANDING FINDING
+ * -------------------------------------
+ * The same multiplication applies to the lines, and it is the reason the second bound
+ * exists: a finding is logged while it stands, a boot is a request under FPM, and a
+ * setting that reads as on but cannot act is a *configuration* state — it cannot change
+ * without an edit and a restart, so a line per request carries no news and buries the
+ * lines that would show a state which did change. The moment the bound is measured from
+ * is therefore remembered with the entry (`last_logged_at`, beside the
+ * `first_reported_at` the age is read from), and a boot logs a finding again only once
+ * `swrr.audit.finding_seconds` has passed. What is deliberately *not* bounded is the
+ * pair the alerting rules are written on: the boot that first sees a finding logs it at
+ * once whatever the interval says, and the single `resolved: true` line that closes it
+ * is a transition rather than a repeat. `0` lifts the bound and logs every boot, which
+ * is the behaviour this replaces and the loud direction — nothing reports it, because a
+ * bound that is off says more rather than less.
+ *
  * WHAT A RECORD REMEMBERS ABOUT A FINDING
  * ----------------------------------------
  * The sentence the log carried while it stood, how loudly it was logged, what it
@@ -100,7 +122,7 @@ use Illuminate\Support\Facades\Log;
  * key the live half cannot answer without a probe is reported as *not evaluated* rather than
  * as cleared, which is the distinction that makes the pair worth reading.
  *
- * @phpstan-type Finding array{resolution: string, warning: string, level: string, context: array<string, mixed>, first_reported_at: string, scope: array<string, mixed>}
+ * @phpstan-type Finding array{resolution: string, warning: string, level: string, context: array<string, mixed>, first_reported_at: string, last_logged_at: int, scope: array<string, mixed>}
  * @phpstan-type Record array{findings: array<string, Finding>, store_probed_at: int|null}
  * @phpstan-type Standing array{key: string, level: string, warning: string, resolution: string, first_reported_at: string, age_seconds: int|null, age: string, context: array<string, mixed>, scope: array<string, mixed>}
  * @phpstan-type Current array{evaluated: bool, standing: bool|null, scope_matches: bool|null}
@@ -155,6 +177,8 @@ final class BootAudit
     /**
      * @param string $file where findings that still stand are remembered
      * @param int $storeProbeSeconds seconds between store probes; 0 never probes
+     * @param int $findingSeconds seconds between two log lines for one standing finding; 0 logs
+     *        every boot
      * @param \Closure(string): array{0: bool, 1: resource|null}|null $lockAcquirer how one
      *        attempt at the record's lock is made — injected so a test can hold it, refuse it,
      *        or watch it being released without a second process
@@ -171,6 +195,7 @@ final class BootAudit
     public function __construct(
         private readonly string $file,
         private readonly int $storeProbeSeconds = 60,
+        private readonly int $findingSeconds = 60,
         ?\Closure $lockAcquirer = null,
         ?\Closure $lockReleaser = null,
         private readonly ?\Closure $currentFindings = null,
@@ -769,9 +794,12 @@ final class BootAudit
      * Log the findings this boot produced, close out the ones it checked and did not
      * find, and remember what still stands.
      *
-     * A finding is logged on every boot while it stands: the alternative is a
-     * warning from three weeks ago with nothing to say whether it is still true.
-     * A resolution is logged once, because it is a transition.
+     * A finding is logged on the boot that first sees it, and after that once it is due
+     * again — see the class docblock's second bound. The alternative at either end is
+     * worse: a line per request is a configuration state multiplied into the log that
+     * would show a state which changed, and never logging it again is a warning from
+     * three weeks ago with nothing to say whether it is still true. A resolution is
+     * logged once, because it is a transition.
      *
      * Every finding handed in is logged, including one that shares its key with another:
      * the record holds one entry per key, and a fold that ran before the log would drop the
@@ -797,10 +825,11 @@ final class BootAudit
     public function report(array $record, array $findings, array $checked, ?int $probedAt = null, array $scope = []): void
     {
         $now = self::timestamp();
+        $at = time();
 
         // Logging and folding happen in one pass, so a key two findings agree on cannot
         // cost one of them its log line — see fold().
-        $current = $this->fold($findings, $record, $now);
+        ['current' => $current, 'logged' => $logged] = $this->fold($findings, $record, $now, $at);
 
         $standing = [];
         $next = [];
@@ -837,6 +866,12 @@ final class BootAudit
                 'level' => $finding->level,
                 'context' => $finding->context,
                 'first_reported_at' => $record['findings'][$key]['first_reported_at'] ?? $now,
+                // The moment the bound is measured from. A boot that was not due a line keeps
+                // the stamp it read, so the finding is due relative to the last line the log
+                // actually carries rather than relative to the last boot that looked.
+                'last_logged_at' => isset($logged[$key])
+                    ? $at
+                    : (int) ($record['findings'][$key]['last_logged_at'] ?? $at),
                 'scope' => $scope,
             ];
         }
@@ -884,34 +919,44 @@ final class BootAudit
      * key's recorded age beside a sentence that had not stood that long, because
      * `first_reported_at` belongs to the key rather than to the sentence.
      *
-     * So every finding is logged here, in the order it was handed in, and a shared key is
-     * named for what it is: two branches of the package producing one key. That is a defect
-     * in the package rather than a state of the installation, which is why it is logged and
-     * not remembered — the record's entries are states an operator repairs, and this one has
-     * no resolution sentence anybody could trigger. The record keeps the louder of the two,
-     * because the level is what a monitor pages on; two findings of the same level keep the
-     * first, so the rule is total and order decides.
+     * So every finding is logged here while it is due — see the class docblock's second
+     * bound, which is what stops a configuration state becoming one line per request — in
+     * the order it was handed in, and a shared key is named for what it is: two branches of
+     * the package producing one key. That is a defect in the package rather than a state of
+     * the installation, which is why it is logged and not remembered — the record's entries
+     * are states an operator repairs, and this one has no resolution sentence anybody could
+     * trigger. The record keeps the louder of the two, because the level is what a monitor
+     * pages on; two findings of the same level keep the first, so the rule is total and order
+     * decides.
      *
      * Nothing here can stop a boot: a diagnostic never takes the process down, and a package
      * defect is still a diagnostic.
      *
      * @param list<BootAuditFinding> $findings the settings that cannot act now
      * @param Record $record what a previous boot reported
-     * @return array<string, BootAuditFinding> one finding per key, the one to remember
+     * @return array{current: array<string, BootAuditFinding>, logged: array<string, true>} the
+     *         one finding to remember per key, and the keys that were actually logged — which
+     *         is what the caller stamps `last_logged_at` from
      */
-    private function fold(array $findings, array $record, string $now): array
+    private function fold(array $findings, array $record, string $now, int $at): array
     {
         $current = [];
+        $logged = [];
 
         foreach ($findings as $finding) {
             $key = $finding->key;
+            $due = $this->logDue($record, $key, $at);
 
-            // The level is the finding's own: a value the package refuses is an error,
-            // a setting that cannot act is a warning. See BootAuditFinding.
-            Log::log($finding->level, '[WeightedDB] '.$finding->warning, self::logContext($finding->level, [
-                'finding' => $key,
-                'first_reported_at' => $record['findings'][$key]['first_reported_at'] ?? $now,
-            ] + $finding->context));
+            if ($due) {
+                $logged[$key] = true;
+
+                // The level is the finding's own: a value the package refuses is an error,
+                // a setting that cannot act is a warning. See BootAuditFinding.
+                Log::log($finding->level, '[WeightedDB] '.$finding->warning, self::logContext($finding->level, [
+                    'finding' => $key,
+                    'first_reported_at' => $record['findings'][$key]['first_reported_at'] ?? $now,
+                ] + $finding->context));
+            }
 
             $kept = $current[$key] ?? null;
 
@@ -927,6 +972,14 @@ final class BootAudit
                 $current[$key] = $finding;
             }
 
+            // Told only where the sentences were: the line is about the two above it, and one
+            // written on a boot the bound kept quiet would send a reader to lines that are not
+            // there. The record keeps the louder of the two either way, which is the half that
+            // must not depend on whether anybody was logging.
+            if (!$due) {
+                continue;
+            }
+
             Log::error(sprintf(
                 '[WeightedDB] Two findings this boot share the key "%s", so they are one entry in the record: it keeps the %s. Both sentences were logged above, and neither setting is wrong — one key is one finding, so this is two branches of the package producing the same key, which is a defect in the package.',
                 $key,
@@ -938,7 +991,35 @@ final class BootAudit
             ]));
         }
 
-        return $current;
+        return ['current' => $current, 'logged' => $logged];
+    }
+
+    /**
+     * Whether a finding under `$key` is due a log line at `$at`.
+     *
+     * The rule the class docblock's second bound is: the first boot that sees a finding logs it
+     * — a key the record does not carry, and a record written before the stamp existed, are both
+     * due, because the line a pager is written on must not depend on an interval — and after
+     * that one line per `findingSeconds`. An interval at or below zero lifts the bound and logs
+     * every boot, which is the loud direction.
+     *
+     * A stamp this boot cannot read, or one from the future — a clock that moved, a record two
+     * hosts share with their clocks apart — is due rather than quiet: the direction a doubtful
+     * reading of a *finding* has to fail in is the one that says the setting is still wrong.
+     * That is the opposite of the store probe's reading of its own stamp, and deliberately: a
+     * probe that does not run costs a PING, and a finding that is not logged costs a reader.
+     *
+     * @param Record $record what a previous boot reported
+     */
+    private function logDue(array $record, string $key, int $at): bool
+    {
+        if ($this->findingSeconds <= 0) {
+            return true;
+        }
+
+        $last = $record['findings'][$key]['last_logged_at'] ?? null;
+
+        return !is_int($last) || $last > $at || ($at - $last) >= $this->findingSeconds;
     }
 
     /**
@@ -972,6 +1053,12 @@ final class BootAudit
 
             $firstReportedAt = $entry['first_reported_at'] ?? null;
 
+            // A record written before the re-logging bound existed carries no stamp, and `0`
+            // is the honest reading of it: the finding is due to be logged, which is the
+            // direction a missing field has to fail in — an entry nothing has read is not an
+            // excuse for silence about it.
+            $lastLoggedAt = $entry['last_logged_at'] ?? null;
+
             $warning = $entry['warning'] ?? null;
 
             // A record written before the scope was remembered carries none, and an empty
@@ -992,6 +1079,7 @@ final class BootAudit
                 'first_reported_at' => is_string($firstReportedAt) && $firstReportedAt !== ''
                     ? $firstReportedAt
                     : self::timestamp(),
+                'last_logged_at' => is_int($lastLoggedAt) ? $lastLoggedAt : 0,
                 'scope' => $scope,
             ];
         }

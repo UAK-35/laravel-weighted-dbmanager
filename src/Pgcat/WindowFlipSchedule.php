@@ -28,9 +28,12 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *   These two tasks are the other half: a boundary is approached, its target is asked whether it
  *   is actually there, and the mode is applied through the flipper's forced path — which has no
  *   boot window, because the boot window is a fact about starting up rather than about the time of
- *   day. They are registered only when {@see self::CONFIG_KEY}`.enabled` is on, and an
- *   installation running them should turn the per-minute `db:pgcat-flip` entry off: two mechanisms
- *   deciding the same mode is two mechanisms that can disagree.
+ *   day. They are registered only when {@see self::CONFIG_KEY}`.enabled` is on, and they may be
+ *   armed beside the per-minute entry: the two read the same resolver, so no boundary is contended,
+ *   and a mode either of them applies is recorded with the mechanism that applied it — which is what
+ *   lets a surface say who last moved the pooler instead of describing the entry, which stops
+ *   acting when the boot window closes. Arming the entry beside them is what buys a container its
+ *   first minutes.
  *
  * WHY THE PROBING IS SEVERAL RUNS RATHER THAN ONE LONG ONE
  *   This task is `* * * * *` *bounded by a lead time*, so it fires once a minute across the eight

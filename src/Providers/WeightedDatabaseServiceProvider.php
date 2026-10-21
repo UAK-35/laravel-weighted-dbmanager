@@ -33,6 +33,7 @@ use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\BootAuditFinding;
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\ConnectorInUse;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
 use Uak35\WeightedDbManager\Support\RedisAccess;
@@ -99,6 +100,8 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *   db-manager.swrr.reader_windows : list<{start, end}>
  *   db-manager.swrr.reader_days    : list<int>  (ISO: 1=Mon … 7=Sun)
  *   db-manager.swrr.timezone       : string    (defaults to UTC)
+ *
+ * @phpstan-import-type Reading from ConnectorInUse
  */
 class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
 {
@@ -110,9 +113,11 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
     private static bool $bootAudited = false;
 
     /**
-     * The findings the audit evaluates from configuration on every boot. The store's
-     * reachability is not here because it is gated on a probe interval; it is added
-     * to the checked set on the boots that probe.
+     * The findings the audit evaluates from configuration on every boot. Two keys are not
+     * here because a boot can leave them unasked: the store's reachability is gated on a probe
+     * interval, and the connector is unanswerable when `db.factory` itself cannot be resolved.
+     * Both are added to the checked set only on the boots that asked, so a key nothing
+     * evaluated is carried over rather than resolved.
      */
     private const AUDITED_KEYS = [
         self::KEY_PGCAT_GATE,
@@ -131,7 +136,27 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         self::KEY_REPLICA_RAM_REFUSED,
         self::KEY_STORE_PROBE_OFF,
         self::KEY_STORE_PROBE_FILE_UNWRITABLE,
-        self::KEY_FLIP_MECHANISMS_CONTENDED,
+    ];
+
+    /**
+     * Keys this package used to report and no longer does, named so that the first boot after an
+     * upgrade closes them out.
+     *
+     * The boot's contract is that a key it does not evaluate is *carried over* rather than cleared —
+     * that is what keeps a throttled store probe's finding alive, and what makes the audit's own
+     * statement about a key it did not look at honest. The same rule would leave a retired key
+     * standing for ever: a finding nothing produces, printed by every surface that reads the record,
+     * with no boot able to resolve it. So the keys that left are named here, the boot evaluates
+     * them, finds nothing, and the single `resolved: true` line the record writes for any key that
+     * stopped applying is what an operator sees. Removing a key from this list as well as from the
+     * producers is the same kind of edit as adding one to both.
+     *
+     * @var list<string>
+     */
+    private const RETIRED_KEYS = [
+        // Two mechanisms armed at once stopped being a finding when the two came to share the mode
+        // record they write — see PgcatConfigFlipper::windowStatus().
+        'swrr.pgcat.schedule.both_armed',
     ];
 
     /**
@@ -261,19 +286,6 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
     public const KEY_AUDIT_LOCK_UNUSABLE = 'swrr.audit.file.lock.unusable';
 
     /**
-     * Both mechanisms that can move the pooler are armed: one mode with two owners, and a record
-     * only one of them writes.
-     *
-     * A warning, and the level is the decision: neither arrangement is malformed, and the documented
-     * migration to the reader-window tasks is to disarm this entry in the same change that arms
-     * them — so an installation caught halfway through that change is the installation doing the
-     * right thing slowly, and a preflight that failed it would be refusing exactly that one. What
-     * the record adds over the row is the date: `flip schedule` describes this boot, and this key
-     * says how long the pair has been armed. See `FlipSchedule::bothArmedSentence()`.
-     */
-    public const KEY_FLIP_MECHANISMS_CONTENDED = 'swrr.pgcat.schedule.both_armed';
-
-    /**
      * The finding each file problem is recorded under, by the setting it is about.
      *
      * Declared once because three places need it and none of them may guess: the boot audit
@@ -361,6 +373,31 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * with no memory, which is a size the read list does not describe.
      */
     public const KEY_REPLICA_RAM_REFUSED = 'database.read.ram_gb.refused';
+
+    /**
+     * The connection this package follows cannot be built at all: no driver named, a driver no
+     * connector is registered for, or a connector that exists but whose connection build throws.
+     *
+     * WHY THIS IS A FINDING AND NOT ONLY A ROW
+     *   `db:doctor`'s `connector` row fails in exactly these states, and it answers when somebody
+     *   runs it — from a terminal, in a pipeline, after the fact. A connection the application
+     *   cannot build is the first failure of the process rather than a preflight question: the
+     *   query fails, the replica summary fails, and the reason is a line nobody asked for. The
+     *   boot asks the same reading the row does (`ConnectorInUse::resolve()`) and records it, which
+     *   is also what the record adds: the row describes this run, the record says how long the
+     *   installation has been unable to build its connection.
+     *
+     *   A warning, and the level is the decision — `BootAuditFinding` reserves `error` for a value
+     *   this package refuses to interpret, and this is not a refusal: the framework's own sentence
+     *   travels in the context, and the repair belongs to the connection rather than to a value
+     *   this package could substitute. What makes it actionable is the sentence and the `--strict`
+     *   half of the gate, not the level.
+     *
+     *   A `db.factory` that cannot be asked is not this key's. That binding is judged by
+     *   `db:doctor`'s `weighted factory` row, and a second finding for one cause would read as two
+     *   problems — so the producer stays silent there and says so.
+     */
+    public const KEY_CONNECTOR_UNUSABLE = 'swrr.connector.unusable';
 
     /**
      * The three replica settings this audit refuses a value for, the finding key its refusal is
@@ -574,6 +611,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             return new BootAudit(
                 file: BootAudit::resolveFile($audit, $sysTempDir . '/swrr-audit.json'),
                 storeProbeSeconds: ConfigValue::int($audit['store_probe_seconds'] ?? null, 60),
+                findingSeconds: ConfigValue::int($audit['finding_seconds'] ?? null, 60),
                 currentFindings: static fn (): array => $provider->liveFindings(),
             );
         });
@@ -784,8 +822,19 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         $probeStore = $store['effective'] === 'redis' && $audit->storeProbeDue($record);
 
         // The file preconditions are spread in from the map that names them, so a key added there is
-        // evaluated by the next boot rather than waiting for a second edit here.
-        $checkeds = [...self::AUDITED_KEYS, ...array_values(self::PGCAT_FILE_KEYS)];
+        // evaluated by the next boot rather than waiting for a second edit here — and the keys this
+        // package has retired are spread in beside them, so a record holding one is closed out by
+        // the first boot after the upgrade instead of standing for ever.
+        $checkeds = [...self::AUDITED_KEYS, ...array_values(self::PGCAT_FILE_KEYS), ...self::RETIRED_KEYS];
+
+        // The connector is asked once, because the answer is both a finding and whether there is
+        // one to give: a `db.factory` that cannot be resolved says nothing about the connector,
+        // so the key is left out of the checked set rather than reported as cleared.
+        $connector = ConnectorInUse::resolve($config, $this->app);
+
+        if ($connector['factory_error'] === null) {
+            $checkeds[] = self::KEY_CONNECTOR_UNUSABLE;
+        }
 
         if ($store['effective'] === 'local' || $probeStore) {
             // Either nothing can be unreachable (the in-process store is local by
@@ -802,8 +851,8 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             ...$this->replicaMetadataFindings($this->app->make(Repository::class)),
             ...$this->primaryStoreFindings($store, $swrr, $probeStore),
             ...$this->weightFormulaFindings($swrr),
-            ...$this->flipMechanismFindings($config, $flipper),
             ...$this->storeProbeFindings($audit),
+            ...$this->connectorFindings($connector),
         ];
 
         $audit->report(
@@ -825,14 +874,20 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * The audited settings as this process reads them right now — the live half of the audit
      * block.
      *
-     * The same six producers the boot runs, in the same order, so a key that would be reported
-     * by a fresh boot is a key this reading reports too. It is deliberately *not* the same call:
+     * The same producers the boot runs, in the same order, so a key that would be reported by a
+     * fresh boot is a key this reading reports too. It is deliberately *not* the same call:
      * `primaryStoreFindings()` is asked with the probe off, because a reachability probe is the
      * one check here that can cost a connect timeout and a health payload is not the place to
      * spend one. The store's reachability is therefore absent from the returned findings, and
      * `swrr.primary_store.unreachable` is absent from `evaluated` with it — so the block says
      * "not evaluated here" rather than "cleared here", which is the whole reason the two
      * lists are returned side by side.
+     *
+     * The connector is asked here, unlike the store, because asking it opens nothing: the reading
+     * constructs a connector and the connection around a lazy PDO closure, which is the same call
+     * the health payload's own `connector` block already makes for the same request. A `db.factory`
+     * that cannot be resolved is the one state where it is left out of `evaluated` instead — the
+     * same "not judged" line, drawn because there is no answer rather than because of the cost.
      *
      * It writes nothing, logs nothing and probes nothing: a surface may call it as often as it
      * serves a request, and the cost is a handful of configuration reads and stats.
@@ -848,6 +903,11 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         $store = self::storeSelection($swrr);
 
         $evaluated = [...self::AUDITED_KEYS, ...array_values(self::PGCAT_FILE_KEYS)];
+        $connector = ConnectorInUse::resolve($config, $this->app);
+
+        if ($connector['factory_error'] === null) {
+            $evaluated[] = self::KEY_CONNECTOR_UNUSABLE;
+        }
 
         return [
             'scope' => self::auditScope($config),
@@ -863,50 +923,10 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
                 ...$this->replicaMetadataFindings($config),
                 ...$this->primaryStoreFindings($store, $swrr, probeStore: false),
                 ...$this->weightFormulaFindings($swrr),
-                ...$this->flipMechanismFindings($config, $flipper),
                 ...$this->storeProbeFindings($audit),
+                ...$this->connectorFindings($connector),
             ],
         ];
-    }
-
-    /**
-     * Both mechanisms that can move the pooler armed at once, one mode and two owners.
-     *
-     * The sentence is `FlipSchedule::bothArmedSentence()`'s, so the row that reports it prints the
-     * same words this finding logs — the pair is one reading of two switches and neither surface
-     * may phrase it differently. Empty while the flipper is inert: nothing moves the pooler then,
-     * so nothing owns its mode, which is the same conclusion `pgcat files`, `pgcat supervisor` and
-     * `flip schedule` reach and say the same way.
-     *
-     * @return list<BootAuditFinding>
-     */
-    private function flipMechanismFindings(Repository $config, PgcatConfigFlipper $flipper): array
-    {
-        if (!$flipper->isEnabled()) {
-            return [];
-        }
-
-        $sentence = FlipSchedule::bothArmedSentence(
-            FlipSchedule::options($config),
-            WindowFlipSchedule::settings($config),
-            $flipper->window()->seconds(),
-        );
-
-        if ($sentence === null) {
-            return [];
-        }
-
-        return [new BootAuditFinding(
-            key: self::KEY_FLIP_MECHANISMS_CONTENDED,
-            warning: $sentence,
-            resolution: 'One mechanism owns the mode again — swrr.pgcat.schedule.enabled or '
-                .'swrr.pgcat.schedule.windows.enabled is off — or pgcat flipping is off, so nothing moves the pooler.',
-            context: [
-                'setting' => 'swrr.pgcat.schedule.enabled',
-                'other_setting' => 'swrr.pgcat.schedule.windows.enabled',
-                'window_seconds' => $flipper->window()->seconds(),
-            ],
-        )];
     }
 
     /**
@@ -1344,6 +1364,93 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
         }
 
         return $findings;
+    }
+
+    /**
+     * The connector that would build the followed connection, and whether it can build anything.
+     *
+     * The reading is `ConnectorInUse::resolve()` — the class `db:doctor`'s `connector` row asks —
+     * so a boot and a preflight cannot disagree about which class is in place, or about whether
+     * one is. It is taken by the caller rather than here, because the same reading decides whether
+     * this key was *evaluated*: a boot that could not ask has no verdict, and reporting one would
+     * clear a finding it never looked at.
+     *
+     * Two of its three failure states are this key's: no connector resolves the driver at all, and
+     * a connector that resolves but whose connection cannot be built. They cannot both happen in
+     * one boot (the reading returns at the first), they have one repair between them, and the row
+     * fails them together — so they are one key with the cause in the context, rather than two
+     * findings an operator would have to read as two problems.
+     *
+     * The third state — `db.factory` could not be asked — is deliberately not here. That binding
+     * is the package's own swap, `db:doctor`'s `weighted factory` row judges it, and a finding for
+     * it would report one cause twice.
+     *
+     * It costs what the connector reading costs, which is one connector and one connection object:
+     * `createConnector()` constructs the class that builds PDOs and the factory builds the
+     * connection around a lazy PDO closure, so nothing is connected to and no query runs. A
+     * replacement's constructor belongs to the application that wrote it, which is the price of the
+     * question being answerable at all — the same price `db:doctor` pays for its row.
+     *
+     * @param Reading $reading a `ConnectorInUse::resolve()` answer, taken once by the caller
+     *
+     * @return list<BootAuditFinding>
+     */
+    private function connectorFindings(array $reading): array
+    {
+        if ($reading['factory_error'] !== null) {
+            return [];
+        }
+
+        $read = $reading['connection'];
+        $source = $reading['source'];
+        $driver = $reading['driver'] === '' ? '(none)' : $reading['driver'];
+
+        if ($reading['error'] !== null) {
+            return [new BootAuditFinding(
+                key: self::KEY_CONNECTOR_UNUSABLE,
+                warning: sprintf(
+                    'The connection this package follows [%s] (%s) names driver [%s], which resolves no connector, so every query on it fails: %s',
+                    $read,
+                    $source,
+                    $driver,
+                    $reading['error'],
+                ),
+                resolution: 'The connection this package follows resolves a connector again, so the earlier warning no longer applies.',
+                context: [
+                    'connection' => $read,
+                    'source' => $source,
+                    'driver' => $driver,
+                    'binding' => $reading['binding'],
+                    'cause' => 'no_connector',
+                    'error' => $reading['error'],
+                ],
+            )];
+        }
+
+        if ($reading['connection_error'] !== null) {
+            return [new BootAuditFinding(
+                key: self::KEY_CONNECTOR_UNUSABLE,
+                warning: sprintf(
+                    'The connection this package follows [%s] (%s) is built by %s, but the connection itself cannot be built, so every query on it fails: %s',
+                    $read,
+                    $source,
+                    (string) $reading['connector'],
+                    $reading['connection_error'],
+                ),
+                resolution: 'The connection this package follows can be built again, so the earlier warning no longer applies.',
+                context: [
+                    'connection' => $read,
+                    'source' => $source,
+                    'driver' => $driver,
+                    'binding' => $reading['binding'],
+                    'connector' => $reading['connector'],
+                    'cause' => 'build_failed',
+                    'error' => $reading['connection_error'],
+                ],
+            )];
+        }
+
+        return [];
     }
 
     /**

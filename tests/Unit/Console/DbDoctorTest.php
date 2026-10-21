@@ -2765,17 +2765,17 @@ class DbDoctorTest extends TestCase
     }
 
     /**
-     * Both mechanisms armed: reported by name, as a warning, and dated from its own finding.
+     * Both mechanisms armed: a pass, and the row says what each of them is doing.
      *
-     * Neither arrangement is malformed — an installation may be halfway through the documented
-     * migration, which is to disarm this entry in the same change that arms the tasks — so this is
-     * not a failure. What it must not be is silent: the two keys are named, and what they share is
-     * the part neither setting shows on its own, because a mode the tasks apply goes through the
-     * flipper's forced path and is not recorded as a boot convergence. The record is what the key
-     * adds over the row: this row describes this boot, and `recorded unresolved since` says how long
-     * the pair has been armed.
+     * This is the state an installation lands in by arming the tasks without disarming the entry,
+     * and it is a supported arrangement rather than halfway through a migration: the entry converges
+     * a container in its first minutes and stops at the end of the boot window, the tasks follow the
+     * day for as long as it lives, and no boundary is contended because the two read the same
+     * resolver. What used to make the pair a warning is gone with the record it was about — either
+     * one's application writes the mode, the moment and the mechanism — so the row passes and
+     * `--strict` has nothing to fail on.
      */
-    public function test_the_flip_schedule_row_warns_when_both_mechanisms_are_armed(): void
+    public function test_the_flip_schedule_row_passes_when_both_mechanisms_are_armed(): void
     {
         $this->bindRedis(reachable: true);
         $this->usePublishedConfig();
@@ -2786,29 +2786,24 @@ class DbDoctorTest extends TestCase
         // disarming this one actually lands in.
         config()->set('db-manager.swrr.pgcat.schedule.windows.enabled', true);
 
-        $this->recordFindings([
-            WeightedDatabaseServiceProvider::KEY_FLIP_MECHANISMS_CONTENDED => '2026-09-20T08:15:00+00:00',
-        ]);
-
         [$output, $exit] = $this->doctor();
         $row = $this->rowContaining($output, 'flip schedule');
 
-        $this->assertStringStartsWith('WARN  flip schedule', $row);
+        $this->assertStringStartsWith('PASS  flip schedule', $row);
         $this->assertStringContainsString('the pooler follows the day: 2 boundary task(s)', $row);
         $this->assertStringContainsString('activate_readers:10:00', $row);
         $this->assertStringContainsString('deactivate_readers:14:20', $row);
-        $this->assertStringContainsString('two mechanisms own the pooler\'s mode', $row);
-        $this->assertStringContainsString('swrr.pgcat.schedule.enabled', $row);
-        $this->assertStringContainsString('swrr.pgcat.schedule.windows.enabled are both on', $row);
-        $this->assertStringContainsString('no boundary is contended', $row);
-        $this->assertStringContainsString('not written as a boot convergence', $row);
-        $this->assertStringContainsString('Arm one and disarm the other in the same change', $row);
-        $this->assertStringContainsString('recorded unresolved since 2026-09-20T08:15:00+00:00', $row);
-        $this->assertSame(0, $exit, 'a warning fails a preflight only under --strict');
+        // Both owners are named, and what the pair now records: the mechanism that last moved the
+        // mode, which is the fact the boot window's own evidence cannot state.
+        $this->assertStringContainsString('the per-minute entry is armed beside them', $row);
+        $this->assertStringContainsString('the mechanism that applied it', $row);
+        $this->assertStringNotContainsString('two mechanisms own the pooler', $row);
+        $this->assertStringNotContainsString('recorded unresolved since', $row);
+        $this->assertSame(0, $exit);
 
         [, $strictExit] = $this->doctor(strict: true);
 
-        $this->assertSame(1, $strictExit, '--strict fails a release for two mechanisms owning one mode');
+        $this->assertSame(0, $strictExit, 'two mechanisms armed is not a release failure any more');
     }
 
     public function test_the_flip_schedule_row_warns_when_nothing_is_scheduled_to_move_the_pooler(): void

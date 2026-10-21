@@ -692,6 +692,43 @@ Route::get('/health/db', [DatabaseHealthController::class, 'index'])
     ->middleware('auth.basic');
 ```
 
+### Every block, and every key in it
+
+The object is a contract with the programs that read it — an alert rule comparing `flip.failed`, a
+deploy gate running `jq -e '.pinned.ok'` — and none of them fails when a block is renamed: they read
+`null`, which this payload uses for the documented nothing. So every path it publishes is tabulated
+twice, here and in [docs/health-payload.md](docs/health-payload.md), and
+`DatabaseHealthControllerTest::test_every_block_and_key_the_payload_publishes_is_documented` reads
+both tables and a real payload: a block or key added, renamed or dropped without both tables is a
+failing test, in either direction. Keys are listed alphabetically — the set is the contract, not
+the order the array literal happens to have. An em dash marks a path whose value is a scalar, a
+list, or an object documented under another heading, and `<connection>` is the one name the payload
+chooses at runtime: `replicas` is keyed by the connection the package follows.
+
+| path | keys | what it is |
+|---|---|---|
+| `status` | — | `ok`, or `degraded` when one of the blocks below fails — the field a monitor pages on |
+| `pinned` | `checked`, `connection`, `driver`, `error`, `host_ip`, `latency_ms`, `ok`, `query`, `refused`, `source` | the one real query, on the connection the package follows, and the driver's own answer — the block `status` rests on |
+| `connector` | `binding`, `connection`, `connection_class`, `connection_driver`, `connection_error`, `connector`, `driver`, `error`, `factory`, `factory_error`, `resolver`, `resolver_applied`, `source` | the class that builds that connection's PDO, reported and never judged |
+| `replicas` | `<connection>` | a map holding the one connection the package follows |
+| `replicas.<connection>` | `cpu_factor`, `degraded`, `formula`, `next_mode_change_at`, `primary_store`, `ram_factor`, `read_mode`, `replicas`, `resolver_cache_size`, `store`, `store_healthy` | that connection's replica summary: weights, mode and store, as `db:replica-status` prints it |
+| `pgcat` | `armed_reason`, `configured_enabled`, `connection`, `driver`, `driver_supported`, `enabled`, `last_mode`, `mismatch`, `reader_window`, `reason`, `resolver_mode`, `schedule`, `warning`, `window` | the flipper's own snapshot, the array `db:pgcat-flip --status` shows |
+| `pgcat.reader_window` | `applied`, `direction`, `expected`, `failed`, `in_step`, `reason` | whether the pooler is on the variant the reader windows are asking for |
+| `pgcat.schedule` | `applicable`, `age_seconds`, `last_beat_at`, `not_judged`, `reason`, `stale`, `stale_after_seconds` | the schedule record's beat, read off the state file the entry writes |
+| `pgcat.window` | — | the boot window inside the snapshot — the same array as `flip.window` |
+| `flip` | `applicable`, `failed`, `reason`, `window` | the boot-window verdict, and the one pgcat reading the status rests on |
+| `flip.window` | — | the boot window, documented key by key under [The window block](#the-window-block-every-key-it-publishes) |
+| `schedule` | `applicable`, `age_seconds`, `causes`, `failed`, `interval_minutes`, `last_beat_at`, `missed_runs`, `not_judged`, `reason`, `stale_after_seconds` | whether anything is still running the entry that moves the mode, and why not when it is silent |
+| `reader_window` | `applicable`, `applied`, `expected`, `failed`, `reason` | the window verdict alone, for a reader that does not want the flipper's snapshot |
+| `pool_probe` | `address`, `admin`, `answered`, `applicable`, `control`, `discriminates`, `enabled`, `failed`, `host`, `judged`, `pools`, `port`, `reason`, `verified`, `warned` | what the running pooler holds, and whether a pool the application reads from is missing |
+| `pool_repairs` | `applicable`, `count`, `in_window`, `judged`, `last_at`, `max_repairs`, `reason`, `warned`, `window_seconds` | how often the container has had to repair a pool, and whether that rate is past the threshold — the one block that warns rather than fails |
+| `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity` | the boot audit's standing findings, as `db:doctor` reads them |
+| `audit.counts` | `error`, `warning` | the standing findings by level |
+| `audit.scope` | `app_env`, `connection`, `driver`, `source` | what the boot that wrote them was running as |
+| `audit.current` | `available`, `count`, `counts`, `error`, `findings`, `severity` | the same audit re-read live by this process, which is not the same thing as what is on record |
+| `audit.current.counts` | `error`, `warning` | the live findings by level |
+| `errors` | — | a list of sentences naming what this process could not do, which no block above owns |
+
 ### It is about one connection: the one the package follows
 
 The subject is `db-manager.swrr.connection` — else `database.default` — resolved once for the whole
@@ -971,7 +1008,9 @@ The same rule is in the boot log, so a monitor that would rather read lines than
 host does not have to poll this route at all: every line the boot audit writes carries the
 level it was written at as `severity`, in the payload beside the `finding` key — a refused
 value still standing is `severity: "error"`, the same comparison this route's `severity`
-answers, and the finding is logged on every boot while it stands. It is in the payload rather
+answers, and the finding is logged by the boot that first sees it and again once
+`swrr.audit.finding_seconds` has passed — a configuration state is not news on every
+request. It is in the payload rather
 than left to the channel's own level because how a level is spelled belongs to whatever
 handler is configured (`production.ERROR` in the default line log, `level_name` under a JSON
 formatter, a priority number in syslog), and because `ERROR` there is every error the
@@ -1062,7 +1101,7 @@ level. Under a JSON handler the line is:
 |---|---|---|
 | page | `severity == "error"` | a value the package refused to interpret is standing: the installation is running without it |
 | ticket | `severity == "warning"`, no `resolved` | a setting that reads as on but cannot act |
-| stop the page | `severity == "warning"`, `resolved == true` | the finding cleared — the line the pager stops on. It is logged on every boot while it stands, so the last line per `finding` is the state, and no other state is needed |
+| stop the page | `severity == "warning"`, `resolved == true` | the finding cleared — the line the pager stops on. A standing finding is logged by the boot that first sees it and then once per `swrr.audit.finding_seconds`, so the last line per `finding` is still the state, and no other state is needed |
 
 The two patterns below are the same rule, and which one applies is the handler's shape: a
 JSON channel makes the payload the line, while the default line handler appends it, so there
@@ -1421,7 +1460,11 @@ from a payload has one place to look rather than four.
 | `converged` | whether the first usable mode on record was reached inside this window's bounds |
 | `converged_at` | that moment, as the state file holds it, or `null` |
 | `converged_mode` | the mode it reached, or `null` |
-| `failed` | closed and not converged — the one field here the endpoint acts on, and the one behind `flip.failed` and the `503` |
+| `applied` | whether a mode was applied inside those bounds by **either** mechanism, so a boundary task's application counts and `converged` need not |
+| `applied_at` | that moment, as the state file holds it, or `null` |
+| `applied_mode` | the mode applied, or `null` |
+| `applied_via` | which mechanism applied it — `schedule` for the per-minute entry, `window` for a reader-window task, `manual` for `db:pgcat-flip --force-mode` — or `null` for a state file written before the mechanism was recorded |
+| `failed` | closed with neither a convergence nor an application inside the window — the one field here the endpoint acts on, and the one behind `flip.failed` and the `503` |
 | `failed_reason` | which of the three ways it failed when `failed` is true, and `null` otherwise |
 
 Two rules hold for the whole block. A key that was never recorded is `null` rather than absent, so
@@ -1429,6 +1472,13 @@ a consumer tests a value instead of the shape of the object. And the convergence
 for the container's life: the first run that reached a usable mode is what the window is judged on,
 so a later failure cannot un-work a container that did come up. A container with no flipper at all
 publishes `flip.window: null`, which is the same answer `applicable: false` gives beside it.
+
+The `applied` keys are the other half, and they are what a second mechanism made necessary: the
+per-minute entry records `converged_at` and then stops acting, while the reader-window tasks go on
+moving the mode through the forced path and record no run — so `converged` cannot see them, and a
+pooler a boundary task is keeping in step is not a container that failed to converge. Both write
+the same mode record, which is why this half answers *what the pooler is in and who put it there*
+for the container's whole life, and why `failed` is the pair of the two.
 
 One line about the shapes, because the state file is one an operator may edit by hand: `runs` is
 read as an integer and the repair facts are read as strings, so a value that is neither arrives as
@@ -1480,15 +1530,15 @@ would otherwise have left every read to a new pool failing reports `repaired` in
 **Turn `swrr.pgcat.schedule.enabled` off in the same change.** The two read the same resolver, and they
 cannot both act on one boundary — the per-minute entry checks the boot window before it takes its
 lock, so once a container has converged it returns `window_closed` without reading or writing a
-file — so this is a choice about which mechanism owns the mode rather than a race to avoid. What the
-per-minute entry has left to contribute after the boot window is a second process a minute and a
-second line in the log; what the tasks contribute is the mode applied at the boundary through
-`forceMode()`, which records no run, so the two do not share a record of what they did either. Keep
-one of them, so a mode change is one mechanism's to make and one record's to describe.
+file — so this is a choice about which mechanism owns the mode rather than a race to avoid, and the
+two may be armed together: what the entry contributes is a container's first minutes, what the tasks
+contribute is the mode applied at the boundary through `forceMode()`, and either one's application
+writes the same mode record — the mode, the moment and the mechanism that applied it — so the
+readings say who last moved the pooler rather than describing the entry, which stops acting when the
+boot window closes. Keep whichever you want, and keep both if you want both: a mode change is one
+record's to describe either way.
 `db:doctor`'s `flip schedule` row reports which of the two answers a boundary, and warns when
-neither does — and when both do, which is the same warning read from the other end: one mode with
-two owners, both keys named, and a boot finding of its own (`swrr.pgcat.schedule.both_armed`) so
-the row can say how long the pair has been armed rather than only that it is. A window is skipped,
+neither does. A window is skipped,
 and logged at `warning`,
 when it cannot be expressed honestly rather than approximated: times that are not readable, an end
 at or before its start, or a window shorter than `lead + grace` (the deactivation would begin
@@ -1761,7 +1811,7 @@ the application still boots and answers requests, and each one is a row:
 | `pgcat mode`         | **Fails** when the pooler is on the configuration the reader windows are not asking for, and leads with which way round it is: the writer-only config while a reader window is open, so every read the resolver meant for the replica pool reaches the writer, or the readers config outside every window, so reads keep reaching a replica through the hours the fallback holds them on the writer. Reads pgcat's own *file* rather than the mode the last flip recorded, so a task that booted outside a window, converged to the writer-only config and never flipped again still shows here — that shape is the incident the row exists for. Prints the flipper's own sentence rather than a second copy of it, the same one `/health/db` reports and logs, which names the file in place and the command that moves it; so no `suggestion`, and the verdict is dated from the boot window like the endpoint's. Passes when the flipper is not armed — no file is compared, so the two cannot disagree — and when the file could not be read at all, which is reported as *nothing compared* rather than as a pass, because judging a file is `pgcat files`' row |
 | `pool probe`         | the running pooler is not answerable for a pool the configuration declares: pgcat is RUNNING — `pgcat supervisor` says so — and holds no pool for a database the application is connected to, so every read to it fails with `No pool configured for database: …`. The reading is the pooler's own inventory where it can be read: `SHOW POOLS` on pgcat's admin console, on the configured host and the `[general] port` the file the pooler is running on names, with that file's `[general] admin_username` and `admin_password` — one connection for the sweep, no `psql`, no connection through the pool, and a declared pool the list does not carry **fails** the row exactly as a front-door refusal does. That is what makes the row independent of how the pooler answers an anonymous startup packet, which is a property of its ordering rather than of its pools. A console that cannot be read — no admin credentials in that file, a refusal, a SCRAM challenge, silence — falls back to one wave of PostgreSQL v3 startup packets — every declared pool asked at once under a single timeout — and the first message back from each, with no credentials: a pooler that resolves a pool before it authenticates refuses a name it holds no pool for, and a pool that exists behind a database that is down still answers, because the question is what the pooler *has* rather than what it can reach. Whether those fallback answers are *proof* is settled by one more name, a control no configuration declares: refused, the pooler reads pools before it authenticates and each answer proves the pool exists; answered, the pooler authenticates *first* — which is what the deployment this was written against was measured doing — and answers every name, so the row *warns* once the boot window has closed rather than passing: a green row is a claim that the pooler is answerable for its pools, and this is the one reading that could not make it. *Warns* for a pooler that answered nothing at all — refused, timed out, or silent — rather than failing it: a probe pointed at the wrong address must not be able to fail a healthy installation, and the same line is what keeps it from restarting a healthy pooler every minute. Every row that asked something ends with the endpoint the packets went to — `— probed tcp://host:port`, read off the probe's own answer rather than off the settings — because a probe aimed at the wrong port reports the same silence as a pooler that is down, and the pool names alone leave an operator nothing to check. Passes without opening a socket when the probe is not armed (`swrr.pgcat.pool_probe.enabled` off, or the pooler's file naming no dialable `[general] port`) — the pooler is then taken at supervisord's word, which cannot tell a pool it is not serving from one it is — and is *not judged* while the boot window is still open, where the flip still re-applies the configuration. Prints no `suggestion`: the repair is a restart of the pooler or a file a flip applies, rather than a value this line could name |
 | `pool repairs`       | how many pool repairs this container has recorded, and when the last one happened. A repair is the self-heal working rather than a fault — a run that found the running pooler refusing a pool the applied file declares re-applied the file, and the fact that it did is the answer the self-heal gave — so the row **passes** in every state it can find and states the count and the time, the line `read/write pair` draws for its own reading: failing on it would fail an installation for the flip having done its job. What it adds is the difference `last_kind` cannot carry — two repairs a minute apart and two a week apart both leave the last run reading `repaired` — and the standing fault, when there is one now, is `pool probe`'s row, which asks the pooler rather than reading its history. The two facts are `PgcatConfigFlipper::poolRepairStatus()`'s, the same derivation `db:pgcat-flip --status` prints its `pool_repairs` row from, so the two surfaces cannot count one container's repairs differently; a repair is only possible inside the boot window, because a run past it returns before it takes the lock, and the row says so rather than letting a count that is not moving read as a pooler that has stopped needing repair. Read from the flip's state file and nothing else, so it is answered in a `--connection-only` run. Prints no `suggestion`: the repair for a pooler that keeps refusing pools is the pooler — a restart, a file, an address — and none of them is a value this line could name |
-| `flip schedule`      | nothing moves the pooler at the boundaries the configuration is written for. *Warns* when the reader-window tasks are on and no boundary is scheduled — every window is unusable, or too short to hold `lead_seconds` + `grace_seconds` — and when the flipper is armed with neither the per-minute entry nor the window tasks on, which leaves pgcat's file where the last write put it while the resolver's mode moves on. **Fails** on either `swrr.pgcat.schedule.enabled` or `swrr.pgcat.schedule.windows.enabled` written as something that is not on or off — the two switches `switch values` does not cover — naming the value, the accepted spellings and the value the setting falls back to, which for these two is *on* for the cadence and *off* for the tasks, each the value its setting documents. On a run that reads cleanly it says which mechanism answers a boundary: the reader-window tasks, named with their boundaries and their lead and grace, or the per-minute entry alone, which converges the pool in the first minutes after a container starts and is then a no-op. *Warns* as well when **both** are armed, naming both keys: one mode with two owners is one mode with two accounts of it. No boundary is contended — the per-minute entry checks the boot window before it takes its lock, so once a container has converged it returns `window_closed` without reading or writing a file — and that is the part neither setting shows on its own: what the tasks apply goes through the flipper's `forceMode()` at the boundary, which records no run, so the readings that describe the entry's convergence describe a mechanism that has stopped acting. It is a warning rather than a failure because an installation may be halfway through the documented migration — disarm this entry in the same change that arms the tasks — so a preflight that failed it would refuse exactly the installation doing the right thing slowly; `--strict` fails it, and it is a boot finding of its own (`swrr.pgcat.schedule.both_armed`), so the row dates the pair while this boot's row describes it. The row prints no `suggestion`, because the repair for either warning is a choice between two settings |
+| `flip schedule`      | nothing moves the pooler at the boundaries the configuration is written for. *Warns* when the reader-window tasks are on and no boundary is scheduled — every window is unusable, or too short to hold `lead_seconds` + `grace_seconds` — and when the flipper is armed with neither the per-minute entry nor the window tasks on, which leaves pgcat's file where the last write put it while the resolver's mode moves on. **Fails** on either `swrr.pgcat.schedule.enabled` or `swrr.pgcat.schedule.windows.enabled` written as something that is not on or off — the two switches `switch values` does not cover — naming the value, the accepted spellings and the value the setting falls back to, which for these two is *on* for the cadence and *off* for the tasks, each the value its setting documents. On a run that reads cleanly it says which mechanism answers a boundary: the reader-window tasks, named with their boundaries and their lead and grace, or the per-minute entry alone, which converges the pool in the first minutes after a container starts and is then a no-op. **Both** armed is a pass rather than a warning, and says so: one mechanism converges a container in its first minutes and stops at the end of the boot window, the other follows the day for as long as the container lives, no boundary is contended — the entry checks the boot window before it takes its lock, so once a container has converged it returns `window_closed` without reading or writing a file — and the two share the record that used to be the argument against the pair: either one's application writes the mode, the moment and the mechanism that applied it, so `pgcat mode` and `/health/db` say which mechanism last moved the pooler instead of describing the one that has stopped acting. The row prints no `suggestion`, because the repair for either warning is a choice between two settings |
 | `schedule beat`      | the per-minute entry has stopped producing runs. The row above reads what is *configured* to move the pooler; this one reads whether that mechanism has been *running*, which is a different failure at a different moment — the entry can be registered, listed by `schedule:list` and armed exactly as documented while the cron line (or `schedule:work`) that fires it is gone, and every other reading then describes a world that stopped moving. **Fails** when the last beat is older than `swrr.pgcat.schedule.stale_after_missed_runs` cadences — five minutes at the shipped one-minute interval — and when no beat at all has been recorded since the boot window closed, which is the same fault one interval earlier. *Warns* when the watch is switched off (`stale_after_missed_runs = 0`), and `--strict` fails a release on that: an installation that has switched off the only check that notices a dead cron is a fact a preflight puts in front of somebody. *Not judged*, in the row's own words, when the entry is not scheduled, while the container is still inside its boot window, and when it recorded no boot time at all — "nothing is watched" and "watched, and it is well" must not be the same silence. Beside that verdict the row names the three causes a stopped schedule has that the state file cannot show — the store the runs' mutexes live in and whether it answered, how many entries run `db:pgcat-flip`, and the boot stamp with the mode and owner it was found with — as *readings* rather than verdicts, so the row's status and the exit code stay the beat's and an installation whose entry is not scheduled is told none of them; a bounded run (`--connection-only`) names the store without asking it, because being answerable where the store is not there is what that mode is for. Prints no `suggestion`: the repair is the container's cron or `schedule:work`, and the row's sentence names it |
 | `store probe`        | *warns* when the store check can never run: probing switched off (`swrr.audit.store_probe_seconds = 0`), or an in-process primary store with nothing to reach. **Fails** when the audit record cannot be written — the record is what throttles the probe, so without it the `PING` is skipped on every boot and an unreachable store goes unreported. Names **every** state it finds rather than the first: an installation that is both switched off and unable to write the record is told both, and the row's verdict is the loudest of them. The two states are boot findings of their own (`swrr.audit.store_probe_seconds.off` and `swrr.audit.file.unwritable`), so each is dated from its own record entry — a record a mode left read-only is repaired before this row is asked, so its date lands; only a file this account genuinely cannot change is the state whose own record has nowhere to put the date |
 | `store reachability` | the primary store cannot serve a read: no usable `redis` binding, or a connection that refuses — workers then fall back to an in-process rotation that is not shared between them |
