@@ -1097,6 +1097,75 @@ final class HandoffTest extends TestCase
         );
     }
 
+    /**
+     * The row a push falsifies, held to the remote that falsifies it.
+     *
+     * WHAT THIS CATCHES THAT NOTHING ELSE IN THIS FILE CAN
+     * ----------------------------------------------------
+     *   Section 2 says the commits above `origin/dev` are on no remote. Every other reading here is
+     *   taken against the pair the note records, which is what makes a committed note checkable at
+     *   all — and is also why a push used to leave the note describing published commits with the
+     *   suite green: a push moves the remote and nothing in this checkout. So the remote is asked
+     *   directly and the row has to be the tip it answers with.
+     *
+     * THE ONE ALLOWANCE, AND WHY IT IS NOT A LEAK
+     *   A note is committed before the push that publishes it, so on that commit the row names the
+     *   previous tip by construction — there is no note that could name the commit its own push is
+     *   about to create. The tip this checkout is standing on is therefore allowed beside the row:
+     *   that is the note travelling on its own push, which is the state section 2 says it is in.
+     *   Anything else is a remote this note no longer describes — a later push, a colleague's, or a
+     *   fetch that reveals one — and is red until the note is re-taken.
+     *
+     * A remote that cannot be asked is a skip that says why, never a pass: the repository is public
+     * and answers anonymously, so a machine with no network is a reading this run did not take
+     * rather than one it took and approved.
+     */
+    public function test_the_origin_row_still_names_the_tip_the_remote_answers(): void
+    {
+        $origin = Handoff::basis()['origin'];
+        $live = Handoff::remoteOrigin();
+
+        if ($live['sha'] === null) {
+            self::markTestSkipped(sprintf(
+                'The live tip of `origin/dev` could not be asked for, so the row is not held to it on this run: %s',
+                $live['error'],
+            ));
+        }
+
+        $resolved = Handoff::git('rev-parse', $origin['sha'].'^{commit}');
+
+        self::assertSame(
+            0,
+            $resolved['exit'],
+            sprintf(
+                'HANDOFF.md line %d names `origin/dev` as %s, and this checkout cannot resolve that commit, so '
+                .'the row cannot be compared with the remote at all: %s',
+                $origin['source'],
+                $origin['sha'],
+                trim($resolved['error']),
+            ),
+        );
+
+        $row = trim($resolved['output']);
+        $head = trim(Handoff::git('rev-parse', 'HEAD')['output']);
+
+        self::assertContains(
+            $live['sha'],
+            [$row, $head],
+            sprintf(
+                "HANDOFF.md line %d names `origin/dev` as %s, and the remote answers %s — neither that commit "
+                ."nor this checkout's HEAD (%s). A push has published commits section 2 still counts as "
+                .'unpushed, so the note describes a state the world has left; re-take it against %s before '
+                .'anything here is trusted again.',
+                $origin['source'],
+                $origin['sha'],
+                substr($live['sha'], 0, 7),
+                substr($head, 0, 7),
+                substr($live['sha'], 0, 7),
+            ),
+        );
+    }
+
     public function test_the_commits_it_lists_are_the_most_recent_ones_between_them(): void
     {
         $basis = Handoff::basis();
