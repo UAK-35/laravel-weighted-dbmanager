@@ -111,21 +111,21 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 682.7s
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 678.8s
       recorded 2026-10-22, PHP 8.4.26
-      syntax     PASS    19.1s  168 files, no syntax errors
-      ast        PASS     1.8s  168 files parsed
-      writeback  PASS     0.5s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     2.7s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     2.6s  20 platform requirements satisfied
+      syntax     PASS    18.5s  168 files, no syntax errors
+      ast        PASS     2.3s  168 files parsed
+      writeback  PASS     0.6s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     3.2s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     3.0s  20 platform requirements satisfied
       interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
-      yaml       PASS     1.9s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     0.6s  56 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.0s  10088 prose line(s) in 34 record(s), no fused sentence; the detector agreed w…
-      phpstan    PASS    24.6s  [OK] No errors
-      pint       PASS     6.5s  PASS … 169 files
-      tests      PASS   622.2s  Tests: 1631, Assertions: 10954, Skipped: 10.
+      yaml       PASS     2.1s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     0.8s  56 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.0s  10444 prose line(s) in 35 record(s), no fused sentence; the detector agreed w…
+      phpstan    PASS     6.9s  [OK] No errors
+      pint       PASS     6.8s  PASS … 169 files
+      tests      PASS   634.4s  Tests: 1646, Assertions: 11087, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
@@ -185,8 +185,11 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=a9ad00e
-  --> exit 0: inventory is current — 53 files, 262 public methods, 306 key(s)/member(s), described as v0.2.0-alpha9
+php bin/inventory.php --check --at=06d8104
+  --> exit 1: the inventory is out of step with the tree at 06d8104
+      files.tsv: 1 line(s) stale
+      methods.tsv: 3 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
   --> exit 1: the inventory is out of step with the tree
@@ -225,15 +228,6 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/local-postgres-and-pgcat.md` | the environment record: the two PostgreSQL servers this machine runs (settings, authentication, databases, and the physical standby streaming from the primary, with the configuration files and log that standby owns rather than sharing), and the pgcat checkout behind them — its origin, commit, every configuration file, the pool rows the standby is named in, the two starter scripts beside the data directories, the build this machine needs for the pooler, and the read and the write that were walked through it to 5431 and 5432 |
-| `scripts/servers-startup/README.md` | the Windows runbook for the three test servers: the machine file and its two tokens, the start order, what each script owns, why the pooler needs a build script at all, and the two queries that prove which server answered |
-| `scripts/servers-startup/apply-hba-scram.ps1` | the pg_hba.conf rules pgcat needs, written above the cleartext ones in both servers' files, backed up once, idempotent, and made live with pg_reload_conf() |
-| `scripts/servers-startup/build-pgcat.ps1` | the build this platform needs: three crates unpacked outside the registry with their `.der` files renamed, two crate-level lints relaxed, and cargo pointed at those copies |
-| `scripts/servers-startup/pgcat.toml` | the pooler config the scripts start: 127.0.0.1:5433, the standby as every shard's replica row, and `simple_db` splitting reads from writes |
-| `scripts/servers-startup/servers.sample.cmd` | the committed form of that machine file: the two directories every script in the folder refuses to guess at, written as tokens |
-| `scripts/servers-startup/start-pgcat.bat` | the pooler's starter: the config beside it rather than the checkout's, the detached window and why the child gets its own handles, the wait on 5433, and SHOW POOLS as the proof it is serving |
-| `scripts/servers-startup/start-primary.bat` | the primary's starter: the paths from the machine file, the refusal while the installer's Windows service holds 5432, and the role read back after pg_isready answers |
-| `scripts/servers-startup/start-replica.bat` | the standby's starter on 5431, the same shape, with pg_is_in_recovery() read back because pg_isready cannot tell a standby from a primary |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
@@ -250,10 +244,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `a9ad00e` — *Release v0.2.0-alpha9* |
+| HEAD | `06d8104` — *fix: the gate's record ends in the line ending its own hash is taken over* |
 | `origin/dev` | `3dc70db` — *docs: the alpha6 CI record carries its outcome, and the green run that answers it* |
-| Unpushed | 22 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 7, feat 6, fix 3, test 4 |
+| Unpushed | 29 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 2, docs 10, feat 7, fix 4, test 5 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -284,16 +278,16 @@ it travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+06d8104  fix: the gate's record ends in the line ending its own hash is taken over
+175253c  chore: the local work directories and the IDE's vendor index are not the package
+16e3f80  docs: the commit skill names the checkout's guarded commit path, and how a split is read back
+3ef9f04  docs: the interpreter is read from the machine record before the first command
+e22347b  test: the note's origin row is held to the tip the remote answers
+30109fc  feat: the doctor asks whether the boot audit's record is actually written
+ad7a05d  docs: the test servers are started from here instead of searched for
 a9ad00e  Release v0.2.0-alpha9
 d144747  fix: the note's guard reads a release's own pending tag the way the release writes it
 63027bf  docs: the note is re-taken at 98c80df, and the gate it quotes is this run
-98c80df  feat: each pool repair is readable as a ledger, and readiness answers the probe alone
-e8ce7c1  docs: the note is re-taken at 6e1fb0c, and the gate it quotes is this run
-6e1fb0c  fix: the Unreleased section carries one `### Fixed`, not two
-eee4258  test: the two tag readings are pinned on a repository that has both kinds of tag
-83a539b  test: the two guards that read every tag in the repository now read the tags this branch carries
-15fc867  docs: the payload's key tables are compared as a set, so their order is not the contract
-971d20e  docs: the published config row's fresh-install answer is one sentence in the four records that state it
 ```
 <!-- /handoff:log -->
 
@@ -327,8 +321,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9` |
 | The latest of them | `v0.2.0-alpha9` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 0 entries — 0 added, 0 fixed, 0 changed |
-| The notes weigh as | `patch` — the section is a bare heading at this basis, because `bin/release.php` promoted the batch into `0.2.0-alpha9` and left the next section to the first change |
+| `## Unreleased` at the basis | 2 entries — 1 added, 1 fixed, 0 changed |
+| The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the doctor's `probe stamp` row, with the `### Fixed` entry for the record a boot cannot write beside it |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -336,14 +330,15 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are the `### Added`,
 `### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and at this basis the
-section carries none of them: the release at the head of this branch promoted the batch that stood
-there into `## 0.2.0-alpha9 - 2026-10-22`, so the `## Unreleased` above it is the bare heading a
-release leaves behind, and `bin/weighing.php` reads it as `patch` where the note taken before the
-release read `breaking` for the `### Removed` entry the batch carried. What the tag holds is still in
+section carries two of them: the doctor's `probe stamp` row under `### Added` and the carry a boot
+writes beside a record it cannot write under `### Fixed`, so `bin/weighing.php` reads it as `minor`.
+The `## Unreleased` the release at the head of this branch left behind was the bare heading, and the
+note taken before it read `breaking` for the `### Removed` entry that batch carried. What the tag holds is still in
 nothing a consumer can install — the release commit is the tip of this branch and not of
 `origin/dev`, which is section 2's count — so the register is a branch whose next release would
 publish the port plan's status guard, the pooler's mode record and the finding it retired,
-`/health/db`'s `connector` key with its two schedule settings, the connector boot finding, the three
+`/health/db`'s `connector` key with its two schedule settings, the connector boot finding, the doctor's
+`probe stamp` row with the `.carry.json` a boot writes beside a record it cannot write, the three
 records of application-side work with the third recording skill beside them, the two halves the
 prose-number pass added, and this note's two tag readings.
 
