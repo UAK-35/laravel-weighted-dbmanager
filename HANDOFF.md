@@ -185,8 +185,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=65e217f
-  --> exit 1: the inventory is out of step with the tree at 65e217f
+php bin/inventory.php --check --at=c081def
+  --> exit 1: the inventory is out of step with the tree at c081def
       files.tsv: 1 line(s) stale
       methods.tsv: 1 line(s) stale
       surface.tsv: 1 line(s) stale
@@ -244,10 +244,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `65e217f` — *docs: the note is re-taken at e968ba6, the commit the push carried* |
-| `origin/dev` | `65e217f` — *docs: the note is re-taken at e968ba6, the commit the push carried* |
-| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
-| Since the last tag | none |
+| HEAD | `c081def` — *chore: the log-and-record pair is read back by one command* |
+| `origin/dev` | `bb28128` — *Release v0.2.0-alpha10* |
+| Unpushed | 1 commit — the one `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -276,7 +276,11 @@ commit the release made is one a consumer can fetch. This note is the commit *af
 and it travels on the push that follows.
 
 <!-- handoff:log -->
-Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
+The one most recent are the ones a reader is most likely to be standing in the middle of:
+
+```
+c081def  chore: the log-and-record pair is read back by one command
+```
 <!-- /handoff:log -->
 
 The fence above is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
@@ -307,8 +311,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10` |
 | The latest of them | `v0.2.0-alpha10` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 2 entries — 1 added, 1 fixed, 0 changed |
-| The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the doctor's `probe stamp` row, with the `### Fixed` entry for the record a boot cannot write beside it |
+| `## Unreleased` at the basis | 0 entries — 0 added, 0 fixed, 0 changed |
+| The notes weigh as | `patch` — the section at this basis is the bare heading `v0.2.0-alpha10`'s release left behind, so no heading is there to ask for more than a patch |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -316,17 +320,12 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are the `### Added`,
 `### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and at this basis the
-section carries two of them: the doctor's `probe stamp` row under `### Added` and the carry a boot
-writes beside a record it cannot write under `### Fixed`, so `bin/weighing.php` reads it as `minor`.
-The `## Unreleased` the release at the head of this branch left behind was the bare heading, and the
-note taken before it read `breaking` for the `### Removed` entry that batch carried. What no release holds is
-still in nothing a consumer can install — the nine commits above `v0.2.0-alpha9`, whose release commit
-and tag are on the remote now, so the tag is a version Packagist derives rather than one only this
-branch has — so the register is a branch whose next release would publish the port plan's status guard, the pooler's mode record and the finding it retired,
-`/health/db`'s `connector` key with its two schedule settings, the connector boot finding, the doctor's
-`probe stamp` row with the `.carry.json` a boot writes beside a record it cannot write, the three
-records of application-side work with the third recording skill beside them, the two halves the
-prose-number pass added, and this note's two tag readings.
+section carries none of them: `v0.2.0-alpha10`'s release promoted the doctor's `probe stamp` row under
+`### Added` and the carry a boot writes beside a record it cannot write under `### Fixed` into its own
+version, leaving the bare `## Unreleased` behind, and `bin/weighing.php` reads a section with no
+heading as `patch`. What no release holds is the one commit above that release — `c081def`, the
+command that reads this note's log-and-record pair back — so the register is a branch whose next
+release would publish that command and nothing else a consumer cannot already install.
 
 ### The release that cut this tag, and the three rows it could not write
 

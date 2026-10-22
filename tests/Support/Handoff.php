@@ -863,6 +863,10 @@ final class Handoff
             'words' => 'the pooler config the scripts start: 127.0.0.1:5433, the standby as every shard\'s replica row, and `simple_db` splitting reads from writes',
             'read' => 'sha256:51a4011d9bb7d03335d8b21c76c6188fdfbffe5e74699e0948a4c1ec76935937',
         ],
+        'docs/issues/issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md' => [
+            'words' => 'the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in',
+            'read' => 'sha256:c9b43acc7f650debcf7f05baf6d0bc990ab8446cb911cc69a97b68cd84277f90',
+        ],
         // @pending-descriptions-end
     ];
 
