@@ -75,8 +75,9 @@ file that owns it, and is not restated here — a copy would drift and a guard w
 | the three test servers on Windows — the PostgreSQL primary on 5432, the standby on 5431 and the pgcat pooler on 5433 — and the scripts that start, configure and build them | `scripts/servers-startup/README.md`, and `docs/local-postgres-and-pgcat.md` for what is behind them |
 
 The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` (how a tool is run),
-`release.php`, `weighing.php`, `inventory.php`, `surface.php`, `api.php`, `counts.php`, `blame.php`
-and `publish-config.php`. The published config is `config/db-manager.php` with `config/app.php`.
+`release.php`, `weighing.php`, `inventory.php`, `surface.php`, `api.php`, `counts.php`, `blame.php`,
+`entry.php` (a commit, the note it wrote and the release that published it) and
+`publish-config.php`. The published config is `config/db-manager.php` with `config/app.php`.
 
 ---
 

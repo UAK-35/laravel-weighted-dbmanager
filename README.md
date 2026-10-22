@@ -2774,6 +2774,8 @@ bin/api.php              renders API.md — the public API page — from that re
                          prints the page a past tree renders with --at=REF, writing
                          nothing (see RELEASING.md)
 bin/blame.php            which signal names one symbol, and what it contributed to the bump
+bin/entry.php            the commit and the changelog entry it wrote, with the release that
+                         published it, read back on demand rather than assembled by hand
 bin/publish-config.php   publishes the sample config into an application
 files.tsv, methods.tsv,  what the last release shipped — its files, their public methods,
 surface.tsv              and the config keys, env vars, constants and properties a
