@@ -1108,11 +1108,17 @@ final class HandoffTest extends TestCase
      *   suite green: a push moves the remote and nothing in this checkout. So the remote is asked
      *   directly and the row has to be the tip it answers with.
      *
-     * THE ONE ALLOWANCE, AND WHY IT IS NOT A LEAK
+     * THE TWO ALLOWANCES, AND WHY THEY ARE NOT LEAKS
      *   A note is committed before the push that publishes it, so on that commit the row names the
      *   previous tip by construction — there is no note that could name the commit its own push is
      *   about to create. The tip this checkout is standing on is therefore allowed beside the row:
      *   that is the note travelling on its own push, which is the state section 2 says it is in.
+     *
+     *   The second is the release. `bin/release.php` commits the promoted notes and the restamped
+     *   records on top of the pushed tip, moves section 3's tag rows and runs this guard against
+     *   that commit before it tags — and a commit made a moment ago has no run of its own, so the
+     *   remote necessarily answers with its parent. Allowing the parent is what lets the release
+     *   check the note at all; it is not a widening, because a push two commits back is still red.
      *   Anything else is a remote this note no longer describes — a later push, a colleague's, or a
      *   fetch that reveals one — and is red until the note is re-taken.
      *
@@ -1148,19 +1154,21 @@ final class HandoffTest extends TestCase
 
         $row = trim($resolved['output']);
         $head = trim(Handoff::git('rev-parse', 'HEAD')['output']);
+        $parent = trim(Handoff::git('rev-parse', 'HEAD~1')['output']);
 
         self::assertContains(
             $live['sha'],
-            [$row, $head],
+            [$row, $head, $parent],
             sprintf(
-                "HANDOFF.md line %d names `origin/dev` as %s, and the remote answers %s — neither that commit "
-                ."nor this checkout's HEAD (%s). A push has published commits section 2 still counts as "
-                .'unpushed, so the note describes a state the world has left; re-take it against %s before '
-                .'anything here is trusted again.',
+                "HANDOFF.md line %d names `origin/dev` as %s, and the remote answers %s — none of that commit, "
+                ."this checkout's HEAD (%s), or the commit HEAD was built on (%s). A push has published "
+                .'commits section 2 still counts as unpushed, so the note describes a state the world has '
+                .'left; re-take it against %s before anything here is trusted again.',
                 $origin['source'],
                 $origin['sha'],
                 substr($live['sha'], 0, 7),
                 substr($head, 0, 7),
+                substr($parent, 0, 7),
                 substr($live['sha'], 0, 7),
             ),
         );
