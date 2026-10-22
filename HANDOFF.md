@@ -185,8 +185,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=e968ba6
-  --> exit 1: the inventory is out of step with the tree at e968ba6
+php bin/inventory.php --check --at=65e217f
+  --> exit 1: the inventory is out of step with the tree at 65e217f
       files.tsv: 1 line(s) stale
       methods.tsv: 3 line(s) stale
       surface.tsv: 1 line(s) stale
@@ -244,8 +244,8 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `e968ba6` — *docs: the note is re-taken at 06d8104, and the gate it quotes is this run* |
-| `origin/dev` | `e968ba6` — *docs: the note is re-taken at 06d8104, and the gate it quotes is this run* |
+| HEAD | `65e217f` — *docs: the note is re-taken at e968ba6, the commit the push carried* |
+| `origin/dev` | `65e217f` — *docs: the note is re-taken at e968ba6, the commit the push carried* |
 | Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
 | Since the last tag | none |
 <!-- /handoff:unpushed -->
@@ -320,7 +320,7 @@ section carries two of them: the doctor's `probe stamp` row under `### Added` an
 writes beside a record it cannot write under `### Fixed`, so `bin/weighing.php` reads it as `minor`.
 The `## Unreleased` the release at the head of this branch left behind was the bare heading, and the
 note taken before it read `breaking` for the `### Removed` entry that batch carried. What no release holds is
-still in nothing a consumer can install — the eight commits above `v0.2.0-alpha9`, whose release commit
+still in nothing a consumer can install — the nine commits above `v0.2.0-alpha9`, whose release commit
 and tag are on the remote now, so the tag is a version Packagist derives rather than one only this
 branch has — so the register is a branch whose next release would publish the port plan's status guard, the pooler's mode record and the finding it retired,
 `/health/db`'s `connector` key with its two schedule settings, the connector boot finding, the doctor's
