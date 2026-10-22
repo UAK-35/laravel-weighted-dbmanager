@@ -1231,6 +1231,12 @@ final class HandoffTest extends TestCase
         $previous = getenv('HANDOFF_PENDING_TAG');
 
         try {
+            // A release this guard runs inside is already naming the tag it is about to cut, and a
+            // pending tag is taken by `tagNames()` whatever repository is asked — which is the point of
+            // the second half of this test. The fixture's own tags are the first half's question, so the
+            // ambient name is cleared here and set again below, where it is a claim rather than noise.
+            putenv('HANDOFF_PENDING_TAG');
+
             self::assertSame(
                 ['v0.1.0', 'v0.2.0-alpha8'],
                 Handoff::tagNames($root),
@@ -1793,11 +1799,21 @@ final class HandoffTest extends TestCase
     {
         $stamp = self::recordStamp();
 
-        $resolved = Handoff::git('rev-parse', $stamp.'^{commit}');
+        // A release stamps the three records with the tag it is about to cut, so during the guard run
+        // that tag is a name git cannot resolve yet: the register is the commit it will be cut at, and
+        // the reading that has to be current is the plain `--check`, which is the one `bin/inventory.php`
+        // documents for a release's own record ("the one stamp `--check` cannot derive from git"). Asking
+        // `--at=<stamp>` there would be asking git for a ref the release has deliberately not created.
+        $pending = Handoff::pendingTag();
+        $atRelease = $pending !== null && $pending === $stamp;
+
+        $resolved = Handoff::git('rev-parse', $atRelease ? 'HEAD' : $stamp.'^{commit}');
 
         self::assertSame(0, $resolved['exit'], sprintf(
-            "files.tsv says it describes the tree at %s, and git resolves no such ref — a record of a tag "
-            ."nothing has is a transcript about a tree a reader cannot open%s",
+            $atRelease
+                ? 'The records are stamped for %s, the tag this release is cutting, and HEAD does not resolve — a release has no commit to cut it at%s'
+                : "files.tsv says it describes the tree at %s, and git resolves no such ref — a record of a tag "
+                    ."nothing has is a transcript about a tree a reader cannot open%s",
             $stamp,
             $resolved['error'],
         ));
@@ -1807,27 +1823,35 @@ final class HandoffTest extends TestCase
 
         // The run the block quotes, asked directly: what it says beside `exit 0` has to be the tool's
         // own sentence rather than this renderer's idea of one.
-        $run = Handoff::run([PHP_BINARY, Handoff::root().'/bin/inventory.php', '--check', '--at='.$stamp]);
+        $run = Handoff::run([
+            PHP_BINARY,
+            Handoff::root().'/bin/inventory.php',
+            '--check',
+            ...($atRelease ? [] : ['--at='.$stamp]),
+        ]);
 
         self::assertSame(0, $run['exit'], sprintf(
-            "files.tsv is stamped for %s and `bin/inventory.php --check --at=%s` exits %d:\n%s%s",
-            $stamp,
-            $stamp,
-            $run['exit'],
-            $run['output'],
-            $run['error'],
+            $atRelease
+                ? 'files.tsv is stamped for %s, the tag this release is cutting, and `bin/inventory.php --check` exits %d:\n%s%s'
+                : 'files.tsv is stamped for %s and `bin/inventory.php --check --at=%s` exits %d:\n%s%s',
+            ...($atRelease
+                ? [$stamp, $run['exit'], $run['output'], $run['error']]
+                : [$stamp, $stamp, $run['exit'], $run['output'], $run['error']]),
         ));
 
+        // The block quotes both runs, `--at=<register>` first and the plain one second: a release's own
+        // record is the second, and the first is the drift that is true of a tag that does not exist yet.
         $lines = explode("\n", $block);
         $command = null;
+        $prefix = $atRelease ? 'php bin/inventory.php --check' : 'php bin/inventory.php --check --at=';
 
         foreach ($lines as $index => $line) {
-            if (str_starts_with($line, 'php bin/inventory.php --check --at=')) {
+            if (str_starts_with($line, $prefix)) {
                 $command = $index;
             }
         }
 
-        self::assertIsInt($command, 'The records block quotes no `--check --at=` run at all.');
+        self::assertIsInt($command, 'The records block quotes no `--check` run at all.');
 
         // The tool's own verdict, taken off the run rather than written here: a sentence in this file
         // would be a second copy of the counts, and would go stale on the first file the tree gains.
@@ -1852,9 +1876,12 @@ final class HandoffTest extends TestCase
             .'preamble and not an exit code with nothing beside it.',
         );
 
-        self::assertSame(
-            '',
+        // Nothing follows a current run, and which line that nothing is depends on where the run sits:
+        // a run followed by another command is separated from it by a blank, while the last run quoted
+        // is closed by the block's fence. A record row under the verdict is the drift either way.
+        self::assertContains(
             $lines[$command + 2] ?? null,
+            ['', '```'],
             'A current run listed a record under it, so the transcript claims a drift the tool did not find.',
         );
     }
