@@ -751,6 +751,136 @@ class DbDoctorTest extends TestCase
         $this->assertSame(1, $exit);
     }
 
+    /**
+     * The record that is not being written, which every other reading about it cannot see.
+     *
+     * `store probe` asks whether a probe could run and answers yes here — the interval is set, the
+     * record is writable and the store answers — while the stamp says nothing has written that
+     * record for an hour. That is the state a stopped schedule leaves: the file still holds the
+     * findings of a world that has moved on, and `/health/db` reports whatever its own boot found.
+     * The row fails on the age, and the sentence names the two things it can be.
+     */
+    public function test_the_probe_stamp_row_fails_when_the_record_has_not_been_written_for_five_cadences(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcat();
+
+        $record = $this->tempDir() . '/audit.json';
+        $this->writeStamp($record, time() - 3600);
+        $this->useAudit(storeProbeSeconds: 60, file: $record);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'probe stamp');
+
+        $this->assertStringStartsWith('FAIL  probe stamp', $row);
+        $this->assertStringContainsString($record, $row);
+        $this->assertStringContainsString('had gone 1 hour(s) without a write when this run started', $row);
+        $this->assertStringContainsString('the tolerance is 5 missed cadences (5 minute(s) at a probe interval of 60 seconds and a run every minute)', $row);
+        $this->assertStringContainsString('the schedule that should boot it has stopped', $row);
+        $this->assertStringContainsString('a state directory this installation does not read', $row);
+        $this->assertSame(1, $exit);
+    }
+
+    /**
+     * The same record, written recently enough — including one written inside the tolerance rather
+     * than only an instant ago, which is the half a `time()` fixture would not exercise: a busy
+     * installation's stamp is nearly always some part of an interval old, and the row is not a
+     * one-minute test.
+     */
+    public function test_the_probe_stamp_row_passes_within_the_tolerance(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcat();
+
+        $record = $this->tempDir() . '/audit.json';
+        $this->writeStamp($record, time() - 240);
+        $this->useAudit(storeProbeSeconds: 60, file: $record);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'probe stamp');
+
+        $this->assertStringStartsWith('PASS  probe stamp', $row);
+        $this->assertStringContainsString('had gone 4 minute(s) without a write when this run started', $row);
+        $this->assertStringContainsString('within the 5 minute(s) it may go between', $row);
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * Every state in which nothing is expected to write the record, named rather than passed over.
+     *
+     * A stamp is only late where something is due to move it, so each of these removes the
+     * expectation instead of leaving a healthy-looking row: probing switched off writes no stamp at
+     * all, an unwritable record cannot move one, an in-process store has nothing to probe, an
+     * installation with no flip schedule has no run that is guaranteed to boot it, and a record no
+     * boot has probed is a fresh installation. The row says which one it is, because "not judged"
+     * and "written, and it is well" must not be the same silence.
+     *
+     * @param list<string> $fragments
+     */
+    #[DataProvider('statesThatRemoveTheExpectation')]
+    public function test_the_probe_stamp_row_is_not_judged_where_nothing_is_expected_to_write_the_record(string $state, array $fragments): void
+    {
+        $this->bindRedis(reachable: true);
+        $record = $this->tempDir() . '/audit.json';
+
+        // A stamp an hour old in every case that has one at all, so a state that was judged rather
+        // than named would fail rather than pass by accident.
+        $this->writeStamp($record, $state === 'no stamp' ? null : time() - 3600);
+
+        if ($state !== 'schedule not armed') {
+            $this->armPgcat();
+        } else {
+            config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
+            $this->app->forgetInstance(PgcatConfigFlipper::class);
+        }
+
+        $this->useAudit(
+            storeProbeSeconds: $state === 'probe switched off' ? 0 : 60,
+            file: $state === 'record unwritable' ? $this->blockedRecordPath() : $record,
+        );
+
+        if ($state === 'in-process store') {
+            config()->set('db-manager.swrr.primary_store', 'local');
+        }
+
+        [$output] = $this->doctor();
+        $row = $this->rowContaining($output, 'probe stamp');
+
+        $this->assertStringStartsWith('PASS  probe stamp', $row);
+
+        foreach ($fragments as $fragment) {
+            $this->assertStringContainsString($fragment, $row);
+        }
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: list<string>}>
+     */
+    public static function statesThatRemoveTheExpectation(): array
+    {
+        return [
+            'probe switched off' => ['probe switched off', [
+                'not judged: probing is switched off (swrr.audit.store_probe_seconds = 0)',
+            ]],
+            'record unwritable' => ['record unwritable', [
+                'not judged: the record at',
+                'cannot be written, so its stamp is frozen rather than late',
+            ]],
+            'in-process store' => ['in-process store', [
+                'not judged: swrr.primary_store is "local"',
+                'nothing probes the store the stamp would date',
+            ]],
+            'schedule not armed' => ['schedule not armed', [
+                'not judged: the flip schedule is not armed',
+                'no run is guaranteed to boot this installation',
+            ]],
+            'no stamp' => ['no stamp', [
+                'no stamp in',
+                'a record that has never been probed is a fresh installation rather than a stale one',
+            ]],
+        ];
+    }
+
     public function test_an_armed_flipper_with_every_pgcat_file_in_place_passes(): void
     {
         $this->bindRedis(reachable: true);
@@ -4526,13 +4656,17 @@ class DbDoctorTest extends TestCase
             // switch and passes, where the same question used to be a branch of the row that
             // opened the socket. The answer row beside it is a `not asked` PASS for the same
             // reason, so the split adds one row and one PASS to every cell.
-            'healthy' => [25, 0, 0],
-            'warned' => [24, 1, 0],
-            'warned-twice' => [23, 2, 0],
-            'failed' => [24, 0, 1],
-            'failed-twice' => [23, 0, 2],
-            'mixed' => [23, 1, 1],
-            'mixed-twice' => [21, 2, 2],
+            // `probe stamp` is the ninth: the suite's record carries a stamp from a moment ago and
+            // every profile leaves it writable, so the age is inside the tolerance and the row is
+            // a PASS in every cell — the `+1` is the row's presence, and its failures are the
+            // cases of their own rather than this matrix's.
+            'healthy' => [26, 0, 0],
+            'warned' => [25, 1, 0],
+            'warned-twice' => [24, 2, 0],
+            'failed' => [25, 0, 1],
+            'failed-twice' => [24, 0, 2],
+            'mixed' => [24, 1, 1],
+            'mixed-twice' => [22, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }
@@ -4561,6 +4695,18 @@ class DbDoctorTest extends TestCase
         ]);
 
         $this->app->forgetInstance(BootAudit::class);
+    }
+
+    /**
+     * A record holding nothing but the probe stamp — the one field the `probe stamp` row reads,
+     * written in the shape the audit reads back.
+     */
+    private function writeStamp(string $path, ?int $stamp): void
+    {
+        file_put_contents($path, (string) json_encode([
+            'findings' => [],
+            'store_probed_at' => $stamp,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 
     /**

@@ -211,6 +211,11 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *   store probe       the store reachability check can never run: probing is
  *                     switched off, or the record that throttles it cannot be
  *                     written, so the PING is skipped on every boot in silence
+ *   probe stamp       the audit record is not being written at all: its probe stamp is
+ *                     older than the runs that should move it, so the audit has stopped
+ *                     running where the record lives. The row beside it asks whether a
+ *                     probe *could* run; this one asks whether one has, which is the only
+ *                     reading that tells a record nothing writes from a quiet one
  *   store             the primary store (Redis) is not answering, so workers fall
  *                     back to an in-process rotation that is not shared
  *   real query        the connection this run follows could not answer one real
@@ -534,6 +539,23 @@ class DbDoctor extends Command
      */
     private const REAL_QUERY = 'real query';
 
+    /**
+     * How many cadences may go by without the audit record being written before its stamp is stale.
+     *
+     * Five, the count `swrr.pgcat.schedule.stale_after_missed_runs` ships for the schedule's own
+     * beat, because it is the same question one file over: a beat that has not moved for five of its
+     * runs is a schedule that stopped, and a probe stamp that has not moved for five of the runs that
+     * should write it is an audit that stopped being written. Four would leave no room for the
+     * ordinary casualties — a run that lost its lock, a container busy for an interval, a clock
+     * adjusted between two runs — and ten would let a record sit unwritten while every surface that
+     * reads it describes an installation that no longer exists.
+     *
+     * Not a setting: the window worth having is the cadence's, and the installation already states
+     * that twice — `swrr.audit.store_probe_seconds` for the probe and
+     * `swrr.pgcat.schedule.interval_minutes` for the runs that boot it. See `probeStamp()`.
+     */
+    private const STALE_AFTER_MISSED_CADENCES = 5;
+
     protected $signature = 'db:doctor
                             {connection=pgsql : Connection whose weighted replicas are inspected}
                             {--strict : Treat warnings as failures, for a deploy gate}
@@ -543,7 +565,7 @@ class DbDoctor extends Command
                             {--real-test : Ask the connection this run follows for one real query — the `select 1` the health endpoint runs — because whether a server answers is the one fact a configuration cannot show; the only reading here that leaves the process, and one no run takes unless it is asked for by name}
                             {--contract : Judge the deployment contract instead of the installation: one row per requirement of docs/deployment-contract.md, its verdict the loudest among the rows behind it, so a deploy fails on the requirement rather than on the reading}';
 
-    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe and reachability — vet one config file without the installation, with --config-file, ask only the rows a build container can answer, with --connection-only, ask the followed connection for one real query, with --real-test, or judge the requirements of the deployment contract, with --contract';
+    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe, the probe stamp and reachability — vet one config file without the installation, with --config-file, ask only the rows a build container can answer, with --connection-only, ask the followed connection for one real query, with --real-test, or judge the requirements of the deployment contract, with --contract';
 
     public function handle(): int
     {
@@ -624,6 +646,13 @@ class DbDoctor extends Command
             if ($this->asks('store probe')) {
                 $rows[] = $this->storeProbe();
             }
+
+            // Beside the row that reads whether a probe *could* run: this one reads whether the
+            // record has been written since, which is the question a schedule that stopped leaves
+            // every other row unable to answer. Asked in every mode, bounded runs included: it
+            // opens nothing, and a record that is not there is a fresh installation rather than a
+            // fault — see probeStamp().
+            $rows[] = $this->probeStamp();
 
             if ($this->asks('store reachability')) {
                 $rows[] = $this->storeReachability($manager, $connection);
@@ -3734,6 +3763,141 @@ class DbDoctor extends Command
         }
 
         return $this->datedRow('store probe', $problems, $this->recordedFindings());
+    }
+
+    /**
+     * Whether the audit record is still being written at all — the one reading that says the audit
+     * is alive rather than only able to write.
+     *
+     * WHY THIS ROW EXISTS BESIDE `store probe`
+     *   That row asks whether a probe *could* run: the interval, the record's mode, the store. Every
+     *   one of those can be right while nothing writes the record. The schedule stops, or the runs
+     *   write a state directory this installation does not read, and the silence is complete: the
+     *   findings that stand are read out of the same file, `/health/db` reports what its own boot
+     *   found, and a record nothing writes goes on describing an installation that no longer exists.
+     *   The probe stamp is the one field a healthy installation moves on its own, so its age is the
+     *   evidence, and this is the only reading here that asks for it.
+     *
+     * THE AGE IS THE ONE BEFORE THIS RUN WROTE ANYTHING
+     *   A boot that finds the probe due sends it and stamps the record, so this command's own boot
+     *   refreshes the stamp before any row is asked. Judging what the file says *now* would report
+     *   every installation as freshly written and, worse, would clear the very fault it exists to
+     *   report. The age comes from `BootAudit::storeProbeStamp()`, which keeps what this process
+     *   found, and the sentence says so — otherwise an operator who opens the record after the run
+     *   finds a timestamp minutes old next to a row saying it had not been written for a week.
+     *
+     * WHAT IT IS NOT JUDGED ON, AND WHY EACH IS A PASS
+     *   A stamp is only expected to move where something is expected to move it, so each state that
+     *   removes the expectation is named instead of being counted as a healthy record: probing
+     *   switched off (no stamp is ever written, and `store probe` warns about the setting), a record
+     *   that cannot be written (its stamp is frozen rather than late, and `store probe` fails on
+     *   it), an in-process store (nothing to probe), and an installation whose flip schedule is not
+     *   armed (no run is guaranteed to boot it, so an age is nobody's fault). A record with no stamp
+     *   is the last: nothing has been probed yet, which is a fresh installation rather than a stale
+     *   one. None of the five is a finding, and none is dated: the state this row reports is the
+     *   *absence* of writes to the record that would carry a date.
+     *
+     * THE TOLERANCE IS THE CADENCE'S
+     *   The stamp moves when the probe is due and something boots the installation, so the two
+     *   settings that decide it are the probe's interval and the schedule's cadence — and the wider
+     *   of the two is what the age is measured against, five times over. At the shipped values that
+     *   is five minutes; on an installation that probes hourly it is five hours, which is the point:
+     *   the window is what this installation says it will do, not a number this row picked.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function probeStamp(): array
+    {
+        try {
+            $audit = $this->laravel->make(BootAudit::class);
+            $status = $audit->storeProbeStatus();
+        } catch (Throwable $e) {
+            return $this->row(
+                'probe stamp',
+                self::FAIL,
+                'the boot audit could not be built, so the record it writes cannot be read: ' . $e->getMessage(),
+            );
+        }
+
+        if (!$status['enabled']) {
+            return $this->row('probe stamp', self::PASS, sprintf(
+                'not judged: probing is switched off (swrr.audit.store_probe_seconds = %d), so no stamp is ever '
+                .'written — the `store probe` row warns about the setting',
+                $status['seconds'],
+            ));
+        }
+
+        if (!$status['writable']) {
+            return $this->row('probe stamp', self::PASS, sprintf(
+                'not judged: the record at %s cannot be written, so its stamp is frozen rather than late — '
+                .'the `store probe` row fails on that',
+                $status['file'],
+            ));
+        }
+
+        $store = WeightedDatabaseServiceProvider::storeSelection(
+            ConfigValue::assoc($this->laravel->make(Repository::class)->get('db-manager.swrr')),
+        );
+
+        if ($store['effective'] !== 'redis') {
+            return $this->row('probe stamp', self::PASS, sprintf(
+                'not judged: swrr.primary_store is %s, so reads are served in-process and nothing probes the '
+                .'store the stamp would date',
+                $store['configured'] === '' ? 'the in-process store' : "\"{$store['configured']}\"",
+            ));
+        }
+
+        $entry = FlipSchedule::options($this->laravel->make(Repository::class));
+
+        if (!$entry['enabled']) {
+            return $this->row(
+                'probe stamp',
+                self::PASS,
+                'not judged: the flip schedule is not armed, so no run is guaranteed to boot this installation '
+                .'and the age of the record is nobody\'s to judge — a web installation with no schedule is '
+                .'written when it serves a request, which is the traffic\'s pace rather than a fault',
+            );
+        }
+
+        $stamp = $audit->storeProbeStamp();
+
+        if ($stamp['probed_at'] === null) {
+            return $this->row('probe stamp', self::PASS, sprintf(
+                'no stamp in %s before this run, so there is no age to judge — a record that has never been '
+                .'probed is a fresh installation rather than a stale one',
+                $status['file'],
+            ));
+        }
+
+        $age = (int) $stamp['age_seconds'];
+        $cadence = max($entry['interval_minutes'] * 60, $status['seconds']);
+        $staleAfter = self::STALE_AFTER_MISSED_CADENCES * $cadence;
+
+        if ($age <= $staleAfter) {
+            return $this->row('probe stamp', self::PASS, sprintf(
+                'the record had gone %s without a write when this run started, within the %s it may go between '
+                .'the writes a probe interval of %d seconds and a run every %s produce',
+                ScheduleBeat::ageText($age),
+                ScheduleBeat::ageText($staleAfter),
+                $status['seconds'],
+                $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes',
+            ));
+        }
+
+        // The fault this row exists for, and the two things it can be. Both look the same from the
+        // file: the record is not being written, so nothing is booting it with the probe due.
+        return $this->row('probe stamp', self::FAIL, sprintf(
+            'the record at %s had gone %s without a write when this run started, and the tolerance is %d '
+            .'missed cadences (%s at a probe interval of %d seconds and a run every %s): nothing wrote the '
+            .'audit record in that time, so the schedule that should boot it has stopped or the runs write a '
+            .'state directory this installation does not read',
+            $status['file'],
+            ScheduleBeat::ageText($age),
+            self::STALE_AFTER_MISSED_CADENCES,
+            ScheduleBeat::ageText($staleAfter),
+            $status['seconds'],
+            $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes',
+        ));
     }
 
     /**

@@ -191,6 +191,11 @@ final class BootAudit
      *        only place that knows every producer; absent for a bare audit (a test, a
      *        hand-built one), and the block then says the live half was not evaluated rather
      *        than inventing one
+     * @param \Closure(string): bool|null $canWrite whether the record can be written — the one
+     *        reading `repairRecord()`, `storeProbeStatus()` and `persist()` all ask. Injected so a
+     *        test can hold a record this process *may not* write while the directory beside it is
+     *        writable, which is the state the carry exists for and which no mode bit produces on
+     *        every host
      */
     public function __construct(
         private readonly string $file,
@@ -199,6 +204,7 @@ final class BootAudit
         ?\Closure $lockAcquirer = null,
         ?\Closure $lockReleaser = null,
         private readonly ?\Closure $currentFindings = null,
+        private readonly ?\Closure $canWrite = null,
     ) {
         $this->lockAcquirer = $lockAcquirer ?? static function (string $file): array {
             // A lock another account left read-only cannot be opened for writing at all, so the
@@ -229,6 +235,18 @@ final class BootAudit
     }
 
     /**
+     * Whether `report()` has run in this process, and the probe stamp it was handed.
+     *
+     * The two are one fact: the stamp a surface may judge is the one this boot *found*, because
+     * the boot that reads the record is also the boot that refreshes it — `report()` sends the due
+     * probe and writes the time it ran. Nothing outside has to know which of the two it is looking
+     * at; `storeProbeStamp()` answers that, and a process that never reported reads the file.
+     */
+    private bool $reported = false;
+
+    private ?int $foundProbedAt = null;
+
+    /**
      * The findings a previous boot reported, and when the store was last probed.
      *
      * The *boot's* reader, and tolerant on purpose: a record this process cannot read is
@@ -251,7 +269,15 @@ final class BootAudit
         try {
             return $this->decode();
         } catch (UnreadableRecord) {
-            return ['findings' => [], 'store_probed_at' => null];
+            // A record nobody can read is still not the whole memory: the last boot that could
+            // not write it may have carried its findings beside it, and a boot that reads past
+            // those would close out findings it has no evidence about.
+            $carry = $this->readCarry();
+
+            return [
+                'findings' => $carry['findings'] ?? [],
+                'store_probed_at' => $carry['store_probed_at'] ?? null,
+            ];
         }
     }
 
@@ -286,7 +312,9 @@ final class BootAudit
                 throw UnreadableRecord::of($this->file, 'is not a file');
             }
 
-            return ['findings' => [], 'store_probed_at' => null];
+            // No record at all is the ordinary state of a name no boot could write, and the
+            // carry beside it is then the only memory there is — see `layCarryOver()`.
+            return $this->layCarryOver(['findings' => [], 'store_probed_at' => null]);
         }
 
         $raw = @file_get_contents($this->file);
@@ -326,10 +354,162 @@ final class BootAudit
 
         $probed = $decoded['store_probed_at'] ?? null;
 
-        return [
+        return $this->layCarryOver([
             'findings' => $this->readFindings($findings),
             'store_probed_at' => is_int($probed) ? $probed : null,
+        ]);
+    }
+
+    /**
+     * The record with the carry laid over it: what the installation knows, whichever of the two
+     * files was written last.
+     *
+     * THE RULE, AND WHY RECENCY AND NOT A MERGE
+     * ------------------------------------------
+     *   The carry is written by a boot that could not write the record, and it holds the record
+     *   *that boot would have written* — its standing findings, not just its own. So when the carry
+     *   is the newer of the two it is the whole answer, and a key the record still lists because it
+     *   was written before the boot that cleared it must not come back. When the record is newer,
+     *   the boot that wrote it had already read the carry — `read()` is what builds its `previous`
+     *   — so its write is the later knowledge and the carry has nothing left to say.
+     *
+     *   A missing record beside a carry is the ordinary state of a name no boot could write: the
+     *   carry wins, and the probe's stamp comes from it because that is the only place it exists.
+     *
+     * @param Record $record
+     * @return Record
+     */
+    private function layCarryOver(array $record): array
+    {
+        $carry = $this->readCarry();
+
+        if ($carry === null) {
+            return $record;
+        }
+
+        $written = @filemtime($this->file);
+
+        if ($written !== false && $written >= $carry['written_at']) {
+            return $record;
+        }
+
+        return [
+            'findings' => $carry['findings'],
+            'store_probed_at' => $record['store_probed_at'] ?? $carry['store_probed_at'],
         ];
+    }
+
+    /**
+     * The findings a boot carried beside the record, or null when nothing was carried.
+     *
+     * Read as tolerantly as the record's own entries are: a carry written by a boot of an earlier
+     * version, or one truncated by a machine that lost power, is not a reason to fail a boot. It is
+     * a reason to ignore the file, and the next boot that can write the record removes it.
+     *
+     * @return array{findings: array<string, Finding>, store_probed_at: int|null, written_at: int}|null
+     */
+    private function readCarry(): ?array
+    {
+        $path = $this->carryPath();
+
+        if (! is_file($path)) {
+            return null;
+        }
+
+        $raw = @file_get_contents($path);
+
+        if (! is_string($raw)) {
+            return null;
+        }
+
+        /** @var mixed $decoded */
+        $decoded = json_decode($raw, true);
+
+        if (! is_array($decoded) || ! is_array($decoded['findings'] ?? null)) {
+            return null;
+        }
+
+        $written = $decoded['written_at'] ?? null;
+
+        if (! is_int($written)) {
+            return null;
+        }
+
+        $probed = $decoded['store_probed_at'] ?? null;
+
+        return [
+            'findings' => $this->readFindings($decoded['findings']),
+            'store_probed_at' => is_int($probed) ? $probed : null,
+            'written_at' => $written,
+        ];
+    }
+
+    /**
+     * The findings this boot could not write down, written where the record's own writability
+     * cannot reach them.
+     *
+     * WHY THIS EXISTS AT ALL
+     * ----------------------
+     *   The record is one file doing two jobs: it is the installation's memory of what stands, and
+     *   it is the stamp that throttles the store probe. A file this account may not write therefore
+     *   used to lose both, and the memory was the half that mattered — the boot logged its findings
+     *   and said nothing about them later, so the boot that repaired one had nothing to close, and a
+     *   monitor watching for `resolved: true` saw a warning simply stop. The carry is that memory
+     *   kept somewhere else: the same record the boot would have written, beside the one it could
+     *   not. It is not a second throttle — the probe stays off while the record is unwritable, which
+     *   is the decision the class docblock records — and it is removed by the first boot that writes
+     *   the record again.
+     *
+     *   Nothing is logged about the carry itself. The record's own finding already says the file
+     *   cannot be written, on the same boot, in the words an operator is meant to act on; a second
+     *   line about where the findings went would be a diagnostic about a diagnostic.
+     *
+     * @param Record $record
+     */
+    private function writeCarry(array $record): void
+    {
+        $path = $this->carryPath();
+
+        if ($record['findings'] === [] && $record['store_probed_at'] === null) {
+            // Nothing stands, so there is nothing to carry: a file holding an empty record is a
+            // memory of nothing, and leaving one behind would outlive the fault it was written for.
+            @unlink($path);
+
+            return;
+        }
+
+        $payload = json_encode([
+            'findings' => $record['findings'],
+            'store_probed_at' => $record['store_probed_at'],
+            'written_at' => time(),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+        if ($payload === false) {
+            return;
+        }
+
+        $directory = dirname($path);
+
+        if (! is_dir($directory)) {
+            @mkdir($directory, 0o755, true);
+        }
+
+        $temporary = $path.'.tmp.'.getmypid();
+
+        if (@file_put_contents($temporary, $payload) === false) {
+            return;
+        }
+
+        @rename($temporary, $path);
+    }
+
+    /**
+     * Where a boot carries what it could not write: beside the record, named after it, so the two
+     * travel together and a record moved to another path takes its carry with it.
+     */
+    private function carryPath(): string
+    {
+        return $this->file.'.carry.json';
     }
 
     /**
@@ -719,6 +899,41 @@ final class BootAudit
     }
 
     /**
+     * The probe stamp as this process found it — never the one it may have written since.
+     *
+     * `store_probed_at` is the one field in the record that a healthy installation moves on its
+     * own: a boot that finds the probe due sends it and writes the time, and nothing else touches
+     * the field. Its age is therefore the age of the last time anything ran the audit, which is the
+     * question a record that nothing writes cannot answer any other way — the findings standing in
+     * it describe a configuration that may be days old, and the file prints no date of its own.
+     *
+     * The subtlety that makes this a method rather than a field a caller reads out of `read()`: the
+     * process asking is usually the process that refreshed it. `db:doctor` runs after this
+     * application booted, and that boot probed whenever the stamp it found was due, so the record
+     * on disk is fresh by the time any row asks. What is reported here is the stamp `report()` was
+     * handed, and the age is measured from that. A process that never reported has written nothing,
+     * so the file still holds what it would have found.
+     *
+     * A stamp in the future is a clock that moved rather than a record written early, and the
+     * honest reading of it is no age at all — a negative age would report every installation as
+     * fresh because one of its containers disagreed about the time, which is the rule
+     * `ScheduleBeat` already applies to the beat.
+     *
+     * @return array{probed_at: int|null, age_seconds: int|null}
+     */
+    public function storeProbeStamp(): array
+    {
+        $probedAt = $this->reported
+            ? $this->foundProbedAt
+            : ($this->read()['store_probed_at'] ?? null);
+
+        return [
+            'probed_at' => $probedAt,
+            'age_seconds' => $probedAt === null ? null : max(0, time() - $probedAt),
+        ];
+    }
+
+    /**
      * The sentence for a probe that is switched off, written once for the two surfaces that report
      * it: the boot finding and `db:doctor`'s row. It is the row's sentence because the row is where
      * an operator reads it, and the finding because a standing state is what a record remembers —
@@ -824,6 +1039,12 @@ final class BootAudit
      */
     public function report(array $record, array $findings, array $checked, ?int $probedAt = null, array $scope = []): void
     {
+        // Kept apart from what this boot is about to write: the stamp is the record's only evidence
+        // that the audit is running at all, so the age a surface judges has to be the age this
+        // process found rather than the one its own probe just wrote.
+        $this->reported = true;
+        $this->foundProbedAt = $record['store_probed_at'];
+
         $now = self::timestamp();
         $at = time();
 
@@ -1158,7 +1379,10 @@ final class BootAudit
         // boot skip the PING as well.
         $this->repairRecord();
 
-        if (self::canonical($previous) === self::canonical($updated)) {
+        // A boot with nothing new to say still writes when a carry exists: the record and the
+        // carry can hold the same findings, and the point of the write is then not the content but
+        // that the memory moves back into the file that is read by everything else.
+        if (self::canonical($previous) === self::canonical($updated) && ! is_file($this->carryPath())) {
             return [];
         }
 
@@ -1166,7 +1390,14 @@ final class BootAudit
         // read-merge-write is attempted — see the docblock. A resolution is still logged by the
         // caller, which is the honest reading: this boot did evaluate the key and find it clean,
         // and it is the record's repair that has nowhere to go rather than the finding's state.
+        //
+        // The findings themselves are carried instead: the record is both this installation's
+        // memory and the probe's throttle, and losing the throttle is the documented trade while
+        // losing the memory is not — a boot that writes nothing here leaves the next boot with no
+        // evidence the finding ever stood, and so no line to close it with.
         if (!$this->recordIsWritable()) {
+            $this->writeCarry($updated);
+
             return [];
         }
 
@@ -1185,7 +1416,12 @@ final class BootAudit
                 $this->reportUnlocked($attempts, $waited);
             }
 
-            $this->write($record);
+            // Only a write that landed retires the carry: a rename the filesystem refused leaves
+            // the record as it was, and the carry is then the newer of the two by its own stamp —
+            // which is exactly the reading `layCarryOver()` is written to make.
+            if ($this->write($record)) {
+                @unlink($this->carryPath());
+            }
         } finally {
             ($this->lockReleaser)($handle, $this->file);
         }
@@ -1267,18 +1503,18 @@ final class BootAudit
      *
      * @param Record $record
      */
-    private function write(array $record): void
+    private function write(array $record): bool
     {
         if ($record['findings'] === [] && $record['store_probed_at'] === null) {
             @unlink($this->file);
 
-            return;
+            return ! is_file($this->file);
         }
 
         $encoded = json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
         if ($encoded === false) {
-            return;
+            return false;
         }
 
         $directory = dirname($this->file);
@@ -1290,10 +1526,10 @@ final class BootAudit
         $temporary = $this->file.'.tmp.'.getmypid();
 
         if (@file_put_contents($temporary, $encoded) === false) {
-            return;
+            return false;
         }
 
-        @rename($temporary, $this->file);
+        return @rename($temporary, $this->file);
     }
 
     /**
@@ -1439,7 +1675,7 @@ final class BootAudit
      */
     private function recordIsWritable(): bool
     {
-        return WritableFile::canWrite($this->file);
+        return ($this->canWrite ?? static fn (string $file): bool => WritableFile::canWrite($file))($this->file);
     }
 
     /**

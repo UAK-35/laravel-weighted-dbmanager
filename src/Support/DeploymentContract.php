@@ -113,9 +113,9 @@ final class DeploymentContract
             ],
             'state-dir' => [
                 'statement' => 'a writable state directory the schedule can write',
-                'readings' => ['pgcat files', 'write paths', 'store probe'],
+                'readings' => ['pgcat files', 'write paths', 'store probe', 'probe stamp'],
                 'unread' => null,
-                'note' => 'the rows report the mode and owner each path was found with rather than judging the user the schedule runs as, which is an entrypoint fact',
+                'note' => 'the rows report the mode and owner each path was found with rather than judging the user the schedule runs as, which is an entrypoint fact — and `probe stamp` is the one of them that reads whether the directory is being written rather than only whether it could be',
             ],
             'supervisor' => [
                 'statement' => 'a supervisor that can be spawned, reached on its control socket, and knows the pooler\'s program',

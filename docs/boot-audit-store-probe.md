@@ -320,26 +320,60 @@ the store that makes it so — a finding would be a second line about one settin
 state for a record to remember, because nothing about the configuration changed. The row keeps
 naming it (see the doctor's row for the third state) and the audit stays silent.
 
-### The one key whose date has nowhere to go
+### The one key whose own record can be the file that cannot be written
 
 `swrr.audit.file.unwritable` is the only finding in this package whose own record can be the file
 that cannot be written. A read-only record is repaired before the boot decides anything —
 `Support\WritableFile::handBack()`, the same call a write's release makes and a flip makes on its
 state file and lock — so on the installations where that works the finding is not produced at all,
-the probe runs, and its timestamp lands. The state that remains is a file this
-account may not change (another owner, an ACL) or a directory that takes no file: there the finding
-is logged without being remembered, and there is no `recorded unresolved since` clause the row can
-append to it — the row prints the sentence the log carries and nothing more. The key exists for the
-two things it can still do in that case: a log line an alert rule and a grep can select on, and a
-name for the state in the surface that describes it.
+the probe runs, and its timestamp lands. The state that remains is a file this account may not change
+(another owner, an ACL) or a directory that takes no file.
 
-The asymmetry is the reason the key was not simply left out. A standing state with no key at all
-would be the one thing this audit does not do — report a configuration the package understood
-perfectly and the installation could not act on — and it would be uncountable exactly in the case
-where the record is guaranteed to be silent. Its resolution sentence ("the audit record is writable
-again, so the probe it throttles runs on its interval again") is written for the same reason every
-other one is: it is what a boot that finds the file usable again would log, if there were anything to
-resolve.
+Neither of those loses the finding. The record is two things at once — the installation's memory of
+what stands, and the stamp that throttles the probe — and only the second is what the decision above
+trades away. A boot that cannot write the record writes the record it *would* have written beside it,
+as `{file}.carry.json`, and a later read takes the carry in place of the record while the carry is the
+newer of the two. So the key keeps its date, the row's `recorded unresolved since` clause has
+something to print, and the boot that checks a setting clean logs the resolution the carry made
+possible.
+
+The carry is retired by the first boot that writes the record. A directory that takes no file beats
+it as well, and that is the one state where the log line is still the whole of what an operator gets:
+nothing beside the record can be written either, and the row is the surface left saying so.
+
+The key matters for a second reason. A standing state with no key at all would be the one thing this
+audit does not do — report a configuration the package understood perfectly and the installation could
+not act on — and it would be uncountable exactly in the case where the record's own write is the
+fault.
+
+### The stamp is the record's only heartbeat, and its age is a row
+
+`store probe` asks whether a probe *could* run — the interval, the record's mode, the store — and every
+one of those can be right while nothing writes the record at all. The schedule stops, or the runs write
+a state directory this installation does not read, and the silence is total: the findings standing in
+the record are read out of the same file, `/health/db` reports what its own boot found, and a record
+nothing writes goes on describing an installation that no longer exists. `store_probed_at` is the one
+field in that record a healthy installation moves on its own, so `db:doctor`'s `probe stamp` row reads
+its age.
+
+The subtlety that decides the design is that the process asking is usually the process that refreshed
+it: a boot that finds the probe due sends it and writes the time, and `db:doctor` runs after this
+application booted. Judging what the file says *now* would report every installation as freshly
+written and, worse, would clear the fault it exists to report. `BootAudit::storeProbeStamp()` therefore
+keeps the stamp `report()` was handed, and the row judges that — the age the record had stood before
+this run wrote anything. A process that never reported reads the file, because it wrote nothing.
+
+The tolerance is the cadence's, five times over. The stamp moves when the probe is due *and* something
+boots the installation, so the window is the longer of `swrr.audit.store_probe_seconds` and
+`swrr.pgcat.schedule.interval_minutes`, multiplied by the five misses
+`swrr.pgcat.schedule.stale_after_missed_runs` ships for the beat: five minutes at the shipped values,
+five hours on an installation that probes hourly. "Late" therefore means one thing in both rows.
+
+A stamp is only expected to move where something is expected to move it, so the row names rather than
+judges the states that remove the expectation — probing switched off, a record that cannot be written,
+an in-process store, an installation whose flip schedule is not armed — and a record with no stamp at
+all, which is a fresh installation rather than a stale one. None of the five is a finding, and none is
+dated: the state the row reports is the *absence* of the writes that would carry a date.
 
 ### The sentences are the audit's, and the shared row learns to finish one
 
@@ -379,6 +413,10 @@ probe` case is no longer the only test that would notice a row regressing to its
 | the accessor's guard, and that the container really would build the extension class | `RedisAccessTest` | accessor |
 | a store that already failed is reported without asking Redis | `test_a_store_that_already_failed_is_reported_without_being_probed` | doctor |
 | an in-process store is warned about rather than probed | `test_an_in_process_primary_store_warns_without_being_probed` | doctor |
+| the age a surface judges is the one the boot found, not the one its own probe wrote — and a process that never reported reads the file | `test_the_stamp_a_process_reports_is_the_one_its_boot_found`, `test_a_process_that_never_reported_reads_the_stamp_out_of_the_record` | audit |
+| a stamp in the future is no age at all rather than a fresh record | `test_a_stamp_in_the_future_is_no_age_at_all` | audit |
+| a record nothing has written for five cadences fails the row; one written within them passes | `test_the_probe_stamp_row_fails_when_the_record_has_not_been_written_for_five_cadences`, `test_the_probe_stamp_row_passes_within_the_tolerance` | doctor |
+| every state where nothing is expected to write the record is named rather than failed | `test_the_probe_stamp_row_is_not_judged_where_nothing_is_expected_to_write_the_record` | doctor |
 | the doctor probes `swrr.redis_connection` and passes or fails on the answer | `test_it_fails_the_store_check_when_the_store_does_not_answer_the_ping`, `test_it_passes_the_store_check_when_the_ping_is_answered` | doctor |
 
 ---
@@ -407,9 +445,9 @@ probe` case is no longer the only test that would notice a row regressing to its
    to clear the warning reports an unwritable record on the same run instead of the next
    preflight. `db:doctor`'s own probe is never throttled, so it remains the answer for an
    installation whose throttle is broken. Both states carry a finding key, so the run that
-   finds them is also the run that can date them — with the one exception the key documents:
-   when the file really cannot be changed, the unwritable record's own date has nowhere to be
-   written, so its key is there for the log and the alert rule and its row prints no age.
+   finds them is also the run that can date them — including the file this account cannot
+   change, whose findings are carried beside the record so that its row prints an age too, and
+   whose repair the next boot that can write the record logs as a resolution.
 3. **The resolution sentence covers two different endings.** Switching
    `swrr.primary_store` to `local` closes a recorded reachability finding with "not
    unreachable any more", which is true of the finding but not of the store. Distinguishing

@@ -123,6 +123,13 @@ const STRUCTURE_WRITE_BACKS = [
         lock and not the sentinel the store-probe decision refused. The write itself rather than persist()
         is the site because this is where the file is replaced; a rename of a temp over the record is what
         that looks like, and it is the reason the lock lives on a companion file beside it.',
+    'src/Support/BootAudit.php::writeCarry writes $path' => 'the carry beside an unwritable record, and the one place in this package where the copy being
+        replaced is *meant* to be dropped. The payload is not read back from anywhere: it is the record
+        this boot would have written, assembled from what it read and what it evaluated, and the file it
+        replaces is the previous boot\'s carry — older by construction, because this write only happens
+        when the record itself refused one. Nothing about that older copy is news, and a merge would be
+        a merge of one boot\'s memory into an earlier boot\'s, which is what layCarryOver() already does
+        in the other direction when it prefers the newer of the two by their stamps.',
 ];
 
 /**

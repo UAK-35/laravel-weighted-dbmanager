@@ -1382,6 +1382,179 @@ class BootAuditTest extends TestCase
     }
 
     /**
+     * The record is two things at once — the installation's memory of what stands and the stamp
+     * that throttles the store probe — and a file this account may not write used to lose both.
+     * The memory is the half that cannot be traded: the boot logged its finding and wrote nothing
+     * down, so every later boot had no evidence it had ever stood, and the boot that repaired the
+     * setting had nothing to close.
+     */
+    public function test_a_boot_that_cannot_write_the_record_carries_its_findings_beside_it(): void
+    {
+        $file = $this->tempDir() . '/audit.json';
+        $audit = new BootAudit($file, 0, canWrite: static fn (string $path): bool => false);
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertFalse(is_file($file), 'a record this process cannot write is not written');
+        $this->assertTrue(is_file($file . '.carry.json'), 'the finding is carried somewhere the record cannot reach');
+
+        // And it reads back as a finding rather than as a line that was logged once: the sentence,
+        // the level and the resolution the boot that closes it will need are all in the carry.
+        $this->assertSame(['swrr.pgcat.gate'], array_column($audit->standing(), 'key'));
+        $this->assertSame('pgcat will never act.', $audit->standing()[0]['warning']);
+        $this->assertSame('The pgcat mismatch no longer applies.', $audit->standing()[0]['resolution']);
+
+        $this->assertCount(1, $records);
+    }
+
+    /**
+     * The repair, in the order it happens: the file becomes writable, the carried finding becomes
+     * the record's, the carry is retired — and the boot that checks the setting clean closes it
+     * out with the resolution line it used to lose.
+     */
+    public function test_a_carried_finding_is_written_into_the_record_and_closed_out_when_it_clears(): void
+    {
+        $file = $this->tempDir() . '/audit.json';
+
+        (new BootAudit($file, 0, canWrite: static fn (string $path): bool => false))
+            ->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertTrue(is_file($file . '.carry.json'));
+
+        $audit = new BootAudit($file, 0);
+
+        $this->assertSame(['swrr.pgcat.gate'], array_column($audit->standing(), 'key'), 'the carry is the record until the record can be written');
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($audit->read(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertSame(['swrr.pgcat.gate'], array_keys($audit->read()['findings']));
+        $this->assertFalse(is_file($file . '.carry.json'), 'the record holds it now, so the carry has nothing left to say');
+
+        $audit->report($audit->read(), [], checked: ['swrr.pgcat.gate']);
+
+        $this->assertSame([], $audit->read()['findings']);
+        $this->assertCount(1, $records, 'the resolution, and no repeat of a warning that was logged within the interval');
+        $this->assertStringContainsString('The pgcat mismatch no longer applies.', $records[0]['message']);
+        $this->assertTrue($records[0]['context']['resolved']);
+    }
+
+    /**
+     * A setting repaired while the record is still unwritable: the carry is what the boot that
+     * closes the finding reads, so the disappearance is a logged transition rather than the last
+     * warning an operator ever sees.
+     */
+    public function test_a_carried_finding_cleared_while_the_record_is_unwritable_is_resolved_from_the_carry(): void
+    {
+        $file = $this->tempDir() . '/audit.json';
+        $audit = new BootAudit($file, 0, canWrite: static fn (string $path): bool => false);
+
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $records = [];
+        $this->collectLogs($records);
+
+        $audit->report($audit->read(), [], checked: ['swrr.pgcat.gate']);
+
+        $this->assertCount(1, $records);
+        $this->assertTrue($records[0]['context']['resolved']);
+        $this->assertSame([], $audit->read()['findings']);
+        $this->assertFalse(is_file($file . '.carry.json'), 'nothing stands, so nothing is carried');
+    }
+
+    /**
+     * A carry written by a version that wrote a different shape, or truncated by a machine that
+     * lost power, is not a reason to fail a boot — the record beside it is still readable.
+     */
+    public function test_a_carry_that_is_not_a_record_is_ignored_rather_than_believed(): void
+    {
+        $file = $this->tempDir() . '/audit.json';
+        file_put_contents($file . '.carry.json', '{"findings": "not a map"}');
+
+        $audit = new BootAudit($file, 0);
+
+        $this->assertSame([], $audit->read()['findings']);
+
+        // The next boot that can write replaces the bad carry with the record it should have been
+        // written into, so the fault does not outlive the boot that found it.
+        $audit->report($this->emptyRecord(), [$this->gateFinding()], checked: ['swrr.pgcat.gate']);
+
+        $this->assertSame(['swrr.pgcat.gate'], array_keys($audit->read()['findings']));
+        $this->assertFalse(is_file($file . '.carry.json'));
+    }
+
+    /**
+     * The record does two jobs at once: it is the installation's memory, and its probe stamp is the
+     * throttle. A surface asking how long the stamp has stood is asking the second question, and the
+     * answer cannot be the file's — the boot that asks is the boot that has just refreshed it.
+     *
+     * Both halves are asserted here because either alone is satisfiable by the wrong reading: a
+     * method that returned the record's stamp would pass the second assertion, and one that returned
+     * a constant would pass the first.
+     */
+    public function test_the_stamp_a_process_reports_is_the_one_its_boot_found(): void
+    {
+        $file = $this->tempDir() . '/audit.json';
+        $found = time() - 900;
+
+        $audit = new BootAudit($file, 60);
+
+        $audit->report(
+            ['findings' => [], 'store_probed_at' => $found],
+            [],
+            checked: [],
+            probedAt: time(),
+        );
+
+        $this->assertGreaterThanOrEqual(
+            time() - 5,
+            (int) $audit->read()['store_probed_at'],
+            'this boot probed, so the file holds its own time now',
+        );
+
+        $stamp = $audit->storeProbeStamp();
+
+        $this->assertSame($found, $stamp['probed_at'], 'the age a surface judges is the one this boot found');
+        $this->assertGreaterThanOrEqual(900, (int) $stamp['age_seconds']);
+    }
+
+    /**
+     * A process that never reported wrote nothing, so the file still holds what it would have found —
+     * the reading a `db:doctor` run whose boot audit could not be built falls back to.
+     */
+    public function test_a_process_that_never_reported_reads_the_stamp_out_of_the_record(): void
+    {
+        $audit = $this->audit();
+        $found = time() - 120;
+
+        $this->putRecord([], $found);
+
+        $stamp = $audit->storeProbeStamp();
+
+        $this->assertSame($found, $stamp['probed_at']);
+        $this->assertGreaterThanOrEqual(120, (int) $stamp['age_seconds']);
+    }
+
+    /**
+     * A stamp in the future is a clock that moved rather than a record written early. The honest
+     * reading is no age at all, because a negative one would report every installation as freshly
+     * written the moment one of its containers disagreed about the time.
+     */
+    public function test_a_stamp_in_the_future_is_no_age_at_all(): void
+    {
+        $audit = $this->audit();
+
+        $this->putRecord([], time() + 3600);
+
+        $this->assertSame(0, $audit->storeProbeStamp()['age_seconds']);
+    }
+
+    /**
      * Collect the records the code under test writes, deliberately unmocked, so the
      * assertions run against what Laravel really emits.
      *

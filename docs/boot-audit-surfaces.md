@@ -142,7 +142,8 @@ the record *file* itself is not on it, because `swrr.audit.file.unwritable` belo
 reading and the object that owns the record is the one that judges it. Two are the store probe's own states —
 `swrr.audit.store_probe_seconds.off` for a probe switched off on purpose, and
 `swrr.audit.file.unwritable` for the record that throttles it — a boot repairs a read-only record
-before deciding, so only a file this account cannot change is left without its own date — and they
+before deciding, and one this account cannot change is carried beside the record rather than left
+undated, so the key is not the log's alone — and they
 are keyed because the row reporting them has to be able to say how long the installation has been
 unable to check its store. Filing all of those under
 `pgcat` would put twenty-five keys' worth of claims inside one feature's block, and a finding about

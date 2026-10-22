@@ -1061,7 +1061,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
      * The sentences are the audit's rather than this class's, because `db:doctor` prints them too and
      * a row and a log line that describe one setting two ways is the failure `ReplicaMetadata` was
      * extracted for. The unwritable one is remembered wherever the boot could repair the mode, and
-     * is logged without being remembered where it could not — see the key.
+     * where it could not it is carried beside the record instead — see the key.
      *
      * @return list<BootAuditFinding>
      */

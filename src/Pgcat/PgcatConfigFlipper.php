@@ -1505,7 +1505,7 @@ final class PgcatConfigFlipper
                 'audit_file',
                 $auditFile,
                 'audit record',
-                'a finding and the probe\'s throttle cannot be recorded, so a fault is logged once and the store is PINGed on every boot',
+                'the probe\'s throttle cannot be recorded, so the store is PINGed on every boot; the finding is carried beside the record rather than lost',
             );
         }
 
@@ -1592,8 +1592,8 @@ final class PgcatConfigFlipper
      * The consequences are the ones the faults were observed with rather than a general statement
      * about permissions: an unwritable boot stamp leaves `FlipWindow::closed()` permanently false,
      * so the per-minute entry keeps flipping instead of standing down after the window; an
-     * unwritable record cannot remember a finding or the store probe's throttle, so a fault is
-     * logged once and the store is PINGed on every boot; and an untakeable lock lets two boots
+     * unwritable record cannot be the store probe's throttle and carries its findings beside itself
+     * instead, so the store is PINGed on every boot; and an untakeable lock lets two boots
      * write the record at once, which is the merge the audit's own log line reports.
      *
      * `swrr.audit.file` is not a key of this class's slice — the provider resolves it and passes it

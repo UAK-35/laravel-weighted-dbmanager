@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+### Added
+
+- **`db:doctor` asks whether the boot audit's record has actually been written, not only whether it
+  could be.** `store probe` reads the interval, the record's mode and the store, and every one of
+  those can be right while nothing writes the record at all — the schedule stops, or the runs write a
+  state directory this installation does not read — and the silence is total, because the findings
+  standing in the record are read out of that same file and `/health/db` reports what its own boot
+  found. `store_probed_at` is the one field a healthy installation moves on its own, so the new
+  `probe stamp` row reads its age and fails past five missed cadences: five minutes at the shipped
+  probe interval and one-minute entry, five hours on an installation that probes hourly, where a
+  cadence is the longer of `swrr.audit.store_probe_seconds` and
+  `swrr.pgcat.schedule.interval_minutes` — the same five misses `stale_after_missed_runs` ships for
+  the beat, so "late" means one thing in both rows. The age is the one the record held *before this
+  run's own boot wrote anything*, which is what `BootAudit::storeProbeStamp()` keeps: a boot that
+  finds the probe due sends it and stamps the record, and `db:doctor` runs after that boot, so
+  judging the file as it stands would report every installation as fresh and would clear the fault
+  the row exists to report. A process that never reported reads the file, because it wrote nothing.
+  The states that remove the expectation are named rather than judged — probing switched off, a
+  record that cannot be written, an in-process store, a flip schedule that is not armed, and a record
+  holding no stamp at all, which is a fresh installation rather than a stale one — and none of them
+  is dated: the state the row reports is the *absence* of the writes that would carry a date. The
+  doctor's table gains one row, and the README, `docs/db-doctor-json.md`,
+  `docs/documented-exit-codes.md` and `docs/prose-numbers.md` name the new count.
+
+### Fixed
+
+- **A finding whose own record is the file that cannot be written is carried beside it instead of
+  losing its date.** `swrr.audit.file.unwritable` is the one finding in this package whose own record
+  can be the file that cannot be written: a read-only record is repaired before the boot decides
+  anything, so on the installations where that works the finding is not produced at all, and the
+  state that remains is a file this account may not change — another owner, an ACL — or a directory
+  that takes no file. The record is two things at once, the installation's memory of what stands and
+  the stamp that throttles the probe, and only the second is what a boot without a writable file
+  trades away. So a boot that cannot write the record now writes the record it *would* have written
+  beside it, as `{file}.carry.json`, and a later read takes the carry in place of the record while
+  the carry is the newer of the two: the key keeps its date, the row's `recorded unresolved since`
+  clause has something to print, and the boot that finds the setting clean logs the resolution the
+  carry made possible — a repair in between that the record alone could never have closed. The carry
+  is retired by the first boot that writes the record, and it is the record's own name plus
+  `.carry.json`, so a record moved to another path takes its carry with it. A directory that takes no
+  file still beats it, and that is the one state where the log line is the whole of what an operator
+  gets. `bin/checks.php` declares the carry's write as a structural write-back: the copy it replaces
+  is the previous boot's carry and is older by construction, which is the one place in this package
+  where dropping the file being replaced is intended.
+
 ## 0.2.0-alpha9 - 2026-10-22
 
 ### Added

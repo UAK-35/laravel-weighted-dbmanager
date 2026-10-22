@@ -305,8 +305,11 @@ so the probe runs, the findings are built against the record it can now use, and
 The lock the write is held on is repaired and handed back too, on either side of the open: a 0644
 `.lock` is one the next account cannot open for writing at all, and a read-only one is one *this*
 boot cannot, so the write would go ahead unlocked and say so. A file this account may not change
-(another owner, an ACL) still pays a stat, and the finding the boot logged is the whole of what an
-operator gets.
+(another owner, an ACL) still pays a stat, and the findings that boot produced are carried beside it
+— `{file}.carry.json`, read by the next boot and retired by the first write the record accepts — so
+the row can date them and the boot that finds a setting clean can log the resolution. A directory
+that takes no file is the case where nothing beside the record can be written either, and the log
+line is the whole of what an operator gets.
 
 ### The two windows, measured rather than argued
 
