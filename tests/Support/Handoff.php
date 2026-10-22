@@ -669,11 +669,11 @@ final class Handoff
         // @pending-descriptions
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-            'read' => 'sha256:846dcfa1596b81e9f517161317d4ea263de3c5abf335c69643457b0dc0311425',
+            'read' => 'sha256:c28ffbc88b8981898378fc4bf5a1384ee675f18c512a3ad1e8992922f083682c',
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
-            'read' => 'sha256:0360ecb95dac0c976bae4be7bf0f3816a78fc3d4ccd0e74965736d06a94dec92',
+            'read' => 'sha256:3344f7ec352d0f2e57f3ce1fbd4c65e370641005d9fa5628bd70d411eb07d328',
         ],
         'tests/Unit/Docs/DeploymentContractTest.php' => [
             'words' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
@@ -689,15 +689,15 @@ final class Handoff
         ],
         'docs/health-payload.md' => [
             'words' => 'the payload contract: why the shape a monitor reads by name is pinned rather than left to each block\'s tests, what the tables\' cells mean, the open shapes and why they are open, and every path and key the endpoint publishes',
-            'read' => 'sha256:cb46df1ed194b38bc2ef8f735422411c28c4c3a58c3d07d40f7dde0cd7e6f9d2',
+            'read' => 'sha256:345ccf5fb71cbad8e5be16e951ed1a565bf0aaea39cf53dd8fc3ea92122b012f',
         ],
         'docs/pool-repair-rate.md' => [
             'words' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
-            'read' => 'sha256:702f662e19138ee87e5d0b25a0c068c9454eaaded51aada87df4aad1a6b1ee6b',
+            'read' => 'sha256:8a4bd93a790da477430bd4c87d1de1ab54cba7b6a27b850169a795f8cf697f03',
         ],
         'docs/pgcat-fleet-inspection.md' => [
             'words' => 'the runbook for reading every task of a service rather than one: the three rows that carry loaded pools, supervisor state and flip writability, the ECS Exec loop that asks each task, why the report runs as `www-data` rather than the session\'s `root`, and what a task-level answer cannot say about the service',
-            'read' => 'sha256:50578154e3749bda7138d5ebf3ceb68ca381b7f1ba33514db31ee48b675f147f',
+            'read' => 'sha256:8a7a6da0fdce7362f0c4a5d2bcd8af4a5fd8f29ba2f601bc66b7fcdb5eab3c54',
         ],
         'docs/pgcat-pool-metrics.md' => [
             'words' => 'the metric decision: why the probe needed a surface a monitor can scrape, why a pool the reading could not prove has no sample, the alert rules, and the shapes it rejected',
@@ -705,7 +705,7 @@ final class Handoff
         ],
         'src/Pgcat/PoolProbeMetrics.php' => [
             'words' => 'the pool probe\'s verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on',
-            'read' => 'sha256:a0bc7e6d336787efa3499d0baa726cf5c5f109f05b9120be3feacf7778eb3c1e',
+            'read' => 'sha256:dbc8e22b5743573ae12e39f87748617f5d0aa76f2f0a90232f92ff8b760a3530',
         ],
         'src/Console/Commands/DbPgcatMetrics.php' => [
             'words' => 'the command that writes that exposition to stdout, with `--strict` as the deploy step\'s exit code and the body unchanged by it',

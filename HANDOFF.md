@@ -1,4 +1,4 @@
-# Handoff — the state of this package, taken 2026-10-21
+# Handoff — the state of this package, taken 2026-10-22
 
 This is a snapshot for whoever opens a thread in **this** repository next: what is written
 but uncommitted, what is committed but unpushed, what is not in any release a consumer can
@@ -28,13 +28,11 @@ git log --oneline origin/dev..HEAD                  # what is unpushed
 php bin/release.php --weigh --branch=dev --dry-run  # what a release would do right now
 ```
 
-Every number below that the register holds — sections 2 and 3 — was read off this machine when this
-note was re-taken, on 2026-10-21, from the refs this checkout holds; the remote was asked directly
-(`git ls-remote`, which named the same commit the local `origin/dev` ref does) rather than trusted
-from the local ref. Section 1 was re-taken on 2026-10-21, the date above, and it is the one part of
+Every number below that the register holds — sections 2 and 3 — was read off this machine when thisnote was re-taken, on 2026-10-22, from the refs this checkout holds; the remote was asked directly (`git ls-remote`, which named the same commit the local `origin/dev` ref does) rather than trusted
+from the local ref. Section 1 was re-taken on 2026-10-22, the date above, and it is the one part of
 this file that describes *now* rather than the commit it is read against — which this time means the
-pending set is empty, and the work this note lands is committed on `dev` and counted in section 2
-rather than sitting in this working tree.
+pending set is empty and the batch this note is taken over is the register's own commit, `98c80df`, so
+it is the paragraph under that table rather than a row of it that names the work.
 
 ---
 
@@ -42,12 +40,30 @@ rather than sitting in this working tree.
 
 **Nothing is pending: the set is empty, and the table under the paragraph that renders it is its two
 header rows.** The working tree carries no file the register does not — which is the question the block
-asks, `git ls-files --cached --others --exclude-standard` minus `git ls-tree -r` of the register — and
-the one tracked path that differs, `.idea/php.xml`, is a modification of a file a commit carries rather
-than a file none does, so it is not a row here.
+asks, `git ls-files --cached --others --exclude-standard` minus `git ls-tree -r` of the register — so
+the batch this note lands is a set of modifications to paths a commit already carries, and a
+modification is not a row here.
 
-**The batch this note lands is the pair that answered the suite's two red tests, and it was committed
-before the note rather than pending in it.** `83a539b` makes the note's latest-tag guard and the page
+**The batch this note is taken over is the pool-repair ledger, the readiness probe and the doctor's
+split pool-probe row, and it is the register's own commit, `98c80df`.** Every repair a container records is now an entry — when, the pool, the mode, and
+whether the restart cleared it — instead of only a count and one moment, published as
+`pool_repairs.ledger` by `/health/db`, as `ledger` by `windowStatus()`, and as one `repair_N` row per
+entry by `db:pgcat-flip --status`. Beside it the controller gained the second action a load balancer
+wants, `readiness()`: `status` and `pool_probe` and nothing else, `503` on exactly the state `index()`
+fails that block for, and cheap because it runs no query, opens no database connection, reads no state
+store and writes no log line. Beside those, `db:doctor`'s `pool probe` row is now `pool probe armed`
+and `pool probe answer`, on a `PgcatConfigFlipper::poolProbeArming()` that reads the switch and the
+pooler's file without opening a socket — so the bounded run answers the first and leaves out the
+second, and the preflight says the same thing at a quarter of the cost. It touches the flipper, its
+command and the endpoint, their three tests plus the doctor's and the contract's, and the records that
+describe them: `README.md`, `docs/pool-repair-rate.md`, `docs/pgcat-pool-probe.md`,
+`docs/health-payload.md`, `docs/db-doctor-json.md`, `docs/deployment-contract.md`,
+`docs/pgcat-fleet-inspection.md`, `docs/prose-numbers.md`, and the `## Unreleased` entries that weigh
+them. Nothing under `bin/` or `config/` moves, the test support files move only where the note itself
+is declared, and no untracked file arrives with it.
+
+**The batch under this one is the pair that answered the suite's two red tests, and it was committed
+before this note rather than pending in it.** `83a539b` makes the note's latest-tag guard and the page
 guard read the tags this branch carries — `git tag --merged HEAD`, the question `RELEASING.md` builds a
 release from, `bin/surface.php`'s `latestTag()` asks, and `bin/release.php`'s rung takes — instead of
 every tag the repository has, which is what `v0.2.0-alpha8` had turned red on: that tag is cut on
@@ -73,7 +89,7 @@ and the push that publishes it comes after. The version in each row moves and th
 left as it was, the three ways a note can be unmovable are refusals before anything is written, and the
 failing sentence a release's own commit has landed red on twice is section 3.
 
-**All of it is committed, and none of it is pushed.** The seventeen commits past `origin/dev` are
+**All of it but the batch above is committed, and none of it is pushed.** The nineteen commits past `origin/dev` are
 section 2's listing rather than a list restated here: the three records of application-side work with the
 plan beside them, the third recording skill, the prose-number guard's completeness half, the
 quoted-records guard, the doctor record's citation, the connector row's tests, the Laravel plugin's
@@ -95,21 +111,21 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 744.3s
-      recorded 2026-10-21, PHP 8.4.26
-      syntax     PASS    21.1s  168 files, no syntax errors
-      ast        PASS     2.4s  168 files parsed
-      writeback  PASS     0.8s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     3.4s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.1s  20 platform requirements satisfied
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 682.7s
+      recorded 2026-10-22, PHP 8.4.26
+      syntax     PASS    19.1s  168 files, no syntax errors
+      ast        PASS     1.8s  168 files parsed
+      writeback  PASS     0.5s  3 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     2.7s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     2.6s  20 platform requirements satisfied
       interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
-      yaml       PASS     2.2s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     0.8s  56 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.0s  10005 prose line(s) in 34 record(s), no fused sentence; the detector agreed w…
-      phpstan    PASS     7.1s  [OK] No errors
-      pint       PASS     9.2s  PASS … 169 files
-      tests      PASS   693.9s  Tests: 1621, Assertions: 10768, Skipped: 10.
+      yaml       PASS     1.9s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     0.6s  56 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.0s  10088 prose line(s) in 34 record(s), no fused sentence; the detector agreed w…
+      phpstan    PASS    24.6s  [OK] No errors
+      pint       PASS     6.5s  PASS … 169 files
+      tests      PASS   622.2s  Tests: 1631, Assertions: 10954, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
@@ -136,14 +152,16 @@ five tests to the store they judge: four of them read a run's exit code without 
 `db:doctor`'s `store reachability` row PINGs, so on a workstation with a Redis answering they passed
 by accident and on the runner all four failed while every row they assert on read correctly.
 
-**What this note lands with.** The register commit it describes is `6e1fb0c` — *fix: the Unreleased
+**What this note lands with.** The register commit it describes is `e8ce7c1` — *docs: the note is
+re-taken at 6e1fb0c, and the gate it quotes is this run* — the re-take that moved this file to the
+commit under it without touching a line of `src/`. Under it sits `6e1fb0c` — *fix: the Unreleased
 section carries one `### Fixed`, not two* — the commit that merged the second `### Fixed` heading a
 batch had appended under `## Unreleased` back into the first, so the section states one count per
-heading and the weighing reports four fixed entries rather than `3` and `1` on two lines. Under it sits
-`eee4258`, the tag readings pinned on a repository that is not this checkout — a fixture with a tag
-behind a branch `main` cannot reach, which is the history this checkout may stop having the day the
-alpha8 release branch is merged — and under that `83a539b`, the reading itself. Under those sit the
-fifteen commits section 2 lists behind them.
+heading and the weighing reports four fixed entries rather than `3` and `1` on two lines. Under that
+sits `eee4258`, the tag readings pinned on a repository that is not this checkout — a fixture with a
+tag behind a branch `main` cannot reach, which is the history this checkout may stop having the day
+the alpha8 release branch is merged — and under that `83a539b`, the reading itself. Under those sit the
+sixteen commits section 2 lists behind them.
 The note is prose only, which is what a re-take is: the rendered blocks come out of git, the inventory
 check and the last recorded gate run, and nothing else in it claims a fact a command could not answer.
 A release reads it too: `bin/release.php` refreshes the five blocks at the register this note names —
@@ -160,21 +178,21 @@ header line — the release rewrites them, which is why the record of one tag is
 tree. That is the check reading the stamp and the rows: against the register this note names it exits
 1 on one line per record, because the tree that commit carries is not the tree the records were
 written at; and against this checkout it exits 1 on two of the three, because the branch has moved
-eighteen commits past the tag the release wrote them at — the stamp names `v0.2.0-alpha7`, which is
+twenty commits past the tag the release wrote them at — the stamp names `v0.2.0-alpha7`, which is
 the tag section 3 calls latest, and the rows under it are that tag's tree rather than this one:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=6e1fb0c
-  --> exit 1: the inventory is out of step with the tree at 6e1fb0c
+php bin/inventory.php --check --at=98c80df
+  --> exit 1: the inventory is out of step with the tree at 98c80df
       files.tsv: 1 line(s) stale
-      methods.tsv: 4 line(s) stale
-      surface.tsv: 7 line(s) stale
+      methods.tsv: 5 line(s) stale
+      surface.tsv: 8 line(s) stale
 
 php bin/inventory.php --check
   --> exit 1: the inventory is out of step with the tree
-      methods.tsv: 3 line(s) stale
-      surface.tsv: 6 line(s) stale
+      methods.tsv: 4 line(s) stale
+      surface.tsv: 7 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -225,10 +243,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `6e1fb0c` — *fix: the Unreleased section carries one `### Fixed`, not two* |
+| HEAD | `98c80df` — *feat: each pool repair is readable as a ledger, and readiness answers the probe alone* |
 | `origin/dev` | `3dc70db` — *docs: the alpha6 CI record carries its outcome, and the green run that answers it* |
-| Unpushed | 17 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 5, feat 5, fix 2, test 4 |
+| Unpushed | 19 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1, docs 6, feat 6, fix 2, test 4 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -237,7 +255,7 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is seventeen commits ahead of `origin/dev`, and the table above is where they are counted: the
+The register is nineteen commits ahead of `origin/dev`, and the table above is where they are counted: the
 records of application-side work and the plan beside them, the third recording skill, the two halves the
 prose-number pass added, the doctor record's citation, the connector row's tests, the Laravel plugin's
 settings, the handoff note's one-command blocks, the note taken at the alpha7 commits, `/health/db`'s two
@@ -247,7 +265,7 @@ read as a set, the Unreleased section's two `### Fixed` headings merged into one
 tag readings — the release commit itself, `2a771cc`, and the alpha6 record, `3dc70db`, are on the
 remote already.
 
-Unpushed at the register means what it says, seventeen commits no remote has — which is the state the
+Unpushed at the register means what it says, nineteen commits no remote has — which is the state the
 release this cycle cut was *not* in: `v0.2.0-alpha7` was cut with the CI rail skipped, from a commit that
 was not the tip of `origin/dev`, and the paragraph above the release section records that. The `ci` line
 of a plan is what refuses over it until the push below happens: `bin/release.php` refuses to tag while
@@ -259,6 +277,8 @@ it travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+98c80df  feat: each pool repair is readable as a ledger, and readiness answers the probe alone
+e8ce7c1  docs: the note is re-taken at 6e1fb0c, and the gate it quotes is this run
 6e1fb0c  fix: the Unreleased section carries one `### Fixed`, not two
 eee4258  test: the two tag readings are pinned on a repository that has both kinds of tag
 83a539b  test: the two guards that read every tag in the repository now read the tags this branch carries
@@ -267,23 +287,21 @@ eee4258  test: the two tag readings are pinned on a repository that has both kin
 d6bff09  feat: the port plan's status table is read as data, and held to the tree
 a9b70da  feat: the pooler's mode is one record with two writers, and the both-armed finding is retired
 eb3a48a  feat: /health/db publishes the connector that builds the followed connection
-a130243  feat: /health/db's schedule block names the two settings its tolerance is made of
-39300fc  docs: the handoff note is re-taken at the alpha7 commits, and its gate is this run
 ```
 <!-- /handoff:log -->
 
 The fence above is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
 block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
 commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
-register the range is seventeen commits, past the ten the block holds, so seven of them are left to
+register the range is nineteen commits, past the ten the block holds, so nine of them are left to
 that command and the ten a reader is most likely to be standing in are the ones the block prints.
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
-is *unsatisfied* at this register — `HEAD` is seventeen commits past `origin/dev` — so the next version
-needs the push below first, and its Unreleased section carries twenty-one entries where the release this
+is *unsatisfied* at this register — `HEAD` is nineteen commits past `origin/dev` — so the next version
+needs the push below first, and its Unreleased section carries twenty-four entries where the release this
 cycle cut promoted the four before it. Section 3's plan is a transcript taken before this cycle's tags;
 a run against this register would plan a minor above `v0.2.0-alpha7`, and the `### Removed` entry among
-those twenty-one is what asks for it.
+those twenty-four is what asks for it.
 
 The push itself goes through PowerShell 7 and nothing else; `PUSHING.md` is the runbook, and
 `@pkg-push` wraps it:
@@ -302,7 +320,7 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7` |
 | The latest of them | `v0.2.0-alpha7` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 21 entries — 11 added, 4 fixed, 5 changed, 1 removed |
+| `## Unreleased` at the basis | 24 entries — 13 added, 4 fixed, 6 changed, 1 removed |
 | The notes weigh as | `breaking` — the `### Removed` heading is the loudest one the notes use, and it is a minor rather than a major while the package is pre-1.0 |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
@@ -311,7 +329,7 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are the `### Added`,
 `### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and the section carries
-eleven entries under `### Added`, five under `### Changed`, four under `### Fixed` and one under
+thirteen entries under `### Added`, six under `### Changed`, four under `### Fixed` and one under
 `### Removed` at the register, which `bin/weighing.php` reads as `breaking` — the bump a `### Removed`
 entry asks for, which a 0.x line takes as a minor. The register is therefore a branch whose release
 would publish the port plan's status guard, the pooler's mode record and the finding it retired,
@@ -383,7 +401,7 @@ version it holds.
 
 That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers in
 it that *are* checkable are held, though they are two different readings: the entries the notes carry
-**at the register** (the table at the top of this section — twenty-one) and the state of the three records
+**at the register** (the table at the top of this section — twenty-four) and the state of the three records
 (section 1, whose transcript the guard runs). Its own `2 bullet(s)` is the weighing's answer about the
 working tree, which no guard here holds.
 
