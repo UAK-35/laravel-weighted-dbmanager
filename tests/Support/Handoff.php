@@ -673,7 +673,7 @@ final class Handoff
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
-            'read' => 'sha256:3344f7ec352d0f2e57f3ce1fbd4c65e370641005d9fa5628bd70d411eb07d328',
+            'read' => 'sha256:c37579024705a54d27b27c43b51c6434b50475d4008da83e326de07316894aa7',
         ],
         'tests/Unit/Docs/DeploymentContractTest.php' => [
             'words' => 'the guard that holds the record\'s `Key` column and the README\'s row table to that map, in both directions',
@@ -702,6 +702,10 @@ final class Handoff
         'docs/pgcat-pool-metrics.md' => [
             'words' => 'the metric decision: why the probe needed a surface a monitor can scrape, why a pool the reading could not prove has no sample, the alert rules, and the shapes it rejected',
             'read' => 'sha256:0a9cf28c19561d69f5409f779b7d48e19890985c22649fbb13278853ef139869',
+        ],
+        'docs/local-postgres-and-pgcat.md' => [
+            'words' => 'the environment record: the two PostgreSQL servers this machine runs (settings, authentication, databases, and the physical standby streaming from the primary, with the configuration files and log that standby owns rather than sharing), and the pgcat checkout behind them — its origin, commit, every configuration file, the pool rows the standby is named in, the two starter scripts beside the data directories, the build this machine needs for the pooler, and the read and the write that were walked through it to 5431 and 5432',
+            'read' => 'sha256:b0ca2efe1147211d1d45adb07aea27a10c95db18b278d8d82671baf9bd306f95',
         ],
         'src/Pgcat/PoolProbeMetrics.php' => [
             'words' => 'the pool probe\'s verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on',
@@ -827,6 +831,38 @@ final class Handoff
             'words' => 'the guard that holds that status table to the tree: every sha it names is a commit this repository has, and every phase it claims is one the plan still declares',
             'read' => 'sha256:24c9aa8ce9e76dfeb7c5c6d83885668e9049b71bcda9a6cf6698dfc3008ae6cc',
         ],
+        'scripts/servers-startup/README.md' => [
+            'words' => 'the Windows runbook for the three test servers: the machine file and its two tokens, the start order, what each script owns, why the pooler needs a build script at all, and the two queries that prove which server answered',
+            'read' => 'sha256:f53253715ad29b35314e7d7c45f41adf853084e0656684360e0d538e9014e9e4',
+        ],
+        'scripts/servers-startup/servers.sample.cmd' => [
+            'words' => 'the committed form of that machine file: the two directories every script in the folder refuses to guess at, written as tokens',
+            'read' => 'sha256:cb027ad2e92591dc578e24c3eb1edba0afd0d4755516e19d5c327c21bea06d09',
+        ],
+        'scripts/servers-startup/start-primary.bat' => [
+            'words' => 'the primary\'s starter: the paths from the machine file, the refusal while the installer\'s Windows service holds 5432, and the role read back after pg_isready answers',
+            'read' => 'sha256:33cda19c834f82bdd4d6787d9ff3526c3b2734a57b8f97d9956bb8192e2f704f',
+        ],
+        'scripts/servers-startup/start-replica.bat' => [
+            'words' => 'the standby\'s starter on 5431, the same shape, with pg_is_in_recovery() read back because pg_isready cannot tell a standby from a primary',
+            'read' => 'sha256:f207c81a476934885baa1e4016ac8d37af27ff6bf51ac16dd5db8d479cb287d6',
+        ],
+        'scripts/servers-startup/start-pgcat.bat' => [
+            'words' => 'the pooler\'s starter: the config beside it rather than the checkout\'s, the detached window and why the child gets its own handles, the wait on 5433, and SHOW POOLS as the proof it is serving',
+            'read' => 'sha256:154eedb1498ab2b322c1ec8b50b73cdcc61d1532c51e6174baa36c1b9508dc1e',
+        ],
+        'scripts/servers-startup/apply-hba-scram.ps1' => [
+            'words' => 'the pg_hba.conf rules pgcat needs, written above the cleartext ones in both servers\' files, backed up once, idempotent, and made live with pg_reload_conf()',
+            'read' => 'sha256:cc38fc98d1334d6710df9839e895d9baaebf82c7caf820aa512253ded5ea46e0',
+        ],
+        'scripts/servers-startup/build-pgcat.ps1' => [
+            'words' => 'the build this platform needs: three crates unpacked outside the registry with their `.der` files renamed, two crate-level lints relaxed, and cargo pointed at those copies',
+            'read' => 'sha256:8d7b29a61466e2e5307d59e2e16fa2220c9d747d1c118ab0b1cf073576863b46',
+        ],
+        'scripts/servers-startup/pgcat.toml' => [
+            'words' => 'the pooler config the scripts start: 127.0.0.1:5433, the standby as every shard\'s replica row, and `simple_db` splitting reads from writes',
+            'read' => 'sha256:51a4011d9bb7d03335d8b21c76c6188fdfbffe5e74699e0948a4c1ec76935937',
+        ],
         // @pending-descriptions-end
     ];
 
@@ -916,6 +952,12 @@ final class Handoff
      *   own `What the test above cannot ask` writes — the guard holds the commit the remote named
      *   and the commits between it and the basis, not the ref it sits on — and reading the live ref
      *   here made a note red for a push that had nothing to do with it.
+     *
+     *   The live ref is not left unasked on that account: {@see remoteOrigin()} asks it, and one
+     *   guard in `HandoffTest` holds the `origin/dev` row to the answer. The difference is what the
+     *   reading is for. A renderer has to reproduce a block against a snapshot, so a network answer
+     *   there is a value the note cannot be committed with; a guard is asking whether the snapshot
+     *   is still the world, which is exactly a question for the network.
      *
      * @param array{register: string, origin: string, branch: string}|null $snapshot
      *
@@ -1791,6 +1833,50 @@ final class Handoff
             'head' => self::commit(self::UNPUSHED, 'HEAD'),
             'origin' => self::commit(self::UNPUSHED, 'origin/dev'),
         ];
+    }
+
+    /**
+     * The tip of `origin/dev` on the remote itself, asked of the network rather than of the ref this
+     * checkout last fetched.
+     *
+     * WHY THE REMOTE IS ASKED AT ALL, WHEN EVERY BLOCK IS RENDERED AGAINST A SNAPSHOT
+     * -------------------------------------------------------------------------------
+     *   Section 2's `origin/dev` row is a claim that the commits above it are on no remote, and every
+     *   other reading in this file is taken against the pair the note records — which is what makes a
+     *   committed note checkable, and also what leaves a push invisible to it. A push updates the
+     *   remote and nothing in this checkout: the row goes on naming the tip it was taken at, the
+     *   count goes on counting commits that are now published, and the suite stays green over a note
+     *   that has become false. So the remote is asked once, here, and `HandoffTest` holds the row to
+     *   what it answers.
+     *
+     * The call is `git ls-remote --exit-code`, with the credential prompt off (`run()` sets
+     * `GIT_TERMINAL_PROMPT=0`), so an unreachable or private remote fails at once instead of waiting
+     * on a console this shell does not have. The answer is returned rather than asserted, because
+     * "the remote could not be asked" and "the remote does not agree" are a skip and a failure — two
+     * outcomes a helper that threw would collapse into one.
+     *
+     * @return array{sha: string|null, error: string} `sha` is null when the remote could not be asked,
+     *                                               and `error` is the reason to report with the skip
+     */
+    public static function remoteOrigin(): array
+    {
+        $run = self::git('ls-remote', '--exit-code', 'origin', 'refs/heads/dev');
+        $lines = self::outputLines($run['output']);
+
+        $matches = [];
+
+        if ($run['exit'] !== 0
+            || count($lines) !== 1
+            || preg_match('/^([0-9a-f]{40})\trefs\/heads\/dev$/', $lines[0], $matches) !== 1) {
+            return [
+                'sha' => null,
+                'error' => trim($run['error']) !== ''
+                    ? trim($run['error'])
+                    : sprintf('git ls-remote exited %d and printed [%s]', $run['exit'], implode(' ', $lines)),
+            ];
+        }
+
+        return ['sha' => $matches[1], 'error' => ''];
     }
 
     /**

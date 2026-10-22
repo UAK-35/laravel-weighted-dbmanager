@@ -147,7 +147,9 @@ on the remote, pushed with `git push origin dev --follow-tags` from PowerShell 7
 them, and both carry the `### Fixed` entries the release then promoted. `929094b` reads section 2 at
 the pair the note's own table names rather than at the live `origin/dev`, so a push can no longer make
 a committed note stale — and with it, nothing unpushed became a state the renderer writes rather than
-one it refuses, which is the state a push and a release both leave. `8742456` binds the pool probe's
+one it refuses, which is the state a push and a release both leave. The remote is not unasked on that
+account: a later guard holds the `origin/dev` row to the tip `git ls-remote` answers, so a push past
+this checkout is red again, while the note travelling on its own push is not. `8742456` binds the pool probe's
 five tests to the store they judge: four of them read a run's exit code without arming the store
 `db:doctor`'s `store reachability` row PINGs, so on a workstation with a Redis answering they passed
 by accident and on the runner all four failed while every row they assert on read correctly.
@@ -183,14 +185,12 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=98c80df
-  --> exit 1: the inventory is out of step with the tree at 98c80df
-      files.tsv: 1 line(s) stale
-      methods.tsv: 1 line(s) stale
-      surface.tsv: 1 line(s) stale
+php bin/inventory.php --check --at=a9ad00e
+  --> exit 0: inventory is current — 53 files, 262 public methods, 306 key(s)/member(s), described as v0.2.0-alpha9
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 53 files, 262 public methods, 306 key(s)/member(s), described as v0.2.0-alpha9
+  --> exit 1: the inventory is out of step with the tree
+      methods.tsv: 2 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -225,6 +225,15 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `docs/local-postgres-and-pgcat.md` | the environment record: the two PostgreSQL servers this machine runs (settings, authentication, databases, and the physical standby streaming from the primary, with the configuration files and log that standby owns rather than sharing), and the pgcat checkout behind them — its origin, commit, every configuration file, the pool rows the standby is named in, the two starter scripts beside the data directories, the build this machine needs for the pooler, and the read and the write that were walked through it to 5431 and 5432 |
+| `scripts/servers-startup/README.md` | the Windows runbook for the three test servers: the machine file and its two tokens, the start order, what each script owns, why the pooler needs a build script at all, and the two queries that prove which server answered |
+| `scripts/servers-startup/apply-hba-scram.ps1` | the pg_hba.conf rules pgcat needs, written above the cleartext ones in both servers' files, backed up once, idempotent, and made live with pg_reload_conf() |
+| `scripts/servers-startup/build-pgcat.ps1` | the build this platform needs: three crates unpacked outside the registry with their `.der` files renamed, two crate-level lints relaxed, and cargo pointed at those copies |
+| `scripts/servers-startup/pgcat.toml` | the pooler config the scripts start: 127.0.0.1:5433, the standby as every shard's replica row, and `simple_db` splitting reads from writes |
+| `scripts/servers-startup/servers.sample.cmd` | the committed form of that machine file: the two directories every script in the folder refuses to guess at, written as tokens |
+| `scripts/servers-startup/start-pgcat.bat` | the pooler's starter: the config beside it rather than the checkout's, the detached window and why the child gets its own handles, the wait on 5433, and SHOW POOLS as the proof it is serving |
+| `scripts/servers-startup/start-primary.bat` | the primary's starter: the paths from the machine file, the refusal while the installer's Windows service holds 5432, and the role read back after pg_isready answers |
+| `scripts/servers-startup/start-replica.bat` | the standby's starter on 5431, the same shape, with pg_is_in_recovery() read back because pg_isready cannot tell a standby from a primary |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
@@ -241,10 +250,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `98c80df` — *feat: each pool repair is readable as a ledger, and readiness answers the probe alone* |
+| HEAD | `a9ad00e` — *Release v0.2.0-alpha9* |
 | `origin/dev` | `3dc70db` — *docs: the alpha6 CI record carries its outcome, and the green run that answers it* |
-| Unpushed | 19 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 6, feat 6, fix 2, test 4 |
+| Unpushed | 22 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1, docs 7, feat 6, fix 3, test 4 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -275,6 +284,9 @@ it travels on the push below.
 The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+a9ad00e  Release v0.2.0-alpha9
+d144747  fix: the note's guard reads a release's own pending tag the way the release writes it
+63027bf  docs: the note is re-taken at 98c80df, and the gate it quotes is this run
 98c80df  feat: each pool repair is readable as a ledger, and readiness answers the probe alone
 e8ce7c1  docs: the note is re-taken at 6e1fb0c, and the gate it quotes is this run
 6e1fb0c  fix: the Unreleased section carries one `### Fixed`, not two
@@ -282,9 +294,6 @@ eee4258  test: the two tag readings are pinned on a repository that has both kin
 83a539b  test: the two guards that read every tag in the repository now read the tags this branch carries
 15fc867  docs: the payload's key tables are compared as a set, so their order is not the contract
 971d20e  docs: the published config row's fresh-install answer is one sentence in the four records that state it
-d6bff09  feat: the port plan's status table is read as data, and held to the tree
-a9b70da  feat: the pooler's mode is one record with two writers, and the both-armed finding is retired
-eb3a48a  feat: /health/db publishes the connector that builds the followed connection
 ```
 <!-- /handoff:log -->
 
@@ -318,19 +327,22 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9` |
 | The latest of them | `v0.2.0-alpha9` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 24 entries — 13 added, 4 fixed, 6 changed, 1 removed |
-| The notes weigh as | `breaking` — the `### Removed` heading is the loudest one the notes use, and it is a minor rather than a major while the package is pre-1.0 |
+| `## Unreleased` at the basis | 0 entries — 0 added, 0 fixed, 0 changed |
+| The notes weigh as | `patch` — the section is a bare heading at this basis, because `bin/release.php` promoted the batch into `0.2.0-alpha9` and left the next section to the first change |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
 version — the release a prerelease announces, or the next patch above a release — and from `44a33da` a
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are the `### Added`,
-`### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and the section carries
-thirteen entries under `### Added`, six under `### Changed`, four under `### Fixed` and one under
-`### Removed` at the register, which `bin/weighing.php` reads as `breaking` — the bump a `### Removed`
-entry asks for, which a 0.x line takes as a minor. The register is therefore a branch whose release
-would publish the port plan's status guard, the pooler's mode record and the finding it retired,
+`### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and at this basis the
+section carries none of them: the release at the head of this branch promoted the batch that stood
+there into `## 0.2.0-alpha9 - 2026-10-22`, so the `## Unreleased` above it is the bare heading a
+release leaves behind, and `bin/weighing.php` reads it as `patch` where the note taken before the
+release read `breaking` for the `### Removed` entry the batch carried. What the tag holds is still in
+nothing a consumer can install — the release commit is the tip of this branch and not of
+`origin/dev`, which is section 2's count — so the register is a branch whose next release would
+publish the port plan's status guard, the pooler's mode record and the finding it retired,
 `/health/db`'s `connector` key with its two schedule settings, the connector boot finding, the three
 records of application-side work with the third recording skill beside them, the two halves the
 prose-number pass added, and this note's two tag readings.
@@ -568,9 +580,12 @@ batch.
 Three claims in this file are a reader's to judge, and are named here so that a green suite is
 not mistaken for a checked file:
 
-* **the remote**. The tip of `origin/dev` was asked of GitHub on the day; the test holds the
-  commit that answer named, and the commits between it and the basis, but not the ref it sits
-  on — a fetch that moved `origin/dev` would not fail it.
+* **the remote's next movement**. The `origin/dev` row is held to the tip `git ls-remote` answers,
+  with one allowance: that tip may be this checkout's own `HEAD`, which is the note travelling on
+  the push that carries it. What no reading on a pushed tree can see is that same push publishing
+  the commits section 2 counts — the note is committed before the push exists, so it names the
+  previous tip by construction. Every later movement is red: a second push, a colleague's, or a
+  fetch that reveals one.
 * **the plan and the evidence blocks**. The release plan in section 3 and the runs quoted in
   section 5 were runs against this working tree. Their checkable arithmetic is held — the entries the
   notes carry at the register, and the commands section 1's transcript quotes, which the guard now

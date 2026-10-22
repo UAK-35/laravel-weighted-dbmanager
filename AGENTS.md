@@ -72,6 +72,7 @@ file that owns it, and is not restated here — a copy would drift and a guard w
 | the state of the work when it was last taken | `HANDOFF.md`, held to the tree by `tests/Unit/Docs/HandoffTest.php` |
 | the rule above, and the paths that would break it — a climb, and a machine | `tests/Support/RepoEscapes.php`, `tests/Unit/Support/RepoEscapesTest.php`, `tests/Support/MachinePaths.php`, `tests/Unit/Support/MachinePathsTest.php` |
 | the skills for working here, and what each one wraps | `.agents/README.md`, `.agents/skills/` |
+| the three test servers on Windows — the PostgreSQL primary on 5432, the standby on 5431 and the pgcat pooler on 5433 — and the scripts that start, configure and build them | `scripts/servers-startup/README.md`, and `docs/local-postgres-and-pgcat.md` for what is behind them |
 
 The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` (how a tool is run),
 `release.php`, `weighing.php`, `inventory.php`, `surface.php`, `api.php`, `counts.php`, `blame.php`
@@ -93,6 +94,11 @@ and `publish-config.php`. The published config is `config/db-manager.php` with `
    never in a rule; `HANDOFF.md` section 5 holds its rows to it. A fresh clone has nothing to copy
    from, so the same file in token form is committed at `.agents/sample.machine.local.json`: copy it
    to the name above and replace each `__TOKEN__` with this machine's own value.
+7. `scripts/servers-startup/README.md` — when the work needs a real database rather than a mock:
+   three commands start the primary, the standby and the pooler, and nothing has to be searched for
+   first. The directories they read are in `servers.local.cmd` beside them — gitignored, and the
+   same token-and-sample arrangement as the machine record above — so a missing one is refused by
+   name rather than guessed at.
 
 ---
 
