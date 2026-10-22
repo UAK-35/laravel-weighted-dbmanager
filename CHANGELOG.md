@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha10 - 2026-10-22
+
 ### Added
 
 - **`db:doctor` asks whether the boot audit's record has actually been written, not only whether it
