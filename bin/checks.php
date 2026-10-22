@@ -512,9 +512,15 @@ $elapsed = microtime(true) - $startedAt;
 // Written before the summary is printed rather than after the failure block, because the run it
 // records is the one whose rows are about to be read — and a red run is a run the note may have
 // to quote too, so the record is not conditional on the verdict.
+//
+// The line ending is `\n` rather than `PHP_EOL`, and that is not tidiness: `.gitattributes` checks
+// this file out with LF, and the note's pending table holds a digest of the bytes it finds. A
+// record written with `\r\n` on this platform would be hashed with the carriage return and
+// committed without it, so the row would declare a reading the committed file does not have — red
+// on the next machine that checks the tree out, green on the one that wrote it.
 if ($options['record'] && @file_put_contents(
     $root . '/' . GATE_RECORD,
-    gateRecord($results, $elapsed) . PHP_EOL,
+    gateRecord($results, $elapsed) . "\n",
 ) === false) {
     fwrite(STDERR, 'The gate record could not be written to ' . GATE_RECORD . '.' . PHP_EOL);
     exit(1);
