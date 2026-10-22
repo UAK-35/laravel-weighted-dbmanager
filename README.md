@@ -751,11 +751,12 @@ one name the payload chooses at runtime: `replicas` is keyed by the connection t
 | `reader_window` | `applicable`, `applied`, `expected`, `failed`, `reason` | the window verdict alone, for a reader that does not want the flipper's snapshot |
 | `pool_probe` | `address`, `admin`, `answered`, `applicable`, `control`, `discriminates`, `enabled`, `failed`, `host`, `judged`, `pools`, `port`, `reason`, `verified`, `warned` | what the running pooler holds, and whether a pool the application reads from is missing |
 | `pool_repairs` | `applicable`, `count`, `in_window`, `judged`, `last_at`, `ledger`, `max_repairs`, `reason`, `warned`, `window_seconds` | how often the container has had to repair a pool, whether that rate is past the threshold, and the repairs themselves as a small ledger — the one block that warns rather than fails |
-| `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity` | the boot audit's standing findings, as `db:doctor` reads them |
+| `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity`, `store_probe` | the boot audit's standing findings, as `db:doctor` reads them, and whether the record is still being written |
 | `audit.counts` | `error`, `warning` | the standing findings by level |
 | `audit.scope` | `app_env`, `connection`, `driver`, `source` | what the boot that wrote them was running as |
 | `audit.current` | `available`, `count`, `counts`, `error`, `findings`, `severity` | the same audit re-read live by this process, which is not the same thing as what is on record |
 | `audit.current.counts` | `error`, `warning` | the live findings by level |
+| `audit.store_probe` | `age_seconds`, `applicable`, `interval_minutes`, `last_probed_at`, `missed_cadences`, `not_judged`, `probe_seconds`, `reason`, `stale`, `stale_after_seconds` | the age of the record's probe stamp — whether the audit is still being written, the window it is judged against, and why nothing is judged when nothing is |
 | `errors` | — | a list of sentences naming what this process could not do, which no block above owns |
 
 ### It is about one connection: the one the package follows
@@ -968,6 +969,18 @@ cannot disagree about whether flipping is active:
             "counts": {"error": 0, "warning": 0},
             "findings": [],
             "error": null
+        },
+        "store_probe": {
+            "applicable": true,
+            "last_probed_at": "2026-09-30T09:40:31+00:00",
+            "age_seconds": 31,
+            "stale": false,
+            "stale_after_seconds": 300,
+            "missed_cadences": 5,
+            "probe_seconds": 60,
+            "interval_minutes": 1,
+            "reason": null,
+            "not_judged": null
         }
     },
     "errors": {}
@@ -979,6 +992,24 @@ but cannot act, each with the sentence the boot log carried for it, the level it
 logged at, and how long it has stood — `age` in words, with `age_seconds` for a monitor
 that would rather do the arithmetic. `count` and `oldest` save a dashboard from walking
 the list.
+
+`store_probe` answers the question the findings cannot: is the record still being *written*?
+A record nothing writes goes on describing an installation that no longer exists, and because
+the findings are read out of that same file their silence is not evidence of anything — the one
+field a healthy installation moves on its own is `store_probed_at`, so its age is the reading.
+The block publishes that age (`age_seconds`, with `last_probed_at` for a reader that would
+rather have the moment), the window it is judged against (`stale_after_seconds`, decomposed into
+`missed_cadences`, `probe_seconds` and `interval_minutes` so a monitor can say *how* late a
+stamp is), and `stale` with the sentence in `reason` when it is past that window. `stale` is
+`null` where the age is nobody's fault — probing switched off, a record that cannot be written,
+an in-process store, a schedule that is not armed, a record holding no stamp — and `not_judged`
+says which; the window is published in those states too, because it is what the installation was
+asked to tolerate rather than a conclusion about it. The rule is `src/Support/ProbeStamp.php`,
+the one `db:doctor`'s `probe stamp` row decides by, so a monitor and the command cannot disagree
+about an installation in silence.
+
+Like the findings beside it, none of it moves `status`: an audit nobody is writing is a
+configuration that is no longer being described, not a database that cannot answer.
 
 ### What the installation recorded, and what this process sees
 
@@ -1022,6 +1053,7 @@ two kinds of finding is one field:
 | page — a refused value is standing | `severity == "error"` (or `counts.error > 0`) |
 | ticket — a setting reads as on but cannot act | `severity == "warning"` |
 | the audit stopped reporting | `available == false` |
+| page — nothing has written the audit record for five cadences | `store_probe.stale == true` |
 
 The rest of it — the same three rules as paste-able patterns, what a load balancer's status
 code does and does not cover, and how to tell an installation's fault from the package's once

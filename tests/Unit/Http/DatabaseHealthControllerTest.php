@@ -10,6 +10,7 @@ use Illuminate\Database\SQLiteConnection;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionProperty;
 use RuntimeException;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
@@ -18,6 +19,7 @@ use Uak35\WeightedDbManager\Http\Controllers\DatabaseHealthController;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
+use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Tests\Support\Readme;
 use Uak35\WeightedDbManager\Tests\TestCase;
 
@@ -517,6 +519,214 @@ class DatabaseHealthControllerTest extends TestCase
 
         $this->assertStringContainsString($file, $error, 'the file an operator has to open');
         $this->assertStringContainsString('is not JSON', $error);
+    }
+
+    /**
+     * The audit's second question, asked from the surface a monitor already polls: is the record
+     * still being written at all?
+     *
+     * The findings standing in the record describe a configuration, and a record nothing writes
+     * goes on describing one: the file prints no date of its own, and `db:doctor`'s `probe stamp`
+     * row is a thing somebody has to run. The stamp is the one field a healthy installation moves on
+     * its own, so the age published here is the evidence — with the window it is judged against
+     * published beside it, decomposed into the two settings the window is made of, so a monitor
+     * reading `stale_after_seconds` can say *how* late a stamp is without trusting a product it
+     * cannot take apart.
+     *
+     * Five cadences at the shipped settings: the probe every 60 seconds and the entry every minute
+     * are the same cadence, so the window is five minutes.
+     */
+    public function test_the_probe_stamps_age_is_published_with_the_window_it_is_judged_against(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('audit.store_probe.applicable', true)
+            ->assertJsonPath('audit.store_probe.stale', false)
+            ->assertJsonPath('audit.store_probe.not_judged', null)
+            ->assertJsonPath('audit.store_probe.reason', null)
+            ->assertJsonPath('audit.store_probe.missed_cadences', 5)
+            ->assertJsonPath('audit.store_probe.probe_seconds', 60)
+            ->assertJsonPath('audit.store_probe.interval_minutes', 1)
+            ->assertJsonPath('audit.store_probe.stale_after_seconds', 300);
+
+        $this->assertMatchesRegularExpression(
+            '/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$/',
+            (string) $response->json('audit.store_probe.last_probed_at'),
+            'the stamp is published as DATE_ATOM in UTC, which is how the payload publishes every other moment',
+        );
+
+        $age = $response->json('audit.store_probe.age_seconds');
+
+        $this->assertIsInt($age);
+        $this->assertLessThanOrEqual(300, $age);
+    }
+
+    /**
+     * The fault the block exists for, and the claim that it leaves the status alone.
+     *
+     * An audit that stopped being written is a configuration nobody is describing any more, which is
+     * not "this database is unreachable" — the same line the findings themselves draw. A load
+     * balancer that took an unwritten audit record out of rotation would be acting on the wrong
+     * fact, so the reading is published with `stale` and a sentence and the status stays `ok`; the
+     * monitor that should act on it has `audit.store_probe.stale` to write a rule against.
+     */
+    public function test_a_record_nothing_writes_is_published_as_stale_without_moving_the_status(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        // A record last written an hour ago, read by a process that has not reported: the file is
+        // what a web process sees when the boot it answered on never probed, and it is the state the
+        // fault is reported from rather than the one `db:doctor`'s own boot would have refreshed.
+        $file = $this->auditRecord(['findings' => [], 'store_probed_at' => time() - 3600]);
+
+        $this->app->instance(BootAudit::class, new BootAudit($file));
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('audit.severity', 'none')
+            ->assertJsonPath('audit.store_probe.applicable', true)
+            ->assertJsonPath('audit.store_probe.stale', true)
+            ->assertJsonPath('audit.store_probe.not_judged', null)
+            ->assertJsonPath('audit.store_probe.stale_after_seconds', 300);
+
+        $this->assertGreaterThanOrEqual(3600, $response->json('audit.store_probe.age_seconds'));
+
+        $reason = (string) $response->json('audit.store_probe.reason');
+
+        $this->assertStringContainsString($file, $reason, 'the file an operator has to open');
+        $this->assertStringContainsString('1 hour(s)', $reason, 'the age, in the words the command uses for the same reading');
+        $this->assertStringContainsString('5 missed cadences (5 minute(s)', $reason, 'the tolerance, and the two settings it is made of');
+        $this->assertStringContainsString('state directory this installation does not read', $reason, 'the two causes the sentence names');
+    }
+
+    /**
+     * Five states in which an age is nobody's fault, each named rather than left to read as a pass.
+     *
+     * `stale` is `null` in all of them, because *nothing asked it* is not the same claim as *it reads
+     * well* — and `not_judged` says which of the five removed the expectation, so a reader is not
+     * left to infer a healthy window from a missing verdict. The tolerance is still published: it is
+     * what the installation was asked to tolerate, and a monitor plotting an age against a number
+     * that vanishes the moment the probe is switched off would have to remember the last value it
+     * saw.
+     *
+     * @param string $state which of the five the fixture is put in
+     * @param string $expected the fact the sentence has to name
+     * @param int $probeSeconds the interval the block should publish in that state
+     */
+    #[DataProvider('statesWhereTheAgeIsNotJudged')]
+    public function test_the_age_is_not_judged_and_the_sentence_names_the_state_that_removed_the_expectation(
+        string $state,
+        string $expected,
+        int $probeSeconds,
+    ): void {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $file = (string) config('db-manager.swrr.audit.file');
+
+        match ($state) {
+            'off' => $this->app->instance(BootAudit::class, new BootAudit($file, 0)),
+            'unwritable' => $this->app->instance(
+                BootAudit::class,
+                new BootAudit($file, 60, canWrite: static fn (string $path): bool => false),
+            ),
+            'no_stamp' => $this->app->instance(
+                BootAudit::class,
+                new BootAudit($this->auditRecord(['findings' => []])),
+            ),
+            'unarmed' => config()->set('db-manager.swrr.pgcat.enabled', false),
+            'in_process' => config()->set('db-manager.swrr.primary_store', 'local'),
+        };
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('audit.store_probe.stale', null)
+            ->assertJsonPath('audit.store_probe.reason', null)
+            ->assertJsonPath('audit.store_probe.probe_seconds', $probeSeconds);
+
+        $this->assertStringContainsString(
+            $expected,
+            (string) $response->json('audit.store_probe.not_judged'),
+            'the sentence has to say which state removed the expectation, not only that none was judged',
+        );
+    }
+
+    /**
+     * The five fixtures the test above runs, and what each sentence has to name.
+     *
+     * @return array<string, array{0: string, 1: string, 2: int}>
+     */
+    public static function statesWhereTheAgeIsNotJudged(): array
+    {
+        return [
+            'probing switched off' => ['off', 'switched off (swrr.audit.store_probe_seconds = 0)', 0],
+            'the record cannot be written' => ['unwritable', 'frozen rather than late', 60],
+            'the record holds no stamp' => ['no_stamp', 'fresh installation rather than a stale one', 60],
+            'the flip schedule is not armed' => ['unarmed', 'flip schedule is not armed', 60],
+            'the store is in-process' => ['in_process', 'reads are served in-process', 60],
+        ];
+    }
+
+    /**
+     * No audit registered at all — the dependency is optional, so the controller resolves — and the
+     * block says so instead of omitting itself.
+     *
+     * An absent block reads as a pass to every reader that walks the payload, and this is the reading
+     * a monitor is being asked to trust; `applicable: false` is the field that says there was nothing
+     * to read, and every other key is present so a rule never has to guard for one that might be
+     * missing.
+     */
+    public function test_no_registered_audit_publishes_the_stamp_block_as_not_applicable(): void
+    {
+        $this->app->instance(DatabaseHealthController::class, new DatabaseHealthController());
+
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+
+        $response = $this->getJson('/health/db')->assertOk();
+
+        $response->assertJsonPath('audit.available', false)
+            ->assertJsonPath('audit.store_probe.applicable', false)
+            ->assertJsonPath('audit.store_probe.stale', null)
+            ->assertJsonPath('audit.store_probe.reason', null)
+            ->assertJsonPath('audit.store_probe.stale_after_seconds', 0)
+            ->assertJsonPath('audit.store_probe.probe_seconds', 0)
+            ->assertJsonPath('audit.store_probe.age_seconds', null)
+            ->assertJsonPath('audit.store_probe.last_probed_at', null);
+
+        $this->assertStringContainsString(
+            'no boot audit is registered',
+            (string) $response->json('audit.store_probe.not_judged'),
+        );
+    }
+
+    /**
+     * Write an audit record where the configuration points, and answer its path.
+     *
+     * @param array<string, mixed> $record
+     */
+    private function auditRecord(array $record): string
+    {
+        $file = (string) config('db-manager.swrr.audit.file');
+
+        file_put_contents($file, (string) json_encode($record, JSON_UNESCAPED_SLASHES));
+
+        return $file;
     }
 
     /**

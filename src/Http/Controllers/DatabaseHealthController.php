@@ -9,12 +9,14 @@ use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
 use Uak35\WeightedDbManager\Pgcat\ScheduleCauses;
+use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
 use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ConnectorInUse;
 use Uak35\WeightedDbManager\Support\HostAddress;
 use Uak35\WeightedDbManager\Support\PinnedQuery;
+use Uak35\WeightedDbManager\Support\ProbeStamp;
 use Uak35\WeightedDbManager\Support\SwitchValue;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -957,11 +959,149 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * environment is therefore visible as exactly that, instead of reading as a problem the
      * instance answering the request has.
      *
-     * @return array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, oldest: string|null, findings: list<array<string, mixed>>, error: string|null, checked_at: string|null, scope: array<string, mixed>|null, current: array<string, mixed>}
+     * The block also carries `store_probe`: whether the record is still being *written*, which is
+     * the one thing the findings in it cannot say. See `probeStampBlock()` for why the age is the
+     * evidence and why it does not move the status.
+     *
+     * @return array{available: bool, count: int, severity: string, counts: array{error: int, warning: int}, oldest: string|null, findings: list<array<string, mixed>>, error: string|null, checked_at: string|null, scope: array<string, mixed>|null, current: array<string, mixed>, store_probe: array<string, mixed>}
      */
     private function audit(): array
     {
-        return BootAudit::reported($this->audit);
+        $block = BootAudit::reported($this->audit);
+
+        $block['store_probe'] = $this->probeStampBlock();
+
+        return $block;
+    }
+
+    /**
+     * Whether the audit record is still being written — the age of its probe stamp, published so a
+     * monitor sees an audit that stopped without running `db:doctor`.
+     *
+     * WHY THE AGE IS THE EVIDENCE
+     *   `store_probed_at` is the one field in the record a healthy installation moves on its own: a
+     *   boot that finds the probe due sends it and writes the time, and nothing else touches it. The
+     *   findings in the same file describe a configuration, and a record nothing writes goes on
+     *   describing one — the file prints no date of its own, so the stamp's age is the only reading
+     *   that says the audit is alive rather than only able to write. That is `db:doctor`'s `probe
+     *   stamp` row asked from the surface a monitor already polls.
+     *
+     * THE AGE IS THE ONE THIS PROCESS FOUND
+     *   A boot that finds the probe due refreshes the stamp before any of this is asked, so judging
+     *   the file as it stands would report every installation as freshly written. The stamp comes
+     *   from `BootAudit::storeProbeStamp()`, which keeps what this process found rather than what it
+     *   may have written since; a process that never reported reads the file, because it wrote
+     *   nothing.
+     *
+     * THE RULE IS `ProbeStamp::read()`'S
+     *   The tolerance — the wider of the probe interval and the schedule's cadence, five misses over
+     *   — and the five states in which nothing is judged are the ones the command's row decides by,
+     *   through that class rather than a second copy of the arithmetic: a window widened in the row
+     *   and not here would page for an installation the command calls well. The sentences are this
+     *   surface's, because the row names the rows beside it and a payload must not send a reader to
+     *   a command.
+     *
+     * WHY IT DOES NOT MOVE THE STATUS
+     *   The line `audit` and `connector` draw: a record nothing writes is a configuration nobody is
+     *   describing any more, not a database that cannot answer, and a load balancer polling this
+     *   route is acting on the second claim. `stale` and `reason` are published so a monitor can
+     *   make the first one its own rule — `audit.store_probe.stale == true` — which is the division
+     *   the boot log and the command already draw.
+     *
+     *   Every key is present in every state, `null` where there is nothing to say, so an alert rule
+     *   never has to guard for a field that might be missing: `last_probed_at` and `age_seconds` are
+     *   still the stamp's when nothing was judged, and `stale_after_seconds` is still the tolerance
+     *   when the probe or the schedule is switched off — the value the installation was asked to
+     *   tolerate does not vanish because nobody is judging it.
+     *
+     * @return array{applicable: bool, last_probed_at: string|null, age_seconds: int|null, stale: bool|null, stale_after_seconds: int, missed_cadences: int, probe_seconds: int, interval_minutes: int, reason: string|null, not_judged: string|null}
+     */
+    private function probeStampBlock(): array
+    {
+        $entry = FlipSchedule::options(config());
+
+        // No audit is registered — the controller's dependency is optional, so the route still
+        // resolves — and there is no record to age. Said rather than omitted: an absent block reads
+        // as a pass, and this one is the reading a monitor is being asked to trust.
+        if ($this->audit === null) {
+            return [
+                'applicable' => false,
+                'last_probed_at' => null,
+                'age_seconds' => null,
+                'stale' => null,
+                'stale_after_seconds' => 0,
+                'missed_cadences' => ProbeStamp::MISSED_CADENCES,
+                'probe_seconds' => 0,
+                'interval_minutes' => $entry['interval_minutes'],
+                'reason' => null,
+                'not_judged' => 'no boot audit is registered for this application, so there is no record to read',
+            ];
+        }
+
+        $status = $this->audit->storeProbeStatus();
+        $store = WeightedDatabaseServiceProvider::storeSelection(
+            ConfigValue::assoc(config()->get('db-manager.swrr')),
+        );
+
+        $reading = ProbeStamp::read(
+            $this->audit->storeProbeStamp(),
+            $status,
+            $store['effective'] === 'redis',
+            $entry,
+        );
+
+        $probedAt = $reading['probed_at'];
+        $minutes = $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes';
+
+        return [
+            'applicable' => true,
+            'last_probed_at' => $probedAt === null ? null : gmdate(DATE_ATOM, $probedAt),
+            'age_seconds' => $reading['age_seconds'],
+            'stale' => $reading['stale'],
+            'stale_after_seconds' => $reading['stale_after_seconds'],
+            'missed_cadences' => $reading['missed_cadences'],
+            'probe_seconds' => $reading['probe_seconds'],
+            'interval_minutes' => $reading['interval_minutes'],
+            'reason' => $reading['stale'] === true
+                ? sprintf(
+                    'the record at %s had gone %s without a write when this process read it, and the tolerance is %d '
+                    .'missed cadences (%s at a probe interval of %d seconds and a run every %s): nothing wrote the '
+                    .'audit record in that time, so the schedule that should boot it has stopped or the runs write a '
+                    .'state directory this installation does not read',
+                    $status['file'],
+                    ScheduleBeat::ageText((int) $reading['age_seconds']),
+                    $reading['missed_cadences'],
+                    ScheduleBeat::ageText($reading['stale_after_seconds']),
+                    $reading['probe_seconds'],
+                    $minutes,
+                )
+                : null,
+            'not_judged' => match ($reading['not_judged']) {
+                ProbeStamp::OFF => sprintf(
+                    'probing is switched off (swrr.audit.store_probe_seconds = %d), so no stamp is ever written and '
+                    .'there is no age to judge',
+                    $reading['probe_seconds'],
+                ),
+                ProbeStamp::UNWRITABLE => sprintf(
+                    'the record at %s cannot be written, so its stamp is frozen rather than late',
+                    $status['file'],
+                ),
+                ProbeStamp::IN_PROCESS => sprintf(
+                    'swrr.primary_store is %s, so reads are served in-process and nothing probes the store the '
+                    .'stamp would date',
+                    $store['configured'] === '' ? 'unset' : "\"{$store['configured']}\"",
+                ),
+                ProbeStamp::UNARMED => 'the flip schedule is not armed, so no run is guaranteed to boot this '
+                    .'installation and the age of the record is nobody\'s to judge — a web installation with no '
+                    .'schedule is written when it serves a request, which is the traffic\'s pace rather than a fault',
+                ProbeStamp::NO_STAMP => sprintf(
+                    'the record at %s holds no stamp, so there is no age to judge — a record that has never been '
+                    .'probed is a fresh installation rather than a stale one',
+                    $status['file'],
+                ),
+                default => null,
+            },
+        ];
     }
 
     /**

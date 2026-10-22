@@ -30,6 +30,7 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
 use Uak35\WeightedDbManager\Support\ConnectorInUse;
 use Uak35\WeightedDbManager\Support\DeploymentContract;
 use Uak35\WeightedDbManager\Support\PinnedQuery;
+use Uak35\WeightedDbManager\Support\ProbeStamp;
 use Uak35\WeightedDbManager\Support\ReaderDays;
 use Uak35\WeightedDbManager\Support\ReaderWindows;
 use Uak35\WeightedDbManager\Support\RedisAccess;
@@ -538,23 +539,6 @@ class DbDoctor extends Command
      * the row into a requirement.
      */
     private const REAL_QUERY = 'real query';
-
-    /**
-     * How many cadences may go by without the audit record being written before its stamp is stale.
-     *
-     * Five, the count `swrr.pgcat.schedule.stale_after_missed_runs` ships for the schedule's own
-     * beat, because it is the same question one file over: a beat that has not moved for five of its
-     * runs is a schedule that stopped, and a probe stamp that has not moved for five of the runs that
-     * should write it is an audit that stopped being written. Four would leave no room for the
-     * ordinary casualties — a run that lost its lock, a container busy for an interval, a clock
-     * adjusted between two runs — and ten would let a record sit unwritten while every surface that
-     * reads it describes an installation that no longer exists.
-     *
-     * Not a setting: the window worth having is the cadence's, and the installation already states
-     * that twice — `swrr.audit.store_probe_seconds` for the probe and
-     * `swrr.pgcat.schedule.interval_minutes` for the runs that boot it. See `probeStamp()`.
-     */
-    private const STALE_AFTER_MISSED_CADENCES = 5;
 
     protected $signature = 'db:doctor
                             {connection=pgsql : Connection whose weighted replicas are inspected}
@@ -3787,22 +3771,14 @@ class DbDoctor extends Command
      *   finds a timestamp minutes old next to a row saying it had not been written for a week.
      *
      * WHAT IT IS NOT JUDGED ON, AND WHY EACH IS A PASS
-     *   A stamp is only expected to move where something is expected to move it, so each state that
-     *   removes the expectation is named instead of being counted as a healthy record: probing
-     *   switched off (no stamp is ever written, and `store probe` warns about the setting), a record
-     *   that cannot be written (its stamp is frozen rather than late, and `store probe` fails on
-     *   it), an in-process store (nothing to probe), and an installation whose flip schedule is not
-     *   armed (no run is guaranteed to boot it, so an age is nobody's fault). A record with no stamp
-     *   is the last: nothing has been probed yet, which is a fresh installation rather than a stale
-     *   one. None of the five is a finding, and none is dated: the state this row reports is the
-     *   *absence* of writes to the record that would carry a date.
-     *
-     * THE TOLERANCE IS THE CADENCE'S
-     *   The stamp moves when the probe is due and something boots the installation, so the two
-     *   settings that decide it are the probe's interval and the schedule's cadence — and the wider
-     *   of the two is what the age is measured against, five times over. At the shipped values that
-     *   is five minutes; on an installation that probes hourly it is five hours, which is the point:
-     *   the window is what this installation says it will do, not a number this row picked.
+     *   A stamp is only expected to move where something is expected to move it, so the five states
+     *   that remove the expectation are named instead of being counted as a healthy record — probing
+     *   switched off, a record that cannot be written, an in-process store, a schedule that is not
+     *   armed, and a record with no stamp at all. The states are `ProbeStamp::read()`'s, and so is
+     *   the tolerance (the wider of the probe interval and the schedule's cadence, five misses
+     *   over), because `/health/db` publishes the same age as `audit.store_probe`: one rule, two
+     *   readers, and neither can widen its window without the other. This row owns the sentences —
+     *   they name the rows beside it, which a payload must not do.
      *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
@@ -3819,68 +3795,71 @@ class DbDoctor extends Command
             );
         }
 
-        if (!$status['enabled']) {
-            return $this->row('probe stamp', self::PASS, sprintf(
-                'not judged: probing is switched off (swrr.audit.store_probe_seconds = %d), so no stamp is ever '
-                .'written — the `store probe` row warns about the setting',
-                $status['seconds'],
-            ));
-        }
-
-        if (!$status['writable']) {
-            return $this->row('probe stamp', self::PASS, sprintf(
-                'not judged: the record at %s cannot be written, so its stamp is frozen rather than late — '
-                .'the `store probe` row fails on that',
-                $status['file'],
-            ));
-        }
-
         $store = WeightedDatabaseServiceProvider::storeSelection(
             ConfigValue::assoc($this->laravel->make(Repository::class)->get('db-manager.swrr')),
         );
 
-        if ($store['effective'] !== 'redis') {
-            return $this->row('probe stamp', self::PASS, sprintf(
-                'not judged: swrr.primary_store is %s, so reads are served in-process and nothing probes the '
-                .'store the stamp would date',
-                $store['configured'] === '' ? 'the in-process store' : "\"{$store['configured']}\"",
-            ));
-        }
-
         $entry = FlipSchedule::options($this->laravel->make(Repository::class));
 
-        if (!$entry['enabled']) {
-            return $this->row(
-                'probe stamp',
-                self::PASS,
-                'not judged: the flip schedule is not armed, so no run is guaranteed to boot this installation '
-                .'and the age of the record is nobody\'s to judge — a web installation with no schedule is '
-                .'written when it serves a request, which is the traffic\'s pace rather than a fault',
-            );
+        $reading = ProbeStamp::read(
+            $audit->storeProbeStamp(),
+            $status,
+            $store['effective'] === 'redis',
+            $entry,
+        );
+
+        $minutes = $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes';
+
+        switch ($reading['not_judged']) {
+            case ProbeStamp::OFF:
+                return $this->row('probe stamp', self::PASS, sprintf(
+                    'not judged: probing is switched off (swrr.audit.store_probe_seconds = %d), so no stamp is ever '
+                    .'written — the `store probe` row warns about the setting',
+                    $reading['probe_seconds'],
+                ));
+
+            case ProbeStamp::UNWRITABLE:
+                return $this->row('probe stamp', self::PASS, sprintf(
+                    'not judged: the record at %s cannot be written, so its stamp is frozen rather than late — '
+                    .'the `store probe` row fails on that',
+                    $status['file'],
+                ));
+
+            case ProbeStamp::IN_PROCESS:
+                return $this->row('probe stamp', self::PASS, sprintf(
+                    'not judged: swrr.primary_store is %s, so reads are served in-process and nothing probes the '
+                    .'store the stamp would date',
+                    $store['configured'] === '' ? 'the in-process store' : "\"{$store['configured']}\"",
+                ));
+
+            case ProbeStamp::UNARMED:
+                return $this->row(
+                    'probe stamp',
+                    self::PASS,
+                    'not judged: the flip schedule is not armed, so no run is guaranteed to boot this installation '
+                    .'and the age of the record is nobody\'s to judge — a web installation with no schedule is '
+                    .'written when it serves a request, which is the traffic\'s pace rather than a fault',
+                );
+
+            case ProbeStamp::NO_STAMP:
+                return $this->row('probe stamp', self::PASS, sprintf(
+                    'no stamp in %s before this run, so there is no age to judge — a record that has never been '
+                    .'probed is a fresh installation rather than a stale one',
+                    $status['file'],
+                ));
         }
 
-        $stamp = $audit->storeProbeStamp();
+        $age = (int) $reading['age_seconds'];
+        $staleAfter = $reading['stale_after_seconds'];
 
-        if ($stamp['probed_at'] === null) {
-            return $this->row('probe stamp', self::PASS, sprintf(
-                'no stamp in %s before this run, so there is no age to judge — a record that has never been '
-                .'probed is a fresh installation rather than a stale one',
-                $status['file'],
-            ));
-        }
-
-        $age = (int) $stamp['age_seconds'];
-        $cadence = max($entry['interval_minutes'] * 60, $status['seconds']);
-        $staleAfter = self::STALE_AFTER_MISSED_CADENCES * $cadence;
-
-        if ($age <= $staleAfter) {
+        if ($reading['stale'] !== true) {
             return $this->row('probe stamp', self::PASS, sprintf(
                 'the record had gone %s without a write when this run started, within the %s it may go between '
                 .'the writes a probe interval of %d seconds and a run every %s produce',
                 ScheduleBeat::ageText($age),
                 ScheduleBeat::ageText($staleAfter),
-                $status['seconds'],
-                $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes',
+                $reading['probe_seconds'],
+                $minutes,
             ));
         }
 
@@ -3893,10 +3872,10 @@ class DbDoctor extends Command
             .'state directory this installation does not read',
             $status['file'],
             ScheduleBeat::ageText($age),
-            self::STALE_AFTER_MISSED_CADENCES,
+            $reading['missed_cadences'],
             ScheduleBeat::ageText($staleAfter),
-            $status['seconds'],
-            $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes',
+            $reading['probe_seconds'],
+            $minutes,
         ));
     }
 

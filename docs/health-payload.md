@@ -76,11 +76,12 @@ fixture.
 | `reader_window` | `applicable`, `applied`, `expected`, `failed`, `reason` | the window verdict alone, for a reader that does not want the flipper's snapshot |
 | `pool_probe` | `address`, `admin`, `answered`, `applicable`, `control`, `discriminates`, `enabled`, `failed`, `host`, `judged`, `pools`, `port`, `reason`, `verified`, `warned` | what the running pooler holds, and whether a pool the application reads from is missing |
 | `pool_repairs` | `applicable`, `count`, `in_window`, `judged`, `last_at`, `ledger`, `max_repairs`, `reason`, `warned`, `window_seconds` | how often the container has had to repair a pool, whether that rate is past the threshold, and the repairs as a ledger of `at`/`pool`/`mode`/`cleared` entries — the one block that warns rather than fails |
-| `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity` | the boot audit's standing findings, as `db:doctor` reads them |
+| `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity`, `store_probe` | the boot audit's standing findings, as `db:doctor` reads them, and whether the record is still being written |
 | `audit.counts` | `error`, `warning` | the standing findings by level |
 | `audit.scope` | `app_env`, `connection`, `driver`, `source` | what the boot that wrote them was running as |
 | `audit.current` | `available`, `count`, `counts`, `error`, `findings`, `severity` | the same audit re-read live by this process, which is not the same thing as what is on record |
 | `audit.current.counts` | `error`, `warning` | the live findings by level |
+| `audit.store_probe` | `age_seconds`, `applicable`, `interval_minutes`, `last_probed_at`, `missed_cadences`, `not_judged`, `probe_seconds`, `reason`, `stale`, `stale_after_seconds` | the age of the record's probe stamp — whether the audit is still being written, the window it is judged against, and why nothing is judged when nothing is |
 | `errors` | — | a list of sentences naming what this process could not do, which no block above owns |
 
 ## The readiness probe is a second object

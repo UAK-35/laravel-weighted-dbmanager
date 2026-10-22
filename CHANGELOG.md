@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- **`/health/db` publishes the age of the audit record's probe stamp, so a monitor sees an audit that
+  stopped being written without running `db:doctor`.** `store_probed_at` is the one field in the
+  record a healthy installation moves on its own — a boot that finds the probe due sends it and
+  writes the time — and the findings standing beside it cannot answer the same question, because
+  they are read out of that same file: a record nothing writes goes on describing an installation
+  that no longer exists, and the file prints no date of its own. The new `audit.store_probe` block
+  carries `last_probed_at`, `age_seconds`, `stale`, `stale_after_seconds` and the sentence in
+  `reason`, with the window decomposed into `missed_cadences`, `probe_seconds` and
+  `interval_minutes` so a rule can say how late a stamp is: five misses of the wider of
+  `swrr.audit.store_probe_seconds` and the schedule's cadence, five minutes at the shipped values
+  and five hours on an installation that probes hourly. The age is the one the process *found*, not
+  the one its own boot may have written, which is what `BootAudit::storeProbeStamp()` keeps. `stale`
+  is `null` where the age is nobody's fault — probing switched off, a record that cannot be written,
+  an in-process store, a schedule that is not armed, a record holding no stamp — and `not_judged`
+  says which, with the window still published and `applicable: false` for an installation with no
+  audit registered. Nothing about it moves `status`, for the reason the findings do not: a record
+  nobody writes is a configuration no longer being described, not a database that cannot answer.
+  The rule is `src/Support/ProbeStamp.php`, which `db:doctor`'s `probe stamp` row now decides by as
+  well, so the terminal and a monitor cannot widen the window apart; the README and
+  `docs/health-payload.md` tabulate the key, `docs/boot-audit-surfaces.md` documents it, and
+  `docs/boot-audit-store-probe.md` records why the stamp is published twice.
+
 ## 0.2.0-alpha10 - 2026-10-22
 
 ### Added

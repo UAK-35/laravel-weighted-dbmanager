@@ -346,15 +346,17 @@ audit does not do — report a configuration the package understood perfectly an
 not act on — and it would be uncountable exactly in the case where the record's own write is the
 fault.
 
-### The stamp is the record's only heartbeat, and its age is a row
+### The stamp is the record's only heartbeat, and it is published twice
 
 `store probe` asks whether a probe *could* run — the interval, the record's mode, the store — and every
 one of those can be right while nothing writes the record at all. The schedule stops, or the runs write
 a state directory this installation does not read, and the silence is total: the findings standing in
 the record are read out of the same file, `/health/db` reports what its own boot found, and a record
 nothing writes goes on describing an installation that no longer exists. `store_probed_at` is the one
-field in that record a healthy installation moves on its own, so `db:doctor`'s `probe stamp` row reads
-its age.
+field in that record a healthy installation moves on its own, so its age is read twice: by `db:doctor`'s
+`probe stamp` row, and by `/health/db` as `audit.store_probe`. The second reader exists because the row
+is a thing somebody has to run — an audit that stopped being written is the state nobody discovers by
+not running a command — and because a monitor cannot page on a reading a terminal never made.
 
 The subtlety that decides the design is that the process asking is usually the process that refreshed
 it: a boot that finds the probe due sends it and writes the time, and `db:doctor` runs after this
@@ -363,17 +365,27 @@ written and, worse, would clear the fault it exists to report. `BootAudit::store
 keeps the stamp `report()` was handed, and the row judges that — the age the record had stood before
 this run wrote anything. A process that never reported reads the file, because it wrote nothing.
 
-The tolerance is the cadence's, five times over. The stamp moves when the probe is due *and* something
-boots the installation, so the window is the longer of `swrr.audit.store_probe_seconds` and
-`swrr.pgcat.schedule.interval_minutes`, multiplied by the five misses
-`swrr.pgcat.schedule.stale_after_missed_runs` ships for the beat: five minutes at the shipped values,
-five hours on an installation that probes hourly. "Late" therefore means one thing in both rows.
+The tolerance is the cadence's, five times over, and it is `Support\ProbeStamp`'s rather than either
+reader's. The stamp moves when the probe is due *and* something boots the installation, so the window
+is the longer of `swrr.audit.store_probe_seconds` and `swrr.pgcat.schedule.interval_minutes`,
+multiplied by the five misses `swrr.pgcat.schedule.stale_after_missed_runs` ships for the beat: five
+minutes at the shipped values, five hours on an installation that probes hourly. "Late" therefore
+means one thing in both rows — and a window widened in one of them and not the other is a monitor that
+pages for an installation the command calls well, which is why the arithmetic is not in either.
 
-A stamp is only expected to move where something is expected to move it, so the row names rather than
-judges the states that remove the expectation — probing switched off, a record that cannot be written,
-an in-process store, an installation whose flip schedule is not armed — and a record with no stamp at
-all, which is a fresh installation rather than a stale one. None of the five is a finding, and none is
-dated: the state the row reports is the *absence* of the writes that would carry a date.
+A stamp is only expected to move where something is expected to move it, so the states that remove the
+expectation are named rather than judged — probing switched off, a record that cannot be written, an
+in-process store, an installation whose flip schedule is not armed, and a record with no stamp at all,
+which is a fresh installation rather than a stale one. `ProbeStamp::read()` names each with a code and
+answers `stale: null`; the row words the five for a terminal, where it can append the clause naming
+the rows beside it, and the payload words them for a monitor, where it cannot. None of the five is a
+finding, and none is dated: what is reported is the *absence* of the writes that would carry a date.
+
+The window is published in those states too, and so is the stamp's age. It is what the installation
+was asked to tolerate rather than a conclusion about it, and a monitor plotting one against the other
+should not have to remember the last value it saw before somebody switched the probe off. Neither
+surface lets this reading move a status: a record nobody writes is a configuration no longer being
+described, not a database that cannot answer, which is the line the findings themselves draw.
 
 ### The sentences are the audit's, and the shared row learns to finish one
 
@@ -417,6 +429,9 @@ probe` case is no longer the only test that would notice a row regressing to its
 | a stamp in the future is no age at all rather than a fresh record | `test_a_stamp_in_the_future_is_no_age_at_all` | audit |
 | a record nothing has written for five cadences fails the row; one written within them passes | `test_the_probe_stamp_row_fails_when_the_record_has_not_been_written_for_five_cadences`, `test_the_probe_stamp_row_passes_within_the_tolerance` | doctor |
 | every state where nothing is expected to write the record is named rather than failed | `test_the_probe_stamp_row_is_not_judged_where_nothing_is_expected_to_write_the_record` | doctor |
+| the window, its boundary and the five states are one rule, wherever they are read | `ProbeStampTest` | rule |
+| the payload publishes the same age with the window, and `stale` past it, without moving `status` | `test_the_probe_stamps_age_is_published_with_the_window_it_is_judged_against`, `test_a_record_nothing_writes_is_published_as_stale_without_moving_the_status` | health |
+| every state where nothing is expected to write the record is named in the payload too, and an unregistered audit says so | `test_the_age_is_not_judged_and_the_sentence_names_the_state_that_removed_the_expectation`, `test_no_registered_audit_publishes_the_stamp_block_as_not_applicable` | health |
 | the doctor probes `swrr.redis_connection` and passes or fails on the answer | `test_it_fails_the_store_check_when_the_store_does_not_answer_the_ping`, `test_it_passes_the_store_check_when_the_ping_is_answered` | doctor |
 
 ---

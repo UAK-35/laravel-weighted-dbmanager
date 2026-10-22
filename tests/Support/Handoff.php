@@ -689,7 +689,7 @@ final class Handoff
         ],
         'docs/health-payload.md' => [
             'words' => 'the payload contract: why the shape a monitor reads by name is pinned rather than left to each block\'s tests, what the tables\' cells mean, the open shapes and why they are open, and every path and key the endpoint publishes',
-            'read' => 'sha256:345ccf5fb71cbad8e5be16e951ed1a565bf0aaea39cf53dd8fc3ea92122b012f',
+            'read' => 'sha256:6409c9c6b81d7e9687d8e5dd7230bd1c945401b374709de5d6a2723a0c92da5b',
         ],
         'docs/pool-repair-rate.md' => [
             'words' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',
@@ -866,6 +866,14 @@ final class Handoff
         'docs/issues/issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md' => [
             'words' => 'the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in',
             'read' => 'sha256:c9b43acc7f650debcf7f05baf6d0bc990ab8446cb911cc69a97b68cd84277f90',
+        ],
+        'src/Support/ProbeStamp.php' => [
+            'words' => 'the probe stamp\'s rule, shared by `db:doctor`\'s row and `/health/db`\'s block: the window (the wider of the probe interval and the schedule\'s cadence, five misses over), its inclusive boundary, and the five states in which nothing is judged — as codes each surface words for itself',
+            'read' => 'sha256:4a9c9fe5e4ade5542c5db004460291c9c82798963001fc69067ac185b03159dd',
+        ],
+        'tests/Unit/Support/ProbeStampTest.php' => [
+            'words' => 'the shared rule on its own: the window\'s arithmetic and its boundary, the five states and the order they are asked in, and the window still published where nothing is judged',
+            'read' => 'sha256:997201f033515b5d96b7ee680bac473dd6a2740cad9841fa131f9aac9fc653e6',
         ],
         // @pending-descriptions-end
     ];

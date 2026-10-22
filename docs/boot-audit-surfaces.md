@@ -308,12 +308,28 @@ support.
         "counts": {"error": 0, "warning": 0},
         "findings": [],
         "error": null
+    },
+    "store_probe": {
+        "applicable": true,
+        "last_probed_at": "2026-09-30T09:40:31+00:00",
+        "age_seconds": 31,
+        "stale": false,
+        "stale_after_seconds": 300,
+        "missed_cadences": 5,
+        "probe_seconds": 60,
+        "interval_minutes": 1,
+        "reason": null,
+        "not_judged": null
     }
 }
 ```
 
-The block is `BootAudit::reported()` as-is — the field meanings below are its contract — and
-it is the same array the command decides its four states from.
+The block is `BootAudit::reported()` plus `store_probe` — the field meanings below are its
+contract — and everything but that one key is the same array the command decides its four
+states from. The stamp is not `reported()`'s because its window is made of two settings the
+record does not hold (`swrr.audit.store_probe_seconds` and the schedule's cadence); the endpoint
+reads the same `ProbeStamp::read()` rule the `probe stamp` row judges by, so the two surfaces
+agree about a stamp by construction rather than by both being written carefully.
 
 | field | meaning |
 |---|---|
@@ -327,6 +343,7 @@ it is the same array the command decides its four states from.
 | `checked_at` | when the live reading below was taken |
 | `scope` | the connection, its driver, the rule that named it and `app.env` this process resolved — null when nothing evaluated the live half |
 | `current` | the audited settings as they read *now*, in the record's own vocabulary, with `available: false` and an `error` when there is no live reading to make |
+| `store_probe` | whether the record is still being written: the age of `store_probed_at`, the window it is judged against, and `stale` with a sentence when it is past it — `null` where the age is nobody's fault, with `not_judged` naming which of the five states removed the expectation. `applicable: false` is "no audit is registered", and the window is published in every state |
 
 Both failure modes are still an HTTP `200` when the database itself is serving. A record
 that cannot be read is not a database that cannot answer, and the block says so rather
@@ -501,6 +518,8 @@ restarts anything.
 | a record that is *gone* is still nothing standing rather than a failure | `test_a_record_that_is_not_there_is_nothing_standing_rather_than_a_failure` | audit |
 | the boot reads an unreadable record as nothing and writes over it, while a surface refuses to — the reader split, in one process | `test_the_boot_reads_an_unreadable_record_as_nothing_while_a_surface_refuses_to` | audit |
 | the payload names the unreadable record in `audit.error` and leaves `status` alone | `test_an_unreadable_audit_record_is_named_in_the_payload_and_leaves_the_status_alone` | health |
+| the payload publishes the stamp's age and the window it is judged against, and `stale` past it, without moving `status` | `test_the_probe_stamps_age_is_published_with_the_window_it_is_judged_against`, `test_a_record_nothing_writes_is_published_as_stale_without_moving_the_status` | health |
+| every state that removes the expectation is named in the payload, and an unregistered audit says so rather than omitting the block | `test_the_age_is_not_judged_and_the_sentence_names_the_state_that_removed_the_expectation`, `test_no_registered_audit_publishes_the_stamp_block_as_not_applicable` | health |
 | the terminal's `unreadable` line, with the file and the reason, and not `nothing standing` | `test_a_record_that_cannot_be_read_is_a_line_rather_than_nothing_standing` | command |
 | a record that *was* read and holds nothing says so, and is not the `unreadable` line | `test_a_record_with_nothing_standing_is_not_reported_as_unreadable` | command |
 | the command prints the findings, and exits `0` doing it | `test_the_replica_status_command_prints_the_standing_findings` | provider |
@@ -606,13 +625,15 @@ restarts anything.
 | `src/Support/BootAudit.php` | the record, `standing()` — ordering, ages, the fields a surface renders, the scope each finding was written in — `reported()`, the block both surfaces publish and the one place either decides whether there is a record, `live()` and its annotation, which run the producers the provider injects and put the present beside the record, `standingSummary()` with the severity vocabulary, and `fold()`, where a boot's findings become that record |
 | `src/Support/BootAuditFinding.php` | one finding: key, warning, resolution, context, level |
 | `src/Support/UnreadableRecord.php` | the state that made the branch reachable: the record is there and is not a record, and the reason is the message both surfaces publish |
-| `src/Http/Controllers/DatabaseHealthController.php` | the `audit` block — `reported()`, embedded — and the status it deliberately does not move |
+| `src/Support/ProbeStamp.php` | the stamp's rule, shared by its two readers: the window (the wider of the probe interval and the schedule's cadence, five misses over), the boundary, and the five states in which nothing is judged — with the codes each surface words for itself |
+| `src/Http/Controllers/DatabaseHealthController.php` | the `audit` block — `reported()`, embedded, plus the `store_probe` reading — and the status it deliberately does not move |
 | `src/Console/Commands/DbReplicaStatus.php` | the `Audit:` list in its four states, on both the table and the no-replicas path, each finding followed by its `now:` reading and the live half printed under the list |
 | `src/Console/Commands/DbDoctor.php` | the gate: `recordedFinding()` reads the record by key, adds the age clause, and fails under `--strict` — and `recordedFindings()`, which the `reader windows` row uses to date each of the problems it names from its own key |
 | `src/Providers/WeightedDatabaseServiceProvider.php` | the finding keys, `reportBootAudit()`, `readerRecordKeys()`, and `liveFindings()` with `auditScope()` — the live half the `BootAudit` singleton is handed, and the scope every recorded finding is stamped with |
 | `tests/Unit/Support/BootAuditTest.php` | the record and the view over it, including the two readers either side of `decode()`, every unreadable shape, and the boundary a missing file sits on |
 | `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` | both surfaces, and that the payload stays `ok` |
-| `tests/Unit/Http/DatabaseHealthControllerTest.php` | the payload's own block: the unreadable record's `error`, and that it does not move `status` |
+| `tests/Unit/Http/DatabaseHealthControllerTest.php` | the payload's own block: the unreadable record's `error`, the stamp's age and window, and that neither moves `status` |
+| `tests/Unit/Support/ProbeStampTest.php` | the shared rule on its own: the window's arithmetic, the boundary, the five states and their order, and the window published where nothing is judged |
 | `tests/Unit/Console/DbReplicaStatusTest.php` | the terminal's `Audit:` lines, including the `unreadable` one and the `nothing standing` it must not be confused with |
 | `tests/Unit/Console/DbDoctorTest.php` | the gate's half: the age clause (including that a finding for another problem is not quoted) and the failing rows |
 | `README.md` | the user-facing shape of the block, next to the endpoint's other sections |
