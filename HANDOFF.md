@@ -185,8 +185,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=06d8104
-  --> exit 1: the inventory is out of step with the tree at 06d8104
+php bin/inventory.php --check --at=e968ba6
+  --> exit 1: the inventory is out of step with the tree at e968ba6
       files.tsv: 1 line(s) stale
       methods.tsv: 3 line(s) stale
       surface.tsv: 1 line(s) stale
@@ -244,10 +244,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `06d8104` — *fix: the gate's record ends in the line ending its own hash is taken over* |
-| `origin/dev` | `3dc70db` — *docs: the alpha6 CI record carries its outcome, and the green run that answers it* |
-| Unpushed | 29 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 2, docs 10, feat 7, fix 4, test 5 |
+| HEAD | `e968ba6` — *docs: the note is re-taken at 06d8104, and the gate it quotes is this run* |
+| `origin/dev` | `e968ba6` — *docs: the note is re-taken at 06d8104, and the gate it quotes is this run* |
+| Unpushed | 0 commits — `git log --oneline origin/dev..HEAD` prints nothing |
+| Since the last tag | none |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -256,53 +256,39 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is nineteen commits ahead of `origin/dev`, and the table above is where they are counted: the
-records of application-side work and the plan beside them, the third recording skill, the two halves the
-prose-number pass added, the doctor record's citation, the connector row's tests, the Laravel plugin's
-settings, the handoff note's one-command blocks, the note taken at the alpha7 commits, `/health/db`'s two
-schedule settings and its `connector` key, the pooler's mode record with the both-armed finding retired,
-the port plan's status guard, the published config's fresh-install sentence, the payload's key tables
-read as a set, the Unreleased section's two `### Fixed` headings merged into one, and this note's two
-tag readings — the release commit itself, `2a771cc`, and the alpha6 record, `3dc70db`, are on the
-remote already.
+The register is the tip of `origin/dev`, and the table above is where that is counted: the push that
+carried it published thirty commits above `3dc70db` — the records of application-side work and the
+plan beside them, the third recording skill, the two halves the prose-number pass added, the doctor
+record's citation, the connector row's tests, the Laravel plugin's settings, the handoff note's
+one-command blocks, `/health/db`'s two schedule settings and its `connector` key, the pooler's mode
+record with the both-armed finding retired, the port plan's status guard, the published config's
+fresh-install sentence, the payload's key tables read as a set, the boot audit's `probe stamp` row
+and the carry beside a record a boot cannot write, and this note's two tag readings — together with
+the two tags that had been cut and never published, `v0.2.0-alpha8` and `v0.2.0-alpha9`.
 
-Unpushed at the register means what it says, nineteen commits no remote has — which is the state the
-release this cycle cut was *not* in: `v0.2.0-alpha7` was cut with the CI rail skipped, from a commit that
-was not the tip of `origin/dev`, and the paragraph above the release section records that. The `ci` line
-of a plan is what refuses over it until the push below happens: `bin/release.php` refuses to tag while
-`HEAD` is not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every
-commit the release made is one a consumer can fetch. This note is the commit *after* the register, and
-it travels on the push below.
+Unpushed at the register means what it says, and at this register it says nothing: `e968ba6` is the
+tip of `origin/dev`, so every commit in section 1's list is one a consumer can fetch. That is the
+state the release this cycle cut was *not* in: `v0.2.0-alpha7` was cut with the CI rail skipped, from
+a commit that was not the tip of `origin/dev`, and the paragraph above the release section records
+that. The `ci` line of a plan is what refuses over it: `bin/release.php` refuses to tag while `HEAD`
+is not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every
+commit the release made is one a consumer can fetch. This note is the commit *after* the register,
+and it travels on the push that follows.
 
 <!-- handoff:log -->
-The ten most recent are the ones a reader is most likely to be standing in the middle of:
-
-```
-06d8104  fix: the gate's record ends in the line ending its own hash is taken over
-175253c  chore: the local work directories and the IDE's vendor index are not the package
-16e3f80  docs: the commit skill names the checkout's guarded commit path, and how a split is read back
-3ef9f04  docs: the interpreter is read from the machine record before the first command
-e22347b  test: the note's origin row is held to the tip the remote answers
-30109fc  feat: the doctor asks whether the boot audit's record is actually written
-ad7a05d  docs: the test servers are started from here instead of searched for
-a9ad00e  Release v0.2.0-alpha9
-d144747  fix: the note's guard reads a release's own pending tag the way the release writes it
-63027bf  docs: the note is re-taken at 98c80df, and the gate it quotes is this run
-```
+Nothing is between the two commits the table names — `git log --oneline origin/dev..HEAD` prints nothing, so there is no listing to print.
 <!-- /handoff:log -->
 
 The fence above is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
 block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
 commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
-register the range is nineteen commits, past the ten the block holds, so nine of them are left to
-that command and the ten a reader is most likely to be standing in are the ones the block prints.
+register the range is empty, so the block says so and there is nothing left to that command.
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
-is *unsatisfied* at this register — `HEAD` is nineteen commits past `origin/dev` — so the next version
-needs the push below first, and its Unreleased section carries twenty-four entries where the release this
-cycle cut promoted the four before it. Section 3's plan is a transcript taken before this cycle's tags;
-a run against this register would plan a minor above `v0.2.0-alpha7`, and the `### Removed` entry among
-those twenty-four is what asks for it.
+is *satisfied* at this register once the push run on the commit after it is green — `HEAD` is the tip of
+`origin/dev` — and the Unreleased section carries two entries rather than the four the release this
+cycle cut promoted. Section 3's plan is a transcript taken before this cycle's tags, so a run against
+this register declares the lane's next number instead of repeating the one above it.
 
 The push itself goes through PowerShell 7 and nothing else; `PUSHING.md` is the runbook, and
 `@pkg-push` wraps it:
@@ -333,10 +319,10 @@ while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are th
 section carries two of them: the doctor's `probe stamp` row under `### Added` and the carry a boot
 writes beside a record it cannot write under `### Fixed`, so `bin/weighing.php` reads it as `minor`.
 The `## Unreleased` the release at the head of this branch left behind was the bare heading, and the
-note taken before it read `breaking` for the `### Removed` entry that batch carried. What the tag holds is still in
-nothing a consumer can install — the release commit is the tip of this branch and not of
-`origin/dev`, which is section 2's count — so the register is a branch whose next release would
-publish the port plan's status guard, the pooler's mode record and the finding it retired,
+note taken before it read `breaking` for the `### Removed` entry that batch carried. What no release holds is
+still in nothing a consumer can install — the eight commits above `v0.2.0-alpha9`, whose release commit
+and tag are on the remote now, so the tag is a version Packagist derives rather than one only this
+branch has — so the register is a branch whose next release would publish the port plan's status guard, the pooler's mode record and the finding it retired,
 `/health/db`'s `connector` key with its two schedule settings, the connector boot finding, the doctor's
 `probe stamp` row with the `.carry.json` a boot writes beside a record it cannot write, the three
 records of application-side work with the third recording skill beside them, the two halves the
