@@ -186,13 +186,11 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 php bin/inventory.php --check --at=98c80df
   --> exit 1: the inventory is out of step with the tree at 98c80df
       files.tsv: 1 line(s) stale
-      methods.tsv: 5 line(s) stale
-      surface.tsv: 8 line(s) stale
+      methods.tsv: 1 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with the tree
-      methods.tsv: 4 line(s) stale
-      surface.tsv: 7 line(s) stale
+  --> exit 0: inventory is current — 53 files, 262 public methods, 306 key(s)/member(s), described as v0.2.0-alpha9
 ```
 <!-- /handoff:records -->
 
@@ -317,8 +315,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7` |
-| The latest of them | `v0.2.0-alpha7` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9` |
+| The latest of them | `v0.2.0-alpha9` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 24 entries — 13 added, 4 fixed, 6 changed, 1 removed |
 | The notes weigh as | `breaking` — the `### Removed` heading is the loudest one the notes use, and it is a minor rather than a major while the package is pre-1.0 |
