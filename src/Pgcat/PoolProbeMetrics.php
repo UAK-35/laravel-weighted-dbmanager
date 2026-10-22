@@ -8,7 +8,7 @@ namespace Uak35\WeightedDbManager\Pgcat;
  * The pool probe's verdict as Prometheus text exposition.
  *
  * WHY THIS EXISTS
- *   `db:doctor`'s `pool probe` row and `/health/db`'s `pool_probe` block both answer "does the
+ *   `db:doctor`'s `pool probe answer` row and `/health/db`'s `pool_probe` block both answer "does the
  *   running pooler hold the pools the applied variant declares", and both are read by a person or
  *   by a deploy step. A deploy step is late: it runs when a release is being promoted, so a pool the
  *   pooler stopped holding an hour ago is discovered at the worst moment, by the job that has to

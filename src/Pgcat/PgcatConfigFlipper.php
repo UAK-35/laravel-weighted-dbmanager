@@ -110,7 +110,11 @@ use DateTimeZone;
  *                  "flipped_via": "schedule"|"window"|"manual",
  *                  "pool_repairs": N, "last_pool_repair_at": ISO,
  *                  "last_repair_pool": NAME, "last_repair_mode": MODE,
- *                  "pool_repair_times": [ISO, ...], ... }
+ *                  "last_repair_cleared": BOOL|null,
+ *                  "pool_repair_times": [ISO, ...],
+ *                  "pool_repair_ledger": [{ "at": ISO, "pool": NAME,
+ *                                           "mode": MODE, "cleared": BOOL|null }, ...],
+ *                  ... }
  *   Missing file → treated as "never applied"; first call applies current mode.
  */
 final class PgcatConfigFlipper
@@ -164,6 +168,21 @@ final class PgcatConfigFlipper
     public const REPAIR_HISTORY_KEY = 'pool_repair_times';
 
     /**
+     * The state key the repair ledger is kept under: one entry per repair, each naming when it
+     * happened, the pool the pooler refused, the variant that declares it, and whether the pools
+     * answered once the repair had run.
+     *
+     * The count and the times answer *how many* and *how often*; `last_repair_pool` and
+     * `last_repair_mode` answer *which* for the newest repair only. That is enough to open the
+     * question and not enough to answer it — three repairs on one pool that each cleared, and three
+     * that moved between pools without any of them clearing, read the same on two fields — so the
+     * write keeps the entries rather than the last of them. The ledger is capped rather than pruned
+     * by the rate window, because it is history a person reads rather than a measurement: a repair
+     * from yesterday is still the last thing that happened to that pool.
+     */
+    public const REPAIR_LEDGER_KEY = 'pool_repair_ledger';
+
+    /**
      * How often a repair is too often, when the configuration does not say: more than three in an
      * hour is the shipped line.
      *
@@ -195,6 +214,16 @@ final class PgcatConfigFlipper
      * state file from growing one array for the life of a container.
      */
     private const REPAIR_HISTORY_LIMIT = 100;
+
+    /**
+     * The most repairs the ledger keeps.
+     *
+     * A ledger is read rather than measured, so its bound is a payload size rather than a window:
+     * twenty entries is one payload of a few kilobytes and more repairs than any pooler that is
+     * still worth reading has needed, while a container that repaired itself twenty times has
+     * already said the one thing the twenty-first would repeat.
+     */
+    private const REPAIR_LEDGER_LIMIT = 20;
 
     /**
      * The states a file a flip needs can be in. Named rather than left to the sentence, because
@@ -533,8 +562,17 @@ final class PgcatConfigFlipper
                     // out of step, so the repair is a re-application and a restart, not a
                     // transition. A swap that fails is the catch below — a failed repair is a
                     // failed run, and the mode stays unrecorded so the next poll retries.
+                    //
+                    // The pools are read back after the swap, which they were not before the
+                    // ledger existed: whether the repair *worked* is the one thing a run that
+                    // reports `repaired` never said, and it is the field a reader needs to tell
+                    // a pooler that recovers from one that is re-applied every minute and stays
+                    // broken. It is a read the run can afford — it is already the rare path, the
+                    // pooler has just been signalled, and `refusalAfterApply()` is the same retry
+                    // the apply path pays for the same question.
                     $this->swap($currentMode);
-                    $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode, $fault['database']);
+                    $after = $this->refusalAfterApply($currentMode);
+                    $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode, $fault['database'], $after === null);
 
                     return FlipResult::repaired(
                         mode: $currentMode,
@@ -582,7 +620,7 @@ final class PgcatConfigFlipper
             // what it was asked to — and the standing fault is `/health/db`'s `pool_probe`
             // block, which is where a state is reported rather than a run's outcome.
             if ($refusal !== null) {
-                $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode, $refusal['database']);
+                $this->recordRun(FlipResult::KIND_REPAIRED, $currentMode, $refusal['database'], $after === null);
 
                 return FlipResult::repaired(
                     mode: $currentMode,
@@ -679,7 +717,7 @@ final class PgcatConfigFlipper
             $this->writeLastMode($mode, $lastMode, $via);
 
             if ($refusal !== null) {
-                $this->writeState($this->withRepair($this->readState(), $mode, $refusal['database']));
+                $this->writeState($this->withRepair($this->readState(), $mode, $refusal['database'], $after === null));
 
                 return FlipResult::repaired(
                     mode: $mode,
@@ -1987,6 +2025,41 @@ final class PgcatConfigFlipper
     }
 
     /**
+     * Whether a probe is armed, and what it is armed to ask — read without asking it.
+     *
+     * WHY IT IS SEPARATE FROM THE VERDICT BELOW
+     *   `db:doctor` used to answer "is the probe armed" and "did the pooler answer" in one row, and
+     *   the two questions are not the same reader's: arming is a configuration state — the switch and
+     *   a dialable `[general] port` in the file the pooler runs on — that is answerable in a build
+     *   container and costs a file read, while the answer is a socket to the pooler that an image
+     *   build has no route to. Splitting the row is only honest if the first half can be read without
+     *   paying for the second, so this reads the declaration `poolProbeVerdict()` would use — the same
+     *   `configuredPools()` over the same variant — and never opens a connection or publishes an
+     *   answer.
+     *
+     *   `armed` is the probe's own arming: a probe closure or a sweep was injected, which the
+     *   constructor only does when `swrr.pgcat.pool_probe.enabled` is on and the pooler's file names
+     *   a port to dial. `applicable` adds the two conditions the verdict adds before it asks
+     *   anything — the flipper itself applies, and the mode's variant declares at least one pool — so
+     *   a caller can tell "nothing is armed" from "armed, and there is nothing to ask" without
+     *   reading either setting itself. `pools` is what the variant declares, in file order, and it is
+     *   empty whenever `applicable` is false.
+     *
+     * @return array{armed: bool, applicable: bool, pools: list<string>}
+     */
+    public function poolProbeArming(): array
+    {
+        $armed = $this->poolProbe !== null || $this->poolSweep !== null;
+        $pools = $armed && $this->isEnabled() ? $this->configuredPools($this->resolver->currentModeName()) : [];
+
+        return [
+            'armed' => $armed,
+            'applicable' => $pools !== [],
+            'pools' => $pools,
+        ];
+    }
+
+    /**
      * Whether anything asks the running pooler about its pools, and what it answered for each.
      *
      * WHY THIS EXISTS
@@ -1999,8 +2072,8 @@ final class PgcatConfigFlipper
      *   for a database the applied variant declares. Every read to that pool fails, supervisord
      *   calls the program healthy, `pgcat mode` compares two files and finds them in step, the
      *   forced path's one read was taken when it applied that mode, and the repair path will not
-     *   run again. `/health/db`'s `pool_probe` block and `db:doctor`'s `pool
-     *   probe` row are the two surfaces that say so, and both read this — so they cannot disagree.
+     *   run again. `/health/db`'s `pool_probe` block and `db:doctor`'s `pool probe answer` row are
+     *   the two surfaces that say so, and both read this — so they cannot disagree.
      *
      * WHAT IT REPORTS
      *   `enabled` is whether a probe is armed: the switch is on, and the pooler's own file names a
@@ -2588,7 +2661,7 @@ final class PgcatConfigFlipper
      *   report that printed a scalar beside an ISO time would be one field in two shapes, and a
      *   state file edited by hand is the case an operator arrives in first.
      *
-     * @return array{count: int, last_at: string|null, pool: string|null, mode: string|null}
+     * @return array{count: int, last_at: string|null, pool: string|null, mode: string|null, cleared: bool|null, ledger: list<array{at: string, pool: string|null, mode: string|null, cleared: bool|null}>}
      */
     public function poolRepairStatus(): array
     {
@@ -2599,24 +2672,33 @@ final class PgcatConfigFlipper
      * The repair facts in a state file already read, so a caller holding the state does not
      * read the file twice and the two surfaces agree by construction.
      *
+     * The ledger comes with them, in the order it was written: the four facts above are the newest
+     * entry, and the entries are what make a repair that keeps happening on one pool legible
+     * without the log line the run printed at the time.
+     *
      * @param array<string, mixed> $state
      *
-     * @return array{count: int, last_at: string|null, pool: string|null, mode: string|null}
+     * @return array{count: int, last_at: string|null, pool: string|null, mode: string|null, cleared: bool|null, ledger: list<array{at: string, pool: string|null, mode: string|null, cleared: bool|null}>}
      */
     private function repairFacts(array $state): array
     {
         $last = $state['last_pool_repair_at'] ?? null;
         $pool = $state['last_repair_pool'] ?? null;
         $mode = $state['last_repair_mode'] ?? null;
+        $cleared = $state['last_repair_cleared'] ?? null;
 
         // The shapes are the ones `last_at` already draws: a stamp that is not a string is the
         // same state as an absent one, because the file is one an operator may edit by hand and
-        // a report that printed an array beside a name would be one field in two shapes.
+        // a report that printed an array beside a name would be one field in two shapes. `cleared`
+        // is the same rule one step along — a value that is not a boolean is a file written before
+        // the answer was recorded, which is not the same fact as a repair the restart did not clear.
         return [
             'count' => ConfigValue::int($state['pool_repairs'] ?? null, 0),
             'last_at' => is_string($last) && $last !== '' ? $last : null,
             'pool' => is_string($pool) && $pool !== '' ? $pool : null,
             'mode' => is_string($mode) && $mode !== '' ? $mode : null,
+            'cleared' => is_bool($cleared) ? $cleared : null,
+            'ledger' => $this->repairLedger($state[self::REPAIR_LEDGER_KEY] ?? null),
         ];
     }
 
@@ -2659,7 +2741,14 @@ final class PgcatConfigFlipper
      * back to the documented default rather than meaning "never warn" or "warn on everything": a
      * refused setting must not be the thing that silences the reading.
      *
-     * @return array{judged: bool, window_seconds: int, max_repairs: int, count: int, in_window: int|null, last_at: string|null, warned: bool, reason: string|null}
+     * `ledger` is the same list `poolRepairStatus()` reads, carried by the block rather than left to
+     * the preflight: a rate that warns says the pooler keeps being repaired, and the entries are the
+     * only place a reader can see *which* pool kept needing it and whether any of those repairs left
+     * the pools answering. It travels in the unjudged state too — a file that carries a count and no
+     * times may still carry entries, and dropping them there would hide the only legible history a
+     * half-written file has.
+     *
+     * @return array{judged: bool, window_seconds: int, max_repairs: int, count: int, in_window: int|null, last_at: string|null, warned: bool, reason: string|null, ledger: list<array{at: string, pool: string|null, mode: string|null, cleared: bool|null}>}
      */
     public function poolRepairRate(): array
     {
@@ -2680,6 +2769,7 @@ final class PgcatConfigFlipper
                 'in_window' => null,
                 'last_at' => $facts['last_at'],
                 'warned' => false,
+                'ledger' => $facts['ledger'],
                 'reason' => sprintf(
                     'this state file records %d pool repair(s) and no times for them: it was written '
                     .'before repairs were dated, so how many fell inside the last %d seconds cannot be read',
@@ -2713,6 +2803,7 @@ final class PgcatConfigFlipper
             'in_window' => $inWindow,
             'last_at' => $facts['last_at'],
             'warned' => $warned,
+            'ledger' => $facts['ledger'],
             'reason' => $warned
                 ? sprintf(
                     'the pooler has been repaired %d time(s) in the last %d seconds, and the threshold '
@@ -2823,10 +2914,16 @@ final class PgcatConfigFlipper
      * a week apart both leave it reading `repaired`. `last_pool_repair_at` is when the last one
      * happened, read the same way `last_run_at` is; `last_repair_pool` and `last_repair_mode` are
      * what it happened to — the pool the pooler refused, and the variant that declares it — so the
-     * failing pool is named by the table rather than by the log line of the run that saw it. All
-     * four are `poolRepairStatus()`'s facts, from the state read below rather than from a second
-     * read of the file, so this block and the preflight's `pool repairs` row cannot count one
-     * container's repairs differently.
+     * failing pool is named by the table rather than by the log line of the run that saw it, and
+     * `last_repair_cleared` is whether the pools answered once it had run. All five are
+     * `poolRepairStatus()`'s facts, from the state read below rather than from a second read of the
+     * file, so this block and the preflight's `pool repairs` row cannot count one container's
+     * repairs differently.
+     *
+     * `pool_repair_ledger` is the same five facts per repair rather than for the newest: a list, one
+     * entry per repair still on file, oldest first. It answers what two fields cannot — three
+     * repairs on one pool that each cleared, and three that moved between pools with none of them
+     * clearing, read the same on `last_repair_pool` alone.
      *
      * @return array<string, mixed>
      */
@@ -2874,6 +2971,8 @@ final class PgcatConfigFlipper
             'last_pool_repair_at' => $repairs['last_at'],
             'last_repair_pool' => $repairs['pool'],
             'last_repair_mode' => $repairs['mode'],
+            'last_repair_cleared' => $repairs['cleared'],
+            'pool_repair_ledger' => $repairs['ledger'],
             'converged' => $converged,
             'converged_at' => $state['converged_at'] ?? null,
             'converged_mode' => $state['converged_mode'] ?? null,
@@ -4012,7 +4111,7 @@ final class PgcatConfigFlipper
      * previous repair's pool into a new run's record; `$mode` is already a parameter because a run
      * records the mode it left in place.
      */
-    private function recordRun(string $kind, string $mode, ?string $pool = null): void
+    private function recordRun(string $kind, string $mode, ?string $pool = null, ?bool $cleared = null): void
     {
         $state = $this->readState();
         $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE, FlipResult::KIND_REPAIRED], true);
@@ -4023,7 +4122,7 @@ final class PgcatConfigFlipper
         $state['last_mode_active'] = $mode;
 
         if ($kind === FlipResult::KIND_REPAIRED) {
-            $state = $this->withRepair($state, $mode, $pool);
+            $state = $this->withRepair($state, $mode, $pool, $cleared);
         }
 
         if ($usable && !isset($state['converged_at'])) {
@@ -4049,18 +4148,95 @@ final class PgcatConfigFlipper
      * previous repair's pool into a new record, so a repair with no pool to name cannot make the last
      * one read as current.
      *
+     * `$cleared` is the answer to the question the ledger exists for: after the repair had run, did
+     * the pools the variant declares answer? It is read back on both repair paths — the one that
+     * found the mode already applied, and the one that had just applied it — so an entry is a
+     * measurement rather than a hope, and the four fields beside it are what make a repeated repair
+     * on one pool legible as exactly that.
+     *
      * @param array<string, mixed> $state
      * @return array<string, mixed>
      */
-    private function withRepair(array $state, string $mode, ?string $pool): array
+    private function withRepair(array $state, string $mode, ?string $pool, ?bool $cleared = null): array
     {
+        $at = $this->nowIso();
+
         $state['pool_repairs'] = ConfigValue::int($state['pool_repairs'] ?? null, 0) + 1;
-        $state['last_pool_repair_at'] = $this->nowIso();
+        $state['last_pool_repair_at'] = $at;
         $state['last_repair_pool'] = $pool;
         $state['last_repair_mode'] = $mode;
+        $state['last_repair_cleared'] = $cleared;
         $state[self::REPAIR_HISTORY_KEY] = $this->recordRepairTime($state[self::REPAIR_HISTORY_KEY] ?? null);
+        $state[self::REPAIR_LEDGER_KEY] = $this->recordRepairLedger($state[self::REPAIR_LEDGER_KEY] ?? null, [
+            'at' => $at,
+            'pool' => $pool,
+            'mode' => $mode,
+            'cleared' => $cleared,
+        ]);
 
         return $state;
+    }
+
+    /**
+     * The ledger a repair leaves: the entries the file already holds, then this one, capped.
+     *
+     * The same shape `repairLedger()` reads, narrowed on the way in rather than trusted: the state
+     * file is one an operator may edit by hand, so an entry that is not an array, or whose moment is
+     * not a non-empty string, is dropped rather than carried into a rendering that would have to
+     * handle it twice. `pool`, `mode` and `cleared` keep their nulls — a repair with no pool to name
+     * is a real entry, and it is not the same fact as a pool named `null`.
+     *
+     * @param mixed $existing the value the state file holds under {@see REPAIR_LEDGER_KEY}
+     * @param array{at: string, pool: string|null, mode: string|null, cleared: bool|null} $entry
+     * @return list<array{at: string, pool: string|null, mode: string|null, cleared: bool|null}>
+     */
+    private function recordRepairLedger(mixed $existing, array $entry): array
+    {
+        $kept = $this->repairLedger($existing);
+        $kept[] = $entry;
+
+        return array_slice($kept, -self::REPAIR_LEDGER_LIMIT);
+    }
+
+    /**
+     * The repair ledger a state value holds, in the order it was written — oldest first, so the
+     * newest repair is the last entry and `last_*` is the same repair the ledger ends on.
+     *
+     * A value that is not a list, or that holds entries of another shape, reads as the entries that
+     * are shaped like repairs and nothing else: the ledger is one more thing a hand-edited file can
+     * get wrong, and a reading that refused the whole file over one bad row would lose the repairs
+     * that are legible beside it.
+     *
+     * @return list<array{at: string, pool: string|null, mode: string|null, cleared: bool|null}>
+     */
+    private function repairLedger(mixed $value): array
+    {
+        $entries = [];
+
+        foreach (is_array($value) ? $value : [] as $raw) {
+            if (!is_array($raw)) {
+                continue;
+            }
+
+            $at = $raw['at'] ?? null;
+
+            if (!is_string($at) || $at === '') {
+                continue;
+            }
+
+            $pool = $raw['pool'] ?? null;
+            $mode = $raw['mode'] ?? null;
+            $cleared = $raw['cleared'] ?? null;
+
+            $entries[] = [
+                'at' => $at,
+                'pool' => is_string($pool) && $pool !== '' ? $pool : null,
+                'mode' => is_string($mode) && $mode !== '' ? $mode : null,
+                'cleared' => is_bool($cleared) ? $cleared : null,
+            ];
+        }
+
+        return array_slice($entries, -self::REPAIR_LEDGER_LIMIT);
     }
 
     /**

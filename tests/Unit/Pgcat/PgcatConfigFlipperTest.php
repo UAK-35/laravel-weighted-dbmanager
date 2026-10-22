@@ -946,7 +946,14 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame(FlipResult::KIND_REPAIRED, $result->kind());
         $this->assertSame('readers', $result->mode);
         $this->assertSame(0, $result->exitCode());
-        $this->assertSame(['reader_db_2'], $probed, 'every pool the applied variant declares is asked about');
+        // One read that found the fault, then the shipped policy's three after the re-application:
+        // the second read is what says whether the repair cleared the pooler, and this probe never
+        // stops refusing, so it is asked the whole bound.
+        $this->assertSame(
+            ['reader_db_2', 'reader_db_2', 'reader_db_2', 'reader_db_2'],
+            $probed,
+            'every pool the applied variant declares is asked about, before the repair and again after it',
+        );
         $this->assertSame(
             "[pools.reader_db_2]\npool_mode = 'transaction'\n",
             file_get_contents($this->tmp . '/pgcat.toml'),
@@ -961,6 +968,21 @@ class PgcatConfigFlipperTest extends TestCase
 
         $this->assertSame('reader_db_2', $state['last_repair_pool']);
         $this->assertSame('readers', $state['last_repair_mode']);
+
+        // And the answer the count cannot give: the probe above still refuses the pool, so the
+        // repair is recorded as one that did not clear — the pooler was re-applied and did not
+        // start answering for it. It is one entry in the ledger, whatever the last-* keys say.
+        $this->assertFalse($state['last_repair_cleared']);
+        $this->assertSame(
+            [[
+                'at' => $state['last_pool_repair_at'],
+                'pool' => 'reader_db_2',
+                'mode' => 'readers',
+                'cleared' => false,
+            ]],
+            $state[PgcatConfigFlipper::REPAIR_LEDGER_KEY],
+            'the ledger holds the repair as one entry naming when, which pool, which mode, and whether it cleared',
+        );
     }
 
     /**
@@ -1073,7 +1095,14 @@ class PgcatConfigFlipperTest extends TestCase
         $flipper = $this->build('readers');
 
         $this->assertSame(
-            ['count' => 3, 'last_at' => '2026-10-10T12:00:00+00:00', 'pool' => 'reader_db_2', 'mode' => 'readers'],
+            [
+                'count' => 3,
+                'last_at' => '2026-10-10T12:00:00+00:00',
+                'pool' => 'reader_db_2',
+                'mode' => 'readers',
+                'cleared' => null,
+                'ledger' => [],
+            ],
             $flipper->poolRepairStatus(),
             'the reading is the count, the time, and the pool and mode of the repair, and nothing about the window beside them',
         );
@@ -1103,11 +1132,20 @@ class PgcatConfigFlipperTest extends TestCase
         $flipper = $this->build('readers');
 
         $this->assertSame(
-            ['count' => 4, 'last_at' => '2026-10-09T08:00:00+00:00', 'pool' => null, 'mode' => null],
+            [
+                'count' => 4,
+                'last_at' => '2026-10-09T08:00:00+00:00',
+                'pool' => null,
+                'mode' => null,
+                'cleared' => null,
+                'ledger' => [],
+            ],
             $flipper->poolRepairStatus(),
         );
         $this->assertNull($flipper->windowStatus()['last_repair_pool']);
         $this->assertNull($flipper->windowStatus()['last_repair_mode']);
+        $this->assertNull($flipper->windowStatus()['last_repair_cleared'], 'a file written before the answer was measured does not claim one');
+        $this->assertSame([], $flipper->windowStatus()['pool_repair_ledger'], 'and holds no entries to render');
 
         file_put_contents($this->stateFile, json_encode([
             'pool_repairs' => 'many',
@@ -1117,7 +1155,14 @@ class PgcatConfigFlipperTest extends TestCase
         ]));
 
         $this->assertSame(
-            ['count' => 0, 'last_at' => null, 'pool' => null, 'mode' => null],
+            [
+                'count' => 0,
+                'last_at' => null,
+                'pool' => null,
+                'mode' => null,
+                'cleared' => null,
+                'ledger' => [],
+            ],
             $flipper->poolRepairStatus(),
             'a counter that is not a number and a stamp, pool or mode that is not a string read as none, not as five shapes',
         );
@@ -1236,6 +1281,118 @@ class PgcatConfigFlipperTest extends TestCase
 
         $this->assertCount(2, $kept, 'the old moment and the unreadable entry are dropped, the recent one and the new one stay');
         $this->assertSame(3, $this->build('readers')->poolRepairRate()['count'], 'the lifetime count is untouched by the pruning');
+    }
+
+    /**
+     * The half of a repair the count never carried: whether it worked.
+     *
+     * A probe that refuses the pool the first time and answers the second is a pooler the
+     * re-application fixed — the first read is the fault, the read-back after the swap is the answer
+     * — and the ledger says so. The count, `last_kind` and the pool's name read the same on this
+     * container and on one whose pooler stayed broken; `cleared` is the field that tells them apart,
+     * and it is measured after the repair rather than assumed from the run having reported one.
+     */
+    public function test_a_repair_that_clears_is_recorded_as_cleared(): void
+    {
+        file_put_contents($this->tmp.'/pgcat-readers.toml', "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+        file_put_contents($this->stateFile, json_encode(['last_mode' => 'readers']));
+        file_put_contents($this->tmp.'/pgcat.toml', "pool = 'unknown'\n");
+
+        $asked = 0;
+
+        $flipper = $this->build('readers', poolProbe: function (string $database) use (&$asked): array {
+            $asked++;
+
+            return $asked === 1
+                ? ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)]
+                : ['status' => 'present', 'evidence' => sprintf('pgcat has the pool "%s"', $database)];
+        });
+
+        $this->assertSame(FlipResult::KIND_REPAIRED, $flipper->applyCurrentState()->kind());
+        $this->assertSame(2, $asked, 'the read that found the fault, then the read-back that answers it');
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertTrue($state['last_repair_cleared']);
+        $this->assertSame(
+            [[
+                'at' => $state['last_pool_repair_at'],
+                'pool' => 'reader_db_2',
+                'mode' => 'readers',
+                'cleared' => true,
+            ]],
+            $state[PgcatConfigFlipper::REPAIR_LEDGER_KEY],
+            'a repair the pooler recovered from is recorded as one that cleared',
+        );
+
+        // And the reading the two surfaces publish agrees with the entry rather than with the
+        // assumption that a repair works: `cleared` is the same boolean, and the entry is the newest
+        // of a list that ends where the last-* facts point.
+        $reading = $flipper->poolRepairStatus();
+
+        $this->assertTrue($reading['cleared']);
+        $this->assertSame($state['last_pool_repair_at'], $reading['ledger'][array_key_last($reading['ledger'])]['at']);
+    }
+
+    /**
+     * The ledger is bounded, and it is read defensively.
+     *
+     * A file with more entries than the ledger keeps is cut to the newest — the bound is a payload
+     * size rather than a window, so the oldest entries go first — and an entry that is not shaped
+     * like a repair is dropped rather than rendered as a row of placeholders. The repair being
+     * written is appended last, so the newest `last_*` fact and the ledger's final entry are the
+     * same repair.
+     */
+    public function test_the_ledger_keeps_twenty_entries_and_drops_the_ones_it_cannot_read(): void
+    {
+        $entries = [];
+
+        for ($index = 0; $index < 25; $index++) {
+            $entries[] = [
+                'at' => gmdate(DATE_ATOM, time() - (3600 * (25 - $index))),
+                'pool' => 'reader_db_'.$index,
+                'mode' => 'readers',
+                'cleared' => true,
+            ];
+        }
+
+        // Two entries the reader has to drop: one that is not an array, and one with no moment.
+        // Both are shapes a hand-edited file takes, and neither is a repair.
+        $entries[] = 'not an entry';
+        $entries[] = ['pool' => 'reader_db_2', 'mode' => 'readers', 'cleared' => true];
+
+        file_put_contents($this->tmp.'/pgcat-readers.toml', "[pools.reader_db_2]\npool_mode = 'transaction'\n");
+        file_put_contents($this->stateFile, json_encode([
+            'last_mode' => 'readers',
+            'pool_repairs' => 25,
+            PgcatConfigFlipper::REPAIR_LEDGER_KEY => $entries,
+        ]));
+        file_put_contents($this->tmp.'/pgcat.toml', "pool = 'unknown'\n");
+
+        $this->build('readers', poolProbe: static fn (string $database): array
+            => ['status' => 'missing', 'evidence' => sprintf('pgcat is running but has no pool "%s"', $database)])
+            ->applyCurrentState();
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+        $kept = $state[PgcatConfigFlipper::REPAIR_LEDGER_KEY];
+
+        $this->assertCount(20, $kept, 'the ledger keeps the newest twenty entries, whatever the file holds');
+        $this->assertSame('reader_db_6', $kept[0]['pool'], 'the six oldest of the twenty-five are what falls off');
+        $this->assertSame(
+            [
+                'at' => $state['last_pool_repair_at'],
+                'pool' => 'reader_db_2',
+                'mode' => 'readers',
+                'cleared' => false,
+            ],
+            $kept[array_key_last($kept)],
+            'the repair just written is the last entry and the same one the last-* facts name',
+        );
+
+        foreach ($kept as $entry) {
+            $this->assertIsString($entry['at']);
+            $this->assertNotSame('', $entry['at'], 'every kept entry is one the reader could place');
+        }
     }
 
     /**
@@ -1894,6 +2051,61 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
+     * The arming half of that reading, which is what `db:doctor`'s `pool probe armed` row asks: the
+     * same declaration, the same variant, and no exchange at all. The closure records every call, so
+     * a reader that asked would be a failure here rather than a slow row nobody noticed.
+     */
+    public function test_the_pool_probe_arming_reader_names_the_pools_without_asking(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', <<<'TOML'
+        [general]
+        port = 6432
+
+        [pools.writer_db_1.users.0]
+        username = "postgres"
+
+        [pools.reader_db_2.users.0]
+        username = "postgres"
+        TOML);
+
+        $asked = [];
+
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ], poolProbe: function (string $database) use (&$asked): array {
+            $asked[] = $database;
+
+            return ['status' => 'answered', 'evidence' => 'the pooler answered'];
+        });
+
+        $arming = $flipper->poolProbeArming();
+
+        $this->assertSame(['writer_db_1', 'reader_db_2'], $arming['pools'], 'the names the row prints are the variant\'s own, in file order');
+        $this->assertTrue($arming['armed']);
+        $this->assertTrue($arming['applicable']);
+        $this->assertSame([], $asked, 'the arming reader reads a switch and a file, and never opens the probe');
+    }
+
+    /**
+     * The other half of the same question: nothing is armed, so there is nothing to ask and no pool
+     * to name. The verdict reports the same two facts, and this reader must not disagree with it.
+     */
+    public function test_the_pool_probe_arming_reader_says_nothing_is_armed_without_a_probe(): void
+    {
+        $flipper = $this->build('readers', [
+            'boot_file' => $this->stampBoot(time() - 3600),
+            'flip_window_seconds' => 480,
+        ]);
+
+        $this->assertSame(
+            ['armed' => false, 'applicable' => false, 'pools' => []],
+            $flipper->poolProbeArming(),
+            'a switch that arms nothing names no pool, and a row may say so without asking anything',
+        );
+    }
+
+    /**
      * The shipped front door asks every declared name and the sentinel in one call, and reads the
      * rows out of that one answer. The batch is the change: a large pool set used to cost one
      * exchange per name, so the sweep's latency grew with the configuration it was measuring.
@@ -2471,11 +2683,18 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
-     * The poll's reading of the pooler is one read with no wait, whatever the repair's bounds are set
-     * to: a pooler that has been up and answering for a while needs no grace, and a poll that waited
-     * before deciding would spend the boot window's minutes asleep. Five attempts and a quarter of a
-     * second are configured here so an inherited policy cannot hide — the probe would be asked five
-     * times and the sleeper called four.
+     * The poll's *reading* of the pooler is one read with no wait, whatever the repair's bounds are
+     * set to: a pooler that has been up and answering for a while needs no grace, and a poll that
+     * waited before deciding would spend the boot window's minutes asleep. Five attempts and a
+     * quarter of a second are configured here so an inherited policy cannot hide — the probe would
+     * be asked five times and the sleeper called four.
+     *
+     * What follows the repair is the other half, and it is deliberately not the same policy: once
+     * the file has been re-applied and the pooler signalled, the question is whether the pools
+     * answer *now*, which is the one read that needs the grace — the same read the apply path takes
+     * for the same reason, and the one that fills `cleared` in the ledger. It costs the retries only
+     * while the pooler is still refusing, which is the state an operator needs measured; a repair
+     * that cleared returns on the first attempt with no wait at all.
      */
     public function test_the_poll_path_asks_once_however_the_repair_is_bounded(): void
     {
@@ -2500,8 +2719,17 @@ class PgcatConfigFlipperTest extends TestCase
         );
 
         $this->assertSame(FlipResult::KIND_REPAIRED, $flipper->applyCurrentState()->kind());
-        $this->assertSame(['reader_db_2'], $probed, 'one read: the mode never moved, so nothing was just signalled');
-        $this->assertSame([], $slept, 'and no wait before the repair it triggered');
+        $this->assertSame(
+            ['reader_db_2', 'reader_db_2', 'reader_db_2', 'reader_db_2', 'reader_db_2', 'reader_db_2'],
+            $probed,
+            'one read before the repair, with no wait — then the read-back after it, on the configured policy, '
+            .'because this pooler kept refusing',
+        );
+        $this->assertSame(
+            [250000, 250000, 250000, 250000],
+            $slept,
+            'and the repair itself waited, which is the policy the poll\'s first read does not use',
+        );
     }
 
     /**

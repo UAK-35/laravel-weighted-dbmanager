@@ -321,7 +321,12 @@ repairs` row from the same reading —
 because a run's kind cannot tell a one-off from a pooler that keeps needing repair. The repair
 records the pool it was refused for and the mode whose variant declares it, as `last_repair_pool`
 and `last_repair_mode` beside the count, printed as rows of their own: the count opens the question
-*which* pool, under *which* variant, and the table answers it without the run's own sentence.
+*which* pool, under *which* variant, and the table answers it without the run's own sentence. Both
+repair paths read the pools back once the file has been re-applied, so each repair also records
+`last_repair_cleared` and one entry in `pool_repair_ledger` — when, the pool, the mode and whether the
+pools answered afterwards. That is the fact a count cannot carry: three repairs that each cleared and
+three that never did read the same on a counter, and only the entries tell a flapping pooler from one
+that is restarted without recovering.
 
 ### Where the surfaces read it
 
@@ -341,7 +346,9 @@ judged from one it has), `host`,
 `reason`. It deliberately
 records, restarts and throws nothing: a status reading that restarted a pooler would not be one an
 endpoint could be polled with. `/health/db` embeds it as the `pool_probe` block and `db:doctor`
-prints it as the `pool probe` row, and the block is published whole
+prints it as the `pool probe answer` row — beside `pool probe armed`, which reads
+`poolProbeArming()` instead and says whether anything can ask the pooler at all, without opening a
+socket — and the block is published whole
 rather than reduced to a boolean, because the three answers call for different work.
 
 The endpoint is read off the probe's own answer rather than off the settings, because
@@ -367,8 +374,8 @@ column is what a reader of that surface sees.
 | `applyCurrentState()` → `flipped` | the copy and the supervisor command exiting `0`, when the probe is not armed | a pipeline reading `kind`, the scheduler's log, the `flip_runs` row |
 | `applyCurrentState()` → `flipped`, probe armed | the same commands, when the variant declares no pool: `configuredPools()` is empty, so `refusalAfterApply()` has nothing to ask and returns null | as above |
 | `forceMode()` → `flipped` | the same commands, and the pools read back with `refusalAfterApply()` when the probe is armed; there is no boot window and no `poolFault()`, because this path is always a mode that moved | `db:pgcat-window-flip` at every boundary, and `db:pgcat-flip --force-mode` run by hand |
-| `forceMode()` → `repaired` | the pools read back after the swap, then the restart command's exit code and the pools read once more — the run itself is not recorded, the repair is | the boundary task's own line and JSON `kind`, and `pool_repairs` in `--status` |
-| the mode-unchanged repair → `repaired` | the refusal read from the pooler before the re-application, then the re-application's exit codes; the pools are *not* read again | the `pool_repairs` and `flip_runs` rows, and `--status --json` |
+| `forceMode()` → `repaired` | the pools read back after the swap, then the restart command's exit code and the pools read once more — the run itself is not recorded, the repair is, with the same `cleared` and ledger entry a scheduled repair writes | the boundary task's own line and JSON `kind`, `pool_repairs` in `--status`, and `pool_repairs.ledger` on `/health/db` |
+| the mode-unchanged repair → `repaired` | the refusal read from the pooler before the re-application, the re-application's exit codes, then the pools read once more with `refusalAfterApply()` — the read that answers `cleared`, and the one that retries only while the pooler is still refusing | the `pool_repairs`, `last_repair_cleared` and `repair_N` rows, `--status --json`, and `pool_repairs.ledger` |
 | `swap()`'s supervisor command | the command exiting `0`. The program's state is read *before* the swap (`SupervisorStep::inspect()`) and never after it | the run's own outcome: a restart that leaves pgcat `FATAL` reads like one that worked |
 
 The boundary task's own `SELECT 1` is not on this list and is not a substitute for one of its rows:

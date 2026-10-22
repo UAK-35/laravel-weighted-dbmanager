@@ -28,8 +28,9 @@ namespace Uak35\WeightedDbManager\Support;
  *   adds no reading of its own. That is deliberate — a contract that judged something the preflight
  *   does not would be a second opinion about the same installation, and the two could disagree on
  *   the day one of them changed. The consequence is that a requirement is exactly as sharp as the
- *   rows behind it: `pooler` is answered by `pool probe`, which asks what the running pooler holds
- *   rather than which version is answering, and the entry's `note` says so.
+ *   rows behind it: `pooler` is answered by `pool probe armed` and `pool probe answer`, which say
+ *   whether anything can ask the running pooler and what it holds rather than which version is
+ *   answering, and the entry's `note` says so.
  *
  *   The names are compared with the README's preflight table by `DeploymentContractTest`, in both
  *   directions: an entry cannot name a row that does not exist or one the README does not
@@ -94,9 +95,9 @@ final class DeploymentContract
             ],
             'pooler' => [
                 'statement' => 'a pinned, compiled pooler',
-                'readings' => ['pool probe', 'pool repairs'],
+                'readings' => ['pool probe armed', 'pool probe answer', 'pool repairs'],
                 'unread' => null,
-                'note' => 'the version is decided by the image build and no row reads it — `pool probe` asks what the running pooler holds, not which build is answering, and `pool repairs` asks whether it has had to be repaired rather than which version was repaired',
+                'note' => 'the version is decided by the image build and no row reads it — `pool probe armed` says whether anything can ask the pooler at all, `pool probe answer` what the running one holds rather than which build is answering, and `pool repairs` asks whether it has had to be repaired rather than which version was repaired',
             ],
             'boot-stamp' => [
                 'statement' => 'a boot stamp the flip\'s window is measured from',
@@ -124,9 +125,9 @@ final class DeploymentContract
             ],
             'health-check' => [
                 'statement' => 'a container health check that asks the pooler',
-                'readings' => ['pool probe', 'real query'],
+                'readings' => ['pool probe armed', 'pool probe answer', 'real query'],
                 'unread' => null,
-                'note' => 'the check is the deployment\'s script and no row here runs it; `pool probe` answers what the pooler holds from this side, and `real query` is the query such a check runs when it is asked deeply — put only with `--real-test`, and counted here as unasked until a run passes it',
+                'note' => 'the check is the deployment\'s script and no row here runs it; `pool probe armed` says whether this side can ask the pooler, `pool probe answer` what it holds, and `real query` is the query such a check runs when it is asked deeply — put only with `--real-test`, and counted here as unasked until a run passes it',
             ],
             'store' => [
                 'statement' => 'a store, and a known answer for its absence',

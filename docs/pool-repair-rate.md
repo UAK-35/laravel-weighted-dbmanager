@@ -28,6 +28,7 @@ the fact that separates them is a **rate**, and `GET /health/db` is where it is 
 | `count` | every repair this container has recorded, which is what `db:pgcat-flip --status` prints |
 | `in_window` | the repairs inside the window, or `null` when they cannot be read |
 | `last_at` | when the last repair happened, or `null` |
+| `ledger` | the repairs themselves, oldest first: one entry per repair the state file still holds, each `at`, `pool`, `mode` and `cleared` |
 | `reason` | the sentence for a warning, and for a file that carries a count and no times |
 
 `warned` moves no status code and no other field. The blocks that fail this endpoint answer a
@@ -45,6 +46,38 @@ and a manual `--force-mode` adds one when an operator runs it, so the line stays
 a pooler rather than about a cadence. An hour because a container booting twice inside it is not one
 pooler failing twice. Both settings are the sample's, so an installation with a slower cadence or a
 wider window can move the line without a release.
+
+## The ledger: which pool, and did the restart clear it
+
+`count` and `last_at` describe the newest repair and nothing about the ones before it, so a monitor
+that sees `warned` can say the pooler keeps being repaired without being able to say whether any of
+the repairs worked. The ledger is that half: one entry per repair — `at`, `pool`, `mode`, `cleared`
+— published as `ledger` in this block, written to `pool_repair_ledger` in the state file, and printed
+by `db:pgcat-flip --status` as one `repair_N` row per entry, newest first.
+
+`cleared` is the field the count cannot carry, and it is measured rather than assumed. Both repair
+paths re-apply the file and then read the pools back — the run that found the mode already applied
+reads them with `refusalAfterApply()` after its swap, and the run that had just applied a mode reads
+them with the read it already takes — so an entry says whether the pooler answered for the pools
+*afterwards*. It costs one read on a path that has just restarted a pooler, and only that much: a
+repair that worked returns on the read's first attempt with no wait, and the retries a pooler that is
+still refusing pays are exactly the state an operator needs measured.
+
+It has three states, not two. `true` and `false` are the read-back's answer; `null` is an entry
+written before the read existed, or a value somebody edited into something that is not a boolean.
+`null` is not `false` — the first says nobody asked, the second says the pooler was asked and did not
+answer — which is the same rule `judged` draws for the times.
+
+The ledger is capped at twenty entries rather than pruned by the rate's window, because it is history
+a person reads and its bound is a payload size: a container that repaired itself twenty times has
+said the one thing a twenty-first entry would repeat, and the newest entries are the ones a reader
+acts on. Widening `window_seconds` therefore does not reach past them — the rate's retention is the
+times list and the ledger's is its own cap, two bounds for two questions.
+
+What it cannot say is a repair written before it existed: a state file with `pool_repairs` and no
+entries reads as no history rather than as no repairs, which is the line the times already draw one
+paragraph down. It also cannot say *why* a pool was refused — that sentence is the run's, in the
+log — only that the pooler refused it, under which mode, and whether the repair put it right.
 
 ## Why the times are kept in the state file
 
@@ -100,6 +133,10 @@ capped, and untouched by a run that did not repair — the repair a forced flip 
 recording a run (`test_a_forced_flip_whose_pooler_did_not_pick_the_mode_up_is_repaired()`), and the
 reading against state files seeded by
 hand: inside and outside the window, at and past the threshold, a count with no history, and a
-window or threshold the configuration cannot express. `DatabaseHealthControllerTest` pins the block
-the endpoint publishes: a quiet container, one past the threshold, and a flipper that was not built,
-each with the status the payload keeps either way.
+window or threshold the configuration cannot express. The ledger is pinned where it is written and
+where it is read: `PgcatConfigFlipperTest` drives a repair that clears and one that does not, and a
+state file holding more entries than the ledger keeps beside two it cannot read; `DbFlipPgcatCommandTest`
+pins the `repair_N` rows, newest first and with the three `cleared` cells; and
+`DatabaseHealthControllerTest` pins the block the endpoint publishes: a quiet container, one past the
+threshold with its ledger, and a flipper that was not built, each with the status the payload keeps
+either way.

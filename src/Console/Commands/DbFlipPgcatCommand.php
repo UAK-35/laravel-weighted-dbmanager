@@ -363,7 +363,7 @@ class DbFlipPgcatCommand extends Command
      *
      * The default status is the offline report, and a row saying "not asked" would be a new
      * line in a table operators read on hosts that may not reach the pooler. Rows appear only
-     * on the run that asked, and they carry the same facts `db:doctor`'s `pool probe` row and
+     * on the run that asked, and they carry the same facts `db:doctor`'s `pool probe answer` row and
      * `/health/db`'s block do — the verdict, the pools and what the pooler said about each, the
      * address the packets went to, and the console's answer where there was one — because three
      * surfaces describing one exchange differently is the failure the reading was extracted for.
@@ -536,6 +536,23 @@ class DbFlipPgcatCommand extends Command
     }
 
     /**
+     * One ledger entry's answer to "did the restart clear it", as a cell prints it.
+     *
+     * Three states rather than two: `cleared` is a measurement the write took, and a state file
+     * written before repairs were measured — or one somebody edited — carries no boolean. That is
+     * not the same fact as a repair that ran and did not clear: `no` would describe a pooler that
+     * failed to recover when nothing had asked it, which is the one answer a ledger must not invent.
+     */
+    private static function clearedCell(mixed $cleared): string
+    {
+        return match (true) {
+            $cleared === true => 'cleared',
+            $cleared === false => 'still refused',
+            default => 'not measured',
+        };
+    }
+
+    /**
      * The boot window as table rows — the four facts that answer "is this container going to be
      * reported as failed, and why", read from the same block `/health/db` publishes.
      *
@@ -636,6 +653,50 @@ class DbFlipPgcatCommand extends Command
             'last_repair_mode',
             $text($window['last_repair_mode'] ?? null, 'never'),
         ];
+
+        $rows[] = [
+            'last_repair_cleared',
+            self::clearedCell($window['last_repair_cleared'] ?? null),
+        ];
+
+        // The ledger, newest first: the rows above name the latest repair, and these name every
+        // repair the state file still holds. One row per entry rather than a sentence in a cell,
+        // because the question the ledger exists for is a comparison — the same pool repaired three
+        // times with every restart clearing it, and three repairs that never cleared, read the same
+        // on a count. The rows are labelled by position because a pool may appear more than once,
+        // and a table with two rows called `reader_db_2` is one an operator has to count.
+        return [...$rows, ...self::repairLedgerRows($window['pool_repair_ledger'] ?? null)];
+    }
+
+    /**
+     * The ledger as table rows, newest first, from a value the status array carries untyped.
+     *
+     * The narrowing is here rather than at the call site because `windowStatus()` returns an
+     * `array<mixed>` — a caller reading `$window['pool_repair_ledger']` gets `mixed`, and a list this
+     * command renders is one an operator may have edited into whatever JSON they liked. An entry
+     * that is not an array is skipped rather than printed as a row of placeholders: the ledger's
+     * reader already drops malformed entries, so a row saying `? pool none mode unknown` would
+     * describe an entry the file does not really hold.
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private static function repairLedgerRows(mixed $ledger): array
+    {
+        $entries = is_array($ledger) ? array_values(array_filter($ledger, 'is_array')) : [];
+        $rows = [];
+
+        foreach (array_reverse($entries) as $index => $entry) {
+            $rows[] = [
+                'repair_'.($index + 1),
+                sprintf(
+                    '%s  pool %s  mode %s  %s',
+                    is_scalar($entry['at'] ?? null) ? (string) $entry['at'] : '?',
+                    is_scalar($entry['pool'] ?? null) ? (string) $entry['pool'] : 'none',
+                    is_scalar($entry['mode'] ?? null) ? (string) $entry['mode'] : 'unknown',
+                    self::clearedCell($entry['cleared'] ?? null),
+                ),
+            ];
+        }
 
         return $rows;
     }

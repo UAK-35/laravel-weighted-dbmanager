@@ -75,13 +75,29 @@ fixture.
 | `schedule` | `applicable`, `age_seconds`, `causes`, `failed`, `interval_minutes`, `last_beat_at`, `missed_runs`, `not_judged`, `reason`, `stale_after_seconds` | whether anything is still running the entry that moves the mode, and why not when it is silent |
 | `reader_window` | `applicable`, `applied`, `expected`, `failed`, `reason` | the window verdict alone, for a reader that does not want the flipper's snapshot |
 | `pool_probe` | `address`, `admin`, `answered`, `applicable`, `control`, `discriminates`, `enabled`, `failed`, `host`, `judged`, `pools`, `port`, `reason`, `verified`, `warned` | what the running pooler holds, and whether a pool the application reads from is missing |
-| `pool_repairs` | `applicable`, `count`, `in_window`, `judged`, `last_at`, `max_repairs`, `reason`, `warned`, `window_seconds` | how often the container has had to repair a pool, and whether that rate is past the threshold — the one block that warns rather than fails |
+| `pool_repairs` | `applicable`, `count`, `in_window`, `judged`, `last_at`, `ledger`, `max_repairs`, `reason`, `warned`, `window_seconds` | how often the container has had to repair a pool, whether that rate is past the threshold, and the repairs as a ledger of `at`/`pool`/`mode`/`cleared` entries — the one block that warns rather than fails |
 | `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity` | the boot audit's standing findings, as `db:doctor` reads them |
 | `audit.counts` | `error`, `warning` | the standing findings by level |
 | `audit.scope` | `app_env`, `connection`, `driver`, `source` | what the boot that wrote them was running as |
 | `audit.current` | `available`, `count`, `counts`, `error`, `findings`, `severity` | the same audit re-read live by this process, which is not the same thing as what is on record |
 | `audit.current.counts` | `error`, `warning` | the live findings by level |
 | `errors` | — | a list of sentences naming what this process could not do, which no block above owns |
+
+## The readiness probe is a second object
+
+`DatabaseHealthController::readiness()` answers the same question a load balancer asks, and it is a
+second object rather than a filter on the first: `status` and `pool_probe`, and nothing else. The
+table above is `/health/db`'s and does not cover it, because a path added here would be a key the
+full payload does not publish — the one direction that guard reads. What keeps the two honest is
+narrower than a table: the block is the same array, from the same call, so a key added to
+`pool_probe` arrives on both surfaces at once and cannot be documented for one and not the other.
+
+The two keys are fixed because a kubelet's reader is a boolean. `status` is `degraded` on exactly
+`pool_probe.failed`, which is the rule `index()` already applies to that block, and `200` otherwise:
+an unarmed probe asked nothing, a silent pooler is `warned` rather than failed, and both judgements
+wait for the boot window to close. The cost is why the object is not the whole payload — no query, no
+replica read, no state store, no boot audit, and no log line, since a probe polled on a timer would
+write the degraded line far more often than anybody reads it.
 
 ## What this record deliberately does not decide
 

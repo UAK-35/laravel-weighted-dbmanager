@@ -126,6 +126,11 @@ use Throwable;
  *   Route::get('/health/db', [DatabaseHealthController::class, 'index'])
  *        ->middleware('auth.basic');     // protect it!
  *
+ * The same class answers a readiness probe for a load balancer, which wants the pool probe and
+ * nothing else: `readiness()` — see its own block for what it costs and why it is a second action.
+ *
+ *   Route::get('/ready', [DatabaseHealthController::class, 'readiness']);
+ *
  * The package extends Illuminate\Routing\Controller rather than the host
  * application's App\Http\Controllers\Controller — index() needs neither the
  * AuthorizesRequests, DispatchesJobs nor ValidatesRequests traits.
@@ -289,6 +294,58 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             'audit' => $this->audit(),
             'errors' => $errors,
         ], $allHealthy ? 200 : 503);
+    }
+
+    /**
+     * The pool probe alone, for a reader that asks every few seconds.
+     *
+     * WHY THIS IS A SECOND ACTION AND NOT A FLAG ON THE FIRST
+     *   `/health/db` answers a person and a deploy gate: one real query on the followed connection,
+     *   a `getPdo()` on a declared replica, the state store read behind every pgcat and audit block,
+     *   and an error line in the log whenever it is not `ok`. A Kubernetes readiness probe is none
+     *   of those readers — it runs on a timer measured in seconds, its answer decides whether the
+     *   pod is sent traffic, and nothing reads it afterwards. So the question it is allowed to ask
+     *   is the cheapest one that can still be wrong: does the pooler this pod is configured for
+     *   hold the pools the configuration declares? That is `poolProbeVerdict()` and nothing else —
+     *   one console read when `swrr.pgcat.pool_probe.enabled` has armed it, and no socket at all
+     *   when it has not.
+     *
+     * WHAT IT DELIBERATELY DOES NOT DO
+     *   It runs no query and opens no database connection, so a probe that is not about the
+     *   database cannot evict a pod that already fails every request it is sent — `pinned` is the
+     *   full endpoint's fact, and a pod that cannot reach its database is failing where the traffic
+     *   already went. It reads no replica summary, no store, no boot audit and no schedule, and it
+     *   writes no log line: a probe polled every ten seconds would turn one failure into six lines
+     *   a minute for as long as the pod stays unready, which is a log nobody can read. The failure
+     *   is still logged once it matters — `/health/db`'s own degraded line — and this endpoint is
+     *   the cheap answer that keeps traffic off the pod in the meantime.
+     *
+     * THE STATUS RULE IS THE ONE `index()` ALREADY APPLIES TO THIS BLOCK
+     *   503 only when `pool_probe.failed` is true: a pool the pooler refuses is a pod that cannot
+     *   serve the reads the resolver would route to it. Every other state answers 200 — a probe
+     *   this installation has not armed asked nothing (`applicable: false`), a pooler that answered
+     *   nothing at all is `warned` rather than failed, and both judgements wait for the boot window
+     *   to close so a pod is never failed for still starting. Reading the same call the full payload
+     *   reads is what keeps a load balancer and a dashboard from disagreeing about one container.
+     *
+     *   The body is `status` and `pool_probe` and nothing else, so the contract is two keys. Route it
+     *   yourself, like the full endpoint — but do not put `auth.basic` in front of it: a kubelet
+     *   sends no credentials, and what this body carries is pool names, the address the packets went
+     *   to, and the pooler's own sentences. The console credential the probe may send is never
+     *   published, so there is nothing here to protect.
+     *
+     * @return JsonResponse `status` (`ok` or `degraded`) and `pool_probe`
+     */
+    public function readiness(): JsonResponse
+    {
+        $poolProbe = $this->poolProbeVerdict($this->pgcat);
+
+        $healthy = $poolProbe['failed'] !== true;
+
+        return response()->json([
+            'status' => $healthy ? 'ok' : 'degraded',
+            'pool_probe' => $poolProbe,
+        ], $healthy ? 200 : 503);
     }
 
     /**
@@ -563,7 +620,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * Whether the running pooler is answerable for the pools the configuration declares.
      *
      * The reading itself is the flipper's — `PgcatConfigFlipper::poolProbeVerdict()` — so this
-     * endpoint and `db:doctor`'s `pool probe` row cannot disagree about what the pooler holds, and
+     * endpoint and `db:doctor`'s `pool probe answer` row cannot disagree about what the pooler holds, and
      * the sentence `reason` carries is the same one the row prints. What this helper adds is the
      * one case the flipper does not have to know about: an installation with no pgcat at all, where
      * `enabled` is false and nothing was asked. That is the same line `flipVerdict()` draws for a
@@ -649,9 +706,17 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      * blocks that fail this endpoint are the ones whose fault is standing now — `pool_probe` asks
      * the pooler at this moment, where this reads what happened to it.
      *
+     * `ledger` is the same list the flip writes, entry per repair: when, the pool the pooler
+     * refused, the variant that declares it, and whether the pools answered afterwards. It is
+     * published because the rate only says *how often* — a warning with `last_at` and no history
+     * describes a pooler that keeps being repaired without saying whether any repair worked, which
+     * is the difference between a flapping pool and a restart that never fixes it. Empty for a
+     * container that has never repaired anything, and for a state file written before the entries
+     * were kept; the rate's own `judged` already tells those apart from a repair nobody dated.
+     *
      * @param PgcatConfigFlipper|null $pgcat the flipper this endpoint was built with
      *
-     * @return array{applicable: bool, judged: bool, warned: bool, window_seconds: int, max_repairs: int, count: int, in_window: int|null, last_at: string|null, reason: string|null}
+     * @return array{applicable: bool, judged: bool, warned: bool, window_seconds: int, max_repairs: int, count: int, in_window: int|null, last_at: string|null, reason: string|null, ledger: list<array{at: string, pool: string|null, mode: string|null, cleared: bool|null}>}
      */
     private function poolRepairVerdict(?PgcatConfigFlipper $pgcat): array
     {
@@ -666,6 +731,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
                 'in_window' => null,
                 'last_at' => null,
                 'reason' => null,
+                'ledger' => [],
             ];
         }
 

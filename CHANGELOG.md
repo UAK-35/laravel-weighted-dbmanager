@@ -141,7 +141,58 @@
   connection the package follows. The record states which shapes are deliberately open and why, so an
   em dash is a decision rather than a gap.
 
+- **Each recorded pool repair is readable as a small ledger, not only as the last one.**
+  `pool_repairs` says how many repairs a container has made and `last_pool_repair_at` when the newest
+  happened, which is one fact about the last repair and nothing about the ones before it — three
+  repairs on one pool that each cleared and three that moved between pools with none clearing read
+  the same on either. Every repair now writes an entry to `pool_repair_ledger` in the state file —
+  when, the pool it was refused for, the mode whose variant declares that pool, and `cleared` — and
+  the three readers publish it: `windowStatus()` carries it as `ledger` beside the count and the
+  `last_repair_*` keys, `/health/db` as `pool_repairs.ledger`, and `db:pgcat-flip --status` as one
+  `repair_N` row per entry, newest first, beside a `last_repair_cleared` row for the newest one.
+  `cleared` is measured rather than assumed, which is the half the count could not carry: the path
+  that found the mode already applied now reads the pools back after its swap, the way the path that
+  had just applied one already did, so an entry says whether the pooler answered for the pools
+  *afterwards*. It is one read on a path that has just restarted a pooler and returns on that read's
+  first attempt when the restart worked, so the retries are paid only while the pooler is still
+  refusing — the state worth measuring. `null` is a third state beside `true` and `false`, for an
+  entry written before the answer was measured or a hand-edited value that is not a boolean, because
+  "nobody asked" is not "it was asked and did not answer". The ledger keeps the newest twenty
+  entries rather than pruning by the rate's window: it is history a person reads, so its bound is a
+  payload size, and widening `window_seconds` does not reach past them. A stored entry whose moment
+  is not a non-empty string is dropped on the way in and on the way out rather than costing the
+  repairs legible beside it — the rule every hand-editable fact in that file follows.
+
+- **A readiness probe that returns the pool probe and nothing else.** `DatabaseHealthController::readiness()`
+  answers `status` and `pool_probe` for a load balancer or a kubelet: `503` only when
+  `pool_probe.failed` is true — a pool the pooler refuses is a pod that cannot serve the reads routed
+  to it — and `200` for every other state, which is the rule `index()` already applies to that block,
+  read from the same call so the two surfaces cannot disagree. It is a second action rather than a
+  flag because the cost is the difference: no query, no database connection, no replica summary, no
+  state store, no boot audit, no schedule, and no log line — a probe polled every few seconds would
+  turn one failure into a flood — with one console read when `swrr.pgcat.pool_probe.enabled` is armed
+  and none when it is not. An installation that has not armed the probe answers `ok` with
+  `applicable: false`, and a pooler that answered nothing stays `warned` rather than failed, so a
+  probe aimed at the wrong address cannot evict a pod that serves. `DatabaseHealthControllerTest`
+  pins the two-key body, the degraded and warned answers, the unarmed answer, and the cheapness the
+  only way it can be pinned: the same fixture whose database cannot be opened, where the full
+  endpoint answers `503` and the probe answers `200`.
+
 ### Changed
+
+- **`db:doctor`'s `pool probe` row is two rows: `pool probe armed` and `pool probe answer`.** The row
+  answered two questions with one socket — whether anything can ask the pooler at all, and what the
+  pooler said for each pool — so a build container could only ever leave the whole question out of a
+  `--connection-only` run. Arming is a switch and a dialable `[general] port` in the file the pooler
+  runs on, and `PgcatConfigFlipper::poolProbeArming()` reads that declaration without opening a
+  connection, so the new row is asked in every mode, including the bounded one. The exchange, the
+  pooler's own `SHOW POOLS` list, the startup-packet fallback and every verdict stay in `pool probe
+  answer`, which is the row `--connection-only` leaves out and which says `not asked` rather than
+  vanishing from a run a gate selects it by name in. Every state that is not a missing prerequisite
+  is still a pass in both rows — an inert flipper, a probe switched off, a variant that declares no
+  pool — and the contract's `pooler` and `health-check` requirements name both, so the README's table,
+  [docs/db-doctor-json.md](docs/db-doctor-json.md) and the requirement's own sentence say the same
+  thing. A gate that selected the row by its old name selects `pool probe answer`.
 
 - **The `published config` row's fresh-install state is written the same way in the three places that
   state it.** The port plan's phase 1 said a fresh install that has never published is silent, while

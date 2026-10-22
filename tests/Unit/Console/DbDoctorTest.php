@@ -2196,9 +2196,9 @@ class DbDoctorTest extends TestCase
         $this->armPgcatWithPoolProbe(['writer_db_1', 'reader_db_2']);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringStartsWith('PASS  pool probe answer', $row);
         $this->assertStringContainsString('answered for every pool the configuration declares (writer_db_1, reader_db_2)', $row);
         $this->assertStringContainsString('refused a control name it cannot hold', $row, 'the control is what makes the answers proof');
         $this->assertStringContainsString('each answer is proof the pool exists', $row);
@@ -2216,9 +2216,9 @@ class DbDoctorTest extends TestCase
         $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered');
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('WARN  pool probe', $row);
+        $this->assertStringStartsWith('WARN  pool probe answer', $row);
         $this->assertStringContainsString('answered the sentinel name "weighted-dbmanager-control-', $row);
         $this->assertStringContainsString('does not show that the pool exists', $row);
         $this->assertStringContainsString('indeterminate rather than a pass', $row);
@@ -2240,9 +2240,9 @@ class DbDoctorTest extends TestCase
         ]);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringStartsWith('PASS  pool probe answer', $row);
         $this->assertStringContainsString('own admin console lists every pool the configuration declares', $row);
         $this->assertStringContainsString('listed 1 pool(s)', $row, 'the console\'s own sentence, not a paraphrase of it');
         $this->assertSame(0, $exit);
@@ -2262,9 +2262,9 @@ class DbDoctorTest extends TestCase
         ]);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('FAIL  pool probe', $row);
+        $this->assertStringStartsWith('FAIL  pool probe answer', $row);
         $this->assertStringContainsString('holds no pool "reader_db_2"', $row);
         $this->assertStringContainsString('admin console lists no pool "reader_db_2"', $row, 'the console is the reading, so it is what the row names');
         $this->assertSame(1, $exit, 'a pool the pooler says it does not hold is a failure');
@@ -2285,9 +2285,9 @@ class DbDoctorTest extends TestCase
         ]);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('WARN  pool probe', $row);
+        $this->assertStringStartsWith('WARN  pool probe answer', $row);
         $this->assertStringContainsString('admin console could not list them', $row);
         $this->assertStringContainsString('password authentication failed', $row);
         $this->assertSame(0, $exit);
@@ -2303,9 +2303,9 @@ class DbDoctorTest extends TestCase
         $this->armPgcatWithPoolProbe(['reader_db_2'], control: 'answered', windowClosed: false);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringStartsWith('PASS  pool probe answer', $row);
         $this->assertStringContainsString('The boot window is still open', $row);
         $this->assertSame(0, $exit);
     }
@@ -2320,9 +2320,9 @@ class DbDoctorTest extends TestCase
         $this->armPgcatWithPoolProbe(['reader_db_2'], ['reader_db_2' => 'missing']);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('FAIL  pool probe', $row);
+        $this->assertStringStartsWith('FAIL  pool probe answer', $row);
         $this->assertStringContainsString('holds no pool "reader_db_2"', $row);
         $this->assertStringContainsString('— probed tcp://127.0.0.1:7432', $row, 'the row names the endpoint it asked as well as what the pooler said');
         $this->assertStringContainsString('No pool configured for database', $row, 'the pooler\'s admission rather than a paraphrase of it');
@@ -2341,9 +2341,9 @@ class DbDoctorTest extends TestCase
         $this->armPgcatWithPoolProbe(['reader_db_2'], ['reader_db_2' => 'silent']);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('WARN  pool probe', $row);
+        $this->assertStringStartsWith('WARN  pool probe answer', $row);
         $this->assertStringContainsString('did not answer for pool "reader_db_2"', $row);
         $this->assertStringContainsString('— probed tcp://127.0.0.1:7432', $row, 'the row names where the packets went, which is what tells a wrong port from a stopped pooler');
         $this->assertSame(0, $exit, 'a pooler that answered nothing is not a failure');
@@ -2359,9 +2359,9 @@ class DbDoctorTest extends TestCase
         $this->armPgcatWithPoolProbe(['reader_db_2'], ['reader_db_2' => 'missing'], windowClosed: false);
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('PASS  pool probe', $row);
+        $this->assertStringStartsWith('PASS  pool probe answer', $row);
         $this->assertStringContainsString('boot window is still open', $row);
         $this->assertSame(0, $exit);
     }
@@ -2379,11 +2379,60 @@ class DbDoctorTest extends TestCase
         $this->armPgcat();
 
         [$output, $exit] = $this->doctor();
-        $row = $this->rowContaining($output, 'pool probe');
+        $row = $this->rowContaining($output, 'pool probe answer');
 
-        $this->assertStringStartsWith('PASS  pool probe', $row);
-        $this->assertStringContainsString('the probe is not armed (swrr.pgcat.pool_probe.enabled', $row, 'the row names the switch and the port source, because either one alone arms nothing');
+        $this->assertStringStartsWith('PASS  pool probe answer', $row);
+        $this->assertStringContainsString('not asked: the probe is not armed (swrr.pgcat.pool_probe.enabled', $row, 'the row names the switch and the port source, because either one alone arms nothing');
+
+        // And the arming row says the same thing in its own words, which is the whole point of the
+        // split: the setting is answerable where the socket is not.
+        $armed = $this->rowContaining($output, 'pool probe armed');
+
+        $this->assertStringStartsWith('PASS  pool probe armed', $armed);
+        $this->assertStringContainsString('the probe is not armed (swrr.pgcat.pool_probe.enabled', $armed);
         $this->assertSame(0, $exit);
+    }
+
+    /**
+     * The half of the split that has no socket: the package says what the probe will ask for by
+     * reading the switch, the pooler's file and the variant, and never opens the connection the
+     * answer's row pays for. The absence of `probed tcp://` is how that is held — the endpoint is
+     * the answer row's evidence, and a row that printed one would have asked.
+     */
+    public function test_the_pool_probe_armed_row_says_what_will_be_asked_without_asking(): void
+    {
+        $this->armPgcatWithPoolProbe(['writer_db_1', 'reader_db_2']);
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pool probe armed');
+
+        $this->assertStringStartsWith('PASS  pool probe armed', $row);
+        $this->assertStringContainsString(
+            'armed — the probe asks the running pooler for the pool(s) the configuration declares (writer_db_1, reader_db_2)',
+            $row,
+            'the names the variant declares are printed where the setting is read, so the preflight says what will be asked',
+        );
+        $this->assertStringContainsString('the row beside this one reports what it said', $row);
+        $this->assertStringNotContainsString('probed tcp://', $row, 'the arming row reads a switch and a file, and never opens the connection the answer row pays for');
+        $this->assertSame(0, $exit);
+    }
+
+    /**
+     * Why the row was split at all: a build container has no route to the pooler, so the old row had
+     * to be left out of `--connection-only` whole. Half of it is a switch and a file, and that half
+     * is now asked in every mode while the socket stays out of the bounded run.
+     */
+    public function test_the_pool_probe_armed_row_is_asked_in_a_bounded_run_where_the_answer_is_not(): void
+    {
+        $this->bindRedis(reachable: true);
+        $this->armPgcatWithPoolProbe(['reader_db_2']);
+
+        [$json] = $this->doctorJson(connectionOnly: true);
+
+        $names = array_column($this->report($json)['checks'], 'name');
+
+        $this->assertContains('pool probe armed', $names, 'the arming half reads no socket and is answerable on an image build');
+        $this->assertNotContains('pool probe answer', $names, 'the answer half opens the pooler connection, which a build container has no route to');
     }
 
     /**
@@ -3308,7 +3357,9 @@ class DbDoctorTest extends TestCase
         $this->assertSame([], $supervisor->ran, 'a bounded run spawns nothing, so supervisor is never asked');
         $this->assertStringContainsString('--connection-only', $output, 'the rendered run says it was bounded');
 
-        $leftOut = ['pgcat supervisor', 'pool probe', 'read caps', 'standby feedback', 'store probe', 'store reachability'];
+        // `pool probe armed` is deliberately not in this list: it reads a setting and one file and
+        // opens no socket, which is the half of the old row that made splitting it worth doing.
+        $leftOut = ['pgcat supervisor', 'pool probe answer', 'read caps', 'standby feedback', 'store probe', 'store reachability'];
 
         [$json, $jsonExit] = $this->doctorJson(connectionOnly: true);
         $report = $this->report($json);
@@ -3489,20 +3540,25 @@ class DbDoctorTest extends TestCase
         $check = $this->checkNamed($report, 'health-check');
         $this->assertSame('PASS', $check['verdict']);
         $this->assertStringContainsString(
-            'not asked: pool probe left out by --connection-only; real query was built and not put',
+            'pool probe armed\' PASS — none of the readings asked failed; pool probe answer left out by --connection-only; real query was built and not put',
             $check['detail'],
             'the query row is present and says it was not put, so the requirement counts it as unasked rather than as a pass',
         );
-        $this->assertStringNotContainsString(
-            'none of the readings asked failed',
+        // One reading behind this requirement *was* asked, and it is the half the row was split
+        // for: the arming question needs no pooler, so a bounded run answers it and says so. The
+        // sentence therefore reports on what it asked while naming the other two as unasked — the
+        // opposite of the all-unasked sentence this assertion used to hold, and the evidence that
+        // the split did what it was for.
+        $this->assertStringContainsString(
+            "'pool probe armed' PASS",
             $check['detail'],
-            'nothing behind this requirement was asked, so it cannot report on what was',
+            'the arming reading is answerable without a socket, so a bounded run takes it',
         );
     }
 
     /**
      * The same requirement in the other direction: with `--real-test` the query is a reading that
-     * was taken, and the pool probe is still the one the mode left out — so the sentence names one
+     * was taken, and the pool probe's answer is still the one the mode left out — so the sentence names one
      * of each rather than treating the run as all-asked or all-unasked.
      */
     public function test_a_bounded_contract_run_counts_the_query_it_asked_beside_the_reading_it_left_out(): void
@@ -3515,9 +3571,9 @@ class DbDoctorTest extends TestCase
         $check = $this->checkNamed($this->report($json), 'health-check');
 
         $this->assertSame('PASS', $check['verdict']);
-        $this->assertStringContainsString("Readings: 'real query' PASS", $check['detail']);
+        $this->assertStringContainsString("Readings: 'pool probe armed' PASS, 'real query' PASS", $check['detail']);
         $this->assertStringContainsString('none of the readings asked failed', $check['detail']);
-        $this->assertStringContainsString('pool probe left out by --connection-only', $check['detail']);
+        $this->assertStringContainsString('pool probe answer left out by --connection-only', $check['detail']);
         $this->assertStringNotContainsString('was built and not put', $check['detail']);
     }
 
@@ -4465,13 +4521,18 @@ class DbDoctorTest extends TestCase
             // `pool repairs` is a seventh for the same kind of reason: every fixture starts from a
             // state file with no repairs in it, and the row is a reading rather than a verdict, so
             // it is a PASS in every profile.
-            'healthy' => [24, 0, 0],
-            'warned' => [23, 1, 0],
-            'warned-twice' => [22, 2, 0],
-            'failed' => [23, 0, 1],
-            'failed-twice' => [22, 0, 2],
-            'mixed' => [22, 1, 1],
-            'mixed-twice' => [20, 2, 2],
+            // `pool probe armed` is the eighth, and the one that is not about a fixture's silence:
+            // these profiles arm the flipper without arming the probe, so the row reports the
+            // switch and passes, where the same question used to be a branch of the row that
+            // opened the socket. The answer row beside it is a `not asked` PASS for the same
+            // reason, so the split adds one row and one PASS to every cell.
+            'healthy' => [25, 0, 0],
+            'warned' => [24, 1, 0],
+            'warned-twice' => [23, 2, 0],
+            'failed' => [24, 0, 1],
+            'failed-twice' => [23, 0, 2],
+            'mixed' => [23, 1, 1],
+            'mixed-twice' => [21, 2, 2],
             default => throw new InvalidArgumentException("Unknown exit-code profile [{$profile}]"),
         };
     }

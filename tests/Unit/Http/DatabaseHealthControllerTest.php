@@ -1404,6 +1404,149 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
+     * The readiness probe, and the whole of it: `status` and `pool_probe`, on a pod whose database
+     * cannot be reached at all.
+     *
+     * Why the dead connection is the subject: the cheapness of this action is the *absence* of the
+     * query `/health/db` rests on, so the fixture is the one connection that cannot open with the
+     * pinned query switched on. The full endpoint answers 503 on it and this one answers 200 — the
+     * whole difference between the two: a kubelet is asked about the pools this pod serves, not
+     * about a database every request it is sent will report for itself. Both readings come from one
+     * fixture, so the two actions cannot be described by two different installations.
+     */
+    public function test_the_readiness_probe_returns_the_pool_probe_and_opens_no_database(): void
+    {
+        Route::get('/health/db', [DatabaseHealthController::class, 'index']);
+        Route::get('/ready', [DatabaseHealthController::class, 'readiness']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(sys_get_temp_dir().'/swrr-never-created-'.bin2hex(random_bytes(4)).'/dead.sqlite');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['writer_db_1', 'reader_db_2'],
+            // The control name is refused, as a pooler that resolves a pool before it authenticates
+            // answers it: without that the sentinel is `answered` too, every pool is
+            // `indeterminate`, and the fixture would be a reading that proves nothing.
+            poolProbe: static fn (string $database): array => [
+                'status' => str_starts_with($database, 'weighted-dbmanager-control-') ? 'missing' : 'answered',
+                'evidence' => sprintf('the pooler answered for pool "%s"', $database),
+            ],
+        );
+
+        $this->getJson('/health/db')->assertStatus(503);
+
+        // A fresh spy after the full endpoint has already logged its own failure: what is under test
+        // here is the silence of a probe that is polled every few seconds, not the other action's.
+        Log::spy();
+
+        $response = $this->getJson('/ready')->assertOk();
+
+        // The body in both directions: this endpoint's contract is two keys, and a block that
+        // grew one is the change a kubelet's reader would not notice.
+        $this->assertSame(['status', 'pool_probe'], array_keys((array) $response->json()));
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.enabled', true)
+            ->assertJsonPath('pool_probe.answered', true)
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.pools.1.status', 'answered');
+
+        // Polled every ten seconds, so this action logs nothing at all: the degraded line belongs
+        // to `/health/db`, which is read once and by somebody who can act on it.
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * The one state that takes the pod out of the load balancer: a pool the pooler refuses. The
+     * same call the full payload reads, so the two cannot disagree about the container — and still
+     * no log line, for the reason above.
+     */
+    public function test_the_readiness_probe_fails_on_a_pool_the_pooler_refuses(): void
+    {
+        Route::get('/ready', [DatabaseHealthController::class, 'readiness']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'missing',
+                'evidence' => sprintf('pgcat is running but has no pool "%s"', $database),
+            ],
+        );
+
+        Log::spy();
+
+        $response = $this->getJson('/ready');
+
+        $response->assertStatus(503)
+            ->assertJsonPath('status', 'degraded')
+            ->assertJsonPath('pool_probe.applicable', true)
+            ->assertJsonPath('pool_probe.answered', false)
+            ->assertJsonPath('pool_probe.failed', true)
+            ->assertJsonPath('pool_probe.pools.0.status', 'missing');
+
+        $this->assertStringContainsString('holds no pool "reader_db_2"', (string) $response->json('pool_probe.reason'));
+
+        Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * A pooler that answered nothing is `warned`, never failed — the line that keeps a probe aimed
+     * at the wrong address from evicting a pod that serves. A readiness probe is exactly the reader
+     * that rule was written for: it takes the pod out of rotation, so only evidence it can trust is
+     * allowed to do it.
+     */
+    public function test_the_readiness_probe_does_not_fail_a_pooler_that_answered_nothing(): void
+    {
+        Route::get('/ready', [DatabaseHealthController::class, 'readiness']);
+
+        config()->set('db-manager.swrr.health.pinned_query', true);
+        $this->pinToSQLite(':memory:');
+        $this->bindWindowFlipper(
+            bootedSecondsAgo: 3600,
+            appliedMode: 'readers',
+            pools: ['reader_db_2'],
+            poolProbe: static fn (string $database): array => [
+                'status' => 'silent',
+                'evidence' => sprintf('tcp://127.0.0.1:5432 did not answer for pool "%s": Connection refused', $database),
+            ],
+        );
+
+        $response = $this->getJson('/ready')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.applicable', true)
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.warned', true)
+            ->assertJsonPath('pool_probe.pools.0.status', 'silent');
+    }
+
+    /**
+     * An installation that has not armed the probe, or one whose provider is not registered: the
+     * readiness answer is `ok` with an `applicable: false` block, which is the only answer that
+     * lets a load balancer be told about this package without demanding it be configured.
+     */
+    public function test_the_readiness_probe_answers_ok_when_nothing_was_asked(): void
+    {
+        $this->app->instance(DatabaseHealthController::class, new DatabaseHealthController());
+
+        Route::get('/ready', [DatabaseHealthController::class, 'readiness']);
+
+        $response = $this->getJson('/ready')->assertOk();
+
+        $response->assertJsonPath('status', 'ok')
+            ->assertJsonPath('pool_probe.enabled', false)
+            ->assertJsonPath('pool_probe.applicable', false)
+            ->assertJsonPath('pool_probe.answered', null)
+            ->assertJsonPath('pool_probe.failed', false)
+            ->assertJsonPath('pool_probe.pools', []);
+    }
+
+    /**
      * The repair rate, which is the one reading in this payload that warns rather than fails: a
      * pooler repaired on run after run is a problem for a person, and the repair itself is the
      * self-heal working. So the block says `warned` with the count, the window and the threshold it
@@ -1416,6 +1559,12 @@ class DatabaseHealthControllerTest extends TestCase
 
         config()->set('db-manager.swrr.health.pinned_query', true);
         $this->pinToSQLite(':memory:');
+
+        // One moment reused rather than recomputed: `time()` at the assertion can be a second past
+        // the one the fixture was seeded with, and a test that failed on its own clock would be
+        // reading a change nobody made.
+        $newestAt = gmdate(DATE_ATOM, time() - 60);
+
         $this->bindWindowFlipper(
             bootedSecondsAgo: 3600,
             appliedMode: 'readers',
@@ -1429,6 +1578,13 @@ class DatabaseHealthControllerTest extends TestCase
                     gmdate(DATE_ATOM, time() - 600),
                     gmdate(DATE_ATOM, time() - 120),
                     gmdate(DATE_ATOM, time() - 60),
+                ],
+                'last_repair_pool' => 'reader_db_2',
+                'last_repair_mode' => 'readers',
+                'last_repair_cleared' => false,
+                'pool_repair_ledger' => [
+                    ['at' => gmdate(DATE_ATOM, time() - 600), 'pool' => 'reader_db_2', 'mode' => 'readers', 'cleared' => true],
+                    ['at' => $newestAt, 'pool' => 'reader_db_2', 'mode' => 'readers', 'cleared' => false],
                 ],
             ],
         );
@@ -1445,6 +1601,17 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('pool_repairs.count', 5)
             ->assertJsonPath('pool_repairs.window_seconds', 3600)
             ->assertJsonPath('pool_repairs.max_repairs', 3);
+
+        // The ledger travels with the warning, and in the order the flip wrote it: a monitor that
+        // sees `warned` can say which pool the repairs kept landing on and whether the last one
+        // left it answering, instead of guessing from one timestamp.
+        $ledger = $response->json('pool_repairs.ledger');
+
+        $this->assertCount(2, $ledger);
+        $this->assertSame('reader_db_2', $ledger[0]['pool']);
+        $this->assertTrue($ledger[0]['cleared']);
+        $this->assertFalse($ledger[1]['cleared'], 'the newest entry is the repair the last-* facts name');
+        $this->assertSame($newestAt, $ledger[1]['at']);
 
         $this->assertStringContainsString('threshold is 3', (string) $response->json('pool_repairs.reason'));
 

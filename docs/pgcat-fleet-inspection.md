@@ -8,7 +8,7 @@ Reading one task and calling the service healthy is the mistake this page exists
 
 Everything below is read-only. No row flips, restarts, signals or writes anything, and the only
 process the report starts is the read-only `supervisorctl status "<program>"` the flip itself
-would make. It does open connections — to the pooler for `pool probe`, and to the state store —
+would make. It does open connections — to the pooler for `pool probe answer`, and to the state store —
 which is how a report can name an endpoint that refused it.
 
 ---
@@ -19,7 +19,7 @@ Three subjects, and the row in each task's report that carries it.
 
 | The question | The row | What a failure means |
 |---|---|---|
-| Which pools the pooler has **loaded** | `pool probe` | The row reads the pooler's own `SHOW POOLS` list first: a pool the configuration declares and the console does not list is judged `FAIL`, exactly as a refused pool is. Only a console that cannot be read at all — no credentials in the pooler's file, a refusal, a SCRAM challenge, silence — falls back to the startup packets, and then an answered pool leaves the row `WARN` rather than `PASS`, because a green row would claim a reading that could not be made. The detail names the endpoint the reading went to. |
+| Which pools the pooler has **loaded** | `pool probe answer` | The row reads the pooler's own `SHOW POOLS` list first: a pool the configuration declares and the console does not list is judged `FAIL`, exactly as a refused pool is. Only a console that cannot be read at all — no credentials in the pooler's file, a refusal, a SCRAM challenge, silence — falls back to the startup packets, and then an answered pool leaves the row `WARN` rather than `PASS`, because a green row would claim a reading that could not be made. The detail names the endpoint the reading went to. |
 | What the **supervisor** knows | `pgcat supervisor` | The row runs the read-only equivalent of the flip's own command — `supervisorctl status "<program>"` — and reads the answer. `FAIL` is supervisorctl unable to answer at all (a missing socket, a permission refusal) or a program supervisor does not know. A flip refuses before it swaps the file on this row, so a red row here is a flip that will not happen. |
 | Whether a flip could **write** | `pgcat files` | The row asks whether the flip target and both variant sources are readable, and whether the target is writable — the atomic rename needs the file, not just its directory. `FAIL` names the mode and owner it found, and a repair suggestion. A release that also carries the `write paths` row names every path a flip writes with its mode and owner, which is where a hand-back shows up. |
 
@@ -72,7 +72,7 @@ for task in $(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SERVICE" 
     > "doctor-$id.log" 2>&1
   echo "== $id"
   grep -E '[0-9]+ checks:' "doctor-$id.log" | tr -d '\r'
-  grep -E '^(PASS|WARN|FAIL)  (pool probe|pgcat supervisor|pgcat files|write paths)' \
+  grep -E '^(PASS|WARN|FAIL)  (pool probe (armed|answer)|pgcat supervisor|pgcat files|write paths)' \
     "doctor-$id.log" | sed 's/\r$//' | cut -c1-160
 done
 ```
@@ -136,14 +136,14 @@ PASS  pgcat files       a flip could run: both sources are readable and /etc/pgc
 ```
 
 Both tasks failed `pgcat supervisor` with supervisorctl's `PermissionError` on the socket, and
-both reported `pool probe` as unreadable rather than empty: the pooler at `tcp://127.0.0.1:5432`
+both reported `pool probe answer` as unreadable rather than empty: the pooler at `tcp://127.0.0.1:5432`
 refused the connection, so no pool list was read at all.
 
 ## What this report cannot say
 
 * **It covers the tasks that are `RUNNING`.** A task that is draining, or that `list-tasks`
   omits, is exactly the one a flip can still hit. Ask again after a deployment settles.
-* **A refused connection is not an empty pool list.** `pool probe` `PASS` with *did not answer …
+* **A refused connection is not an empty pool list.** `pool probe answer` `PASS` with *did not answer …
   Connection refused* means the console was never read, and the row says so; check that the
   pooler is listening before reading it as "no pools loaded".
 * **It is a preflight, not a record.** Every row asks whether the next flip would work. Whether

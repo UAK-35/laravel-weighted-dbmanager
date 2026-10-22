@@ -128,7 +128,17 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     An armed flipper whose file cannot be read at all is not judged
  *                     — `pgcat files` judges the file itself. The row leads with which
  *                     end of the last window the flip missed
- *   pool probe        the running pooler is not answerable for a pool the configuration
+ *   pool probe armed  nothing can ask the running pooler about its pools: the switch
+ *                     `swrr.pgcat.pool_probe.enabled` is off, or the file the pooler runs on
+ *                     names no port to dial, so the pooler is taken at supervisord's word.
+ *                     Configuration only — one file read, no socket — which is what makes
+ *                     the arming question one a build container can answer, and what makes
+ *                     it a row of its own rather than the first branch of the answer's
+ *                     row. Passes whenever there is nothing to arm: an inert flipper, a
+ *                     probe that is off, and a variant that declares no pool all read as
+ *                     a pass with the sentence for which it is, because none of them is a
+ *                     fault
+ *   pool probe answer the running pooler is not answerable for a pool the configuration
  *                     declares: it is RUNNING, supervisord says so, and it holds no pool
  *                     for a database the application is connected to, so every read to
  *                     that pool fails. The one row that asks the pooler itself rather
@@ -140,11 +150,13 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *                     the second is `indeterminate`, not `answered`, because the same
  *                     answer would have come back for a name it cannot hold. Not judged
  *                     while the boot window is still open, where the flip still
- *                     re-applies the configuration
+ *                     re-applies the configuration. It says `not asked` and passes when
+ *                     the row above found nothing to ask, rather than going missing from
+ *                     a gate that selects it by name
  *   pool repairs      how many pool repairs this container has recorded, and when the last
  *                     one happened: a repair is the self-heal working, so the row reports it
  *                     rather than failing on it — the standing fault, if there is one now,
- *                     is `pool probe`'s, which asks the pooler rather than reading its
+ *                     is `pool probe answer`'s, which asks the pooler rather than reading its
  *                     history. Read from the same state file and the same derivation
  *                     `db:pgcat-flip --status` prints, so the two surfaces cannot count one
  *                     container's repairs differently
@@ -237,8 +249,9 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * --------------------
  * `--connection-only` bounds the installation run to what a build container can answer. The six
  * rows whose subject is something the container may not have are left out — the store (`store
- * probe`, `store reachability`), the supervisor (`pgcat supervisor`), the pooler (`pool probe`)
- * and the read path's own endpoints (`read caps`, `standby feedback`) — because a row that cannot
+ * probe`, `store reachability`), the supervisor (`pgcat supervisor`), the pooler
+ * (`pool probe answer`) and the read path's own endpoints (`read caps`, `standby feedback`) —
+ * because a row that cannot
  * be answered does not print silence: it reports the container's own
  * missing prerequisite, and an image build fails over the absence of a thing the running container
  * was always going to provide. It is the same mistake the `--config-file` mode exists to avoid,
@@ -285,7 +298,7 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  * for exactly that: one `select 1` on the connection this run follows, which is the
  * reading a deploy gate passes the flag for. The checks that reach
  * over the network write nothing either: the store check's PING, where an
- * unreachable store costs one connect timeout; `pool probe`, which is one bounded
+ * unreachable store costs one connect timeout; `pool probe answer`, which is one bounded
  * startup packet per pool; and the two read-path readings, which are one query per
  * endpoint on a connection that is purged on the way out — a settings query, not a
  * probe of what a replica answers. Each of the two is armed or not by its own
@@ -475,8 +488,10 @@ class DbDoctor extends Command
      *
      *     `pgcat supervisor`  a supervisor — it runs supervisorctl, which needs the binary on
      *                         PATH and a control socket to answer
-     *     `pool probe`        the pooler — it opens a PostgreSQL startup packet to the address
-     *                         the probe is named for
+ *     `pool probe answer` the pooler — it opens a PostgreSQL startup packet to the address
+ *                         the probe is named for. The arming row beside it reads a setting
+ *                         and one file and opens nothing, so that half is asked in every
+ *                         mode
      *     `read caps`         the read endpoints — the row connects to each one and reads
      *                         its own `statement_timeout`, which is a server the container
      *                         being built has no route to
@@ -501,7 +516,7 @@ class DbDoctor extends Command
      */
     private const REACHES_OUT = [
         'pgcat supervisor',
-        'pool probe',
+        'pool probe answer',
         'read caps',
         'standby feedback',
         'store probe',
@@ -589,8 +604,14 @@ class DbDoctor extends Command
             $rows[] = $this->readerWindows();
             $rows[] = $this->pgcatMode();
 
-            if ($this->asks('pool probe')) {
-                $rows[] = $this->poolProbe();
+            // Two rows since the question was split: arming is a setting and a file, and the
+            // answer is a socket. The first is asked in every mode — a build container can read
+            // a switch and a port — and the second is one of the rows `--connection-only` leaves
+            // out, which is exactly what the split bought. See REACHES_OUT.
+            $rows[] = $this->poolProbeArmed();
+
+            if ($this->asks('pool probe answer')) {
+                $rows[] = $this->poolProbeAnswer();
             }
 
             // Beside the probe rather than in `--connection-only`'s left-out set: this row reads
@@ -1966,7 +1987,7 @@ class DbDoctor extends Command
      * WHAT IT READS, AND WHAT IT DELIBERATELY DOES NOT
      *   The three configured files, the pool names the pinned connection is written with, and the
      *   host's own resolver for the one reading about addresses. It does not ask the running pooler
-     *   (that is `pool probe`, and that row is the one left out of a bounded run), does not write, and
+     *   (that is `pool probe answer`, and that row is the one left out of a bounded run), does not write, and
      *   does not care whether the pooler is up: the question is what the file *is*, which is a fact the
      *   pooler's own state cannot change. An inert flipper is not judged — nothing swaps a variant
      *   there — which is the line `pgcat files` and `pgcat mode` draw as well.
@@ -2892,6 +2913,70 @@ class DbDoctor extends Command
     }
 
     /**
+     * Whether anything can ask the running pooler about its pools at all.
+     *
+     * WHY THIS IS A ROW OF ITS OWN
+     *   This used to be the first branch of the answer's row, and the two questions have different
+     *   costs and different readers: arming is a configuration state — the switch, and a dialable
+     *   `[general] port` in the file the pooler runs on — that costs one file read, while the answer
+     *   is a socket to the pooler that a build container has no route to. One row that opens the
+     *   socket to find out whether it was armed could only ever be asked where the pooler is
+     *   reachable, so `--connection-only` had to leave the whole question out; split, the arming
+     *   half is asked in every mode and the preflight can say "the pooler is taken at supervisord's
+     *   word" on an image build.
+     *
+     *   It reads the flipper's own declaration — `PgcatConfigFlipper::poolProbeArming()`, over the
+     *   same variant `poolProbeVerdict()` uses — and asks nothing, so a probe that is off costs a
+     *   setting and a file rather than a connect timeout. Every state that is not a missing
+     *   prerequisite is a pass: an inert flipper, a probe switched off, and a variant that declares
+     *   no pool all mean there is nothing to ask, and none of them is a fault. The row that reports a
+     *   fault is `pool probe answer`.
+     *
+     * @return array{status: string, name: string, detail: string, suggestions: list<string>}
+     */
+    private function poolProbeArmed(): array
+    {
+        $name = 'pool probe armed';
+
+        if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
+            return $this->row($name, self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
+        }
+
+        try {
+            $flipper = $this->laravel->make(PgcatConfigFlipper::class);
+        } catch (Throwable $e) {
+            return $this->row(
+                $name,
+                self::FAIL,
+                'the flipper could not be built, so nothing can say whether a probe is armed: '.$e->getMessage(),
+            );
+        }
+
+        // The line `pgcat mode` and `flip schedule` draw: an inert flipper has no pooler to ask
+        // about, because nothing swaps the file and nothing restarts the program.
+        if (!$flipper->isEnabled()) {
+            return $this->row($name, self::PASS, 'flipper is not armed — nothing asks the running pooler about its pools');
+        }
+
+        $arming = $flipper->poolProbeArming();
+
+        if (!$arming['armed']) {
+            return $this->row($name, self::PASS, 'the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the file the pooler runs on) — the running pooler is taken at supervisord\'s word, which cannot tell a pool it is not serving from one it is');
+        }
+
+        if (!$arming['applicable']) {
+            return $this->row($name, self::PASS, 'no pool is declared in the configuration, so there is nothing to ask the running pooler about');
+        }
+
+        // Armed and with something to ask: the pools are named here rather than in the answer's row,
+        // so an operator reading only the preflight can see what the pooler will be asked for.
+        return $this->row($name, self::PASS, sprintf(
+            'armed — the probe asks the running pooler for the pool(s) the configuration declares (%s), and the row beside this one reports what it said',
+            implode(', ', $arming['pools']),
+        ));
+    }
+
+    /**
      * Whether the running pooler is answerable for the pools the configuration declares.
      *
      * WHY THIS ROW EXISTS
@@ -2938,14 +3023,21 @@ class DbDoctor extends Command
      *   inside that window: `applyCurrentState()` re-applies the variant and restarts the pooler for
      *   a pool that is missing, and it stops at the end of the window. So the answers are always
      *   reported and the verdict waits — the same line `pgcat mode` draws for a file that a flip has
-     *   not landed yet, and for the same reason. Past the window the verdict stands and nothing will
-     *   re-apply the file again, which is why a failure here is worth blocking a deploy on.
+     *   not landed yet, and for the same reason. Past the window the verdict stands and nothing will     * re-apply the file again, which is why a failure here is worth blocking a deploy on.
+     *
+     * WHY IT IS THE SECOND OF TWO ROWS
+     *   The arming question — is anything able to ask at all — used to be this row's first branch,
+     *   and it is a setting and a file where this is a socket. `pool probe armed` answers it in
+     *   every mode, so a build container can say the pooler is taken at supervisord's word; this
+     *   row is one of the six `--connection-only` leaves out, because it opens the connection. When
+     *   the other row found nothing to ask, this one says `not asked` and passes rather than going
+     *   missing from a report a gate selects it by name in.
      *
      * @return array{status: string, name: string, detail: string, suggestions: list<string>}
      */
-    private function poolProbe(): array
+    private function poolProbeAnswer(): array
     {
-        $name = 'pool probe';
+        $name = 'pool probe answer';
 
         if (!$this->laravel->bound(PgcatConfigFlipper::class)) {
             return $this->row($name, self::FAIL, 'PgcatConfigFlipper is not bound — is the provider registered?');
@@ -2961,22 +3053,22 @@ class DbDoctor extends Command
             );
         }
 
-        // An inert flipper has no pooler to ask about: nothing swaps the file and nothing restarts
-        // the program, so the two cannot disagree — the line `pgcat mode` and `flip schedule` draw.
+        // The three states the row above reports as *nothing to arm* reach here as *nothing was
+        // asked*, and say so rather than vanishing: a gate that selects this row by name must find
+        // it in a run where the probe is off, and "not asked" is the honest answer rather than a
+        // green claim that the pooler holds its pools.
         if (!$flipper->isEnabled()) {
-            return $this->row($name, self::PASS, 'flipper is not armed — nothing asks the running pooler about its pools');
+            return $this->row($name, self::PASS, 'not asked: flipper is not armed — nothing asks the running pooler about its pools');
         }
 
         $verdict = $flipper->poolProbeVerdict();
 
         if ($verdict['enabled'] !== true) {
-            return $this->row($name, self::PASS, 'the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the file the pooler runs on) — the running pooler is taken at supervisord\'s word, which cannot tell a pool it is not serving from one it is');
+            return $this->row($name, self::PASS, 'not asked: the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the file the pooler runs on) — the running pooler is taken at supervisord\'s word');
         }
 
-        // Not judged rather than passed: nothing was asked, which is a different statement from a
-        // pooler that answered.
         if ($verdict['applicable'] !== true) {
-            return $this->row($name, self::PASS, 'no pool is declared in the configuration, so there is nothing to ask the running pooler about');
+            return $this->row($name, self::PASS, 'not asked: no pool is declared in the configuration, so nothing could have asked the running pooler about one');
         }
 
         // The flipper's own sentence rather than a second copy of it — the same words `/health/db`
@@ -3074,8 +3166,8 @@ class DbDoctor extends Command
      *   A repair is not a fault: it is a run that found the pooler refusing a pool the applied
      *   file declares and re-applied the file, and the fact that it happened is the answer the
      *   self-heal gave. Failing on it would fail an installation for the flip having done its
-     *   job. The standing fault, when there is one now, is `pool probe`'s row — it asks the pooler
-     *   at this moment, where this row reports what happened — so the row passes in every state
+     *   job. The standing fault, when there is one now, is `pool probe answer`'s row — it asks the
+     *   pooler at this moment, where this row reports what happened — so the row passes in every state
      *   it can find and says what it read, the line `read/write pair` draws for its own reading.
      *
      * THE SAME STATE FILE, AND THE SAME DERIVATION
@@ -3107,7 +3199,7 @@ class DbDoctor extends Command
                 $name,
                 self::PASS,
                 'the flipper is not bound, so no run repairs a pool and nothing is counted — the '
-                .'`pool probe` row names that fault',
+                .'`pool probe answer` row names that fault',
             );
         }
 
