@@ -28,6 +28,14 @@ machine's own facts, gitignored and copied from `sample.machine.local.json` in a
 the same command re-renders that block from the record it just wrote, so the note and the run it quotes
 cannot be taken apart.
 
+Before the first command that shells out, take the interpreter from that record rather than from
+`PATH`, and do it even when a thread opened nothing but this file. `machine.local.json` names
+`php.exe`, and `php` is not on this shell's `PATH`, so a bare one fails rather than resolving, and
+searching the disk for a binary of that name is the search the record exists to replace. A fresh clone has nothing to copy from, so the same file in token form is committed as
+`sample.machine.local.json`: copy it to the name above and replace each `__TOKEN__` with this
+machine's own value. [`AGENTS.md`](../AGENTS.md) §2 carries the same rule in the load order it
+belongs to.
+
 The state of the work itself — what is uncommitted, unpushed and in no release a consumer can
 install, as of the day it was taken — is in [`HANDOFF.md`](../HANDOFF.md). It is a snapshot
 rather than a rule, so [`tests/Unit/Docs/HandoffTest.php`](../tests/Unit/Docs/HandoffTest.php)
