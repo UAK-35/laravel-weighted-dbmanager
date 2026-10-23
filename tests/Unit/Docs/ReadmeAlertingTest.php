@@ -30,6 +30,11 @@ use Uak35\WeightedDbManager\Tests\TestCase;
  * resolved against that same payload. A renamed field, a moved block or a rule that has
  * stopped answering the question fails here instead of in production.
  *
+ * The other two paste-able rules are held the same way. The live half is run against a record
+ * written in another scope and one refused here; the audit-stop rule is run against a record
+ * stamped an hour ago and one stamped now, so the page it exists for is proven to fire and the
+ * installation it would otherwise page on is proven not to.
+ *
  * What is not covered: `jq` has to be on the machine (the test skips without it, as
  * PushingDocTest skips a missing shell), and the log-side keys — `levels`, `kept`, `lock` —
  * are log context rather than payload fields, so they are asserted where they are written, by
@@ -216,6 +221,54 @@ class ReadmeAlertingTest extends TestCase
     }
 
     /**
+     * The third paste-able rule: the audit record that stopped being written.
+     *
+     * `audit.store_probe.stale` is the one reading in the payload that says the audit is alive
+     * rather than only able to write, and it is `null` wherever nothing asked the question — so the
+     * rule has to pass a record it cannot judge, and fail only a record that was judged and late.
+     * Both are produced here by the endpoint itself: the same record file, stamped an hour ago and
+     * stamped now, with the schedule armed so that the age is the installation's to answer for
+     * rather than a state that excuses it.
+     */
+    public function test_the_audit_stop_rule_pages_a_record_nothing_writes_and_passes_one_written_now(): void
+    {
+        $program = self::stopGate();
+
+        // The schedule is what makes the age judgeable: unarmed, `not_judged` says the record is
+        // written at the traffic's pace, which is a state this rule must leave alone.
+        $armed = ['db-manager.swrr.pgcat.schedule.enabled' => true];
+
+        $stopped = $this->payload(':memory:', config: $armed + [
+            'db-manager.swrr.audit.file' => $this->record([], time() - 3600),
+        ]);
+        $block = json_decode($stopped, true);
+
+        $this->assertTrue($block['audit']['store_probe']['applicable'], 'an audit is registered in this fixture');
+        $this->assertNull($block['audit']['store_probe']['not_judged'], 'nothing excused the age');
+        $this->assertTrue($block['audit']['store_probe']['stale'], 'an hour without a write is past the tolerance');
+
+        $paged = $this->jq($program, $stopped);
+
+        $this->assertNotSame(
+            0,
+            $paged['exit'],
+            "The audit-stop rule passes a record nothing has written for an hour:\n{$stopped}",
+        );
+
+        $fresh = $this->payload(':memory:', config: $armed + [
+            'db-manager.swrr.audit.file' => $this->record([], time()),
+        ]);
+
+        $quiet = $this->jq($program, $fresh);
+
+        $this->assertSame(
+            0,
+            $quiet['exit'],
+            "The audit-stop rule pages an installation that has just written its record. jq said {$quiet['error']}\n{$fresh}",
+        );
+    }
+
+    /**
      * One `/health/db` body, as JSON, from the real controller.
      *
      * The fixture is the sibling HTTP test's: the connection the package follows is pinned at
@@ -308,19 +361,47 @@ class ReadmeAlertingTest extends TestCase
     }
 
     /**
+     * The audit-stop rule: the `sh` block that carries the marker, so the third paste-able rule is
+     * run rather than counted.
+     *
+     * @throws \PHPUnit\Framework\AssertionFailedError when the cookbook has lost it
+     */
+    private static function stopGate(): string
+    {
+        foreach (Readme::fenced(self::HEADING, 'sh') as $block) {
+            if (!str_contains($block, 'the audit that stopped being written')) {
+                continue;
+            }
+
+            if (preg_match("/jq -e '(.+?)'\\s*$/ms", $block, $matches) === 1) {
+                return $matches[1];
+            }
+        }
+
+        self::fail('The cookbook pastes no audit-stop rule, so there is no rule to run.');
+    }
+
+    /**
      * A boot audit record of this test's own, so a payload can be built with an entry a previous boot
      * wrote. Both keys are written because they are the two the file has: a reader that found one and
      * not the other would report the file rather than the finding, which is a different case.
      *
+     * `findings` is cast to an object so an empty record is still the map the file's reader validates
+     * rather than a list — the state a fresh installation has, and the one the audit-stop fixture
+     * needs, since its subject is the stamp beside the findings rather than a finding.
+     *
+     * `$probedAt` is the stamp the boot that wrote this record left: an hour old is a record nothing
+     * has written since, and now is one that has just been written.
+     *
      * @param array<string, mixed> $findings
      */
-    private function record(array $findings): string
+    private function record(array $findings, ?int $probedAt = null): string
     {
         $file = sys_get_temp_dir().'/swrr-alert-audit-'.bin2hex(random_bytes(6)).'.json';
 
         file_put_contents($file, (string) json_encode([
-            'findings' => $findings,
-            'store_probed_at' => null,
+            'findings' => (object) $findings,
+            'store_probed_at' => $probedAt,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return $file;

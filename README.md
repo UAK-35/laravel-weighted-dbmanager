@@ -1267,6 +1267,37 @@ curl -sS "$HEALTH_URL" | jq -r '
 `app_env` — and `audit.checked_at` is when the live half was taken, so a rule can say how stale its
 "here" is. Neither moves `status`: the live half is a reading, and `status` stays the pinned query's.
 
+### The audit record: has anything written it lately?
+
+A finding is a claim about a configuration, and a configuration that stays still is usually a
+configuration that is fine — which is why the file records no date of its own, and why a record
+nothing writes goes on describing an installation that no longer exists. `store_probed_at` is the
+one field a healthy installation moves on its own: a boot that finds the probe due sends it and
+writes the time. `audit.store_probe` publishes its age, judged against the wider of
+`swrr.audit.store_probe_seconds` and the schedule's `interval_minutes`, five misses over, so `stale`
+is `true` only where something was expected to write and did not.
+
+`stale` is `null` in every state where nothing asked the question, and `not_judged` names which: no
+boot audit registered (`applicable: false`, and there is no record to age), probing switched off, a
+record that cannot be written, an in-process store, a schedule that is not armed, or a record that
+holds no stamp yet. A rule therefore reads `stale` and nothing else, and a `null` is not a pass — it
+is a reading nobody took.
+
+| what to do | the condition | what it means |
+|---|---|---|
+| page | `audit.store_probe.stale == true` | nothing wrote the record for five of the runs that should have: the schedule that boots the installation has stopped, or its runs write a state directory this installation does not read |
+| ticket | `audit.store_probe.applicable == false` | no boot audit is registered, so this route publishes no age at all — whatever the block says beside it, no record is being kept |
+| re-check, do not read it as healthy | `audit.store_probe.stale == null` | nothing asked the age here — `not_judged` names the state, and a null beside a frozen record is `db:doctor`'s `store probe` row rather than this rule |
+
+That stall alone, for the same cron job or sidecar as the rules above:
+
+```sh
+curl -sS "$HEALTH_URL" | jq -e '
+  # the audit that stopped being written: stale is null where nothing asked the question
+  .audit.store_probe.stale != true
+'
+```
+
 ### The page: the installation's fault or the package's?
 
 A refused value and a defect in the package both arrive at `severity: "error"` — deliberately,
