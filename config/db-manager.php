@@ -289,7 +289,7 @@ return [
             // of what the class documents. Write `false` only to disarm the entry on an armed
             // installation; write nothing to let it follow.
             'schedule' => [
-                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED', false),
+                'enabled' => env('SWRR_PGCAT_SCHEDULE_ENABLED'),
                 // How often the flip runs, in whole minutes: 1 is the shipped cadence and 5 is
                 // `SWRR_PGCAT_SCHEDULE_INTERVAL_MINUTES=5`, which is a step of five in the minute
                 // field. Raising it is a trade rather than a saving — what bounds the attempts is

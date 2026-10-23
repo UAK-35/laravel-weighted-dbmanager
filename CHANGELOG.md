@@ -65,6 +65,15 @@
 
 ### Fixed
 
+- **The published config leaves the flip schedule's switch undeclared again, so an armed flipper gets
+  its per-minute entry.** `config/db-manager.php` shipped `env('SWRR_PGCAT_SCHEDULE_ENABLED', false)`
+  while the comment above it argues the opposite: `FlipSchedule::settings()` reads a `false` as the
+  switch off *on purpose* and a missing value as "follow `swrr.pgcat.enabled`", so a copy of this file
+  shipped a schedule that stayed off on an installation whose flipper was armed — the one state the
+  paragraph rules out, and the one that leaves a container's first minutes unconverged. The line
+  travelled inside `a0129b6`, whose subject is the connector reading. `FlipScheduleTest` reads the
+  shipped text for exactly this, so the file declares `env('SWRR_PGCAT_SCHEDULE_ENABLED')` again.
+
 - **The connector row no longer calls a read/write connection unbuildable.** `ConnectorInUse` builds
   the followed connection to name the class it resolves to, and it dropped the `read` and `write`
   lists before building — deliberately, so a question about a *class* never picks a replica and
