@@ -185,8 +185,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=b6f2db7
-  --> exit 1: the inventory is out of step with the tree at b6f2db7
+php bin/inventory.php --check --at=7c81bfc
+  --> exit 1: the inventory is out of step with the tree at 7c81bfc
       files.tsv: 2 line(s) stale
       methods.tsv: 3 line(s) stale
       surface.tsv: 7 line(s) stale
@@ -218,9 +218,9 @@ transcript of the records and section 2's table and the listing under it. Its ro
 checkout has that the register does not carry (`git ls-files --cached --others --exclude-standard`
 minus `git ls-tree -r` of the register), one row apiece, with the prose column declared in
 `tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. Only a file no
-commit carries is on it, which is why this take's table names the setup and teardown scripts and the
-three stop scripts it adds, and the issue record beside them, and nothing a commit already carries: a tracked path's modification is not a file
-the register lacks, while a file the register already carries is a file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
+commit carries is on it, which is why this take's table is its header rows and nothing else: the batch
+it lands was committed before it, and a tracked path's modification is not a file the register lacks,
+while a file the register already carries is a file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
 and one from the recorded run — and the note's own guard renders the same five and asserts the file
 says what they say, so a re-take cannot state a set of files, a count or a listing the tree does not
 have. A file the register does not carry and that has no line declared for it is refused by name
@@ -231,10 +231,15 @@ the tree.
 | File | What it is |
 |---|---|
 | `docs/issues/issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md` | the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in |
+| `docs/php-windows-extensions.md` | the record for the two per-line extension scripts: the pin as four shared variables and one version per library, the table of the eight libraries with both lines' versions, which of them come from PECL and which from a project's own release, the two folders each script writes and the rename rule for the extension's own library, what has to be true of `php.ini` before anything loads, and what the scripts deliberately do not do |
+| `scripts/download-composer.bat` | the installer-route batch script this repository already had: it copies Composer's `installer` with `php -r copy(...)`, checks it against a sha384 written into the file, runs it, and deletes it — the interpreter resolved from the machine record rather than from a drive letter, which is the arrangement the phar script keeps and the pasted constant that it replaces |
+| `scripts/download-composer.ps1` | the script that fetches the latest `composer.phar` and verifies it against the checksum Composer publishes beside the release — the version resolved from the live catalogue, the hash read from the release's own directory rather than written into the script, the bytes compared before the file is installed and a mismatch removed rather than installed — which is what it does instead of the installer route in `scripts/download-composer.bat` with its pasted sha384 |
+| `scripts/download-php84-extensions.ps1` | the 8.4 sibling of `scripts/download-php85-extensions.ps1`: the same eight pinned extension builds and the same declaration of thread safety, build environment and architecture, with the PHP line pinned to `8.4` and `redis` to `6.2.0` — the two libraries whose 8.4 builds differ from the 8.5 pins |
+| `scripts/download-php85-extensions.ps1` | the script that fetches and unpacks the eight pinned PHP extension builds for Windows — brotli, igbinary, lz4, memcached, pcov, protobuf, redis and zstd, seven from PECL's `windows` builds and one from the `php-ext-lz4` project's own GitHub release: the PHP line, thread safety, build environment and architecture are declared once at the top with a version per library, every URL is assembled from them, the archives land in the gitignored `ext/downloads/` and each one's `.dll` and `.ini` members are unpacked into the gitignored `ext/` that PHP loads from, the extension's own library named `php_<name>.dll` whatever the archive called it and a library the build named otherwise left alone, with an archive that is already there left alone unless it is forced |
 | `scripts/servers-startup/stop-pgcat.bat` | the pooler's stop script: the PID owning `127.0.0.1:5433` out of netstat, checked against `tasklist` before it is touched, closed politely and forced only when it does not answer, then the port and `pg_isready` read back as silent |
 | `scripts/servers-startup/stop-primary.bat` | the primary's stop script: `pg_ctl -m fast` on `pgsql179\data`, an already-silent port answered rather than errored, and the port asked again afterwards so a second postmaster fails the run instead of passing it |
 | `scripts/servers-startup/stop-replica.bat` | the standby's stop script: `pg_ctl -m fast` on `standby179`, nothing to stop when the port is already silent, and `pg_isready` asked again afterwards so a leftover listener is a failure |
-| `scripts/setup-pgcat.ps1` | the one command that reproduces this rig: the machine file read once, Windows' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, and the pooler started last |
+| `scripts/setup-pgcat.ps1` | the one command that reproduces this rig: the machine file read once, Windows' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, the pooler started last, and the routing walked through it before the rig is called up — a read that must answer on the standby, a write that must answer on the primary, and either one landing elsewhere failing the run |
 | `scripts/teardown-pgcat.ps1` | the setup script's counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run |
 | `tests/Unit/Release/EntryVerdictTest.php` | the guard that holds `bin/entry.php` to its verdicts: a note a release published, one no tag carries, a tag that carries the commit with the note still under `## Unreleased`, a bullet reworded after it shipped, a release commit read as the promotion it is, a tag whose tree has no changelog, and the usage errors — one test per state the script tells apart |
 <!-- /handoff:pending -->
@@ -253,10 +258,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `b6f2db7` — *docs: the note is re-taken at 7c81bfc, and section 3 weighs the probe stamp's age* |
+| HEAD | `7c81bfc` — *feat: /health/db publishes the age of the audit record's probe stamp* |
 | `origin/dev` | `bb28128` — *Release v0.2.0-alpha10* |
-| Unpushed | 4 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 2, feat 1 |
+| Unpushed | 3 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1, docs 1, feat 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -285,10 +290,9 @@ commit the release made is one a consumer can fetch. This note is the commit *af
 and it travels on the push that follows.
 
 <!-- handoff:log -->
-The four most recent are the ones a reader is most likely to be standing in the middle of:
+The three most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
-b6f2db7  docs: the note is re-taken at 7c81bfc, and section 3 weighs the probe stamp's age
 7c81bfc  feat: /health/db publishes the age of the audit record's probe stamp
 fc9e9d8  docs: the note is re-taken at c081def, and section 3 says what a release leaves behind
 c081def  chore: the log-and-record pair is read back by one command

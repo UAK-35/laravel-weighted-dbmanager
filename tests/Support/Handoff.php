@@ -704,8 +704,8 @@ final class Handoff
             'read' => 'sha256:0a9cf28c19561d69f5409f779b7d48e19890985c22649fbb13278853ef139869',
         ],
         'docs/local-postgres-and-pgcat.md' => [
-            'words' => 'the environment record: the two PostgreSQL servers this machine runs (settings, authentication, databases, and the physical standby streaming from the primary, with the configuration files and log that standby owns rather than sharing), and the pgcat checkout behind them — its origin, commit, every configuration file, the pool rows the standby is named in, the two starter scripts beside the data directories, the build this machine needs for the pooler, and the read and the write that were walked through it to 5431 and 5432',
-            'read' => 'sha256:015a4520f18819b9ee813ba298338fab372d0626b9196fb0a947b88608f99279',
+            'words' => 'the environment record: the two PostgreSQL servers this machine runs (settings, authentication, databases, and the physical standby streaming from the primary, with the configuration files and log that standby owns rather than sharing), and the pgcat checkout behind them — its origin, commit, every configuration file, the pool rows the standby is named in, the two starter scripts beside the data directories, the build this machine needs for the pooler, and the read and the write that were walked through it to 5431 and 5432, which the setup script now walks itself as its last step',
+            'read' => 'sha256:37c83919047c5db96bf9c1d4f942176a00d75f5503822118ade84ce71cf49f9a',
         ],
         'src/Pgcat/PoolProbeMetrics.php' => [
             'words' => 'the pool probe\'s verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on',
@@ -832,8 +832,8 @@ final class Handoff
             'read' => 'sha256:24c9aa8ce9e76dfeb7c5c6d83885668e9049b71bcda9a6cf6698dfc3008ae6cc',
         ],
         'scripts/servers-startup/README.md' => [
-            'words' => 'the Windows runbook for the three test servers: the machine file and its two tokens, the start order, what each script owns, why the pooler needs a build script at all, and the two queries that prove which server answered',
-            'read' => 'sha256:07c05a002cb21ec3709ee89e04d58ab73e73614db2797a9c81e4342eb6da8cfd',
+            'words' => 'the Windows runbook for the three test servers: the machine file and its two tokens, the start order, what each script owns, why the pooler needs a build script at all, and the two queries that prove which server answered, which the setup script runs as its closing check',
+            'read' => 'sha256:6dfbc83ec215bf88908042d02808f2c9566b741710e82a895ac0d48aeb482f38',
         ],
         'scripts/servers-startup/servers.sample.cmd' => [
             'words' => 'the committed form of that machine file: the two directories every script in the folder refuses to guess at, written as tokens',
@@ -864,8 +864,8 @@ final class Handoff
             'read' => 'sha256:51a4011d9bb7d03335d8b21c76c6188fdfbffe5e74699e0948a4c1ec76935937',
         ],
         'scripts/setup-pgcat.ps1' => [
-            'words' => 'the one command that reproduces this rig: the machine file read once, Windows\' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, and the pooler started last',
-            'read' => 'sha256:f8c241e73194e7f3dcd143b58d074520a4284dc6f7f0585c03647b4edd1f8eb0',
+            'words' => 'the one command that reproduces this rig: the machine file read once, Windows\' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, the pooler started last, and the routing walked through it before the rig is called up — a read that must answer on the standby, a write that must answer on the primary, and either one landing elsewhere failing the run',
+            'read' => 'sha256:30ca2457c83d6c10c1126ea28e3c0b338a7229d1502abef3b6d3617b23186861',
         ],
         'scripts/teardown-pgcat.ps1' => [
             'words' => 'the setup script\'s counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run',
@@ -898,6 +898,26 @@ final class Handoff
         'tests/Unit/Release/EntryVerdictTest.php' => [
             'words' => 'the guard that holds `bin/entry.php` to its verdicts: a note a release published, one no tag carries, a tag that carries the commit with the note still under `## Unreleased`, a bullet reworded after it shipped, a release commit read as the promotion it is, a tag whose tree has no changelog, and the usage errors — one test per state the script tells apart',
             'read' => 'sha256:db95e8051597bdc2f135b6d258b0b5e477127416b486ba3c523a9ef7b43f6943',
+        ],
+        'scripts/download-composer.bat' => [
+            'words' => 'the installer-route batch script this repository already had: it copies Composer\'s `installer` with `php -r copy(...)`, checks it against a sha384 written into the file, runs it, and deletes it — the interpreter resolved from the machine record rather than from a drive letter, which is the arrangement the phar script keeps and the pasted constant that it replaces',
+            'read' => 'sha256:18364cbd16533cdb786b3c0686bdbebd9941d5d2f9b530e057a53a7b21e90cfa',
+        ],
+        'scripts/download-composer.ps1' => [
+            'words' => 'the script that fetches the latest `composer.phar` and verifies it against the checksum Composer publishes beside the release — the version resolved from the live catalogue, the hash read from the release\'s own directory rather than written into the script, the bytes compared before the file is installed and a mismatch removed rather than installed — which is what it does instead of the installer route in `scripts/download-composer.bat` with its pasted sha384',
+            'read' => 'sha256:d630eb7ada600a447b09726bc9255dce4609b0ebc6a3374156c77de5156059f0',
+        ],
+        'docs/php-windows-extensions.md' => [
+            'words' => 'the record for the two per-line extension scripts: the pin as four shared variables and one version per library, the table of the eight libraries with both lines\' versions, which of them come from PECL and which from a project\'s own release, the two folders each script writes and the rename rule for the extension\'s own library, what has to be true of `php.ini` before anything loads, and what the scripts deliberately do not do',
+            'read' => 'sha256:c2bc50336071d38e8c1eeeba9c25bc3c5158b754d80ff629c31bf4e510355f29',
+        ],
+        'scripts/download-php84-extensions.ps1' => [
+            'words' => 'the 8.4 sibling of `scripts/download-php85-extensions.ps1`: the same eight pinned extension builds and the same declaration of thread safety, build environment and architecture, with the PHP line pinned to `8.4` and `redis` to `6.2.0` — the two libraries whose 8.4 builds differ from the 8.5 pins',
+            'read' => 'sha256:cdcd7f1869cdf1295fbe2592183dc4969d437bdc176b5ee06a9e8fc31d5e3c0c',
+        ],
+        'scripts/download-php85-extensions.ps1' => [
+            'words' => 'the script that fetches and unpacks the eight pinned PHP extension builds for Windows — brotli, igbinary, lz4, memcached, pcov, protobuf, redis and zstd, seven from PECL\'s `windows` builds and one from the `php-ext-lz4` project\'s own GitHub release: the PHP line, thread safety, build environment and architecture are declared once at the top with a version per library, every URL is assembled from them, the archives land in the gitignored `ext/downloads/` and each one\'s `.dll` and `.ini` members are unpacked into the gitignored `ext/` that PHP loads from, the extension\'s own library named `php_<name>.dll` whatever the archive called it and a library the build named otherwise left alone, with an archive that is already there left alone unless it is forced',
+            'read' => 'sha256:a44f9c66bc1784387a15c20f9fa5ed4664df18ab9159ac88d437b57f252e16b1',
         ],
         // @pending-descriptions-end
     ];
