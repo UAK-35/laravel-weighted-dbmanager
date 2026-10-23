@@ -4,6 +4,23 @@
 
 ### Added
 
+- **The setup script walks the routing through the pooler before it calls the rig up, so a pooler that
+  is listening and sending reads to the primary fails instead of passing.** `setup-pgcat.ps1` checked
+  rows rather than behavior: it compared `pgcat.toml` with what this rig needs, read three ports back,
+  and printed the two queries that would prove the routing as a suggestion for somebody else to run. A
+  read that `query_parser_read_write_splitting` or `primary_reads_enabled` sends to the primary is the
+  state that leaves every client's reads on one server, and nothing before this step would notice: both
+  servers answer, the pooler listens, and the report is green. The script now asks the pooler the way a
+  client does — `simple_user` on the pool's own `simple_db`, so the password in `pgcat.toml` is the
+  first link in the chain — and requires two answers: a read answered on the standby, by a server
+  that reports `pg_is_in_recovery()`, and a write (a temp table, a row in it, one transaction, rolled
+  back) whose `inet_server_port()` is the primary's. Either one landing on the wrong server stops the
+  run with the query and the server that answered printed, and exit code 1 now covers a query that
+  reached the wrong server as well as a step that failed — which the header's exit table says. The
+  two by-hand queries in `scripts/servers-startup/README.md` section 6 and the paragraph in section 2
+  of `docs/local-postgres-and-pgcat.md` now describe checking a rig rather than deciding whether it
+  is up.
+
 - **`/health/db` publishes the age of the audit record's probe stamp, so a monitor sees an audit that
   stopped being written without running `db:doctor`.** `store_probed_at` is the one field in the
   record a healthy installation moves on its own — a boot that finds the probe due sends it and

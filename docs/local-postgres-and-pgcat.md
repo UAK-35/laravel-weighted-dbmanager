@@ -402,7 +402,10 @@ with the rows this rig needs — 5433, the standby as the replica, `primary_read
 `simple_user` / `some_db` pair the hba rules name — before it starts anything, so a config edit is
 found before a build is paid for. The two servers come up next and are read back by their ports,
 the rules and the build run against that live pair, and the pooler is started last, printing its own
-`SHOW POOLS`. Running it twice is safe: a server already up says so, the rules are added once, the
+`SHOW POOLS`. It then walks the chain itself rather than trusting the rows it checked: a read through
+the pool that must answer on 5431 and a write that must answer on 5432, both asked as `simple_user`
+with the pool's own database name, and either one landing on the wrong server fails the run. Running
+it twice is safe: a server already up says so, the rules are added once, the
 patched crates are reused, and the build is skipped while the pooler holds its own binary open —
 cargo cannot replace a file in use. `scripts/teardown-pgcat.ps1` is the way back down: the same
 machine file, then the pooler, the standby and the primary in that order, and the three ports asked

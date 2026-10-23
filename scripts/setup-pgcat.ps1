@@ -22,6 +22,13 @@
     started, then the two servers come up, the rules and the build run against a
     live pair, and the pooler is started last.
 
+    It finishes by proving the routing rather than trusting the rows it checked:
+    a read through the pooler that must be answered by the standby and a write
+    that must be answered by the primary, both asked as a client asks, with the
+    run failing when either one lands on the wrong server. A pooler that is up
+    and sends a read to the primary is the state this step exists to catch, and
+    nothing before it would.
+
     Running it twice is safe. An already-running server is reported as such by
     its own script, the rules are added once, the patched crates are reused, and
     the build is skipped while the pooler holds its own binary open — cargo
@@ -34,8 +41,9 @@
     form of every step, and docs/local-postgres-and-pgcat.md section 2 the record
     of why each one exists.
 
-    Exit codes: 0 the rig is up, 1 a step failed, 2 the machine file or a
-    directory it names is missing.
+    Exit codes: 0 the rig is up and routes the way it is configured to, 1 a step
+    failed or a query went to the wrong server, 2 the machine file or a directory
+    it names is missing.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -162,6 +170,29 @@ function Wait-ForPort([int] $port, [string] $user, [int] $seconds) {
 # A TOML file read only as far as the checks below need: one entry per table,
 # holding that table's lines. Values are read inside their own table, so a
 # `port` in [general] cannot be answered by one in a pool.
+# One psql run against one server, its answer and its exit code. The pooler is asked
+# as a client reaches it — the pool's own name and user — rather than as the superuser
+# the two server checks use, because the password is the first link in the chain.
+function Invoke-Psql([int] $port, [string] $database, [string] $user, [string] $sql) {
+    $psql = Join-Path $pgBin 'psql.exe'
+    $output = & $psql -h 127.0.0.1 -p $port -U $user -d $database -Atc $sql 2>&1
+
+    return @{ Exit = $LASTEXITCODE; Output = (($output | ForEach-Object { "$_" }) -join "`n") }
+}
+
+# The row a routing question asks for, out of what psql printed. A `-c` carrying
+# several statements prints a command tag for each, so the answer is the one line with
+# both fields: the port that served it, and whether that server is a standby.
+function Get-RouteAnswer([string] $output) {
+    foreach ($line in ($output -split "`n")) {
+        if ($line -match '^\s*(\d+)\|(t|f)\s*$') {
+            return @{ Port = [int] $Matches[1]; InRecovery = ($Matches[2] -eq 't') }
+        }
+    }
+
+    return $null
+}
+
 function Read-TomlSections([string] $path) {
     $sections = @{}
     $current = ''
@@ -395,14 +426,104 @@ if (-not $ready) {
     Exit-With 1 "Nothing answers on $poolerPort after 60 seconds, so the pooler is not serving. Its window holds the log, and the usual causes are a server that is down or a pg_hba.conf offering only the cleartext password pgcat refuses."
 }
 
+#
+# 8. The routing, proved through the pooler rather than read off the config: a read
+#    that must be answered by the standby and a write that must be answered by the
+#    primary, both asked by a client that knows nothing about roles.
+#
+
+Write-Step "Proving the routing on $poolerPort"
+
+# The write is one transaction that leaves nothing behind — a temp table and a row in
+# it, rolled back. What makes it a write is not the table's lifetime: the pooler's
+# parser sends anything that is not a read to the primary, and a standby refuses it as
+# read-only. The `returning` names the server that answered, which is the question.
+$readSql = 'select inet_server_port(), pg_is_in_recovery()'
+$writeSql = 'begin; create temp table setup_routing_probe (note text); ' +
+    "insert into setup_routing_probe values ('setup-pgcat') returning inet_server_port(), pg_is_in_recovery(); rollback;"
+
+# The pool's own user and database rather than the superuser and the shard's database:
+# the chain being proved is the one a client walks, and its first link is the password
+# the pool is configured with. pgpass has no line for it — the pooler is the client
+# there, and it reads that password out of pgcat.toml.
+$previousPassword = $env:PGPASSWORD
+
+try {
+    $env:PGPASSWORD = 'simple_user'
+
+    $read = Invoke-Psql $poolerPort 'simple_db' 'simple_user' $readSql
+    $write = Invoke-Psql $poolerPort 'simple_db' 'simple_user' $writeSql
+}
+finally {
+    if ($null -eq $previousPassword) {
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    } else {
+        $env:PGPASSWORD = $previousPassword
+    }
+}
+
+$readAnswer = Get-RouteAnswer $read.Output
+$writeAnswer = Get-RouteAnswer $write.Output
+$readDetail = (($read.Output -split "`n") | Where-Object { $_ -ne '' } | ForEach-Object { "    $_" }) -join "`n"
+$writeDetail = (($write.Output -split "`n") | Where-Object { $_ -ne '' } | ForEach-Object { "    $_" }) -join "`n"
+
+if ($read.Exit -ne 0 -or $null -eq $readAnswer) {
+    Exit-With 1 (@(
+        'The read through the pooler did not answer, so the chain is broken at its first link:'
+        ("  $readSql")
+        $readDetail
+        ''
+        'scripts/servers-startup/README.md section 6 has the same query on its own, and stop-pgcat.bat'
+        'followed by start-pgcat.bat is how to put the pooler back in a state worth asking.'
+    ) -join "`n")
+}
+
+if ($readAnswer.Port -ne $standbyPort -or -not $readAnswer.InRecovery) {
+    $answeredBy = if ($readAnswer.InRecovery) { "a standby on $($readAnswer.Port)" } else { "a primary on $($readAnswer.Port)" }
+
+    Exit-With 1 (@(
+        "A read through the pooler was answered by $answeredBy, not the standby on $standbyPort."
+        ''
+        'query_parser_read_write_splitting = true and primary_reads_enabled = false under'
+        '[pools.simple_db] are what keep a SELECT off the primary, and the shard rows are what'
+        'name the standby; a read answered by the primary means one of those rows has moved.'
+    ) -join "`n")
+}
+
+if ($write.Exit -ne 0 -or $null -eq $writeAnswer) {
+    Exit-With 1 (@(
+        'The write through the pooler did not answer, so nothing proves it reached the primary:'
+        ("  $writeSql")
+        $writeDetail
+        ''
+        'A standby refuses a write as "cannot execute ... in a read-only transaction", which is the'
+        'write having reached one; any other error is the shard''s own connection to the primary, whose'
+        'two server checks above have already reported on.'
+    ) -join "`n")
+}
+
+if ($writeAnswer.Port -ne $primaryPort -or $writeAnswer.InRecovery) {
+    $answeredBy = if ($writeAnswer.InRecovery) { "a standby on $($writeAnswer.Port)" } else { "a server on $($writeAnswer.Port)" }
+
+    Exit-With 1 (@(
+        "A write through the pooler was answered by $answeredBy, not the primary on $primaryPort."
+        'A write only ever goes to the primary; a shard row that names another server first is'
+        'what this reports.'
+    ) -join "`n")
+}
+
+Write-Host ("  read     answered on {0}, in recovery - the standby" -f $readAnswer.Port)
+Write-Host ("  write    answered on {0}, not in recovery - the primary" -f $writeAnswer.Port)
+
 Write-Host ''
 Write-Host 'The rig is up:'
 Write-Host ("  primary   127.0.0.1:{0}" -f $primaryPort)
 Write-Host ("  standby   127.0.0.1:{0}" -f $standbyPort)
 Write-Host ("  pooler    127.0.0.1:{0}" -f $poolerPort)
 Write-Host ''
-Write-Host 'A read through the pooler reaches the standby and a write reaches the primary;'
-Write-Host 'scripts/servers-startup/README.md section 6 has the two queries that prove it.'
+Write-Host 'A read through the pooler answered on the standby and a write answered on the primary,'
+Write-Host 'so the pool is routing the way it is configured to; scripts/servers-startup/README.md'
+Write-Host 'section 6 has the two queries for a by-hand check.'
 Write-Host 'To take it down in the reverse order: stop-pgcat.bat, stop-replica.bat, stop-primary.bat.'
 
 exit 0

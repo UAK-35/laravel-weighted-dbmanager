@@ -44,7 +44,9 @@ start-pgcat.bat              rem 127.0.0.1:5433, with pgcat.toml from this folde
 not known: it reads `servers.local.cmd` once, reports a port Windows has reserved before anything
 tries to bind one, compares `pgcat.toml` with the rows this rig needs, starts the two servers and
 reads their ports back — a port that answers is the verdict, not an exit code — then runs the hba
-rules and the build against the live pair and starts the pooler last. Every step below is still its
+rules and the build against the live pair and starts the pooler last, then proves the routing through
+it — a read the standby must answer and a write the primary must, with either one landing on the wrong
+server failing the run. Every step below is still its
 own script because every step has its own failure to report, and the idempotence described below is
 what lets the one command be re-run: a second server is reported as already up, the rules are added
 once, the crates are reused, and the build is skipped while the pooler holds its own binary open.
@@ -143,3 +145,7 @@ set PGPASSWORD=simple_user
 `5431|t` is a read on the standby; an `INSERT … RETURNING inet_server_port()` answers `5432|f`,
 because a write only ever goes to the primary. The client's database is the **pool** name
 (`simple_db`), not the shard's (`some_db`); `-d some_db` is refused with `No pool configured`.
+
+`..\setup-pgcat.ps1` ends by running both of these through psql, so a rig it reports as up is a rig
+whose routing has been walked — a read not answered on 5431 or a write not answered on 5432 fails the
+run there, with the query and the server that answered it printed.
