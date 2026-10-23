@@ -182,8 +182,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=7d0eea8
-  --> exit 1: the inventory is out of step with the tree at 7d0eea8
+php bin/inventory.php --check --at=365f300
+  --> exit 1: the inventory is out of step with the tree at 365f300
       files.tsv: 2 line(s) stale
       methods.tsv: 3 line(s) stale
       surface.tsv: 7 line(s) stale
@@ -243,10 +243,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `7d0eea8` — *fix: the published copy leaves the schedule switch undeclared again* |
+| HEAD | `365f300` — *docs: the note is re-taken at 7d0eea8, and section 2 counts eight commits past origin/dev* |
 | `origin/dev` | `a99c22b` — *chore: a copy the agent harness left behind is not work this repository carries* |
-| Unpushed | 8 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 2, feat 2, fix 1, test 3 |
+| Unpushed | 9 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 3, feat 2, fix 1, test 3 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -275,9 +275,10 @@ commit the release made is one a consumer can fetch. This note is the commit *af
 and it travels on the push that follows.
 
 <!-- handoff:log -->
-The eight most recent are the ones a reader is most likely to be standing in the middle of:
+The nine most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+365f300  docs: the note is re-taken at 7d0eea8, and section 2 counts eight commits past origin/dev
 7d0eea8  fix: the published copy leaves the schedule switch undeclared again
 c5f7f1e  feat: --at answers --list, and refuses --record with --only before it copies vendor/
 41a248c  docs: the connector note opens on what the installation saw, not on what the class did
