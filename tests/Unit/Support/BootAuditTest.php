@@ -1500,7 +1500,13 @@ class BootAuditTest extends TestCase
     public function test_the_stamp_a_process_reports_is_the_one_its_boot_found(): void
     {
         $file = $this->tempDir() . '/audit.json';
-        $found = time() - 900;
+
+        // The instant is read once and both halves of the test use it: the boot's own time is an
+        // input here, so the record is compared with the moment the boot was told, not with a
+        // second reading taken after it. Two `time()` calls around the write are a window a slow
+        // machine can step out of — a test that passes on this one and fails on a loaded runner.
+        $now = time();
+        $found = $now - 900;
 
         $audit = new BootAudit($file, 60);
 
@@ -1508,11 +1514,11 @@ class BootAuditTest extends TestCase
             ['findings' => [], 'store_probed_at' => $found],
             [],
             checked: [],
-            probedAt: time(),
+            probedAt: $now,
         );
 
-        $this->assertGreaterThanOrEqual(
-            time() - 5,
+        $this->assertSame(
+            $now,
             (int) $audit->read()['store_probed_at'],
             'this boot probed, so the file holds its own time now',
         );
