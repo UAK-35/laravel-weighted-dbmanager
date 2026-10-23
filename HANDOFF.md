@@ -236,6 +236,7 @@ the tree.
 | `scripts/servers-startup/stop-replica.bat` | the standby's stop script: `pg_ctl -m fast` on `standby179`, nothing to stop when the port is already silent, and `pg_isready` asked again afterwards so a leftover listener is a failure |
 | `scripts/setup-pgcat.ps1` | the one command that reproduces this rig: the machine file read once, Windows' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, and the pooler started last |
 | `scripts/teardown-pgcat.ps1` | the setup script's counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run |
+| `tests/Unit/Release/EntryVerdictTest.php` | the guard that holds `bin/entry.php` to its verdicts: a note a release published, one no tag carries, a tag that carries the commit with the note still under `## Unreleased`, a bullet reworded after it shipped, a release commit read as the promotion it is, a tag whose tree has no changelog, and the usage errors — one test per state the script tells apart |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released

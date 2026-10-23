@@ -895,6 +895,10 @@ final class Handoff
             'words' => 'the pooler\'s stop script: the PID owning `127.0.0.1:5433` out of netstat, checked against `tasklist` before it is touched, closed politely and forced only when it does not answer, then the port and `pg_isready` read back as silent',
             'read' => 'sha256:0f4801cffaeb9ba1d3545c20d1c6b1b08485ee05c80e435169b4479d99aacccf',
         ],
+        'tests/Unit/Release/EntryVerdictTest.php' => [
+            'words' => 'the guard that holds `bin/entry.php` to its verdicts: a note a release published, one no tag carries, a tag that carries the commit with the note still under `## Unreleased`, a bullet reworded after it shipped, a release commit read as the promotion it is, a tag whose tree has no changelog, and the usage errors — one test per state the script tells apart',
+            'read' => 'sha256:db95e8051597bdc2f135b6d258b0b5e477127416b486ba3c523a9ef7b43f6943',
+        ],
         // @pending-descriptions-end
     ];
 
