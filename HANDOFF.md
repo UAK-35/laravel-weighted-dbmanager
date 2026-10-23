@@ -111,21 +111,21 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 782.5s
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 740.5s
       recorded 2026-10-23, PHP 8.4.26
-      syntax     PASS    22.3s  168 files, no syntax errors
-      ast        PASS     3.2s  168 files parsed
-      writeback  PASS     0.8s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     4.4s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.7s  20 platform requirements satisfied
-      interpreter PASS     0.2s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
+      syntax     PASS    20.5s  172 files, no syntax errors
+      ast        PASS     2.4s  172 files parsed
+      writeback  PASS     0.6s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     3.5s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     2.9s  20 platform requirements satisfied
+      interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
-      yaml       PASS     2.5s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     0.9s  56 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.1s  10444 prose line(s) in 35 record(s), no fused sentence; the detector agreed w…
-      phpstan    PASS     8.4s  [OK] No errors
-      pint       PASS     7.5s  PASS … 168 files
-      tests      PASS   728.5s  Tests: 1646, Assertions: 11073, Skipped: 10.
+      yaml       PASS     2.1s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     0.8s  56 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.0s  10537 prose line(s) in 35 record(s), no fused sentence; the detector agreed w…
+      phpstan    PASS     7.3s  [OK] No errors
+      pint       PASS     6.4s  PASS … 173 files
+      tests      PASS   693.8s  Tests: 1673, Assertions: 11240, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
