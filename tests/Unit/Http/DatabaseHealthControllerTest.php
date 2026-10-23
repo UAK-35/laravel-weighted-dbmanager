@@ -556,7 +556,7 @@ class DatabaseHealthControllerTest extends TestCase
             ->assertJsonPath('audit.store_probe.stale_after_seconds', 300);
 
         $this->assertMatchesRegularExpression(
-            '/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$/',
+            '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/',
             (string) $response->json('audit.store_probe.last_probed_at'),
             'the stamp is published as DATE_ATOM in UTC, which is how the payload publishes every other moment',
         );

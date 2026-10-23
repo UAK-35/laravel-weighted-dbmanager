@@ -214,10 +214,18 @@ final class ConnectorInUse
         $declared = $config->get('database.connections.'.$name);
         $declared = is_array($declared) ? $declared : [];
 
-        // The read and write lists are a replica choice rather than part of the class: dropping
-        // them keeps `make()` on its single-connection path, which is the path that consults the
-        // connection resolver and never the read picker.
+        // The read and write lists are a replica choice rather than part of the class: keeping them
+        // out of the config `make()` is given keeps it on its single-connection path, which is the
+        // path that consults the connection resolver and never the read picker. The settings they
+        // *hold* are another question, and dropping them with the lists was a defect: a connection
+        // written as a read/write pair can leave its base block with nothing in it but the driver,
+        // so the build failed on the first key the connector reads — `Undefined array key
+        // "database"` — and a correctly configured installation was reported as one that cannot
+        // connect. The write half is the one taken, because it is the connection rather than a
+        // replica pick; the read half is used only when there is no write half at all.
+        $settings = self::settingsIn($declared);
         unset($declared['read'], $declared['write']);
+        $declared = [...$declared, ...$settings];
 
         try {
             $built = $factory->make($declared, $name);
@@ -241,6 +249,52 @@ final class ConnectorInUse
         $reading['resolver_applied'] = $inUse === null || $inUse::class === $built::class;
 
         return $reading;
+    }
+
+    /**
+     * The connection settings a read/write block keeps inside its halves.
+     *
+     * Laravel's own `ConnectionFactory` merges one of the two halves over the base block before it
+     * builds; this is that merge for the write half only, so the class is read without a replica
+     * being chosen. A half that is a *list* of configurations — the framework's other shape, one
+     * entry per host — is read the way the framework reads it: one entry is the connection.
+     *
+     * @param array<array-key, mixed> $declared the connection's block as the configuration writes it
+     * @return array<string, mixed>
+     */
+    private static function settingsIn(array $declared): array
+    {
+        $write = $declared['write'] ?? null;
+
+        if (is_array($write) && $write !== []) {
+            return self::oneSettings($write);
+        }
+
+        $read = $declared['read'] ?? null;
+
+        return is_array($read) && $read !== [] ? self::oneSettings($read) : [];
+    }
+
+    /**
+     * One settings map out of a half that is either a map or a list of maps.
+     *
+     * `array_is_list()` is the reading that tells them apart, not the shape of the first value: a
+     * single map's `host` is itself an array of hosts, so the first value says nothing.
+     *
+     * @param array<array-key, mixed> $half
+     * @return array<string, mixed>
+     */
+    private static function oneSettings(array $half): array
+    {
+        if (array_is_list($half) && is_array($half[0] ?? null)) {
+            /** @var array<string, mixed> $first */
+            $first = $half[0];
+
+            return $first;
+        }
+
+        /** @var array<string, mixed> $half */
+        return $half;
     }
 
     /**

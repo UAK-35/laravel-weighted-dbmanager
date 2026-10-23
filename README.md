@@ -2939,7 +2939,12 @@ the run it just printed to `.agents/gate.json` — the totals, the exit code, th
 day and interpreter, and one row per check with its verdict, seconds and note —
 which is the record `HANDOFF.md` renders its own summary from; it refuses
 `--only`, because a note quoting a subset of the gate would be claiming the
-checks it leaves out were not there.
+checks it leaves out were not there. `--at=REF` runs the same gate on a commit
+this checkout is not on, in a temporary worktree under `build/` — with `vendor/`
+copied rather than linked, and the machine record moved into it — and with
+`--record` adopts a green run as this checkout's record and re-renders the note's
+block from it; the branch, the index and the files here are not touched, and a
+red run is printed but not adopted.
 
 The write-back scan is the one check whose subject is the shape of the code rather
 than the code itself: a class that reads a file and writes that same file back is a

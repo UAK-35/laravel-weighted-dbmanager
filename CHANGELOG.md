@@ -26,6 +26,22 @@
   `docs/health-payload.md` tabulate the key, `docs/boot-audit-surfaces.md` documents it, and
   `docs/boot-audit-store-probe.md` records why the stamp is published twice.
 
+### Fixed
+
+- **A read/write connection is buildable again, so the `connector` row and the boot finding stop
+  reporting a correctly configured installation.** `ConnectorInUse::connection()` dropped a
+  connection's `read` and `write` lists before building it — deliberately, because the class a
+  connection resolves to does not depend on which replica is chosen, and building the pair would
+  make a preflight pick one and open a socket. But the lists are where a read/write connection keeps
+  its settings: `database`, `host`, `username` and `password` live inside them, and the base block
+  holds nothing but `driver`. The build then failed on the first key the framework's own
+  `createSingleConnection()` reads — `Undefined array key "database"` — and both surfaces reported
+  it: `db:doctor`'s `connector` row, and `swrr.connector.unusable` on every boot. The settings of
+  one half are taken first now (the `write` half, which is the connection rather than a replica
+  pick, with `read` used only when there is no `write`), and both shapes the framework accepts are
+  read: a single map, and a list of configurations. A test declares a connection whose settings live
+  entirely in its halves, so the lists cannot be dropped again.
+
 ## 0.2.0-alpha10 - 2026-10-22
 
 ### Added

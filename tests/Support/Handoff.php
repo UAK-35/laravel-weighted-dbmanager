@@ -669,7 +669,7 @@ final class Handoff
         // @pending-descriptions
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-            'read' => 'sha256:4d1b4d610eea0126ae2aaf6777db829cb2939e1ae8a47d633be58958ba706d60',
+            'read' => 'sha256:91a499656af17719d682b2493892c52df2270c70e8267b5af04548c4905026f9',
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
@@ -705,7 +705,7 @@ final class Handoff
         ],
         'docs/local-postgres-and-pgcat.md' => [
             'words' => 'the environment record: the two PostgreSQL servers this machine runs (settings, authentication, databases, and the physical standby streaming from the primary, with the configuration files and log that standby owns rather than sharing), and the pgcat checkout behind them — its origin, commit, every configuration file, the pool rows the standby is named in, the two starter scripts beside the data directories, the build this machine needs for the pooler, and the read and the write that were walked through it to 5431 and 5432',
-            'read' => 'sha256:b0ca2efe1147211d1d45adb07aea27a10c95db18b278d8d82671baf9bd306f95',
+            'read' => 'sha256:015a4520f18819b9ee813ba298338fab372d0626b9196fb0a947b88608f99279',
         ],
         'src/Pgcat/PoolProbeMetrics.php' => [
             'words' => 'the pool probe\'s verdict as Prometheus text exposition — one present sample per pool the pooler spoke about, no sample for one the reading could not prove, and the flags a deploy gates on',
@@ -833,7 +833,7 @@ final class Handoff
         ],
         'scripts/servers-startup/README.md' => [
             'words' => 'the Windows runbook for the three test servers: the machine file and its two tokens, the start order, what each script owns, why the pooler needs a build script at all, and the two queries that prove which server answered',
-            'read' => 'sha256:f53253715ad29b35314e7d7c45f41adf853084e0656684360e0d538e9014e9e4',
+            'read' => 'sha256:07c05a002cb21ec3709ee89e04d58ab73e73614db2797a9c81e4342eb6da8cfd',
         ],
         'scripts/servers-startup/servers.sample.cmd' => [
             'words' => 'the committed form of that machine file: the two directories every script in the folder refuses to guess at, written as tokens',
@@ -863,9 +863,17 @@ final class Handoff
             'words' => 'the pooler config the scripts start: 127.0.0.1:5433, the standby as every shard\'s replica row, and `simple_db` splitting reads from writes',
             'read' => 'sha256:51a4011d9bb7d03335d8b21c76c6188fdfbffe5e74699e0948a4c1ec76935937',
         ],
+        'scripts/setup-pgcat.ps1' => [
+            'words' => 'the one command that reproduces this rig: the machine file read once, Windows\' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, and the pooler started last',
+            'read' => 'sha256:f8c241e73194e7f3dcd143b58d074520a4284dc6f7f0585c03647b4edd1f8eb0',
+        ],
+        'scripts/teardown-pgcat.ps1' => [
+            'words' => 'the setup script\'s counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run',
+            'read' => 'sha256:e1e180642d5ae5db06ee7bd2643490a737d1d8742c3be0346fafd53b9a796a30',
+        ],
         'docs/issues/issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md' => [
             'words' => 'the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in',
-            'read' => 'sha256:c9b43acc7f650debcf7f05baf6d0bc990ab8446cb911cc69a97b68cd84277f90',
+            'read' => 'sha256:e96953d2727202d489e71cea346aa575f3f2397f4d58cf7c605ce0b8ce0c4400',
         ],
         'src/Support/ProbeStamp.php' => [
             'words' => 'the probe stamp\'s rule, shared by `db:doctor`\'s row and `/health/db`\'s block: the window (the wider of the probe interval and the schedule\'s cadence, five misses over), its inclusive boundary, and the five states in which nothing is judged — as codes each surface words for itself',
@@ -874,6 +882,18 @@ final class Handoff
         'tests/Unit/Support/ProbeStampTest.php' => [
             'words' => 'the shared rule on its own: the window\'s arithmetic and its boundary, the five states and the order they are asked in, and the window still published where nothing is judged',
             'read' => 'sha256:997201f033515b5d96b7ee680bac473dd6a2740cad9841fa131f9aac9fc653e6',
+        ],
+        'scripts/servers-startup/stop-primary.bat' => [
+            'words' => 'the primary\'s stop script: `pg_ctl -m fast` on `pgsql179\\data`, an already-silent port answered rather than errored, and the port asked again afterwards so a second postmaster fails the run instead of passing it',
+            'read' => 'sha256:e4d7005075992148cb3f5ffc97afc70445f378626283b42568e0be76069d7f58',
+        ],
+        'scripts/servers-startup/stop-replica.bat' => [
+            'words' => 'the standby\'s stop script: `pg_ctl -m fast` on `standby179`, nothing to stop when the port is already silent, and `pg_isready` asked again afterwards so a leftover listener is a failure',
+            'read' => 'sha256:9586352fd742f39883c4d0a9b92209253b91b2b2521dc229a0289cd3fee0e759',
+        ],
+        'scripts/servers-startup/stop-pgcat.bat' => [
+            'words' => 'the pooler\'s stop script: the PID owning `127.0.0.1:5433` out of netstat, checked against `tasklist` before it is touched, closed politely and forced only when it does not answer, then the port and `pg_isready` read back as silent',
+            'read' => 'sha256:0f4801cffaeb9ba1d3545c20d1c6b1b08485ee05c80e435169b4479d99aacccf',
         ],
         // @pending-descriptions-end
     ];

@@ -33,6 +33,9 @@ declare(strict_types=1);
  *   php bin/checks.php --list           list the checks without running anything
  *   php bin/checks.php --record         also write the summary to .agents/gate.json, and re-render
  *                                       the note's gate block from it
+ *   php bin/checks.php --at=v0.2.0-alpha10 --record
+ *                                       run the gate on that commit instead, in a temporary worktree,
+ *                                       and adopt a green run as this checkout's record
  *   php bin/checks.php --help
  *
  * THE RECORD
@@ -176,6 +179,7 @@ $options = [
     'list' => false,
     'record' => false,
     'only' => [],
+    'at' => null,
 ];
 
 foreach (array_slice($argv, 1) as $argument) {
@@ -206,6 +210,11 @@ foreach (array_slice($argv, 1) as $argument) {
 
     if ($argument === '--record') {
         $options['record'] = true;
+        continue;
+    }
+
+    if (str_starts_with($argument, '--at=')) {
+        $options['at'] = trim(substr($argument, 5));
         continue;
     }
 
@@ -259,6 +268,13 @@ require __DIR__ . '/interpreter.php';
 // the recorded interpreter, so `php bin/checks.php` is the whole command however the caller
 // reached a `php` to type it with.
 redispatch($root);
+
+// `--at` gates a commit this checkout is not on, so it is answered here: after the hand-over,
+// because the run it starts is the same gate on the recorded interpreter, and before a single
+// check, because none of them is about this tree. gateAt() explains the rest.
+if ($options['at'] !== null) {
+    exit(gateAt($root, $options));
+}
 
 // The machine record, read once: the interpreter check answers a claim made in it, and its
 // skip is about whether the file is there at all rather than about what it says.
@@ -672,6 +688,332 @@ function renderNote(string $root): ?array
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helpers — the gate of another commit
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run every check against `--at`'s commit, in a worktree of its own, and report what that tree
+ * scored — this checkout's files, index and branch untouched.
+ *
+ * WHY A COMMIT RATHER THAN THE TREE
+ * ---------------------------------
+ *   `--record` exists so that the note's gate block quotes a run, and a run is meaningful about the
+ *   tree it measured. A note taken at a tag is the case with no answer otherwise: the tag's commit is
+ *   behind the branch by definition, the block is a claim about the released tree, and checking that
+ *   commit out here would discard whatever is uncommitted and move the branch under everyone else
+ *   sharing the checkout. This is the same script running the same gate at the commit asked for.
+ *
+ * WHAT DOES NOT COME FOR FREE
+ * ---------------------------
+ *   A worktree checks out tracked files and nothing else, and three things here are not tracked:
+ *   `vendor/` (a clone has none until `composer install`), `composer.phar` (gitignored) and
+ *   `.agents/machine.local.json` (gitignored, one machine's own facts). So they are prepared, each
+ *   for its own reason:
+ *
+ *   - `vendor/` is *copied*, never linked. A junction or a symlink resolves to the real path, so
+ *     PHP's autoloader would find classes in this checkout's `src/` and the run would report on the
+ *     tree that asked rather than the tree asked about — a green run of the wrong tree, which is the
+ *     one failure a gate cannot afford.
+ *   - `composer.phar` is copied when this checkout has one, so the schema and platform checks meet
+ *     the same Composer the local run does instead of skipping for a missing binary.
+ *   - the machine record is written from this machine's, with `package.dir` moved into the worktree
+ *     and its `tarball` rows kept only where the worktree really has the path. That filtering is not
+ *     tidiness: the note's environment table is held to those rows, so a row for a script an older
+ *     commit does not have (`bin/entry.php`, before it existed) fails a run that has nothing else
+ *     wrong with it.
+ *
+ * WHY A GREEN EXIT IS WHAT GETS ADOPTED
+ * ------------------------------------
+ *   With `--record`, the worktree's `.agents/gate.json` is copied back and this note's block
+ *   re-rendered — but only when every check passed. A note is a claim that the gate passed, so
+ *   adopting a red run would leave the note saying it is green over a record that says it is not, and
+ *   the next run would go red in `HandoffTest` over a tree that is already fixed. The red run is
+ *   still printed, with its own exit code; what it does not become is this checkout's record.
+ *
+ * WHY THE WORKTREE IS REMOVED IN `finally`
+ * --------------------------------------
+ *   `git worktree list` is a record, and a run that leaves its row behind makes the next `--at` refuse
+ *   the path it wants. Both halves are needed: `worktree remove` deletes the registration, and
+ *   deleting the directory cleans up after a run whose registration never landed.
+ *
+ * @param array{verbose: bool, audit: bool, require-all: bool, record: bool, only: list<string>, at: string|null} $options
+ */
+function gateAt(string $root, array $options): int
+{
+    $ref = (string) $options['at'];
+
+    if ($ref === '') {
+        fwrite(STDERR, '--at needs a commit or a ref: --at=v0.2.0-alpha10, --at=HEAD~3, --at=<sha>.' . PHP_EOL);
+
+        return 2;
+    }
+
+    $resolved = runCommand(['git', '-C', $root, 'rev-parse', '--verify', '--quiet', $ref . '^{commit}'], $root);
+
+    if ($resolved['exit'] !== 0) {
+        fwrite(STDERR, "Nothing here resolves --at={$ref}: the gate can only run on a commit git can name." . PHP_EOL);
+
+        return 2;
+    }
+
+    $sha = trim($resolved['output']);
+    $worktree = $root . '/build/checks-at-' . substr($sha, 0, 7);
+    $machineFile = $root . '/.agents/machine.local.json';
+
+    // The two absences a run here cannot answer for, said plainly rather than skipped: a worktree gets
+    // neither, the child would skip most of the gate without them, and a record of a gate that mostly
+    // skipped is not a run the note may quote.
+    if (! is_file($machineFile)) {
+        fwrite(STDERR, '--at reads this machine\'s record, and .agents/machine.local.json is not in this checkout.' . PHP_EOL);
+
+        return 2;
+    }
+
+    if (! is_dir($root . '/vendor')) {
+        fwrite(STDERR, '--at copies vendor/ into the worktree, and this checkout has none: run composer install first.' . PHP_EOL);
+
+        return 2;
+    }
+
+    // A run that was killed leaves its registration behind, and `worktree add` refuses a path that is
+    // already a worktree rather than replacing it. Reclaiming it here is what makes a second attempt
+    // after an interrupted one the same command.
+    if (is_dir($worktree)) {
+        runCommand(['git', '-C', $root, 'worktree', 'remove', '--force', $worktree], $root);
+    }
+
+    $added = runCommand(['git', '-C', $root, 'worktree', 'add', '--detach', $worktree, $sha], $root);
+
+    if ($added['exit'] !== 0) {
+        fwrite(STDERR, "Could not check out {$sha} into " . relative($root, $worktree) . ':' . PHP_EOL . $added['output']);
+
+        return 1;
+    }
+
+    printf(
+        'Gating %s (%s) in %s; this checkout, its index and its branch are untouched.%s',
+        substr($sha, 0, 7),
+        $ref,
+        relative($root, $worktree),
+        PHP_EOL,
+    );
+
+    try {
+        prepareGateWorktree($root, $worktree, $machineFile);
+
+        $exit = runInherited(gateCommand($worktree, $options), $worktree);
+
+        if ($options['record']) {
+            $exit = adoptGateRecord($root, $worktree, $exit);
+        }
+
+        return $exit;
+    } catch (RuntimeException $refusal) {
+        fwrite(STDERR, $refusal->getMessage() . PHP_EOL);
+
+        return 1;
+    } finally {
+        runCommand(['git', '-C', $root, 'worktree', 'remove', '--force', $worktree], $root);
+        removeTree($worktree);
+    }
+}
+
+/**
+ * The child's command line: this script at the commit asked about, with the same switches minus
+ * `--at` itself.
+ *
+ * Built from the parsed options rather than from `$argv`, so a flag is passed on because the run was
+ * asked for it rather than because it was spelled the way the caller's shell left it.
+ *
+ * @param array{verbose: bool, audit: bool, require-all: bool, record: bool, only: list<string>} $options
+ * @return list<string>
+ */
+function gateCommand(string $worktree, array $options): array
+{
+    $command = [PHP_BINARY, $worktree . '/bin/checks.php'];
+
+    foreach (['verbose' => '--verbose', 'audit' => '--audit', 'require-all' => '--require-all', 'record' => '--record'] as $option => $flag) {
+        if ($options[$option]) {
+            $command[] = $flag;
+        }
+    }
+
+    if ($options['only'] !== []) {
+        $command[] = '--only=' . implode(',', $options['only']);
+    }
+
+    return $command;
+}
+
+/**
+ * Fill in what a worktree does not get from git: the installation, Composer, and the machine record.
+ *
+ * Everything here is a step the run cannot continue without, so a failure is thrown and gateAt()
+ * turns it into one sentence and exit code 1 — half a worktree gated is a run whose verdict means
+ * nothing.
+ */
+function prepareGateWorktree(string $root, string $worktree, string $machineFile): void
+{
+    copyTree($root . '/vendor', $worktree . '/vendor');
+
+    if (is_file($root . '/composer.phar')) {
+        copyTree($root . '/composer.phar', $worktree . '/composer.phar');
+    }
+
+    $record = json_decode((string) file_get_contents($machineFile), true);
+
+    if (! is_array($record)) {
+        throw new RuntimeException('.agents/machine.local.json is not JSON: the worktree run is dated and its paths read from it, so --at cannot go on.');
+    }
+
+    $record['package']['dir'] = DIRECTORY_SEPARATOR === '\\'
+        ? str_replace('/', '\\', $worktree)
+        : $worktree;
+
+    if (is_file($worktree . '/composer.phar') && isset($record['composer']['phar'])) {
+        $record['composer']['phar'] = $record['package']['dir'] . DIRECTORY_SEPARATOR . 'composer.phar';
+    }
+
+    // A row for a path the commit does not have is a claim about a file nobody can read, and the
+    // note's environment table is held to those rows — so a row is kept only where the tree has it.
+    foreach (['carries', 'leavesOut'] as $row) {
+        if (! isset($record['tarball'][$row]) || ! is_array($record['tarball'][$row])) {
+            continue;
+        }
+
+        $record['tarball'][$row] = array_values(array_filter(
+            $record['tarball'][$row],
+            static fn ($path): bool => is_string($path) && file_exists($worktree . '/' . rtrim($path, '/')),
+        ));
+    }
+
+    $written = @file_put_contents(
+        $worktree . '/.agents/machine.local.json',
+        json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n",
+    );
+
+    if ($written === false) {
+        throw new RuntimeException('Could not write the machine record into ' . relative($root, $worktree) . '.');
+    }
+}
+
+/**
+ * Copy a green run's record back into this checkout and re-render the note's block from it — or say
+ * why a red one is not adopted.
+ */
+function adoptGateRecord(string $root, string $worktree, int $exit): int
+{
+    if ($exit !== 0) {
+        echo PHP_EOL . 'The run was not green, so this checkout\'s record and note still quote the run before it: a note is a claim that the gate passed.' . PHP_EOL;
+
+        return $exit;
+    }
+
+    if (@copy($worktree . '/' . GATE_RECORD, $root . '/' . GATE_RECORD) === false) {
+        fwrite(STDERR, 'The green run left no ' . GATE_RECORD . ' to adopt.' . PHP_EOL);
+
+        return 1;
+    }
+
+    printf('%sThe record in %s is that run.%s', PHP_EOL, GATE_RECORD, PHP_EOL);
+
+    $rendered = renderNote($root);
+
+    if ($rendered === null) {
+        return 0;
+    }
+
+    echo $rendered['output'];
+
+    return $rendered['exit'];
+}
+
+/**
+ * Run the child on this process's own stdout and stderr, and return its exit code.
+ *
+ * Unlike runCommand(), nothing is captured: the gate takes minutes and prints its summary at the
+ * end, and whoever started a `--at` run should watch those lines appear as the child writes them
+ * rather than receive a quarter of an hour of output in one block. No descriptor is listed, which is
+ * what leaves the child on the handles this process was given.
+ *
+ * @param list<string> $command
+ */
+function runInherited(array $command, string $cwd): int
+{
+    $process = @proc_open($command, [], $pipes, $cwd);
+
+    if (! is_resource($process)) {
+        fwrite(STDERR, 'Could not start: ' . implode(' ', $command) . PHP_EOL);
+
+        return 127;
+    }
+
+    return proc_close($process);
+}
+
+/**
+ * Copy a file, or a directory tree, creating the destination as it goes.
+ *
+ * This is how `vendor/` reaches the worktree: a copy, because a link resolves to the real path and
+ * would load this checkout's classes into a run about another commit.
+ */
+function copyTree(string $from, string $to): void
+{
+    if (is_file($from)) {
+        if (@copy($from, $to) === false) {
+            throw new RuntimeException("Could not copy {$from} into {$to}.");
+        }
+
+        return;
+    }
+
+    if (! is_dir($from)) {
+        throw new RuntimeException("Nothing to copy at {$from}.");
+    }
+
+    if (! is_dir($to) && ! @mkdir($to, 0777, true) && ! is_dir($to)) {
+        throw new RuntimeException("Could not create {$to}.");
+    }
+
+    foreach (scandir($from) ?: [] as $entry) {
+        if ($entry === '.' || $entry === '..') {
+            continue;
+        }
+
+        copyTree($from . '/' . $entry, $to . '/' . $entry);
+    }
+}
+
+/**
+ * Delete a directory and everything under it, or a single file, or nothing if the path is absent.
+ *
+ * The only callers point it at a worktree under `build/`, which `.gitignore` already holds; it is
+ * removed wholesale because git's own removal can refuse a tree it no longer recognises.
+ */
+function removeTree(string $path): void
+{
+    if (is_file($path)) {
+        @unlink($path);
+
+        return;
+    }
+
+    if (! is_dir($path)) {
+        return;
+    }
+
+    foreach (scandir($path) ?: [] as $entry) {
+        if ($entry === '.' || $entry === '..') {
+            continue;
+        }
+
+        removeTree($path . '/' . $entry);
+    }
+
+    @rmdir($path);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers — argument handling
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -690,6 +1032,9 @@ function usage(): void
           --require-all Treat a missing tool as a failure instead of a skip.
           --list        List the checks and their skip conditions.
           --record      Write the summary to .agents/gate.json and re-render the note's gate block.
+          --at=REF      Run every check on that commit in a temporary worktree under build/, with
+                        --record adopting a green run as this checkout's record. This checkout's
+                        files, index and branch are not touched.
       -h, --help        Show this help.
 
     Exit code: 0 all green, 1 anything failed, 2 usage error.

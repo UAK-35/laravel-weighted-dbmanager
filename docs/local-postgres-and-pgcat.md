@@ -204,31 +204,44 @@ that launched it went away; nothing writes to it now. The second is that the gen
 `postgresql.auto.conf` and `standby.signal`, is state rather than configuration: another
 `pg_basebackup` rewrites both, so an edit made there is lost rather than promoted.
 
-### 1.7 The two starter scripts
+### 1.7 The starter and stopper scripts
 
-A batch file per server sits beside the data directories. Each resolves its own location with
-`%~dp0` rather than writing a path into itself, so neither stops working when the folder is moved:
+A batch file per server, and one more per direction, sits beside the data directories. Each resolves
+its own location with `%~dp0` rather than writing a path into itself, so none stops working when the
+folder is moved:
 
-| Script | What it starts |
+| Script | What it starts, or stops |
 | --- | --- |
 | `start-primary.bat` | the primary on 5432, with `pg_ctl -D <postgres-install>/data -l <postgres-install>.log`. It first refuses if the Windows service `postgresql-x64-17` is running, because that service starts the other tree on the same port. |
+| `stop-primary.bat` | the same data directory, with `pg_ctl -D <postgres-install>/data -m fast stop`. |
 | `start-replica.bat` | the standby on 5431, with `pg_ctl -D <standby-dir> -l <standby-dir>.log`. It needs no guard: the standby's `postgresql.conf` names its own port. |
+| `stop-replica.bat` | the same directory, with `pg_ctl -D <standby-dir> -m fast stop`. |
+| `stop-pgcat.bat` | the pooler on 5433, by the PID that owns the listening socket — the admin `SHUTDOWN` command sends `SIGINT`, which Windows does not have. |
 
-Both are safe to run twice: `pg_isready` is asked before anything is started, and a port that
-already answers ends the script with that answer rather than a second postmaster. Both finish by
-asking the server itself, `pg_is_in_recovery()`, so the role of the server on the port is read rather
-than assumed — a standby reports that it is in recovery, a primary that it is not. `pg_ctl`'s own
-output is written to a file under `%TEMP%` rather than to the console, because the postmaster
-inherits whatever handles `pg_ctl` was given and a console handle left open keeps the caller's
-output from ever closing.
+All of them are safe to run twice: `pg_isready` is asked before anything is started or stopped, and a
+port that already answers (or already does not) ends the script with that answer rather than a second
+postmaster or a `pg_ctl` error. The starters finish by asking the server itself,
+`pg_is_in_recovery()`, so the role of the server on the port is read rather than assumed — a standby
+reports that it is in recovery, a primary that it is not. The stoppers finish with the readiness
+line, `pg_isready` against the port, and treat a port that still answers as a failure: a second
+postmaster, or a child that kept the socket, is the state they exist to catch rather than to report
+as success. The pooler's stopper checks the PID against `tasklist` before closing it, so a port held
+by another program is refused with that program named, and it forces the process only after a
+polite close has gone unanswered. `pg_ctl`'s own output is written to a file under `%TEMP%` rather
+than to the console, because the postmaster inherits whatever handles `pg_ctl` was given and a
+console handle left open keeps the caller's output from ever closing.
 
-Neither script registers anything at boot: the primary has no service pointing at this tree, so
+The order is the dependency's: start primary, then standby, then pooler; stop pooler, then standby,
+then primary. Nothing enforces it — each script stops what it names — and the reverse order is what
+keeps the standby's log from a walreceiver retrying a primary that has gone.
+
+None of these scripts registers anything at boot: the primary has no service pointing at this tree, so
 after a reboot it starts only when the script is run, and the standby behaves the same way.
 
-Both are copied into this package, at `scripts/servers-startup/`, where they read the directory they
-sit beside from a gitignored machine file instead of from their own location — a copy in this
-repository cannot be beside the data directories, and the pooler's own build and start scripts are
-in the same folder.
+All of them are copied into this package, at `scripts/servers-startup/`, where they read the
+directory they sit beside from a gitignored machine file instead of from their own location — a
+copy in this repository cannot be beside the data directories, and the pooler's own build and start
+scripts are in the same folder.
 
 ## 2. The pgcat checkout
 
@@ -381,6 +394,19 @@ logic:
   `Unsupported authentication mechanism: 3`. Two `pg_hba.conf` lines above the `password` ones, in
   both the primary's and the standby's file, offer `scram-sha-256` to `simple_user` on `some_db`;
   `pg_reload_conf()` applies them without a restart.
+
+One command runs the three in order, for this machine's directories and with the checks that make
+the order safe: `pwsh -File scripts/setup-pgcat.ps1`. It reads `servers.local.cmd`, reports a port
+Windows has reserved before anything tries to bind one, and compares `scripts/servers-startup/pgcat.toml`
+with the rows this rig needs — 5433, the standby as the replica, `primary_reads_enabled = false`, the
+`simple_user` / `some_db` pair the hba rules name — before it starts anything, so a config edit is
+found before a build is paid for. The two servers come up next and are read back by their ports,
+the rules and the build run against that live pair, and the pooler is started last, printing its own
+`SHOW POOLS`. Running it twice is safe: a server already up says so, the rules are added once, the
+patched crates are reused, and the build is skipped while the pooler holds its own binary open —
+cargo cannot replace a file in use. `scripts/teardown-pgcat.ps1` is the way back down: the same
+machine file, then the pooler, the standby and the primary in that order, and the three ports asked
+with `pg_isready` at the end, where one that still answers fails the run.
 
 ### 2.6 The number 5433, and why the standby does not hold it
 

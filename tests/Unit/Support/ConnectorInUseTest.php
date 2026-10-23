@@ -290,6 +290,35 @@ final class ConnectorInUseTest extends TestCase
      *     resolver_applied: bool|null,
      * }
      */
+    /**
+     * A read/write pair keeps its settings inside its halves, and the reading still builds it.
+     *
+     * `database`, `host`, `username` and `password` live in `read` and `write` rather than at the top
+     * level — the base block holds nothing but `driver`. Dropping the two lists to stay off the
+     * replica picker dropped the *settings* with them, and the framework's own
+     * `createSingleConnection()` then read a missing `database`: an installation configured
+     * correctly was reported as one whose connection cannot be built.
+     */
+    public function test_a_connection_whose_settings_live_in_its_read_and_write_halves_is_built(): void
+    {
+        $config = new Repository(['database' => [
+            'default' => 'pooler',
+            'connections' => [
+                'pooler' => [
+                    'driver' => 'pgsql',
+                    'read' => [['host' => ['10.0.0.1'], 'database' => 'app', 'username' => 'u', 'password' => 'p']],
+                    'write' => [['host' => ['10.0.0.2'], 'database' => 'app', 'username' => 'u', 'password' => 'p']],
+                    'sticky' => true,
+                ],
+            ],
+        ]]);
+
+        $reading = ConnectorInUse::resolve($config, $this->container());
+
+        $this->assertNull($reading['connection_error'], 'the half the settings live in is not decoration');
+        $this->assertSame('pgsql', $reading['connection_driver']);
+    }
+
     private function read(array $drivers): array
     {
         return ConnectorInUse::resolve($this->config($drivers), $this->container());

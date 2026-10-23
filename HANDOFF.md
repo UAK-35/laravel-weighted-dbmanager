@@ -111,21 +111,21 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 678.8s
-      recorded 2026-10-22, PHP 8.4.26
-      syntax     PASS    18.5s  168 files, no syntax errors
-      ast        PASS     2.3s  168 files parsed
-      writeback  PASS     0.6s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     3.2s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.0s  20 platform requirements satisfied
-      interpreter PASS     0.1s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 782.5s
+      recorded 2026-10-23, PHP 8.4.26
+      syntax     PASS    22.3s  168 files, no syntax errors
+      ast        PASS     3.2s  168 files parsed
+      writeback  PASS     0.8s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     4.4s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     3.7s  20 platform requirements satisfied
+      interpreter PASS     0.2s  PHP 8.4.26 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
-      yaml       PASS     2.1s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     0.8s  56 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.0s  10444 prose line(s) in 35 record(s), no fused sentence; the detector agreed w…
-      phpstan    PASS     6.9s  [OK] No errors
-      pint       PASS     6.8s  PASS … 169 files
-      tests      PASS   634.4s  Tests: 1646, Assertions: 11087, Skipped: 10.
+      yaml       PASS     2.5s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     0.9s  56 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.1s  10444 prose line(s) in 35 record(s), no fused sentence; the detector agreed w…
+      phpstan    PASS     8.4s  [OK] No errors
+      pint       PASS     7.5s  PASS … 168 files
+      tests      PASS   728.5s  Tests: 1646, Assertions: 11073, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
@@ -185,8 +185,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=7c81bfc
-  --> exit 1: the inventory is out of step with the tree at 7c81bfc
+php bin/inventory.php --check --at=b6f2db7
+  --> exit 1: the inventory is out of step with the tree at b6f2db7
       files.tsv: 2 line(s) stale
       methods.tsv: 3 line(s) stale
       surface.tsv: 7 line(s) stale
@@ -218,9 +218,9 @@ transcript of the records and section 2's table and the listing under it. Its ro
 checkout has that the register does not carry (`git ls-files --cached --others --exclude-standard`
 minus `git ls-tree -r` of the register), one row apiece, with the prose column declared in
 `tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. Only a file no
-commit carries is on it, which is why this take's table is its header rows and nothing else: the batch
-it lands was committed before it, and a tracked path's modification is not a file the register lacks,
-while a file the register already carries is a file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
+commit carries is on it, which is why this take's table names the setup and teardown scripts and the
+three stop scripts it adds, and the issue record beside them, and nothing a commit already carries: a tracked path's modification is not a file
+the register lacks, while a file the register already carries is a file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
 and one from the recorded run — and the note's own guard renders the same five and asserts the file
 says what they say, so a re-take cannot state a set of files, a count or a listing the tree does not
 have. A file the register does not carry and that has no line declared for it is refused by name
@@ -231,6 +231,11 @@ the tree.
 | File | What it is |
 |---|---|
 | `docs/issues/issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md` | the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in |
+| `scripts/servers-startup/stop-pgcat.bat` | the pooler's stop script: the PID owning `127.0.0.1:5433` out of netstat, checked against `tasklist` before it is touched, closed politely and forced only when it does not answer, then the port and `pg_isready` read back as silent |
+| `scripts/servers-startup/stop-primary.bat` | the primary's stop script: `pg_ctl -m fast` on `pgsql179\data`, an already-silent port answered rather than errored, and the port asked again afterwards so a second postmaster fails the run instead of passing it |
+| `scripts/servers-startup/stop-replica.bat` | the standby's stop script: `pg_ctl -m fast` on `standby179`, nothing to stop when the port is already silent, and `pg_isready` asked again afterwards so a leftover listener is a failure |
+| `scripts/setup-pgcat.ps1` | the one command that reproduces this rig: the machine file read once, Windows' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, and the pooler started last |
+| `scripts/teardown-pgcat.ps1` | the setup script's counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
@@ -247,10 +252,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `7c81bfc` — *feat: /health/db publishes the age of the audit record's probe stamp* |
+| HEAD | `b6f2db7` — *docs: the note is re-taken at 7c81bfc, and section 3 weighs the probe stamp's age* |
 | `origin/dev` | `bb28128` — *Release v0.2.0-alpha10* |
-| Unpushed | 3 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 1, feat 1 |
+| Unpushed | 4 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 1, docs 2, feat 1 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -279,9 +284,10 @@ commit the release made is one a consumer can fetch. This note is the commit *af
 and it travels on the push that follows.
 
 <!-- handoff:log -->
-The three most recent are the ones a reader is most likely to be standing in the middle of:
+The four most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
+b6f2db7  docs: the note is re-taken at 7c81bfc, and section 3 weighs the probe stamp's age
 7c81bfc  feat: /health/db publishes the age of the audit record's probe stamp
 fc9e9d8  docs: the note is re-taken at c081def, and section 3 says what a release leaves behind
 c081def  chore: the log-and-record pair is read back by one command
