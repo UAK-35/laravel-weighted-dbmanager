@@ -45,19 +45,18 @@
 
 ### Fixed
 
-- **A read/write connection is buildable again, so the `connector` row and the boot finding stop
-  reporting a correctly configured installation.** `ConnectorInUse::connection()` dropped a
-  connection's `read` and `write` lists before building it — deliberately, because the class a
-  connection resolves to does not depend on which replica is chosen, and building the pair would
-  make a preflight pick one and open a socket. But the lists are where a read/write connection keeps
-  its settings: `database`, `host`, `username` and `password` live inside them, and the base block
-  holds nothing but `driver`. The build then failed on the first key the framework's own
-  `createSingleConnection()` reads — `Undefined array key "database"` — and both surfaces reported
-  it: `db:doctor`'s `connector` row, and `swrr.connector.unusable` on every boot. The settings of
-  one half are taken first now (the `write` half, which is the connection rather than a replica
-  pick, with `read` used only when there is no `write`), and both shapes the framework accepts are
-  read: a single map, and a list of configurations. A test declares a connection whose settings live
-  entirely in its halves, so the lists cannot be dropped again.
+- **The connector row no longer calls a read/write connection unbuildable.** `ConnectorInUse` builds
+  the followed connection to name the class it resolves to, and it dropped the `read` and `write`
+  lists before building — deliberately, so a question about a *class* never picks a replica and
+  opens a socket. But on a connection written as a read/write pair those two halves are where
+  `database`, `host`, `username` and `password` live, so what reached the factory held `driver`
+  alone, the framework's `createSingleConnection()` read a missing `database`, and both surfaces
+  reported a correctly configured installation as one that cannot connect: the `connector` row as a
+  failure, and `swrr.connector.unusable` as a warning on every boot. The settings are now taken out
+  of the write half — the read half only when there is no write half — before the build, in either
+  of the framework's shapes: one map, or a list of them. What the row *asks* is unchanged; only what
+  it hands the factory is. `ConnectorInUseTest` holds a connection whose settings live entirely in
+  its halves, so the reading cannot drop them again.
 
 ## 0.2.0-alpha10 - 2026-10-22
 
