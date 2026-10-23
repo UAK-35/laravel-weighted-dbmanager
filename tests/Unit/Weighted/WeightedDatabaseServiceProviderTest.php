@@ -34,6 +34,7 @@ use Uak35\WeightedDbManager\Tests\Support\FakeSupervisor;
 use Uak35\WeightedDbManager\Providers\WeightedDatabaseServiceProvider;
 use Uak35\WeightedDbManager\Support\ActiveConnection;
 use Uak35\WeightedDbManager\Support\BootAudit;
+use Uak35\WeightedDbManager\Support\ProbeStamp;
 use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 use Uak35\WeightedDbManager\Tests\Support\FakeRedis;
 use Uak35\WeightedDbManager\Tests\TestCase;
@@ -632,6 +633,11 @@ use Uak35\WeightedDbManager\Tests\TestCase;
      * only honest summary is "nothing is known to be standing": `severity` is `none` and
      * the counts are zero, while `available` and `error` are what say the audit is not
      * reporting at all. A consumer that wants to page on *that* has a field for it.
+     *
+     * `store_probe` is present and says `applicable: false`, which is the same division one
+     * level down: there is no record to age, so the block carries every key with nothing judged
+     * rather than vanishing, and `not_judged` is the sentence that says why. A rule built on
+     * `stale` therefore reads `null` here and pages nobody, instead of failing on a missing key.
      */
     public function test_the_audit_block_makes_no_claim_when_there_is_no_record_to_read(): void
     {
@@ -661,6 +667,18 @@ use Uak35\WeightedDbManager\Tests\TestCase;
                 'counts' => ['error' => 0, 'warning' => 0],
                 'findings' => [],
                 'error' => 'no live reading of the audited settings is configured here',
+            ],
+            'store_probe' => [
+                'applicable' => false,
+                'last_probed_at' => null,
+                'age_seconds' => null,
+                'stale' => null,
+                'stale_after_seconds' => 0,
+                'missed_cadences' => ProbeStamp::MISSED_CADENCES,
+                'probe_seconds' => 0,
+                'interval_minutes' => 1,
+                'reason' => null,
+                'not_judged' => 'no boot audit is registered for this application, so there is no record to read',
             ],
         ], $payload['audit']);
     }
