@@ -4,6 +4,26 @@
 
 ### Added
 
+- **The gate runs on a commit this checkout is not on, so refreshing a release's record no longer
+  needs a hand-built checkout.** `php bin/checks.php --at=REF` resolves the ref, checks it out with
+  `git worktree add --detach` under `build/checks-at-<sha>`, and runs the same gate there on the
+  interpreter the machine record names; this checkout's files, index and branch are not touched. A
+  worktree gets tracked files only, so the three untracked things the gate needs are prepared rather
+  than assumed: `vendor/` is *copied*, never linked, because a link resolves to the real path and
+  the autoloader would then load this checkout's classes into a run about another tree — a green
+  report on the wrong tree, which is the one failure a gate cannot afford; `composer.phar` is copied
+  when this checkout has one, so the schema and platform checks meet the same Composer instead of
+  skipping; and the machine record is written from this machine's, with `package.dir` moved into the
+  worktree and its `tarball` rows kept only where the commit really has the path, since the note's
+  environment table is held to those rows. With `--record`, a green run's `.agents/gate.json` is
+  copied back and the note's `gate` block is re-rendered from it; a red run is printed with its own
+  exit code and adopted by nothing, because a note is a claim that the gate passed. The worktree is
+  removed in a `finally` — registration and directory both — so an interrupted run is reclaimed by
+  the next one instead of making `worktree add` refuse its path. `--list` is passed on, so
+  `--at=REF --list` answers what that commit's gate would run rather than dropping the flag and
+  starting the run, and `--record` with `--only` is refused before the copy of `vendor/` rather than
+  after it.
+
 - **The setup script walks the routing through the pooler before it calls the rig up, so a pooler that
   is listening and sending reads to the primary fails instead of passing.** `setup-pgcat.ps1` checked
   rows rather than behavior: it compared `pgcat.toml` with what this rig needs, read three ports back,

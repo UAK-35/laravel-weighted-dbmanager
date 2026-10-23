@@ -269,6 +269,16 @@ require __DIR__ . '/interpreter.php';
 // reached a `php` to type it with.
 redispatch($root);
 
+// The record is what the handoff note quotes as *the* gate, so a subset is not a run it can
+// describe: a note whose block listed three checks would be claiming the others were not there.
+// Asked here, above `--at`, so the refusal is the same one whether the subset is about this tree or
+// another: a worktree run that reached the child's own refusal would have paid for the copy of
+// `vendor/` first, which is the minute this line exists to save.
+if ($options['record'] && $options['only'] !== []) {
+    fwrite(STDERR, '--record writes the whole gate, and --only asks for a subset: run it without --only.' . PHP_EOL);
+    exit(2);
+}
+
 // `--at` gates a commit this checkout is not on, so it is answered here: after the hand-over,
 // because the run it starts is the same gate on the recorded interpreter, and before a single
 // check, because none of them is about this tree. gateAt() explains the rest.
@@ -442,13 +452,6 @@ if ($options['audit']) {
             $root,
         ),
     ];
-}
-
-// The record is what the handoff note quotes as *the* gate, so a subset is not a run it can
-// describe: a note whose block listed three checks would be claiming the others were not there.
-if ($options['record'] && $options['only'] !== []) {
-    fwrite(STDERR, '--record writes the whole gate, and --only asks for a subset: run it without --only.' . PHP_EOL);
-    exit(2);
 }
 
 if ($options['only'] !== []) {
@@ -825,14 +828,17 @@ function gateAt(string $root, array $options): int
  * Built from the parsed options rather than from `$argv`, so a flag is passed on because the run was
  * asked for it rather than because it was spelled the way the caller's shell left it.
  *
- * @param array{verbose: bool, audit: bool, require-all: bool, record: bool, only: list<string>} $options
+ * `--list` is passed on like the rest: `--at=<ref> --list` answers what that commit's gate would
+ * run, rather than dropping the request on the floor and gating the tree for a quarter of an hour.
+ *
+ * @param array{verbose: bool, audit: bool, require-all: bool, list: bool, record: bool, only: list<string>, at: string|null} $options
  * @return list<string>
  */
 function gateCommand(string $worktree, array $options): array
 {
     $command = [PHP_BINARY, $worktree . '/bin/checks.php'];
 
-    foreach (['verbose' => '--verbose', 'audit' => '--audit', 'require-all' => '--require-all', 'record' => '--record'] as $option => $flag) {
+    foreach (['verbose' => '--verbose', 'audit' => '--audit', 'require-all' => '--require-all', 'list' => '--list', 'record' => '--record'] as $option => $flag) {
         if ($options[$option]) {
             $command[] = $flag;
         }
