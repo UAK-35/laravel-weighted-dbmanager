@@ -912,8 +912,8 @@ final class Handoff
             'read' => 'sha256:c2bc50336071d38e8c1eeeba9c25bc3c5158b754d80ff629c31bf4e510355f29',
         ],
         'scripts/download-php84-extensions.ps1' => [
-            'words' => 'the 8.4 sibling of `scripts/download-php85-extensions.ps1`: the same eight pinned extension builds and the same declaration of thread safety, build environment and architecture, with the PHP line pinned to `8.4` and `redis` to `6.2.0` — the two libraries whose 8.4 builds differ from the 8.5 pins',
-            'read' => 'sha256:cdcd7f1869cdf1295fbe2592183dc4969d437bdc176b5ee06a9e8fc31d5e3c0c',
+            'words' => 'the 8.4 sibling of `scripts/download-php85-extensions.ps1`: the same eight pinned extension builds and the same declaration of thread safety, build environment and architecture, with the PHP line pinned to `8.4`, and the two libraries whose 8.4 builds differ from the 8.5 pins — `brotli` at `0.18.3` and `redis` at `6.2.0`',
+            'read' => 'sha256:a5e904e13e033b4c3343f30cee559eb39f30537b34fe39d11be296c958cb3824',
         ],
         'scripts/download-php85-extensions.ps1' => [
             'words' => 'the script that fetches and unpacks the eight pinned PHP extension builds for Windows — brotli, igbinary, lz4, memcached, pcov, protobuf, redis and zstd, seven from PECL\'s `windows` builds and one from the `php-ext-lz4` project\'s own GitHub release: the PHP line, thread safety, build environment and architecture are declared once at the top with a version per library, every URL is assembled from them, the archives land in the gitignored `ext/downloads/` and each one\'s `.dll` and `.ini` members are unpacked into the gitignored `ext/` that PHP loads from, the extension\'s own library named `php_<name>.dll` whatever the archive called it and a library the build named otherwise left alone, with an archive that is already there left alone unless it is forced',

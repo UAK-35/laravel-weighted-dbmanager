@@ -31,7 +31,7 @@ php bin/release.php --weigh --branch=dev --dry-run  # what a release would do ri
 Every number below that the register holds — sections 2 and 3 — was read off this machine when thisnote was re-taken, on 2026-10-22, from the refs this checkout holds; the remote was asked directly (`git ls-remote`, which named the same commit the local `origin/dev` ref does) rather than trusted
 from the local ref. Section 1 was re-taken on 2026-10-22, the date above, and it is the one part of
 this file that describes *now* rather than the commit it is read against — which this time means the
-pending set is empty and the batch this note is taken over is the register's own commit, `98c80df`, so
+pending set is empty and the batch this note is taken over is the register's own commit, so
 it is the paragraph under that table rather than a row of it that names the work.
 
 ---
@@ -89,15 +89,12 @@ and the push that publishes it comes after. The version in each row moves and th
 left as it was, the three ways a note can be unmovable are refusals before anything is written, and the
 failing sentence a release's own commit has landed red on twice is section 3.
 
-**All of it but the batch above is committed, and none of it is pushed.** The nineteen commits past `origin/dev` are
-section 2's listing rather than a list restated here: the three records of application-side work with the
-plan beside them, the third recording skill, the prose-number guard's completeness half, the
-quoted-records guard, the doctor record's citation, the connector row's tests, the Laravel plugin's
-settings, the handoff note's one-command blocks, the note taken at the alpha7 commits, the two
-`/health/db` readings, the pooler's mode record with the finding it retired, the port plan's status
-guard, the published config's fresh-install sentence, the payload's key tables read as a set, the Unreleased section's two
-`### Fixed` headings merged into one, and this note's two tag readings — each with the changelog entry
-that weighs it.
+**All of it but the batch above is committed, and none of it is pushed.** The eight commits past `origin/dev` are
+section 2's listing rather than a list restated here: four of them move the notes — the routing the
+setup script proves, the connector entry said again, the gate's `--at` hand-over, and the schedule
+switch the published config stopped declaring — and four are the readings those changes needed, the
+cookbook's third rule with its guard, the release fixture's missing script, the audit block's
+`store_probe`, and the boot-stamp test that no longer reads the clock twice.
 
 The gate is green with this note in the tree, and the run that says so is the one recorded under
 `.agents/gate.json`: the summary and the per-check timings below are that run's, written by
@@ -185,8 +182,8 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=7c81bfc
-  --> exit 1: the inventory is out of step with the tree at 7c81bfc
+php bin/inventory.php --check --at=7d0eea8
+  --> exit 1: the inventory is out of step with the tree at 7d0eea8
       files.tsv: 2 line(s) stale
       methods.tsv: 3 line(s) stale
       surface.tsv: 7 line(s) stale
@@ -230,18 +227,6 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/issues/issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md` | the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in |
-| `docs/php-windows-extensions.md` | the record for the two per-line extension scripts: the pin as four shared variables and one version per library, the table of the eight libraries with both lines' versions, which of them come from PECL and which from a project's own release, the two folders each script writes and the rename rule for the extension's own library, what has to be true of `php.ini` before anything loads, and what the scripts deliberately do not do |
-| `scripts/download-composer.bat` | the installer-route batch script this repository already had: it copies Composer's `installer` with `php -r copy(...)`, checks it against a sha384 written into the file, runs it, and deletes it — the interpreter resolved from the machine record rather than from a drive letter, which is the arrangement the phar script keeps and the pasted constant that it replaces |
-| `scripts/download-composer.ps1` | the script that fetches the latest `composer.phar` and verifies it against the checksum Composer publishes beside the release — the version resolved from the live catalogue, the hash read from the release's own directory rather than written into the script, the bytes compared before the file is installed and a mismatch removed rather than installed — which is what it does instead of the installer route in `scripts/download-composer.bat` with its pasted sha384 |
-| `scripts/download-php84-extensions.ps1` | the 8.4 sibling of `scripts/download-php85-extensions.ps1`: the same eight pinned extension builds and the same declaration of thread safety, build environment and architecture, with the PHP line pinned to `8.4` and `redis` to `6.2.0` — the two libraries whose 8.4 builds differ from the 8.5 pins |
-| `scripts/download-php85-extensions.ps1` | the script that fetches and unpacks the eight pinned PHP extension builds for Windows — brotli, igbinary, lz4, memcached, pcov, protobuf, redis and zstd, seven from PECL's `windows` builds and one from the `php-ext-lz4` project's own GitHub release: the PHP line, thread safety, build environment and architecture are declared once at the top with a version per library, every URL is assembled from them, the archives land in the gitignored `ext/downloads/` and each one's `.dll` and `.ini` members are unpacked into the gitignored `ext/` that PHP loads from, the extension's own library named `php_<name>.dll` whatever the archive called it and a library the build named otherwise left alone, with an archive that is already there left alone unless it is forced |
-| `scripts/servers-startup/stop-pgcat.bat` | the pooler's stop script: the PID owning `127.0.0.1:5433` out of netstat, checked against `tasklist` before it is touched, closed politely and forced only when it does not answer, then the port and `pg_isready` read back as silent |
-| `scripts/servers-startup/stop-primary.bat` | the primary's stop script: `pg_ctl -m fast` on `pgsql179\data`, an already-silent port answered rather than errored, and the port asked again afterwards so a second postmaster fails the run instead of passing it |
-| `scripts/servers-startup/stop-replica.bat` | the standby's stop script: `pg_ctl -m fast` on `standby179`, nothing to stop when the port is already silent, and `pg_isready` asked again afterwards so a leftover listener is a failure |
-| `scripts/setup-pgcat.ps1` | the one command that reproduces this rig: the machine file read once, Windows' reserved ports reported before anything binds one, the pool rows checked against `pgcat.toml` by name, the two servers started and read back by their ports, the hba rules and the patched-crate build run against the live pair, the pooler started last, and the routing walked through it before the rig is called up — a read that must answer on the standby, a write that must answer on the primary, and either one landing elsewhere failing the run |
-| `scripts/teardown-pgcat.ps1` | the setup script's counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run |
-| `tests/Unit/Release/EntryVerdictTest.php` | the guard that holds `bin/entry.php` to its verdicts: a note a release published, one no tag carries, a tag that carries the commit with the note still under `## Unreleased`, a bullet reworded after it shipped, a release commit read as the promotion it is, a tag whose tree has no changelog, and the usage errors — one test per state the script tells apart |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
@@ -258,10 +243,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `7c81bfc` — *feat: /health/db publishes the age of the audit record's probe stamp* |
-| `origin/dev` | `bb28128` — *Release v0.2.0-alpha10* |
-| Unpushed | 3 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | chore 1, docs 1, feat 1 |
+| HEAD | `7d0eea8` — *fix: the published copy leaves the schedule switch undeclared again* |
+| `origin/dev` | `a99c22b` — *chore: a copy the agent harness left behind is not work this repository carries* |
+| Unpushed | 8 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | docs 2, feat 2, fix 1, test 3 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -290,12 +275,17 @@ commit the release made is one a consumer can fetch. This note is the commit *af
 and it travels on the push that follows.
 
 <!-- handoff:log -->
-The three most recent are the ones a reader is most likely to be standing in the middle of:
+The eight most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
-7c81bfc  feat: /health/db publishes the age of the audit record's probe stamp
-fc9e9d8  docs: the note is re-taken at c081def, and section 3 says what a release leaves behind
-c081def  chore: the log-and-record pair is read back by one command
+7d0eea8  fix: the published copy leaves the schedule switch undeclared again
+c5f7f1e  feat: --at answers --list, and refuses --record with --only before it copies vendor/
+41a248c  docs: the connector note opens on what the installation saw, not on what the class did
+c5e420f  docs: the cookbook's third rule pages an audit that stopped, and the guard runs it
+8510c59  test: the audit block's store_probe is pinned where there is no record to read
+87e2634  test: the release fixture carries bin/entry.php, so the entry guard has a script to run
+3fa7922  feat: the setup script proves the routing through the pooler instead of printing the queries
+a2f73d4  test: the boot stamp is read once, so the test cannot step out of its own window
 ```
 <!-- /handoff:log -->
 
@@ -327,8 +317,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10` |
 | The latest of them | `v0.2.0-alpha10` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 1 entry — 1 added, 0 fixed, 0 changed |
-| The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the probe stamp's age on `/health/db`, with no `### Removed` entry beside it |
+| `## Unreleased` at the basis | 5 entries — 3 added, 2 fixed, 0 changed |
+| The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the gate's `--at`, the setup script's routing and the probe stamp's age on `/health/db`, with no `### Removed` entry beside them |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -336,8 +326,9 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are the `### Added`,
 `### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and at this basis the
-section carries one of them: the `### Added` entry for `audit.store_probe`, which is what
-`bin/weighing.php` reads as `minor`. The section stands where `v0.2.0-alpha10`'s release left it —
+section carries two of them: `### Added`, with the gate's `--at`, the setup script's routing and
+`audit.store_probe`, and `### Fixed`, with the connector reading and the schedule switch. The loudest
+of the two is `### Added`, which is what `bin/weighing.php` reads as `minor`. The section stands where `v0.2.0-alpha10`'s release left it —
 that commit promoted the doctor's `probe stamp` row under `### Added` and the carry a boot writes
 beside a record it cannot write under `### Fixed`, and wrote the bare heading this change's note
 went under. What no release holds is the three commits above that tag — `c081def`, the command that
@@ -484,7 +475,7 @@ repository is not an installation change until each of them happens.
 
 | Field | Working here |
 |---|---|
-| PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.26). It is **not on `PATH`** in the shell, so a bare `php` does not resolve — which no longer decides which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
+| PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.27). It is **not on `PATH`** in the shell, so a bare `php` does not resolve — which no longer decides which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
 | Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy,wdm-issue,wdm-investigation,wdm-plan}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
