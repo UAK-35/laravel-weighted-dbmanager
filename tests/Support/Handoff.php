@@ -919,6 +919,10 @@ final class Handoff
             'words' => 'the script that fetches and unpacks the eight pinned PHP extension builds for Windows — brotli, igbinary, lz4, memcached, pcov, protobuf, redis and zstd, seven from PECL\'s `windows` builds and one from the `php-ext-lz4` project\'s own GitHub release: the PHP line, thread safety, build environment and architecture are declared once at the top with a version per library, every URL is assembled from them, the archives land in the gitignored `ext/downloads/` and each one\'s `.dll` and `.ini` members are unpacked into the gitignored `ext/` that PHP loads from, the extension\'s own library named `php_<name>.dll` whatever the archive called it and a library the build named otherwise left alone, with an archive that is already there left alone unless it is forced',
             'read' => 'sha256:a44f9c66bc1784387a15c20f9fa5ed4664df18ab9159ac88d437b57f252e16b1',
         ],
+        'docs/phpstan-memory.md' => [
+            'words' => 'the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers\' limit was the machine\'s rather than the gate\'s, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix',
+            'read' => 'sha256:94d1a5826c320df2655aee44f1020674acc07df8bda71a5d38626278d3366fe2',
+        ],
         // @pending-descriptions-end
     ];
 

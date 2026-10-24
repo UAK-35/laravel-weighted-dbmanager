@@ -426,8 +426,13 @@ $checks = [
     'phpstan' => [
         'title' => "Static analysis (phpstan, level {$level})",
         'skip' => is_file($tools['phpstan']) ? null : $manifest['phpstan']['package'] . ' is not installed',
+        // The limit is the gate's rather than the host's: phpstan's parallel workers inherit the
+        // interpreter's `php.ini`, so without this the row passes on a generous machine and dies —
+        // reporting its own crash as a failed check — on a modest one. 512M clears the peak of a
+        // cold, parallel, level-max run over src/ without being a number nothing can reach.
+        // See `docs/phpstan-memory.md`.
         'run' => static fn (): array => runCommand(
-            [PHP_BINARY, $tools['phpstan'], 'analyse', '--no-progress', '--no-ansi'],
+            [PHP_BINARY, $tools['phpstan'], 'analyse', '--no-progress', '--no-ansi', '--memory-limit=512M'],
             $root,
         ),
     ],

@@ -192,7 +192,7 @@ php bin/inventory.php --check
   --> exit 1: the inventory is out of step with the tree
       files.tsv: 1 line(s) stale
       methods.tsv: 2 line(s) stale
-      surface.tsv: 6 line(s) stale
+      surface.tsv: 7 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -227,6 +227,7 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
+| `docs/phpstan-memory.md` | the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers' limit was the machine's rather than the gate's, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
