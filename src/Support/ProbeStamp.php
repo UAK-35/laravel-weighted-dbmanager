@@ -149,8 +149,12 @@ final class ProbeStamp
             !$status['writable'] => self::UNWRITABLE,
             !$storeIsRedis => self::IN_PROCESS,
             !$entry['enabled'] => self::UNARMED,
-            !$containerStamped => self::NO_BOOT_STAMP,
+            // Before the container's own state, and this order is the reading: a record holding no
+            // stamp at all is a fresh installation whatever the container has done, and that is a
+            // stronger statement than "nobody measured the container's life". A record that *does*
+            // carry a stamp in a container that never recorded a boot is the state below.
             $probedAt === null || $age === null => self::NO_STAMP,
+            !$containerStamped => self::NO_BOOT_STAMP,
             default => null,
         };
 

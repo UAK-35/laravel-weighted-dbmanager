@@ -64,7 +64,8 @@
         "preferred-install": "dist",
         "allow-plugins": {
             "pestphp/pest-plugin": true
-        }
+        },
+        "process-timeout": 1800
     },
     "extra": {
         "laravel": {

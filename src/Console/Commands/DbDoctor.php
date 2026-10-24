@@ -3771,10 +3771,11 @@ class DbDoctor extends Command
      *   finds a timestamp minutes old next to a row saying it had not been written for a week.
      *
      * WHAT IT IS NOT JUDGED ON, AND WHY EACH IS A PASS
-     *   A stamp is only expected to move where something is expected to move it, so the five states
+     *   A stamp is only expected to move where something is expected to move it, so the six states
      *   that remove the expectation are named instead of being counted as a healthy record — probing
      *   switched off, a record that cannot be written, an in-process store, a schedule that is not
-     *   armed, and a record with no stamp at all. The states are `ProbeStamp::read()`'s, and so is
+     *   armed, a record with no stamp at all, and a container that recorded no boot time of its own.
+     *   The states are `ProbeStamp::read()`'s, and so is
      *   the tolerance (the wider of the probe interval and the schedule's cadence, five misses
      *   over), because `/health/db` publishes the same age as `audit.store_probe`: one rule, two
      *   readers, and neither can widen its window without the other. This row owns the sentences —
@@ -3801,15 +3802,24 @@ class DbDoctor extends Command
 
         $entry = FlipSchedule::options($this->laravel->make(Repository::class));
 
+        // The container's own life, which is what the record's age would be placed against. A
+        // flipper that cannot be built cannot say this container never recorded a boot, so the age
+        // is judged rather than excused — `pgcat gate` is the row that reports the flipper itself,
+        // and excusing an age on that failure would be the silent pass this row exists to remove.
+        $containerStamped = true;
+
+        try {
+            $containerStamped = $this->laravel->make(PgcatConfigFlipper::class)->window()->bootedAt() !== null;
+        } catch (Throwable) {
+            // Judged, not excused: see above.
+        }
+
         $reading = ProbeStamp::read(
             $audit->storeProbeStamp(),
             $status,
             $store['effective'] === 'redis',
             $entry,
-            // The container's own life: the beat is not judged without a boot stamp, and the age of
-            // the record cannot be placed against a life nobody measured — so this row and the
-            // payload answer the same state the same way.
-            $this->laravel->make(PgcatConfigFlipper::class)->window()->bootedAt() !== null,
+            $containerStamped,
         );
 
         $minutes = $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes';
@@ -3851,6 +3861,15 @@ class DbDoctor extends Command
                     .'probed is a fresh installation rather than a stale one',
                     $status['file'],
                 ));
+
+            case ProbeStamp::NO_BOOT_STAMP:
+                return $this->row(
+                    'probe stamp',
+                    self::PASS,
+                    'not judged: this container recorded no boot time (swrr.pgcat.boot_file is not there), so no '
+                    .'life was measured for the age of the record to be placed against — the `schedule beat` row '
+                    .'reads the same stamp and is not judged without it either',
+                );
         }
 
         $age = (int) $reading['age_seconds'];

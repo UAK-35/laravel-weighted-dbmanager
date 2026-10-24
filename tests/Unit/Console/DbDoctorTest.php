@@ -763,7 +763,7 @@ class DbDoctorTest extends TestCase
     public function test_the_probe_stamp_row_fails_when_the_record_has_not_been_written_for_five_cadences(): void
     {
         $this->bindRedis(reachable: true);
-        $this->armPgcat();
+        $this->armPgcat(['boot_file' => $this->bootStamp()]);
 
         $record = $this->tempDir() . '/audit.json';
         $this->writeStamp($record, time() - 3600);
@@ -790,7 +790,7 @@ class DbDoctorTest extends TestCase
     public function test_the_probe_stamp_row_passes_within_the_tolerance(): void
     {
         $this->bindRedis(reachable: true);
-        $this->armPgcat();
+        $this->armPgcat(['boot_file' => $this->bootStamp()]);
 
         $record = $this->tempDir() . '/audit.json';
         $this->writeStamp($record, time() - 240);
@@ -811,8 +811,9 @@ class DbDoctorTest extends TestCase
      * A stamp is only late where something is due to move it, so each of these removes the
      * expectation instead of leaving a healthy-looking row: probing switched off writes no stamp at
      * all, an unwritable record cannot move one, an in-process store has nothing to probe, an
-     * installation with no flip schedule has no run that is guaranteed to boot it, and a record no
-     * boot has probed is a fresh installation. The row says which one it is, because "not judged"
+     * installation with no flip schedule has no run that is guaranteed to boot it, a record no boot
+     * has probed is a fresh installation, and a container that recorded no boot time has no life for
+     * the record's age to be placed against. The row says which one it is, because "not judged"
      * and "written, and it is well" must not be the same silence.
      *
      * @param list<string> $fragments
@@ -827,7 +828,12 @@ class DbDoctorTest extends TestCase
         // than named would fail rather than pass by accident.
         $this->writeStamp($record, $state === 'no stamp' ? null : time() - 3600);
 
-        if ($state !== 'schedule not armed') {
+        if ($state === 'no boot stamp') {
+            // A stamp path that is deliberately not there, spelled out rather than left to the shipped
+            // default: the default is the machine's temp directory, and another run may have left a
+            // file in it, which would make this state un-buildable rather than absent.
+            $this->armPgcat(['boot_file' => $this->tempDir() . '/no-such-boot-stamp']);
+        } elseif ($state !== 'schedule not armed') {
             $this->armPgcat();
         } else {
             config()->set('db-manager.swrr.pgcat', ['enabled' => false]);
@@ -877,6 +883,10 @@ class DbDoctorTest extends TestCase
             'no stamp' => ['no stamp', [
                 'no stamp in',
                 'a record that has never been probed is a fresh installation rather than a stale one',
+            ]],
+            'no boot stamp' => ['no boot stamp', [
+                'not judged: this container recorded no boot time',
+                'no life was measured for the age of the record to be placed against',
             ]],
         ];
     }
@@ -4707,6 +4717,21 @@ class DbDoctorTest extends TestCase
             'findings' => [],
             'store_probed_at' => $stamp,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * A container that recorded a boot a moment ago, as the path the window reads it from.
+     *
+     * A stamp is only judged where a life was measured to place it against, so every fixture that
+     * means the age to be judged needs one: without it the reading is the container's state and the
+     * verdict is "not judged", whatever the record holds.
+     */
+    private function bootStamp(): string
+    {
+        $path = $this->tempDir() . '/container-booted-at';
+        file_put_contents($path, (string) time());
+
+        return $path;
     }
 
     /**

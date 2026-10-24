@@ -1,3 +1,10 @@
 {
-    "preset": "psr12"
+    "preset": "psr12",
+    "exclude": [
+        "external",
+        "ext",
+        "lpr-git",
+        "build",
+        "vendor"
+    ]
 }

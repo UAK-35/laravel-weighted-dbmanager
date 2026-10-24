@@ -542,6 +542,7 @@ class DatabaseHealthControllerTest extends TestCase
 
         config()->set('db-manager.swrr.health.pinned_query', true);
         $this->pinToSQLite(':memory:');
+        $this->recordABoot();
 
         $response = $this->getJson('/health/db')->assertOk();
 
@@ -582,6 +583,7 @@ class DatabaseHealthControllerTest extends TestCase
 
         config()->set('db-manager.swrr.health.pinned_query', true);
         $this->pinToSQLite(':memory:');
+        $this->recordABoot();
 
         // A record last written an hour ago, read by a process that has not reported: the file is
         // what a web process sees when the boot it answered on never probed, and it is the state the
@@ -610,7 +612,28 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
-     * Five states in which an age is nobody's fault, each named rather than left to read as a pass.
+     * A container that recorded a boot, which is what makes an age judgeable at all.
+     *
+     * The window is read from the stamp and not from the flipper's own state, so a fixture that means
+     * the age to be judged has to have one: without it the reading is `no_boot_stamp` whatever the
+     * record holds, and a test about the age would be asserting the wrong state.
+     */
+    private function recordABoot(): void
+    {
+        $dir = sys_get_temp_dir().'/swrr-health-boot-'.bin2hex(random_bytes(4));
+
+        if (!mkdir($dir, 0o777, true) && !is_dir($dir)) {
+            $this->fail("Could not create the temp directory {$dir}");
+        }
+
+        $this->tempDirs[] = $dir;
+        file_put_contents($dir.'/container-booted-at', (string) time());
+
+        config()->set('db-manager.swrr.pgcat.boot_file', $dir.'/container-booted-at');
+    }
+
+    /**
+     * Six states in which an age is nobody's fault, each named rather than left to read as a pass.
      *
      * `stale` is `null` in all of them, because *nothing asked it* is not the same claim as *it reads
      * well* — and `not_judged` says which of the five removed the expectation, so a reader is not
@@ -636,6 +659,12 @@ class DatabaseHealthControllerTest extends TestCase
 
         $file = (string) config('db-manager.swrr.audit.file');
 
+        if ($state === 'no_boot_stamp') {
+            // A stamp path that is deliberately not there, so the state is the container's rather
+            // than a file another run left in the machine's temp directory.
+            config()->set('db-manager.swrr.pgcat.boot_file', sys_get_temp_dir().'/swrr-no-boot-'.bin2hex(random_bytes(4)));
+        }
+
         match ($state) {
             'off' => $this->app->instance(BootAudit::class, new BootAudit($file, 0)),
             'unwritable' => $this->app->instance(
@@ -645,6 +674,10 @@ class DatabaseHealthControllerTest extends TestCase
             'no_stamp' => $this->app->instance(
                 BootAudit::class,
                 new BootAudit($this->auditRecord(['findings' => []])),
+            ),
+            'no_boot_stamp' => $this->app->instance(
+                BootAudit::class,
+                new BootAudit($this->auditRecord(['findings' => [], 'store_probed_at' => time()])),
             ),
             'unarmed' => config()->set('db-manager.swrr.pgcat.enabled', false),
             'in_process' => config()->set('db-manager.swrr.primary_store', 'local'),
@@ -665,7 +698,7 @@ class DatabaseHealthControllerTest extends TestCase
     }
 
     /**
-     * The five fixtures the test above runs, and what each sentence has to name.
+     * The six fixtures the test above runs, and what each sentence has to name.
      *
      * @return array<string, array{0: string, 1: string, 2: int}>
      */
@@ -675,6 +708,7 @@ class DatabaseHealthControllerTest extends TestCase
             'probing switched off' => ['off', 'switched off (swrr.audit.store_probe_seconds = 0)', 0],
             'the record cannot be written' => ['unwritable', 'frozen rather than late', 60],
             'the record holds no stamp' => ['no_stamp', 'fresh installation rather than a stale one', 60],
+            'the container recorded no boot' => ['no_boot_stamp', 'this container recorded no boot time', 60],
             'the flip schedule is not armed' => ['unarmed', 'flip schedule is not armed', 60],
             'the store is in-process' => ['in_process', 'reads are served in-process', 60],
         ];

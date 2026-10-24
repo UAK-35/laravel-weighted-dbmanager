@@ -995,7 +995,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      *
      * THE RULE IS `ProbeStamp::read()`'S
      *   The tolerance — the wider of the probe interval and the schedule's cadence, five misses over
-     *   — and the five states in which nothing is judged are the ones the command's row decides by,
+     *   — and the six states in which nothing is judged are the ones the command's row decides by,
      *   through that class rather than a second copy of the arithmetic: a window widened in the row
      *   and not here would page for an installation the command calls well. The sentences are this
      *   surface's, because the row names the rows beside it and a payload must not send a reader to

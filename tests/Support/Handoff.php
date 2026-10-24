@@ -876,11 +876,11 @@ final class Handoff
             'read' => 'sha256:e96953d2727202d489e71cea346aa575f3f2397f4d58cf7c605ce0b8ce0c4400',
         ],
         'src/Support/ProbeStamp.php' => [
-            'words' => 'the probe stamp\'s rule, shared by `db:doctor`\'s row and `/health/db`\'s block: the window (the wider of the probe interval and the schedule\'s cadence, five misses over), its inclusive boundary, and the five states in which nothing is judged — as codes each surface words for itself',
-            'read' => 'sha256:e51a43fe30280c6c17cb7b1369d1aaa29d8a4564c8126565cbf53a4de6f2156b',
+            'words' => 'the probe stamp\'s rule, shared by `db:doctor`\'s row and `/health/db`\'s block: the window (the wider of the probe interval and the schedule\'s cadence, five misses over), its inclusive boundary, and the six states in which nothing is judged — as codes each surface words for itself',
+            'read' => 'sha256:a0f2c8f3e801d139545a7670259324d38563872249c8af34efed6a98fc00e304',
         ],
         'tests/Unit/Support/ProbeStampTest.php' => [
-            'words' => 'the shared rule on its own: the window\'s arithmetic and its boundary, the five states and the order they are asked in, and the window still published where nothing is judged',
+            'words' => 'the shared rule on its own: the window\'s arithmetic and its boundary, the six states and the order they are asked in, and the window still published where nothing is judged',
             'read' => 'sha256:997201f033515b5d96b7ee680bac473dd6a2740cad9841fa131f9aac9fc653e6',
         ],
         'scripts/servers-startup/stop-primary.bat' => [
@@ -934,6 +934,30 @@ final class Handoff
         'docs/wsl-linux-php.md' => [
             'words' => 'the runbook for the WSL Linux PHP: why the download happens on the Windows side, what the wrapper puts in the temp directory, the two presets and the one the code paths need, what `-Check` judges line by line, running the provided app in `external/laravel-site` rather than this package\'s own suites, and what the interpreter deliberately does not give you',
             'read' => 'sha256:01c65c846945cbd06510547a247c3973d2ea350f8950ba63f1b3743f77bf7edd',
+        ],
+        'scripts/windows/copy-site-to-external.ps1' => [
+            'words' => 'the script that carries this machine\'s Laravel site checkout into `external/laravel-site`: the site path read from `site-path.local.cmd` beside it or passed as the first argument, the eleven top-level names visited and nothing else carried, files ending in `.txt`, `.text`, `.todo`, `.7z`, `.zip`, `.ignore` or `.gitignore` dropped at every depth, the folder structure copied whole so empty folders are kept, the copy additive so a file at the destination the site does not have is left alone, `-WhatIf` touching nothing, and the exit codes 0, 1 and 2',
+            'read' => 'sha256:2cca89a57cadaca04223e83993879fd338e92cd5094a528b9a30df9a1084aa74',
+        ],
+        'scripts/windows/build-external-laravel-site.ps1' => [
+            'words' => 'the one command that builds `external/laravel-site`: the copy, then the two removals and the file check, each run against the copy rather than `external/app` so the lists resolve there, a failed copy ending the run at the second exit code and the three later steps not stopping it, the summary one line per step, and the 21 files under `app/Data/ValidationObjects/refs/` that the folder list removes while the file list still names them — the difference between a green run and a red one',
+            'read' => 'sha256:ded817441e3fa79dadaa9f4ad740f51973fc6c4c4bb535aa050c1716909cb0ad',
+        ],
+        'scripts/windows/remove-external-app-files.ps1' => [
+            'words' => 'the removal of the files a list names: `ext/app-files-to-delete.txt` read as paths relative to `external/app` or to the checkout named as the first argument, blank lines and `#` lines ignored and a name listed twice attempted once, a name that is already gone reported rather than failed so the script is safe to run twice, a name that climbs out of the target or that names a directory skipped and reported, nothing deleted recursively, `-WhatIf` touching nothing, and the exit codes 0, 1 and 2',
+            'read' => 'sha256:05caa17d79c1c73cf4d644e54d84b2f3e0555c640c2ef2ae985184852ba7cf48',
+        ],
+        'scripts/windows/remove-external-app-folders.ps1' => [
+            'words' => 'the recursive removal, and the destructive one: `ext/app-folders-to-delete.txt` read exactly as the file list is, each name removed with everything beneath it after printing how many files that is, a trailing slash treated as decoration on the name, a name that is the target root itself or that climbs out of it skipped, an already-gone name reported rather than failed, `-WhatIf` touching nothing, and the exit codes 0, 1 and 2',
+            'read' => 'sha256:96dc162cf9ca94adfe766edd57e6d29e6cd64f64adb9ed50c1ad45a4b7b6e5e7',
+        ],
+        'scripts/windows/verify-external-app-files.ps1' => [
+            'words' => 'the check, which prints the finding rather than the progress: `ext/app-files-list.txt` read as paths relative to `external/app` or to the checkout named as the first argument, a name that is there printing nothing and a name that is not printed on its own line so the output can be piped, a name that resolves outside the target printed with a note instead of being checked, a folder where a file was expected counted as missing, and the exit codes 0, 1 and 2 — the last one also for a list that names nothing at all',
+            'read' => 'sha256:2829c92e2ace4036c13c135d30cd8b56e2f3814e9d13586238be9f37a9d690f2',
+        ],
+        'scripts/windows/site-path.sample.cmd' => [
+            'words' => 'the committed form of the machine file `copy-site-to-external.ps1` reads: `SITE_SOURCE` written as the `__SITE_SOURCE__` token, so a fresh checkout refuses by name rather than copying from a path somebody guessed at',
+            'read' => 'sha256:fd3838a4aab8ff2d6295b1ddbd1a7f705c832669fe4b7a2c78dbc5a06efe9a2f',
         ],
         // @pending-descriptions-end
     ];

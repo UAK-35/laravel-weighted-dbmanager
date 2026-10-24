@@ -12,7 +12,6 @@
 /.freebuff/project-id
 /.agents/*.local.json
 !/.agents/sample.machine.local.json
-/opencode.jsonc
 /oc-session-*.md
 /lpr-git/
 /lpr-compare/
@@ -21,3 +20,7 @@
 /scripts/servers-startup/servers.local.cmd
 /scripts/windows/site-path.local.cmd
 /opencode.v1-backup.jsonc
+/opencode.jsonc
+/all-externally-related.md
+/app-externally-related.md
+/app-removables.md

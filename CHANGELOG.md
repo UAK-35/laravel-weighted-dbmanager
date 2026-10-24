@@ -132,6 +132,30 @@
   takes. The README's rule is unchanged and still pages on `stale == true`: what changed is that a
   state nobody can place no longer produces that answer.
 
+- **`db:doctor`'s `probe stamp` row names the container's state instead of reading it as a healthy
+  record.** The sixth state `ProbeStamp::read()` learned — a record carrying a stamp inside a
+  container that never recorded a boot — reached no arm of the row's `switch`, so it fell through to
+  the branch that reads a *judged* verdict: an age nobody could place was reported as one inside its
+  tolerance, which is the silent pass the row exists to remove. The row now names the state, in the
+  words the endpoint uses for it. Two corrections came with it, and both were the same mistake seen
+  from a different side. The container's state is asked *after* the record's, because a record holding
+  no stamp at all is a fresh installation, which is a stronger and more specific claim than "nobody
+  measured the container's life" — read the other way round, every fresh installation was reported as
+  a container that had never booted. And the flipper is now built inside a guard: a flipper that
+  cannot be constructed cannot say the container never recorded a boot, so the age is *judged* rather
+  than excused, and reporting the flipper itself is the `pgcat gate` row's job rather than this one's.
+
+- **The style check read the whole checkout, and `composer test` was cut off before its unit run
+  finished.** `pint.json` carried the preset and
+  nothing else, so every invocation but the gate's own row read the whole checkout — the copied
+  application in `external/` alone is 1,577 PHP files this package does not ship, and `composer lint`,
+  being the fixing half, would have *rewritten* them in place rather than reported them. The config now
+  excludes `external`, `ext`, `lpr-git`, `build` and `vendor`, which leaves it reading the same set the
+  gate keeps out of its own row by handing it the package's four roots. And `composer test` declares a
+  `process-timeout` of 1800 seconds: the suite takes fifteen to twenty minutes on this machine, so
+  Composer's 300-second default cut the unit run off mid-suite and returned a failure that was a
+  timeout wearing a test failure's clothes.
+
 ## 0.2.0-alpha10 - 2026-10-22
 
 ### Added
