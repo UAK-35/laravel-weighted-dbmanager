@@ -255,7 +255,7 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is the tip of `origin/dev`, and the table above is where that is counted: the push that
+The register is nine commits past the tip of `origin/dev`, and the table above is where that is counted: the push that
 carried it published thirty commits above `3dc70db` — the records of application-side work and the
 plan beside them, the third recording skill, the two halves the prose-number pass added, the doctor
 record's citation, the connector row's tests, the Laravel plugin's settings, the handoff note's
@@ -265,8 +265,9 @@ fresh-install sentence, the payload's key tables read as a set, the boot audit's
 and the carry beside a record a boot cannot write, and this note's two tag readings — together with
 the two tags that had been cut and never published, `v0.2.0-alpha8` and `v0.2.0-alpha9`.
 
-Unpushed at the register means what it says, and at this register it says nothing: `e968ba6` is the
-tip of `origin/dev`, so every commit in section 1's list is one a consumer can fetch. That is the
+Unpushed at the register means what it says, and at this register it says nine: `a99c22b` is the tip
+of `origin/dev` and the register is `365f300`, so the nine commits in the table above are ones a
+consumer cannot fetch yet. That is the
 state the release this cycle cut was *not* in: `v0.2.0-alpha7` was cut with the CI rail skipped, from
 a commit that was not the tip of `origin/dev`, and the paragraph above the release section records
 that. The `ci` line of a plan is what refuses over it: `bin/release.php` refuses to tag while `HEAD`
@@ -293,11 +294,12 @@ a2f73d4  test: the boot stamp is read once, so the test cannot step out of its o
 The fence above is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
 block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
 commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
-register the range is empty, so the block says so and there is nothing left to that command.
+register the range is nine commits, under that ceiling, so the block above is the whole of it rather
+than a head of it.
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
-is *satisfied* at this register once the push run on the commit after it is green — `HEAD` is the tip of
-`origin/dev` — and the Unreleased section carries two entries rather than the four the release this
+is *satisfied* at this register once the push run on the commit after it is green - `HEAD` is the tip of
+`origin/dev` - and the Unreleased section carries five entries rather than the set the release this
 cycle cut promoted. Section 3's plan is a transcript taken before this cycle's tags, so a run against
 this register declares the lane's next number instead of repeating the one above it.
 
@@ -401,13 +403,13 @@ version it holds.
 
 That plan is a transcript of a run against this working tree, and nothing re-runs it. The numbers in
 it that *are* checkable are held, though they are two different readings: the entries the notes carry
-**at the register** (the table at the top of this section — twenty-four) and the state of the three records
+**at the register** (the table at the top of this section - five) and the state of the three records
 (section 1, whose transcript the guard runs). Its own `2 bullet(s)` is the weighing's answer about the
 working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Twenty-one entries at the register, and they are this cycle's landings rather than a repair of the
+Five entries at the register, and they are this cycle's landings rather than a repair of the
 release before it: the port plan's status table read as data and held to the tree, the connector boot
 finding with the `/health/db` key beside it, three records of application-side work and the third
 recording skill, the prose-number guard's completeness half and the guard that holds one record's
