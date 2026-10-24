@@ -1048,6 +1048,11 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
             $status,
             $store['effective'] === 'redis',
             $entry,
+            // The container's own life, which is what the record's age would be placed against. A
+            // boot file that is not there is the state the beat already refuses to judge a beat in,
+            // and a probe that went on judging the age there would page for what its sibling says it
+            // cannot know.
+            $this->pgcat === null || $this->pgcat->window()->bootedAt() !== null,
         );
 
         $probedAt = $reading['probed_at'];
@@ -1099,6 +1104,9 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
                     .'probed is a fresh installation rather than a stale one',
                     $status['file'],
                 ),
+                ProbeStamp::NO_BOOT_STAMP => 'this container recorded no boot time (swrr.pgcat.boot_file is not '
+                    .'there), so the boot window is not judged and neither is the age of the record — a stamp has no '
+                    .'life to be placed against when nobody measured one, which is the same excuse the beat takes',
                 default => null,
             },
         ];

@@ -3806,6 +3806,10 @@ class DbDoctor extends Command
             $status,
             $store['effective'] === 'redis',
             $entry,
+            // The container's own life: the beat is not judged without a boot stamp, and the age of
+            // the record cannot be placed against a life nobody measured — so this row and the
+            // payload answer the same state the same way.
+            $this->laravel->make(PgcatConfigFlipper::class)->window()->bootedAt() !== null,
         );
 
         $minutes = $entry['interval_minutes'] === 1 ? 'minute' : $entry['interval_minutes'] . ' minutes';

@@ -234,9 +234,16 @@ class ReadmeAlertingTest extends TestCase
     {
         $program = self::stopGate();
 
-        // The schedule is what makes the age judgeable: unarmed, `not_judged` says the record is
-        // written at the traffic's pace, which is a state this rule must leave alone.
-        $armed = ['db-manager.swrr.pgcat.schedule.enabled' => true];
+        // The schedule is what makes the age judgeable, and the stamp is what makes the schedule's
+        // own reading judgemental: unarmed, `not_judged` says the record is written at the traffic's
+        // pace; with no boot stamp, it says nobody measured the life the age would be placed against.
+        $bootStamp = sys_get_temp_dir().'/swrr-alert-boot-'.bin2hex(random_bytes(6));
+        file_put_contents($bootStamp, (string) time());
+
+        $armed = [
+            'db-manager.swrr.pgcat.schedule.enabled' => true,
+            'db-manager.swrr.pgcat.boot_file' => $bootStamp,
+        ];
 
         $stopped = $this->payload(':memory:', config: $armed + [
             'db-manager.swrr.audit.file' => $this->record([], time() - 3600),
@@ -265,6 +272,79 @@ class ReadmeAlertingTest extends TestCase
             0,
             $quiet['exit'],
             "The audit-stop rule pages an installation that has just written its record. jq said {$quiet['error']}\n{$fresh}",
+        );
+    }
+
+    /**
+     * The null branch, proven rather than described: three states in which the age is nobody's to
+     * answer for, and the rule must leave every one of them alone.
+     *
+     * The rule pages on `audit.store_probe.stale == true`, so a state the endpoint cannot judge has
+     * to answer `null` — not `false`. A rule written as `== true` and a block that answered `false`
+     * for "I cannot tell" would be the same silence, but the second one would be a claim, and there
+     * would be nothing left pointing at the fact that nothing was judged. So each case asserts the
+     * three things together: `stale` is `null`, `not_judged` names the state rather than leaving an
+     * empty string, and the rule passes.
+     *
+     * The first two are states the payload answers `null` in whatever the record's age: probing
+     * switched off, and a schedule that is not armed — where the record is written at the traffic's
+     * pace and no run was missed. The record is an hour old in both, which is what the rule pages on,
+     * so each case has to be excused by something other than the age.
+     *
+     * The third, a container with no boot stamp, was absent first and the case is what found the
+     * defect — with `swrr.pgcat.boot_file` pointing
+     * at a file that is not there, `pgcat.schedule` answered "this container recorded no boot time …,
+     * so the boot window is not judged and neither is the beat", while `audit.store_probe`, in the
+     * same payload from the same record, answered `stale: true` with a reason paging the stopped
+     * schedule. `ProbeStamp` now carries the state and the block answers `null`, so the case below is
+     * the proof of the repair rather than a description of a state that was missing.
+     *
+     * @return array<string, array{0: array<string, mixed>}>
+     */
+    public static function unjudgedAuditStates(): array
+    {
+        return [
+            'probing switched off' => [[
+                'db-manager.swrr.pgcat.schedule.enabled' => true,
+                'db-manager.swrr.audit.store_probe_seconds' => 0,
+            ]],
+            'a schedule that is not armed' => [[
+                'db-manager.swrr.pgcat.schedule.enabled' => false,
+            ]],
+            'no boot stamp' => [[
+                'db-manager.swrr.pgcat.schedule.enabled' => true,
+                'db-manager.swrr.pgcat.boot_file' => __DIR__.'/no-such-boot-stamp',
+            ]],
+        ];
+    }
+
+    #[DataProvider('unjudgedAuditStates')]
+    public function test_the_audit_stop_rule_leaves_a_state_it_cannot_judge_alone(array $config): void
+    {
+        $program = self::stopGate();
+
+        $payload = $this->payload(':memory:', config: $config + [
+            'db-manager.swrr.audit.file' => $this->record([], time() - 3600),
+        ]);
+        $block = json_decode($payload, true);
+
+        $this->assertTrue($block['audit']['store_probe']['applicable'], 'an audit is registered in this fixture');
+        $this->assertNull(
+            $block['audit']['store_probe']['stale'],
+            "the age is judged in a state that excuses it:\n{$payload}",
+        );
+        $this->assertNotSame(
+            '',
+            $block['audit']['store_probe']['not_judged'],
+            "a state the rule cannot judge has to name itself rather than say nothing:\n{$payload}",
+        );
+
+        $paged = $this->jq($program, $payload);
+
+        $this->assertSame(
+            0,
+            $paged['exit'],
+            "The audit-stop rule pages a state it cannot judge. jq said {$paged['error']}\n{$payload}",
         );
     }
 

@@ -87,6 +87,17 @@
   it hands the factory is. `ConnectorInUseTest` holds a connection whose settings live entirely in
   its halves, so the reading cannot drop them again.
 
+- **The audit's `store_probe` block leaves the record's age alone when the container never recorded a
+  boot time.** `pgcat.schedule` already refuses to judge a beat without `swrr.pgcat.boot_file` — the
+  stamp is what separates a container that has not started from one whose schedule stopped — while
+  `/health/db`'s `audit.store_probe`, in the same payload from the same record, went on judging the
+  age and could page on it. The two numbers a just-booted container and a long-dead record present are
+  the same, so a state directory persisted into an image would read as a stopped schedule on the first
+  request after every rollout. `ProbeStamp` gains the state (`no_boot_stamp`) and the block answers
+  `stale: null` with a sentence naming the missing stamp, which is the excuse its sibling already
+  takes. The README's rule is unchanged and still pages on `stale == true`: what changed is that a
+  state nobody can place no longer produces that answer.
+
 ## 0.2.0-alpha10 - 2026-10-22
 
 ### Added

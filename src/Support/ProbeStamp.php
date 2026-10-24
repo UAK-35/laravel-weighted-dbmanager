@@ -82,6 +82,22 @@ final class ProbeStamp
     public const NO_STAMP = 'no_stamp';
 
     /**
+     * The container recorded no boot time of its own.
+     *
+     * Deliberately a state of its own rather than {@see self::NO_STAMP}, which is about the *record*
+     * carrying no probe stamp: this one is about the container, and it is the life the age would be
+     * placed against. Without it an old record and a container thirty seconds past boot are the same
+     * two numbers, so a state directory persisted into an image — the shape a deploy starts from —
+     * would read as a stopped schedule on the first request after every rollout.
+     *
+     * It is the excuse the beat already takes for the same reason: `ScheduleBeat` refuses to judge a
+     * beat without a stamp, because the stamp is what separates "not started yet" from "stopped". A
+     * probe that went on judging the record's age in that state would page for what its sibling
+     * says it cannot know.
+     */
+    public const NO_BOOT_STAMP = 'no_boot_stamp';
+
+    /**
      * How long the stamp may stand still: the wider of the probe interval and the schedule's
      * cadence, `MISSED_CADENCES` times over.
      *
@@ -122,7 +138,7 @@ final class ProbeStamp
      *     interval_minutes: int
      * }
      */
-    public static function read(array $stamp, array $status, bool $storeIsRedis, array $entry): array
+    public static function read(array $stamp, array $status, bool $storeIsRedis, array $entry, bool $containerStamped = true): array
     {
         $probedAt = $stamp['probed_at'] ?? null;
         $age = $stamp['age_seconds'] ?? null;
@@ -133,6 +149,7 @@ final class ProbeStamp
             !$status['writable'] => self::UNWRITABLE,
             !$storeIsRedis => self::IN_PROCESS,
             !$entry['enabled'] => self::UNARMED,
+            !$containerStamped => self::NO_BOOT_STAMP,
             $probedAt === null || $age === null => self::NO_STAMP,
             default => null,
         };
