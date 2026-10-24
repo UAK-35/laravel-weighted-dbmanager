@@ -959,6 +959,14 @@ final class Handoff
             'words' => 'the committed form of the machine file `copy-site-to-external.ps1` reads: `SITE_SOURCE` written as the `__SITE_SOURCE__` token, so a fresh checkout refuses by name rather than copying from a path somebody guessed at',
             'read' => 'sha256:fd3838a4aab8ff2d6295b1ddbd1a7f705c832669fe4b7a2c78dbc5a06efe9a2f',
         ],
+        'opencode.jsonc' => [
+            'words' => 'the OpenCode configuration for this repository, in the V2 shape: the two instruction files it loads, `formatter`, the `php-code-analyzer` default agent with its own grants, the single skill target under `.agents/skills/`, the commands, the one experimental switch, and the permission table whose single path grant allows the harness\'s temporary directory by a tilde rather than by an account',
+            'read' => 'sha256:9b778cb80f73824bc92b8c2dc20962d81344fb50175e7cc1845149754b7b760b',
+        ],
+        'opencode.v1-backup.jsonc' => [
+            'words' => 'the V1 shape of that same configuration, kept beside it as a backup: the same two instruction files, `skills` as a map with `paths`, the agent and command blocks, and the V1 permission maps — and, in both files, no MCP server entry, because the one that was there carried the state directory of a tool on one machine',
+            'read' => 'sha256:ddf45cdfbbcdb97624d5b58648a9b2771687bd2326ba71f5dd02165edbd9a2e0',
+        ],
         // @pending-descriptions-end
     ];
 

@@ -1,0 +1,98 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "instructions": [
+        "AGENTS.md",
+        "BEHAVE.mdc"
+    ],
+    "formatter": true,
+    "default_agent": "php-code-analyzer",
+    "skills": {
+        // `.agents/skills/` is the single real skill target (see .skills/README.md).
+        // There is deliberately no `.opencode/skills/` - a second copy would drift
+        // out of sync with the canonical packages, which is what it used to do.
+        "paths": [
+            ".agents/skills"
+        ]
+    },
+    "agent": {
+        "php-code-analyzer": {
+            "description": "Analyzes PHP files for syntax errors, logical bugs, cyclomatic complexity, PHP 8.4 modernization opportunities, duplicate code, and tool recommendations. Presents issues with numbered IDs and allows user to select which to fix via custom sub-agents.",
+            "mode": "primary",
+            "model": "opencode/north-mini-code-free",
+            // The canonical agent body lives under .agents/. This inline entry is only the
+            // OpenCode registration; the prompt points at the single source of truth.
+            "prompt": "Read and follow the canonical agent definition at .agents/agents/php-code-analyzer.md before acting. Skills live under .agents/skills/.",
+            "permission": {
+                "read": "allow",
+                "edit": "allow",
+                "bash": "allow",
+                "glob": "allow",
+                "grep": "allow",
+                "list": "allow"
+            }
+        }
+    },
+    "command": {
+        // This becomes the name of the command
+        "php-analyze": {
+            // This is the prompt that will be sent to the LLM
+            "template": "Run PHP code analysis on Laravel project - syntax, bugs, complexity, PHP 8.4 modernization, duplicates, tools",
+            // This is shown as the description in the TUI
+            "description": "Run the code analysis",
+            "agent": "php-code-analyzer",
+            "model": "opencode/north-mini-code-free"
+        }
+    },
+    // The permissions this session was granted, recorded in `permissions-01.md` (also gitignored).
+    // opencode evaluates the LAST matching rule, so the broad `*` rules come first and the narrow
+    // ones after it; `bash`'s `"*": "ask"` is the deliberate fallback for a command not listed.
+    "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "skill": "allow",
+        "question": "allow",
+        "todowrite": "allow",
+        "bash": {
+            "echo *": "allow",
+            "curl *": "allow",
+            "php *": "allow",
+            "composer *": "allow",
+            "git *": "allow",
+            "python *": "allow",
+            "python3 *": "allow",
+            "py *": "allow",
+            "rg *": "allow",
+            "sh *": "allow",
+            "pwsh *": "allow",
+            "powershell *": "allow",
+            "Get-*": "allow",
+            "Set-*": "allow",
+            "Get-ChildItem *": "allow",
+            "Copy-Item *": "allow",
+            "New-Item *": "allow",
+            "Remove-Item *": "allow",
+            "Test-Path *": "allow",
+            "Set-Content *": "allow",
+            "Select-Object *": "allow",
+            "Sort-Object *": "allow",
+            "Where-Object *": "allow",
+            "Measure-Object *": "allow",
+            "ForEach-Object *": "allow",
+            "Select-String *": "allow",
+            "Out-Null *": "allow",
+            "Out-String *": "allow",
+            "Start-Sleep *": "allow",
+            "Write-Output *": "allow",
+            "aws *": "allow",
+            "tar *": "allow",
+            "*": "ask"
+        },
+        "external_directory": {
+            "*": "deny",
+            "~\\AppData\\Local\\Temp\\opencode\\*": "allow"
+        }
+    }
+}

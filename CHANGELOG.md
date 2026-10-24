@@ -97,6 +97,15 @@
   `docs/health-payload.md` tabulate the key, `docs/boot-audit-surfaces.md` documents it, and
   `docs/boot-audit-store-probe.md` records why the stamp is published twice.
 
+- **The agent harness's configuration for this repository is carried, with the machine named nowhere in
+  it.** `opencode.jsonc` and `opencode.v1-backup.jsonc` are the two files the harness reads here, and
+  each named this machine in two ways: an MCP server's state directory, and an `external_directory`
+  grant for the harness's own temporary directory. The MCP entry is gone from both. The grant is
+  spelled with a tilde — the account and the drive are facts about one machine, while the shape is a
+  fact about the platform — and with it the guards that hold every carried file to what it may name
+  read both files clean. The two `.gitignore` rules that hid them are gone with it, so what the
+  harness reads is now what a reader of this repository can see.
+
 ### Fixed
 
 - **The published config leaves the flip schedule's switch undeclared again, so an armed flipper gets

@@ -1,0 +1,273 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "instructions": [
+        "AGENTS.md",
+        "BEHAVE.mdc"
+    ],
+    "formatter": true,
+    "default_agent": "php-code-analyzer",
+    // `.agents/skills/` is the single real skill target (see .skills/README.md).
+    // There is deliberately no `.opencode/skills/` - a second copy would drift
+    // out of sync with the canonical packages, which is what it used to do.
+    "skills": [
+        ".agents/skills"
+    ],
+    "agents": {
+        "php-code-analyzer": {
+            "description": "Analyzes PHP files for syntax errors, logical bugs, cyclomatic complexity, PHP 8.4 modernization opportunities, duplicate code, and tool recommendations. Presents issues with numbered IDs and allows user to select which to fix via custom sub-agents.",
+            "mode": "primary",
+            "model": "opencode/north-mini-code-free",
+            // The canonical agent body lives under .agents/. This inline entry is only the
+            // OpenCode registration; the system prompt points at the single source of truth.
+            "system": "Read and follow the canonical agent definition at .agents/agents/php-code-analyzer.md before acting. Skills live under .agents/skills/.",
+            // V1 `"bash": "allow"` -> V2 `shell` allow. The other V1 entries (read/edit/glob/
+            // grep/list) already match V2's default-allow base policy, and `list` is not a V2
+            // permission action, so only the shell grant is carried over.
+            "permissions": [
+                {
+                    "action": "shell",
+                    "resource": "*",
+                    "effect": "allow"
+                }
+            ]
+        }
+    },
+    "commands": {
+        "php-analyze": {
+            "template": "Run PHP code analysis on Laravel project - syntax, bugs, complexity, PHP 8.4 modernization, duplicates, tools",
+            "description": "Run the code analysis",
+            "agent": "php-code-analyzer",
+            "model": "opencode/north-mini-code-free"
+        }
+    },
+    // V1 had `"todowrite": "allow"`; todos are off by default in V2.
+    "experimental": {
+        "todo": true
+    },
+    // Migrated from the V1 `permission` map. opencode evaluates the LAST matching rule, so the
+    // broad `shell` `*` rule comes first and the narrow ones after it; `*` is the deliberate
+    // fallback for a command not listed.
+    //
+    // `read` is intentionally not listed: V2's base policy already allows reads but keeps a
+    // `*.env` "ask" guard, and a blanket `read: allow` would silently widen access to secrets.
+    // `list` is not a V2 permission action (discovery tools are allowed by default), and
+    // `todowrite` became `experimental.todo` above.
+    "permissions": [
+        {
+            "action": "shell",
+            "resource": "& *bash.exe* -c *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "& *pwsh.exe* -Command *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "& *php.exe *",
+            "effect": "allow"
+        },
+        {
+            "action": "edit",
+            "resource": "*",
+            "effect": "allow"
+        },
+        {
+            "action": "glob",
+            "resource": "*",
+            "effect": "allow"
+        },
+        {
+            "action": "grep",
+            "resource": "*",
+            "effect": "allow"
+        },
+        {
+            "action": "skill",
+            "resource": "*",
+            "effect": "allow"
+        },
+        {
+            "action": "question",
+            "resource": "*",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "*",
+            "effect": "ask"
+        },
+        {
+            "action": "shell",
+            "resource": "echo *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "curl *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "php *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "composer *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "git *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "python *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "python3 *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "py *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "rg *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "sh *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "pwsh *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "powershell *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Get-*",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Set-*",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Get-ChildItem *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Copy-Item *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "New-Item *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Remove-Item *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Test-Path *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Set-Content *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Select-Object *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Sort-Object *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Where-Object *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Measure-Object *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "ForEach-Object *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Select-String *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Out-Null *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Out-String *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Start-Sleep *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "Write-Output *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "aws *",
+            "effect": "allow"
+        },
+        {
+            "action": "shell",
+            "resource": "tar *",
+            "effect": "allow"
+        },
+        // V2 allows outside-project paths by default; the V1 config denied them.
+        {
+            "action": "external_directory",
+            "resource": "*",
+            "effect": "deny"
+        },
+        {
+            "action": "external_directory",
+            "resource": "~/AppData/Local/Temp/opencode/*",
+            "effect": "allow"
+        }
+    ]
+}
