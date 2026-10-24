@@ -877,7 +877,7 @@ final class Handoff
         ],
         'src/Support/ProbeStamp.php' => [
             'words' => 'the probe stamp\'s rule, shared by `db:doctor`\'s row and `/health/db`\'s block: the window (the wider of the probe interval and the schedule\'s cadence, five misses over), its inclusive boundary, and the five states in which nothing is judged — as codes each surface words for itself',
-            'read' => 'sha256:4a9c9fe5e4ade5542c5db004460291c9c82798963001fc69067ac185b03159dd',
+            'read' => 'sha256:e51a43fe30280c6c17cb7b1369d1aaa29d8a4564c8126565cbf53a4de6f2156b',
         ],
         'tests/Unit/Support/ProbeStampTest.php' => [
             'words' => 'the shared rule on its own: the window\'s arithmetic and its boundary, the five states and the order they are asked in, and the window still published where nothing is judged',
