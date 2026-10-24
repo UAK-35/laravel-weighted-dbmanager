@@ -4,6 +4,20 @@
 
 ### Added
 
+- **The two lists under `ext/` become two scripts that delete what they name, from whichever checkout
+  is named on the command line.** `remove-external-app-files.ps1` reads `ext/app-files-to-delete.txt`
+  and deletes each file it names; `remove-external-app-folders.ps1` reads
+  `ext/app-folders-to-delete.txt` and removes each folder it names with everything under it, printing
+  how many files that folder holds first. Both resolve every line against `external/app` unless
+  another root is given as the first argument, so the same two lists clean a freshly copied site as
+  well as the tree they were written against. Every line is walked to a full path before anything is
+  touched: a line that climbs out of the root is skipped and reported rather than followed, the folder
+  script refuses a line that resolves to the root itself, and a name whose type is the other one - a
+  folder where a file was expected, a file where a folder was - is reported instead of acted on. A
+  name that is not there is reported as already gone rather than as a failure, which makes a second
+  run safe; `-WhatIf` prints every path that would go and touches nothing; and each script exits
+  non-zero when anything it was asked to delete is still there.
+
 - **The gate runs on a commit this checkout is not on, so refreshing a release's record no longer
   needs a hand-built checkout.** `php bin/checks.php --at=REF` resolves the ref, checks it out with
   `git worktree add --detach` under `build/checks-at-<sha>`, and runs the same gate there on the
