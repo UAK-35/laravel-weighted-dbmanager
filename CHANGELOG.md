@@ -4,6 +4,18 @@
 
 ### Added
 
+- **`external/laravel-site` is built from this machine's site checkout by one command, and the site's
+  path stays out of every tracked file.** `copy-site-to-external.ps1` carries thirteen top-level names
+  from the site - the ten folders this package works against, plus `artisan`, `composer.json` and
+  `composer.lock` - and nothing else: the folder structure whole, empty folders included, and no file
+  whose name ends in `.txt`, `.text`, `.todo`, `.7z`, `.zip`, `.ignore` or `.gitignore` at any depth.
+  `build-external-laravel-site.ps1` runs that copy and then the three list scripts against it, in that
+  order, ending on the check so the run's verdict is whether the copy holds every name the file list
+  expects. The site path is machine state, so it is read from `scripts/windows/site-path.local.cmd` -
+  which `.gitignore` now covers - with `site-path.sample.cmd` committing the token in its place, the
+  same arrangement `servers.local.cmd` already has: a path that resolves for one person is the one
+  thing this pair of scripts cannot carry.
+
 - **A third list becomes a check that prints only the names it cannot find.** `verify-external-app-files.ps1`
   reads `ext/app-files-list.txt`, resolves each line against the same root argument the two removal
   scripts take, and prints nothing for a name that is there and one line per name that is not, so its

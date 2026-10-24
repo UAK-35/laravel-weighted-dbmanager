@@ -19,4 +19,5 @@
 /external
 /ext/
 /scripts/servers-startup/servers.local.cmd
+/scripts/windows/site-path.local.cmd
 /opencode.v1-backup.jsonc
