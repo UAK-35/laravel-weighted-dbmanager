@@ -273,8 +273,10 @@ state the release this cycle cut was *not* in: `v0.2.0-alpha7` was cut with the 
 a commit that was not the tip of `origin/dev`, and the paragraph above the release section records
 that. The `ci` line of a plan is what refuses over it: `bin/release.php` refuses to tag while `HEAD`
 is not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every
-commit the release made is one a consumer can fetch. This note is the commit *after* the register,
-and it travels on the push that follows.
+commit the release made is one a consumer can fetch. This note stands above the register rather
+than on it: `842b916` recorded the register, and the prose pass over it, the `store_probe` fix, the
+gate's memory row and the reading's re-take came after it, as does this one — and they all travel on
+the push that follows.
 
 <!-- handoff:log -->
 The nine most recent are the ones a reader is most likely to be standing in the middle of:
@@ -335,10 +337,12 @@ section carries two of them: `### Added`, with the gate's `--at`, the setup scri
 of the two is `### Added`, which is what `bin/weighing.php` reads as `minor`. The section stands where `v0.2.0-alpha10`'s release left it —
 that commit promoted the doctor's `probe stamp` row under `### Added` and the carry a boot writes
 beside a record it cannot write under `### Fixed`, and wrote the bare heading this change's note
-went under. What no release holds is the three commits above that tag — `c081def`, the command that
-reads this note's log-and-record pair back; `fc9e9d8`, the re-take that followed it; and `7c81bfc`,
-the probe stamp's age on `/health/db` — so the register is a branch whose next release would publish
-both commands' answers and nothing a consumer can already install.
+went under. What no release holds is the range above that tag at the register — `c081def`, the
+command that reads this note's log-and-record pair back; `fc9e9d8`, the re-take that followed it;
+`7c81bfc`, the probe stamp's age on `/health/db`; and every commit after them up to `365f300`, of
+which the nine section 2 counts are the part a consumer cannot fetch. The commits below those nine
+were pushed and released nowhere, so the register is a branch whose next release would publish both
+commands' answers and nothing a consumer can already install.
 
 ### The release that cut this tag, and the three rows it could not write
 
@@ -410,15 +414,15 @@ working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Five entries at the register, and they are this cycle's landings rather than a repair of the
-release before it: the port plan's status table read as data and held to the tree, the connector boot
-finding with the `/health/db` key beside it, three records of application-side work and the third
-recording skill, the prose-number guard's completeness half and the guard that holds one record's
-quotes to another's words, the pending table's readings, `/health/db`'s two schedule settings and the
-`swrr.audit.finding_seconds` bound beside them, the pooler's mode record shared by its two writers with
-the both-armed finding retired — and, at the end, the two tag readings this note lands. One entry is
-under `### Removed`: `swrr.pgcat.schedule.both_armed` and the constant that named it, which is why the
-section weighs `breaking` while the next version may still be a minor.
+Five entries at the register, and they are this cycle's landings rather than a repair of the release
+before it. Three are under `### Added`: the gate running on a commit this checkout is not on, so a
+release's record can be refreshed without a hand-built checkout; the setup script walking the routing
+through the pooler before it calls the rig up; and `/health/db` publishing the age of the audit
+record's probe stamp. Two are under `### Fixed`: the published config leaving the flip schedule's
+switch undeclared again, and the connector row no longer calling a read/write connection unbuildable.
+Those two headings and nothing under `### Removed` or `### Changed` is what the weighing reads as
+`minor`; the `### Removed` entry this cycle's earlier notes carried — `swrr.pgcat.schedule.both_armed`
+and the constant that named it — is in `v0.2.0-alpha9`'s released section rather than here.
 
 Everything the release before this one carried is in `v0.2.0-alpha7`: the schedule that can be watched,
 the api page a past tree renders, the published config that says which key set it is, the paths a flip
