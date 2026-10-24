@@ -4,6 +4,14 @@
 
 ### Added
 
+- **A third list becomes a check that prints only the names it cannot find.** `verify-external-app-files.ps1`
+  reads `ext/app-files-list.txt`, resolves each line against the same root argument the two removal
+  scripts take, and prints nothing for a name that is there and one line per name that is not, so its
+  output is the finding rather than a log about it and can be piped straight on. It is read-only; a
+  name that exists as a folder counts as missing, because the list is a list of files; a line that
+  resolves outside the root is printed with that note rather than walked to; and the exit code is 0
+  only when every name in the list was found.
+
 - **The two lists under `ext/` become two scripts that delete what they name, from whichever checkout
   is named on the command line.** `remove-external-app-files.ps1` reads `ext/app-files-to-delete.txt`
   and deletes each file it names; `remove-external-app-folders.ps1` reads
