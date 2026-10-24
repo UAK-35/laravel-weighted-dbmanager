@@ -923,6 +923,18 @@ final class Handoff
             'words' => 'the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers\' limit was the machine\'s rather than the gate\'s, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix',
             'read' => 'sha256:94d1a5826c320df2655aee44f1020674acc07df8bda71a5d38626278d3366fe2',
         ],
+        'docs/planning/plan-local-pgcat-window-flip-in-wsl.md' => [
+            'words' => 'the plan for proving the pgcat window flip against a live pooler: the cold rig and the routing proof it ends with, the two variants `simple_db` can be told apart by, the app in `external/laravel-site` built and given a `.env` the flipper can use from inside WSL, a reader window three minutes out that lands inside the eight-minute boot window, the readings either side of the boundary, and what the plan deliberately leaves out',
+            'read' => 'sha256:478a16dadcf072c905fddbc7ac7902a2fd65a00696ef304af5708991ad67e491',
+        ],
+        'scripts/windows/wsl-linux-php.ps1' => [
+            'words' => 'the Windows-side wrapper that fetches a static Linux PHP CLI and runs a tree through it inside WSL: `-Setup`, `-Check` and `-Run`, the mount resolved by `wslpath` rather than assembled, the extraction done by the distribution\'s own tar, the runtime and manifest extension lines, the two roots derived from the file\'s own location, and the exit codes 0, 1 and 2',
+            'read' => 'sha256:28f304b98800dc398acf723bcbb42f81d979df2ecbfb10fa4925ba514b4f44bd',
+        ],
+        'docs/wsl-linux-php.md' => [
+            'words' => 'the runbook for the WSL Linux PHP: why the download happens on the Windows side, what the wrapper puts in the temp directory, the two presets and the one the code paths need, what `-Check` judges line by line, running the provided app in `external/laravel-site` rather than this package\'s own suites, and what the interpreter deliberately does not give you',
+            'read' => 'sha256:01c65c846945cbd06510547a247c3973d2ea350f8950ba63f1b3743f77bf7edd',
+        ],
         // @pending-descriptions-end
     ];
 
