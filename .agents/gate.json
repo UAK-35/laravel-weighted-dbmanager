@@ -2,36 +2,36 @@
     "taken": "2026-10-25",
     "php": "8.4.27",
     "exit": 0,
-    "elapsed": 1167,
+    "elapsed": 980.1,
     "checks": [
         {
             "name": "syntax",
             "status": "PASS",
-            "seconds": 23.6,
+            "seconds": 21.5,
             "note": "172 files, no syntax errors"
         },
         {
             "name": "ast",
             "status": "PASS",
-            "seconds": 4.1,
+            "seconds": 2.8,
             "note": "172 files parsed"
         },
         {
             "name": "writeback",
             "status": "PASS",
-            "seconds": 1.2,
+            "seconds": 0.7,
             "note": "4 write-back(s) in the shipped tree, every one declared; the detector agreed …"
         },
         {
             "name": "schema",
             "status": "PASS",
-            "seconds": 4.3,
+            "seconds": 3.7,
             "note": "composer.json is valid; composer.lock is not part of this repository, so it is not checked"
         },
         {
             "name": "platform",
             "status": "PASS",
-            "seconds": 3.9,
+            "seconds": 3.3,
             "note": "20 platform requirements satisfied"
         },
         {
@@ -49,7 +49,7 @@
         {
             "name": "yaml",
             "status": "PASS",
-            "seconds": 2.8,
+            "seconds": 2.5,
             "note": "[OK] All 1 YAML files contain valid syntax."
         },
         {
@@ -67,20 +67,20 @@
         {
             "name": "phpstan",
             "status": "PASS",
-            "seconds": 90.8,
+            "seconds": 61.8,
             "note": "[OK] No errors"
         },
         {
             "name": "pint",
             "status": "PASS",
-            "seconds": 8.8,
+            "seconds": 7.5,
             "note": "PASS … 172 files"
         },
         {
             "name": "tests",
             "status": "PASS",
-            "seconds": 1026.1,
-            "note": "Tests: 1678, Assertions: 11275, Skipped: 10."
+            "seconds": 874.9,
+            "note": "Tests: 1679, Assertions: 11286, Skipped: 10."
         }
     ]
 }

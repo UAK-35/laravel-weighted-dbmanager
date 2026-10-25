@@ -108,21 +108,21 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 1167.0s
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 980.1s
       recorded 2026-10-25, PHP 8.4.27
-      syntax     PASS    23.6s  172 files, no syntax errors
-      ast        PASS     4.1s  172 files parsed
-      writeback  PASS     1.2s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     4.3s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.9s  20 platform requirements satisfied
+      syntax     PASS    21.5s  172 files, no syntax errors
+      ast        PASS     2.8s  172 files parsed
+      writeback  PASS     0.7s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS     3.7s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     3.3s  20 platform requirements satisfied
       interpreter PASS     0.2s  PHP 8.4.27 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
-      yaml       PASS     2.8s  [OK] All 1 YAML files contain valid syntax.
+      yaml       PASS     2.5s  [OK] All 1 YAML files contain valid syntax.
       counts     PASS     1.0s  56 count(s) across 12 record(s), all in step with their derivations.
       sentences  PASS     0.1s  10805 prose line(s) in 38 record(s), no fused sentence; the detector agreed w…
-      phpstan    PASS    90.8s  [OK] No errors
-      pint       PASS     8.8s  PASS … 172 files
-      tests      PASS  1026.1s  Tests: 1678, Assertions: 11275, Skipped: 10.
+      phpstan    PASS    61.8s  [OK] No errors
+      pint       PASS     7.5s  PASS … 172 files
+      tests      PASS   874.9s  Tests: 1679, Assertions: 11286, Skipped: 10.
 ```
 <!-- /handoff:gate -->
 
