@@ -178,6 +178,147 @@ final class ComposerScriptsTest extends TestCase
     }
 
     /**
+     * The directories `composer lint` and `composer test:lint` hand Pint, against the ones
+     * `bin/checks.php` reads for its own PHP rows.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     *   Pint with no path reads every PHP file under the directory it starts in, which is this
+     *   checkout — so a tree at the root that no commit carries was inside the style gate until
+     *   both surfaces were narrowed to `src`, `tests`, `config` and `bin`: the package's own PHP,
+     *   and nothing else. That is one list written in two files, and nothing compared them. A
+     *   widening of one that misses the other is silent in the direction that matters — the gate's
+     *   row and the composer command then answer different questions about the same tree, and the
+     *   one a developer runs is not the one CI runs.
+     *
+     *   The comparison is by name rather than by content: what a root holds is `phpFiles()`'s
+     *   business, and the claim here is only that both readers are pointed at the same places.
+     *
+     * WHY BOTH SCRIPTS AND NOT JUST THE GATE
+     * --------------------------------------
+     *   `lint` writes and `test:lint` reports, so a disagreement between them is the worst of the
+     *   three: a file the fixer formats and the check refuses, or the reverse. They are read
+     *   separately rather than assumed equal because the `--test` flag is the only difference
+     *   between them, and a root dropped from one of the two lines is exactly how that drifts.
+     */
+    public function test_the_lint_scripts_and_the_gate_read_the_same_roots(): void
+    {
+        $declared = ComposerScripts::declared(self::root());
+
+        $scripts = [];
+
+        foreach (['lint', 'test:lint'] as $name) {
+            self::assertArrayHasKey($name, $declared, sprintf(
+                'composer.json no longer declares `%s`, so this reading would hold the gate to nothing.',
+                $name,
+            ));
+
+            $scripts[$name] = self::pintRoots($declared[$name], $name);
+        }
+
+        $gate = self::gateRoots(self::root().'/bin/checks.php');
+
+        self::assertNotSame([], $gate, 'No `$phpFiles = phpFiles([…])` call was found in bin/checks.php, so the gate side of this comparison was read as nothing at all.');
+
+        self::assertSame($scripts['test:lint'], $scripts['lint'], sprintf(
+            "`composer lint` and `composer test:lint` hand Pint different directories, so the fixer and the style\n".
+            "check disagree about what this package's PHP is:\n  lint:      [%s]\n  test:lint: [%s]",
+            implode(', ', $scripts['lint']),
+            implode(', ', $scripts['test:lint']),
+        ));
+
+        self::assertSame($gate, $scripts['test:lint'], sprintf(
+            "The composer lint scripts and the gate's PHP rows read different directories, so one of them checks a\n".
+            "set the other never sees — and CI runs the gate while a developer runs the composer script:\n".
+            "  bin/checks.php: [%s]\n  composer.json:  [%s]\n\n".
+            'Widen or narrow both: the four roots are what keeps a tree at the package root outside the style row.',
+            implode(', ', $gate),
+            implode(', ', $scripts['test:lint']),
+        ));
+
+        // A root nobody has is a row that reads nothing, which is the failure the equality above
+        // cannot see: two lists of the same wrong name agree with each other.
+        foreach ($gate as $root) {
+            self::assertDirectoryExists(
+                self::root().'/'.$root,
+                sprintf('Both the gate and the composer lint scripts name `%s` as a root, and this checkout has no such directory.', $root),
+            );
+        }
+    }
+
+    /**
+     * The directory arguments one composer script passes Pint.
+     *
+     * The line is split the way a shell would and read after the tool name, so a flag (`--test`)
+     * is not mistaken for a directory and a change of order does not read as a change of set.
+     *
+     * @param list<string> $commands
+     * @return list<string>
+     */
+    private static function pintRoots(array $commands, string $script): array
+    {
+        $roots = [];
+
+        foreach ($commands as $command) {
+            $tokens = preg_split('/\s+/', trim($command)) ?: [];
+            $at = array_search('pint', $tokens, true);
+
+            if ($at === false) {
+                continue;
+            }
+
+            foreach (array_slice($tokens, $at + 1) as $token) {
+                if (! str_starts_with($token, '-')) {
+                    $roots[] = $token;
+                }
+            }
+        }
+
+        self::assertNotSame([], $roots, sprintf(
+            '`composer %s` names no directory after `pint`, so Pint would read the whole checkout again — the state this pair of lists exists to end.',
+            $script,
+        ));
+
+        $roots = array_values(array_unique($roots));
+        sort($roots);
+
+        return $roots;
+    }
+
+    /**
+     * The roots `bin/checks.php` builds `$phpFiles` from, read out of its own call.
+     *
+     * Read rather than restated: a second copy of the list here would be a third place to widen,
+     * and this reading exists to hold two places together rather than to add one.
+     *
+     * @return list<string>
+     */
+    private static function gateRoots(string $file): array
+    {
+        $source = @file_get_contents($file);
+
+        if ($source === false) {
+            self::fail('bin/checks.php could not be read, so the gate side of this comparison is missing rather than equal.');
+        }
+
+        if (preg_match('/\$phpFiles = phpFiles\(\[(.*?)\]\);/s', $source, $call) !== 1) {
+            return [];
+        }
+
+        preg_match_all("/'([^']+)'/", $call[1], $literals);
+
+        $roots = [];
+
+        foreach ($literals[1] as $literal) {
+            $roots[] = ltrim($literal, '/');
+        }
+
+        sort($roots);
+
+        return $roots;
+    }
+
+    /**
      * The findings in a set of entries: the path a command reaches, and the lines that reach it,
      * for every path git holds back.
      *

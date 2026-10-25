@@ -80,8 +80,8 @@
         "checks": "@php bin/checks.php",
         "release": "@php bin/release.php",
         "publish-config": "@php bin/publish-config.php",
-        "lint": "@php bin/tool.php pint",
-        "test:lint": "@php bin/tool.php pint --test",
+        "lint": "@php bin/tool.php pint src tests config bin",
+        "test:lint": "@php bin/tool.php pint --test src tests config bin",
         "test:types": "@php bin/tool.php phpstan analyse --ansi",
         "test:unit": "@php bin/tool.php phpunit --colors=always",
         "test": [

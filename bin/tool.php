@@ -11,8 +11,8 @@ declare(strict_types=1);
  *   A composer script can only name a command; it cannot read a file. So the paths live in
  *   `bin/tools.php` and every script that runs a tool goes through here:
  *
- *     composer lint        →  php bin/tool.php pint
- *     composer test:lint   →  php bin/tool.php pint --test
+ *     composer lint        →  php bin/tool.php pint src tests config bin
+ *     composer test:lint   →  php bin/tool.php pint --test src tests config bin
  *     composer test:types  →  php bin/tool.php phpstan analyse --ansi
  *     composer test:unit   →  php bin/tool.php phpunit --colors=always
  *
@@ -21,6 +21,13 @@ declare(strict_types=1);
  *   installs of one tool the first time a package moved its binary. Including the arguments:
  *   the ones written in composer.json are the ones a person runs by hand, which is what makes
  *   `composer test:types` reproducible as a single command.
+ *
+ *   Pint is the one tool those arguments narrow rather than pass through. With no path it reads
+ *   every PHP file under the working directory, which here is the checkout: a tree sitting at the
+ *   root that no commit carries — a copied application, a `build/` worktree — would be reformatted
+ *   by `composer lint` and would redden `composer test:lint` over code this package does not ship.
+ *   So its two scripts name the four roots `bin/checks.php` already reads for its `php -l` and AST
+ *   rows, and the three style surfaces then agree about what this package's PHP is.
  *
  * USAGE
  * -----
