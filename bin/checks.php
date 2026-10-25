@@ -439,7 +439,20 @@ $checks = [
     'pint' => [
         'title' => 'Code style (pint --test)',
         'skip' => is_file($tools['pint']) ? null : $manifest['pint']['package'] . ' is not installed',
-        'run' => static fn (): array => runCommand([PHP_BINARY, $tools['pint'], '--test'], $root),
+        // The row is handed `$phpFiles` rather than started bare. Pint with no path reads every PHP
+        // file under the directory it is started in, which is the checkout — so a tree sitting at the
+        // root that no commit carries was inside this row and could turn a green package red over
+        // code it does not ship. That happened twice: `lpr-compare/` cost 1,697 of 1,698 findings, and
+        // the copy had to be deleted for the gate to pass (`app-externally-related.md` section 0,
+        // `all-externally-related.md` section 0). Passing the four directories the `php -l` and AST
+        // rows already read makes the three PHP rows one set, and puts everything outside them — a
+        // copied application, a `build/` worktree, a tool's own cache — beyond this row's reach.
+        // The cost is the shape the other two rows already have: a PHP file added at the root or in a
+        // new top-level directory is not read here until the roots above are widened.
+        'run' => static fn (): array => runCommand(
+            [PHP_BINARY, $tools['pint'], '--test', ...$phpFiles],
+            $root,
+        ),
     ],
     'tests' => [
         'title' => 'Unit tests (phpunit)',

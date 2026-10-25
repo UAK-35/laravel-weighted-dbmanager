@@ -32,12 +32,14 @@ application's top-level `app/` and `config/`, `CHANGELOG.md`, `SCRIPTS.md` or `T
 section 7 says what that costs the comparison.
 
 **The copy was read once and then removed from this tree, deliberately.** The reason is worth
-writing down, because it is a fact about this package rather than about the copy: `pint --test` is
-run at the root with no path (`bin/checks.php`), so a foreign tree sitting at the root is inside the
+writing down, because it is a fact about this package rather than about the copy: `pint --test` was
+run at the root with no path (`bin/checks.php`), so a foreign tree sitting at the root was inside the
 package's style check. Measured before the folder went: pint reported 1,698 findings over this
 tree, **1,697 of them files under `lpr-compare/`** and one in this package (another hand's pending
-test file). The scratch folder existed to be read once and the reading is recorded here, so it and
-the `/lpr-compare/` ignore rule were removed together; keeping either would have left this package's
+test file). The gate's Pint row has since been scoped to the files its `php -l` and AST rows read,
+so a tree at the root is outside that row rather than the reason a green package goes red; this
+record is why the scoping was made. The scratch folder existed to be read once and the reading is
+recorded here, so it and the `/lpr-compare/` ignore rule were removed together; keeping either would have left this package's
 gate red for a tree that is not this package. Nothing of the deliverable depends on the files being
 here — every path in it is quoted — and the copy can be taken again with the same command as before
 if a later phase needs the material, since the source is the sibling application checkout the user

@@ -32,10 +32,13 @@ third-party or generated: `**/node_modules/**`, `**/build/coverage/**`, `**/__py
 into framework names.
 
 The copy was then **removed from this tree, deliberately**, and the reason is a fact about this
-package: `pint --test` runs at the root with no path, so a foreign tree sitting at the root is
+package: `pint --test` was run at the root with no path, so a foreign tree sitting at the root was
 inside the package's own style check. Measured before the folder went: pint reported 1 698 findings,
-1 697 of them under `lpr-compare/`. The scratch folder existed to be read once, the reading is
-recorded here, and the folder and its ignore rule went together.
+1 697 of them under `lpr-compare/`. That is no longer how the row reads: the gate hands Pint the
+same files its `php -l` and AST rows read — `src/`, `tests/`, `config/` and `bin/` — so a tree at
+the root is outside the style row rather than the reason a green package goes red. The scratch
+folder existed to be read once, the reading is recorded here, and the folder and its ignore rule
+went together.
 
 **Reading 2 — the commit history.** A bare, blob-filtered, date-shallow clone of
 `git@gitlab.com:lpr802309/laravel.git`, taken over https (the SSH endpoint answers `Permission
