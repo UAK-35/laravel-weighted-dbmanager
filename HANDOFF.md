@@ -494,7 +494,7 @@ repository is not an installation change until each of them happens.
 
 | Field | Working here |
 |---|---|
-| PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.27). It is **not on `PATH`** in the shell, so a bare `php` does not resolve — which no longer decides which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
+| PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.27). It **is on `PATH`** in the shell, and a bare `php` resolves to that same binary today - which still decides nothing about which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
 | Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy,wdm-issue,wdm-investigation,wdm-plan}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
