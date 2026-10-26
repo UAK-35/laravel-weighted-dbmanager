@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha11 - 2026-10-26
+
 ### Added
 
 - **`external/laravel-site` is built from this machine's site checkout by one command, and the site's

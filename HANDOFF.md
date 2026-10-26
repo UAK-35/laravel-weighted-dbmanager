@@ -184,15 +184,12 @@ the tag section 3 calls latest, and the rows under it are that tag's tree rather
 ```
 php bin/inventory.php --check --at=365f300
   --> exit 1: the inventory is out of step with the tree at 365f300
-      files.tsv: 2 line(s) stale
-      methods.tsv: 3 line(s) stale
-      surface.tsv: 7 line(s) stale
-
-php bin/inventory.php --check
-  --> exit 1: the inventory is out of step with the tree
       files.tsv: 1 line(s) stale
       methods.tsv: 2 line(s) stale
-      surface.tsv: 7 line(s) stale
+      surface.tsv: 2 line(s) stale
+
+php bin/inventory.php --check
+  --> exit 0: inventory is current — 54 files, 265 public methods, 313 key(s)/member(s), described as v0.2.0-alpha11
 ```
 <!-- /handoff:records -->
 
@@ -331,8 +328,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10` |
-| The latest of them | `v0.2.0-alpha10` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10`, `v0.2.0-alpha11` |
+| The latest of them | `v0.2.0-alpha11` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 5 entries — 3 added, 2 fixed, 0 changed |
 | The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the gate's `--at`, the setup script's routing and the probe stamp's age on `/health/db`, with no `### Removed` entry beside them |
