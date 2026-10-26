@@ -837,19 +837,19 @@ final class Handoff
         ],
         'scripts/servers-startup/servers.sample.cmd' => [
             'words' => 'the committed form of that machine file: the two directories every script in the folder refuses to guess at, written as tokens',
-            'read' => 'sha256:cb027ad2e92591dc578e24c3eb1edba0afd0d4755516e19d5c327c21bea06d09',
+            'read' => 'sha256:93f41ebcd604cd72c7fdeba422435388299bdcc0bae0e60ae5048d550c8e979e',
         ],
         'scripts/servers-startup/start-primary.bat' => [
             'words' => 'the primary\'s starter: the paths from the machine file, the refusal while the installer\'s Windows service holds 5432, and the role read back after pg_isready answers',
-            'read' => 'sha256:33cda19c834f82bdd4d6787d9ff3526c3b2734a57b8f97d9956bb8192e2f704f',
+            'read' => 'sha256:9703e16ddc8e47274438cf5bfd9b2407d998a397d1114b35074cac2414a3f433',
         ],
         'scripts/servers-startup/start-replica.bat' => [
             'words' => 'the standby\'s starter on 5431, the same shape, with pg_is_in_recovery() read back because pg_isready cannot tell a standby from a primary',
-            'read' => 'sha256:f207c81a476934885baa1e4016ac8d37af27ff6bf51ac16dd5db8d479cb287d6',
+            'read' => 'sha256:676861674d5d296f68f053b050783eacd4de673634375181ca499eb490359b51',
         ],
         'scripts/servers-startup/start-pgcat.bat' => [
             'words' => 'the pooler\'s starter: the config beside it rather than the checkout\'s, the detached window and why the child gets its own handles, the wait on 5433, and SHOW POOLS as the proof it is serving',
-            'read' => 'sha256:154eedb1498ab2b322c1ec8b50b73cdcc61d1532c51e6174baa36c1b9508dc1e',
+            'read' => 'sha256:c9261ccf2a71c9f5c766ac4c0cbf6f0c3951a7b8c904a38ce7b3226bf7eea3e1',
         ],
         'scripts/servers-startup/apply-hba-scram.ps1' => [
             'words' => 'the pg_hba.conf rules pgcat needs, written above the cleartext ones in both servers\' files, backed up once, idempotent, and made live with pg_reload_conf()',
@@ -885,15 +885,15 @@ final class Handoff
         ],
         'scripts/servers-startup/stop-primary.bat' => [
             'words' => 'the primary\'s stop script: `pg_ctl -m fast` on `pgsql179\\data`, an already-silent port answered rather than errored, and the port asked again afterwards so a second postmaster fails the run instead of passing it',
-            'read' => 'sha256:e4d7005075992148cb3f5ffc97afc70445f378626283b42568e0be76069d7f58',
+            'read' => 'sha256:a37f4a1becfb2fc7ce003830d19d915b838e19699a29dee1a3f89af3ec820630',
         ],
         'scripts/servers-startup/stop-replica.bat' => [
             'words' => 'the standby\'s stop script: `pg_ctl -m fast` on `standby179`, nothing to stop when the port is already silent, and `pg_isready` asked again afterwards so a leftover listener is a failure',
-            'read' => 'sha256:9586352fd742f39883c4d0a9b92209253b91b2b2521dc229a0289cd3fee0e759',
+            'read' => 'sha256:aca6b9db65710e6c73e88f6fb333cfc087693edc76648f3ffa0982b803b623c6',
         ],
         'scripts/servers-startup/stop-pgcat.bat' => [
             'words' => 'the pooler\'s stop script: the PID owning `127.0.0.1:5433` out of netstat, checked against `tasklist` before it is touched, closed politely and forced only when it does not answer, then the port and `pg_isready` read back as silent',
-            'read' => 'sha256:0f4801cffaeb9ba1d3545c20d1c6b1b08485ee05c80e435169b4479d99aacccf',
+            'read' => 'sha256:6057a221b604cf5654d6f7710d7e9bc92b32ea0c37fe953395bcef95dda41c7c',
         ],
         'tests/Unit/Release/EntryVerdictTest.php' => [
             'words' => 'the guard that holds `bin/entry.php` to its verdicts: a note a release published, one no tag carries, a tag that carries the commit with the note still under `## Unreleased`, a bullet reworded after it shipped, a release commit read as the promotion it is, a tag whose tree has no changelog, and the usage errors — one test per state the script tells apart',
@@ -901,7 +901,7 @@ final class Handoff
         ],
         'scripts/download-composer.bat' => [
             'words' => 'the installer-route batch script this repository already had: it copies Composer\'s `installer` with `php -r copy(...)`, checks it against a sha384 written into the file, runs it, and deletes it — the interpreter resolved from the machine record rather than from a drive letter, which is the arrangement the phar script keeps and the pasted constant that it replaces',
-            'read' => 'sha256:18364cbd16533cdb786b3c0686bdbebd9941d5d2f9b530e057a53a7b21e90cfa',
+            'read' => 'sha256:a46c5ecc2f9762a782f7605aa7c81ac5fe48d58df0efafdfde0f9b55aa849cc0',
         ],
         'scripts/download-composer.ps1' => [
             'words' => 'the script that fetches the latest `composer.phar` and verifies it against the checksum Composer publishes beside the release — the version resolved from the live catalogue, the hash read from the release\'s own directory rather than written into the script, the bytes compared before the file is installed and a mismatch removed rather than installed — which is what it does instead of the installer route in `scripts/download-composer.bat` with its pasted sha384',
@@ -913,11 +913,11 @@ final class Handoff
         ],
         'scripts/download-php84-extensions.ps1' => [
             'words' => 'the 8.4 sibling of `scripts/download-php85-extensions.ps1`: the same eight pinned extension builds and the same declaration of thread safety, build environment and architecture, with the PHP line pinned to `8.4`, and the two libraries whose 8.4 builds differ from the 8.5 pins — `brotli` at `0.18.3` and `redis` at `6.2.0`',
-            'read' => 'sha256:a5e904e13e033b4c3343f30cee559eb39f30537b34fe39d11be296c958cb3824',
+            'read' => 'sha256:9450385588404c4bc3d5dc004835174f98d8dd3edcae694fefb777bc05afeb50',
         ],
         'scripts/download-php85-extensions.ps1' => [
             'words' => 'the script that fetches and unpacks the eight pinned PHP extension builds for Windows — brotli, igbinary, lz4, memcached, pcov, protobuf, redis and zstd, seven from PECL\'s `windows` builds and one from the `php-ext-lz4` project\'s own GitHub release: the PHP line, thread safety, build environment and architecture are declared once at the top with a version per library, every URL is assembled from them, the archives land in the gitignored `ext/downloads/` and each one\'s `.dll` and `.ini` members are unpacked into the gitignored `ext/` that PHP loads from, the extension\'s own library named `php_<name>.dll` whatever the archive called it and a library the build named otherwise left alone, with an archive that is already there left alone unless it is forced',
-            'read' => 'sha256:a44f9c66bc1784387a15c20f9fa5ed4664df18ab9159ac88d437b57f252e16b1',
+            'read' => 'sha256:fe4f0edc542be4708eed7444d325fdeadec6248c4017012d1b3f988ce6957b4a',
         ],
         'docs/phpstan-memory.md' => [
             'words' => 'the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers\' limit was the machine\'s rather than the gate\'s, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix',
@@ -1768,15 +1768,30 @@ final class Handoff
      * file this line describes is the file in the tree, and every cheaper reading agrees with files
      * that are no longer that one.
      *
+     * LINE ENDINGS ARE NORMALISED AWAY, AND THAT IS NOT A LOOSENING
+     * -----------------------------------------------------------
+     *   The bytes are the file's *content*, not the checkout's. `.gitattributes` pins `*.bat` and
+     *   `*.cmd` to `eol=crlf` in the working tree, so a file written here by hand with LF and the same
+     *   file in every fresh clone are two different byte strings that are one file — and the digest
+     *   taken from the hand-written copy is a reading no checkout can reproduce. That is not a
+     *   hypothetical: `site-path.sample.cmd` was read at `fd3838a4…` on the machine that wrote it, and
+     *   CI, which checks it out with the CRLF the attributes ask for, computed `0ec66930…` and refused
+     *   a reading that was correct where it was taken.
+     *
+     *   So CRLF and a lone CR fold to LF before the digest, which is the rule the inventory's own
+     *   comparison already applies (`bin/surface.php`): a CRLF checkout of the right bytes is current
+     *   rather than drift. Nothing else is folded — a file whose content changed still hashes
+     *   differently, which is the whole of what this reading is for.
+     *
      * @throws RuntimeException when there is no such file to read
      */
     private static function fingerprint(string $path): string
     {
         $full = self::ROOT.'/'.$path;
 
-        $digest = is_file($full) ? @hash_file('sha256', $full) : false;
+        $bytes = is_file($full) ? @file_get_contents($full) : false;
 
-        if ($digest === false) {
+        if ($bytes === false) {
             throw new RuntimeException(sprintf(
                 'The register does not carry %s and this checkout has no such file, so there is nothing to read its '
                 .'description against. A pending row names a file; a row for a file that is not there is one to take '
@@ -1785,7 +1800,7 @@ final class Handoff
             ));
         }
 
-        return 'sha256:'.$digest;
+        return 'sha256:'.hash('sha256', str_replace(["\r\n", "\r"], "\n", $bytes));
     }
 
     /**
