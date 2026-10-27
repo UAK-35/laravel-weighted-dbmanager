@@ -94,7 +94,12 @@ The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` 
    an interpreter is what this rule replaces. The record is gitignored, so the path lives there and
    never in a rule; `HANDOFF.md` section 5 holds its rows to it. A fresh clone has nothing to copy
    from, so the same file in token form is committed at `.agents/sample.machine.local.json`: copy it
-   to the name above and replace each `__TOKEN__` with this machine's own value.
+   to the name above and replace each `__TOKEN__` with this machine's own value. The harness's own
+   configuration is generated rather than edited: `opencode.jsonc.template` is carried,
+   `.agents/manage-config.py` answers each `__TOKEN__` out of this record and writes `opencode.jsonc`,
+   and that output is gitignored because it carries this machine's temp directory — so the file the
+   harness reads is never the file a commit carries, and editing it by hand is work the next render
+   throws away.
 7. `scripts/servers-startup/README.md` — when the work needs a real database rather than a mock:
    three commands start the primary, the standby and the pooler, and nothing has to be searched for
    first. The directories they read are in `servers.local.cmd` beside them — gitignored, and the

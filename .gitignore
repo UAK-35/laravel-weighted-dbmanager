@@ -19,6 +19,7 @@
 /ext/
 /scripts/servers-startup/servers.local.cmd
 /scripts/windows/site-path.local.cmd
+/opencode.jsonc
 /all-externally-related.md
 /app-externally-related.md
 /app-removables.md

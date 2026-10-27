@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Changed
+
+- **The harness configuration is carried as a template and rendered, so the file that names this
+  machine is not the file a commit carries.** `opencode.jsonc.template` and
+  `opencode.v1-backup.jsonc.template` hold the two configurations with the machine's temp directory
+  written as `<__SYSTEM_TEMP_FOLDER__>`, and `.agents/manage-config.py` answers that token out of
+  `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per placeholder mapping it to the section and
+  key that hold the value, a `--check` mode that writes nothing and exits 1 when the pair is out of
+  step, and a refusal for a token nothing answers. The generated `opencode.jsonc` is gitignored, so a
+  checkout carries the template and never the output, and the machine file gains
+  `systemTempFolder.systemTempFolderPath` to answer it — with the token form committed in
+  `.agents/sample.machine.local.json`, so a fresh clone has the key rather than a hole. Two
+  consequences worth stating: a consumer's tarball stops carrying a harness configuration and starts
+  carrying the template, and the rule that no Python beyond the guarded commit path is carried now
+  names this renderer too, because it writes a file the harness reads rather than any of this
+  package's code.
+
 ## 0.2.0-alpha11 - 2026-10-26
 
 ### Added

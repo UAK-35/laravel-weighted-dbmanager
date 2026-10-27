@@ -92,7 +92,7 @@
         },
         "external_directory": {
             "*": "deny",
-            "~\\AppData\\Local\\Temp\\opencode\\*": "allow"
+            "<__SYSTEM_TEMP_FOLDER__>\\*": "allow"
         }
     }
 }

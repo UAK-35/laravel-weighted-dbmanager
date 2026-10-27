@@ -959,13 +959,33 @@ final class Handoff
             'words' => 'the committed form of the machine file `copy-site-to-external.ps1` reads: `SITE_SOURCE` written as the `__SITE_SOURCE__` token, so a fresh checkout refuses by name rather than copying from a path somebody guessed at',
             'read' => 'sha256:fd3838a4aab8ff2d6295b1ddbd1a7f705c832669fe4b7a2c78dbc5a06efe9a2f',
         ],
-        'opencode.jsonc' => [
-            'words' => 'the OpenCode configuration for this repository, in the V2 shape: the two instruction files it loads, `formatter`, the `php-code-analyzer` default agent with its own grants, the single skill target under `.agents/skills/`, the commands, the one experimental switch, and the permission table whose single path grant allows the harness\'s temporary directory by a tilde rather than by an account',
-            'read' => 'sha256:9b778cb80f73824bc92b8c2dc20962d81344fb50175e7cc1845149754b7b760b',
+        'opencode.v1-backup.jsonc.template' => [
+            'words' => 'the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the agent and command blocks, and the V1 permission maps — with the machine\'s temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine',
+            'read' => 'sha256:7c5eb0237de465e9bc19bab6483003b9852aca2bc1f03bb5633315148a2689ef',
         ],
-        'opencode.v1-backup.jsonc' => [
-            'words' => 'the V1 shape of that same configuration, kept beside it as a backup: the same two instruction files, `skills` as a map with `paths`, the agent and command blocks, and the V1 permission maps — and, in both files, no MCP server entry, because the one that was there carried the state directory of a tool on one machine',
-            'read' => 'sha256:ddf45cdfbbcdb97624d5b58648a9b2771687bd2326ba71f5dd02165edbd9a2e0',
+        'docs/investigations/investigation-boot-stamp-vs-container-boot-stamp.md' => [
+            'words' => 'the investigation into whether `swrr.pgcat.boot_file` is the container\'s boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment\'s entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written',
+            'read' => 'sha256:c205c4b807c737fb85ae06043b6676bab4a22b2d0ce69f65c355af0da202e5c9',
+        ],
+        'docs/investigations/investigation-boot-stamp-unwritable-warning.md' => [
+            'words' => 'the investigation of the live ECS task\'s `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image\'s entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes',
+            'read' => 'sha256:55303bac7dc34da5f4f706bdf77f1cd6829350f92314f39e6639211233ec3ff5',
+        ],
+        'docs/planning/plan-boot-stamp-read-only-check.md' => [
+            'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
+            'read' => 'sha256:4d2541d5052acac801b8239affdc005389358056e747998037200acba9a10f91',
+        ],
+        'opencode.jsonc.template' => [
+            'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the default agent and its grants, the single skill target, the commands and the permission table, with the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine',
+            'read' => 'sha256:f306cfcb2f60dd445da8f0f309d49bc27c99937eb020b22301a7d8d3ecf0b738',
+        ],
+        '.agents/manage-config.py' => [
+            'words' => 'the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a `--check` mode that writes nothing and exits 1 when the pair is out of step, and a refusal — exit 1 — for a token nothing answers or a record missing the key',
+            'read' => 'sha256:524009f434f6a16782cd4a4d8def0c2970686afdb44decaa1144407b1e3ddfe2',
+        ],
+        'docs/investigations/investigation-force-mode-readers-reverts.md' => [
+            'words' => 'the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay',
+            'read' => 'sha256:a7c6387fe905a8c4d1bd0ff9ffea077ade99d4519b035e7e37b2ef95d0d2774c',
         ],
         // @pending-descriptions-end
     ];

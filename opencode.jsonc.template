@@ -266,7 +266,7 @@
         },
         {
             "action": "external_directory",
-            "resource": "~/AppData/Local/Temp/opencode/*",
+            "resource": "<__SYSTEM_TEMP_FOLDER__>/opencode/*",
             "effect": "allow"
         }
     ]
