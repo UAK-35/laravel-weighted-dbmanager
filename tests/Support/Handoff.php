@@ -987,6 +987,10 @@ final class Handoff
             'words' => 'the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay',
             'read' => 'sha256:a7c6387fe905a8c4d1bd0ff9ffea077ade99d4519b035e7e37b2ef95d0d2774c',
         ],
+        'docs/issues/issue-allserversdown-single-server-pool.md' => [
+            'words' => 'the issue record for `AllServersDown` on the live application task: the 34 requests the 22:02 database reboot cost, the 13 the 22:00 pgcat restart cost, why a one-server pool has nothing to hand out while pgcat reconnects, the retry the application has to add, and the dead `reader_db_1` endpoint the next 10:00 reader window would activate',
+            'read' => 'sha256:0144512cf5877fca944fc60715e94f092e81e23cce19a589392efca0930f6ac2',
+        ],
         // @pending-descriptions-end
     ];
 

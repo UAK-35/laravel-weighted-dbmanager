@@ -19,6 +19,20 @@
   names this renderer too, because it writes a file the harness reads rather than any of this
   package's code.
 
+### Fixed
+
+- **A flip refuses a variant whose pools this container cannot resolve, instead of putting a pooler
+  in front of a server it cannot reach.** `VariantShape::unresolvedPools()` asks one variant's own
+  `[pools.*]` servers — not the connection's pool names, so a file is judged even when the
+  connection names none of its pools — and reports a pool only when *none* of its addresses
+  resolves, the same line the boot's prune draws. `PgcatConfigFlipper` asks it in
+  `applyCurrentState()` and `forceMode()` before anything is swapped: the file is left as it is,
+  the scheduled run is recorded as `skipped` with `last_refusal`, `last_refusal_at` and
+  `last_refusal_mode` in the flip state, and the forced path records the same reason without a run
+  or a mode. The case it exists for: a reader endpoint deleted after the container booted, whose
+  readers variant the next boundary would otherwise activate — pgcat validates its servers at
+  start, so the flip that puts it back is the pooler that does not come up.
+
 ## 0.2.0-alpha11 - 2026-10-26
 
 ### Added

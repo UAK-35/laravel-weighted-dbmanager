@@ -182,6 +182,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?\Closure $sleeper = null,
         ?string $auditFile = null,
         ?SupervisorStep $supervisorStep = null,
+        ?\Closure $hostResolver = null,
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -238,6 +239,7 @@ class PgcatConfigFlipperTest extends TestCase
             sleeper: $sleeper,
             auditFile: $auditFile,
             supervisorStep: $supervisorStep,
+            hostResolver: $hostResolver,
         );
 
         return $flipper;
@@ -4479,5 +4481,121 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame('readers', $verdict['expected'], 'permissive means always readers');
         $this->assertNull($verdict['applied']);
         $this->assertFalse($verdict['failed']);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A target this container cannot serve is refused before the swap
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The deletion the fix exists for: the readers variant still declares the reader pool, but the
+     * only address that pool has no longer resolves. pgcat validates its servers when it starts, so
+     * swapping the file in would leave the pooler unable to come back — the scheduled run must leave
+     * the file alone and record why, rather than take the pooler down at the boundary.
+     */
+    public function test_a_scheduled_flip_refuses_a_target_whose_only_address_does_not_resolve(): void
+    {
+        $this->writeReadersVariant('gone-db-01');
+
+        $flipper = $this->build(
+            'readers',
+            hostResolver: static fn (string $address): bool => $address === 'lpr-db-01',
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $result->kind());
+        $this->assertSame('readers', $result->mode);
+        $this->assertStringContainsString('reader_db_1', $result->reason);
+        $this->assertStringContainsString('gone-db-01', $result->reason);
+        $this->assertStringContainsString('file was left as it is', $result->reason);
+
+        $this->assertSame([], $this->copyLog, 'nothing was swapped');
+        $this->assertSame([], $this->flipCommands(), 'and no supervisor command ran');
+        $this->assertSame("pool = 'unknown'\n", file_get_contents($this->tmp . '/pgcat.toml'), 'the file in place is untouched');
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $state['last_kind']);
+        $this->assertSame(1, $state['runs'], 'the run happened and is recorded as skipped');
+        $this->assertStringContainsString('reader_db_1', $state['last_refusal']);
+        $this->assertStringContainsString('gone-db-01', $state['last_refusal']);
+        $this->assertSame('readers', $state['last_refusal_mode']);
+    }
+
+    /**
+     * The forced path is the one that can take a boundary by hand, so it gets the same refusal —
+     * and records the reason without pretending a run happened or a mode moved: `runs`, `last_kind`
+     * and `last_mode` are the boot window's evidence, and a request that was refused is neither.
+     */
+    public function test_a_forced_flip_refuses_the_same_target_and_records_no_run(): void
+    {
+        $this->writeReadersVariant('gone-db-01');
+
+        $flipper = $this->build(
+            'writer',
+            hostResolver: static fn (string $address): bool => $address === 'lpr-db-01',
+        );
+
+        $result = $flipper->forceMode('readers', PgcatConfigFlipper::VIA_MANUAL);
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $result->kind());
+        $this->assertStringContainsString('reader_db_1', $result->reason);
+        $this->assertSame([], $this->copyLog, 'nothing was swapped');
+        $this->assertSame([], $this->flipCommands(), 'and no supervisor command ran');
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertArrayNotHasKey('last_kind', $state, 'a forced run records no run');
+        $this->assertArrayNotHasKey('last_mode', $state, 'the pooler did not move');
+        $this->assertStringContainsString('reader_db_1', $state['last_refusal']);
+    }
+
+    /**
+     * The line the prune draws: one address that resolves is a pool the boot leaves in place,
+     * narrowed. Refusing that would refuse a file pgcat can start on, so the flip goes ahead.
+     */
+    public function test_a_pool_with_one_live_address_is_not_refused(): void
+    {
+        $this->writeReadersVariant('gone-db-01', 'lpr-db-01');
+
+        $flipper = $this->build(
+            'readers',
+            hostResolver: static fn (string $address): bool => $address === 'lpr-db-01',
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertCount(1, $this->copyLog);
+
+        $state = json_decode((string) file_get_contents($this->stateFile), true);
+
+        $this->assertNull($state['last_refusal'], 'a run that acted retires the reason');
+        $this->assertNull($state['last_refusal_at']);
+        $this->assertNull($state['last_refusal_mode']);
+    }
+
+    /**
+     * The readers variant as a rendered file: the writer pool plus the reader pool, with the
+     * reader's addresses the case names. The writer's one address is the one the allowlist answers,
+     * so the case is about the reader and nothing else.
+     */
+    private function writeReadersVariant(string ...$readerAddresses): void
+    {
+        $servers = implode(', ', array_map(
+            static fn (string $address): string => sprintf('["%s", 5432, "primary"]', $address),
+            $readerAddresses,
+        ));
+
+        file_put_contents(
+            $this->tmp . '/pgcat-readers.toml',
+            "[pools.writer_db_1]\n"
+            ."[pools.writer_db_1.shards.0]\n"
+            ."servers = [[\"lpr-db-01\", 5432, \"primary\"]]\n"
+            ."[pools.reader_db_1]\n"
+            ."[pools.reader_db_1.shards.0]\n"
+            ."servers = [{$servers}]\n",
+        );
     }
 }

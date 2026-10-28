@@ -545,6 +545,21 @@ final class PgcatConfigFlipper
             $currentMode = $this->resolver->currentModeName();
             $lastMode = $this->readLastMode();
 
+            // The file this run would put in front of pgcat, read before anything is swapped: a
+            // variant whose every address for a pool is unresolvable is one pgcat will not serve,
+            // and the pooler's own start-up validates the servers. It runs here rather than in
+            // `swap()` because this is the one moment the host asking is the host pgcat will run
+            // on — the shape's resolver warning is the same answer seen from a laptop — and it is
+            // recorded as a skipped run rather than a failure: nothing was wrong with this run,
+            // and the next one tries again.
+            $refusal = $this->unservableVariant($currentMode);
+
+            if ($refusal !== null) {
+                $this->recordRun(FlipResult::KIND_SKIPPED, $currentMode, refusal: $refusal);
+
+                return FlipResult::skipped($currentMode, $refusal);
+            }
+
             // A missing state file falls through to the swap below: with no
             // previous mode there is nothing for the current mode to be
             // "unchanged" from, so a first run is reported as a flip whose
@@ -697,6 +712,20 @@ final class PgcatConfigFlipper
         }
 
         try {
+            // A forced flip is the path that can take a window boundary by hand, so it gets the
+            // same refusal the scheduled run gets: a mode this container cannot serve is not one
+            // worth putting in front of pgcat, whether a resolver asked for it or an operator did.
+            // It records the reason without a run — `runs` and `last_kind` are the boot window's
+            // evidence and a hand-applied mode must not move them — and leaves `last_mode` alone,
+            // because the pooler did not move.
+            $refusal = $this->unservableVariant($mode);
+
+            if ($refusal !== null) {
+                $this->recordRefusal($mode, $refusal);
+
+                return FlipResult::skipped($mode, $refusal);
+            }
+
             $lastMode = $this->readLastMode();
             $this->swap($mode);
 
@@ -1212,6 +1241,49 @@ final class PgcatConfigFlipper
             $this->connectionPools,
             $this->connectionName ?? '',
             $this->hostResolver,
+        );
+    }
+
+    /**
+     * Why a flip to `$mode` would put a variant in front of pgcat that this container cannot serve,
+     * or null when every pool that variant declares has at least one address that resolves here.
+     *
+     * `VariantShape` reports an unresolved pool as a warning, and the reason is written down in its
+     * own docblock: resolution is a fact about the host that asks, so a `db:doctor` on a laptop or a
+     * rehearsal in CI must not fail over a name the pooler's network may answer. A flip is the one
+     * caller that can tell the difference. It runs inside the container, on the network pgcat will
+     * use, at the moment before the file is swapped — so the same answer is a refusal here rather
+     * than a reading. The file is left as it is, the run is recorded as skipped with the sentence in
+     * `last_refusal`, and the next minute tries again: a name that resolves on the next run costs
+     * one boundary, while a variant the pooler cannot serve costs every request behind it.
+     *
+     * Only the target is asked — `readers_path` for readers, `no_readers_path` for the writer. The
+     * file in place is not being swapped in, and holding it to this rule would refuse to leave a
+     * container on the file it is already running, which is the case the next boundary fixes.
+     */
+    private function unservableVariant(string $mode): ?string
+    {
+        $setting = $mode === 'readers' ? 'readers_path' : 'no_readers_path';
+        $unresolved = $this->variantShape()->unresolvedPools($setting);
+
+        if ($unresolved === []) {
+            return null;
+        }
+
+        $named = implode(', ', array_map(
+            static fn (array $pool): string => sprintf(
+                '"%s" (%s)',
+                $pool['pool'],
+                implode(', ', $pool['addresses']),
+            ),
+            $unresolved,
+        ));
+
+        return sprintf(
+            'pgcat config not swapped: swrr.pgcat.%s [%s] declares %s, and none of those addresses resolves from this container — pgcat validates its servers when it starts, so a flip to this file would leave the pooler unable to serve; the file was left as it is.',
+            $setting,
+            ConfigValue::string($this->config[$setting] ?? null),
+            $named,
         );
     }
 
@@ -2925,6 +2997,13 @@ final class PgcatConfigFlipper
      * repairs on one pool that each cleared, and three that moved between pools with none of them
      * clearing, read the same on `last_repair_pool` alone.
      *
+     * `last_refusal` is the newest reason a run left the file alone: the variant it would have
+     * swapped in declares a pool with no resolvable address from this container. It rides with
+     * `last_refusal_at` and `last_refusal_mode`, and a run that did act clears all three, so the
+     * reason cannot outlive the refusal it describes. The row that prints `last_kind` does not
+     * print it — the command's own line carries the same sentence — but the JSON report and
+     * `/health/db` read it here rather than from a second read of the file.
+     *
      * @return array<string, mixed>
      */
     public function windowStatus(): array
@@ -2967,6 +3046,9 @@ final class PgcatConfigFlipper
             'runs' => $runs,
             'last_run_at' => $state['last_run_at'] ?? null,
             'last_kind' => $state['last_kind'] ?? null,
+            'last_refusal' => is_string($state['last_refusal'] ?? null) ? $state['last_refusal'] : null,
+            'last_refusal_at' => is_string($state['last_refusal_at'] ?? null) ? $state['last_refusal_at'] : null,
+            'last_refusal_mode' => is_string($state['last_refusal_mode'] ?? null) ? $state['last_refusal_mode'] : null,
             'pool_repairs' => $repairs['count'],
             'last_pool_repair_at' => $repairs['last_at'],
             'last_repair_pool' => $repairs['pool'],
@@ -4051,6 +4133,12 @@ final class PgcatConfigFlipper
             'last_flipped_at' => $this->nowIso(),
             'flipped_by' => 'pgcat-flipper',
             'flipped_via' => $via,
+            // A mode that moved is no longer the state a refusal describes. The scheduled path
+            // clears these through `recordRun()`; this is the forced path's half, where no run is
+            // recorded but the success still has to retire the reason the last refusal left.
+            'last_refusal' => null,
+            'last_refusal_at' => null,
+            'last_refusal_mode' => null,
         ]);
     }
 
@@ -4110,16 +4198,25 @@ final class PgcatConfigFlipper
      * is the name the refusing probe gave, and null leaves the key null rather than carrying the
      * previous repair's pool into a new run's record; `$mode` is already a parameter because a run
      * records the mode it left in place.
+     *
+     * `$refusal` is the sentence a run that left the file alone writes — the variant it would have
+     * swapped in declares a pool with no resolvable address. A run that did act passes null, which
+     * is what keeps the reason from outliving the refusal it describes: `last_refusal` is either the
+     * newest refusal or none, never the one before a good run.
      */
-    private function recordRun(string $kind, string $mode, ?string $pool = null, ?bool $cleared = null): void
+    private function recordRun(string $kind, string $mode, ?string $pool = null, ?bool $cleared = null, ?string $refusal = null): void
     {
         $state = $this->readState();
         $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE, FlipResult::KIND_REPAIRED], true);
+        $at = $this->nowIso();
 
         $state['runs'] = ConfigValue::int($state['runs'] ?? null, 0) + 1;
-        $state['last_run_at'] = $this->nowIso();
+        $state['last_run_at'] = $at;
         $state['last_kind'] = $kind;
         $state['last_mode_active'] = $mode;
+        $state['last_refusal'] = $refusal;
+        $state['last_refusal_at'] = $refusal === null ? null : $at;
+        $state['last_refusal_mode'] = $refusal === null ? null : $mode;
 
         if ($kind === FlipResult::KIND_REPAIRED) {
             $state = $this->withRepair($state, $mode, $pool, $cleared);
@@ -4131,6 +4228,27 @@ final class PgcatConfigFlipper
         }
 
         $this->writeState($state);
+    }
+
+    /**
+     * Record a refusal on a path that records no run.
+     *
+     * `recordRun()` writes the same three keys for the scheduled path, where a refusal is also a
+     * run because the per-minute entry did fire. The forced path is the other half: it moves a mode
+     * by hand or at a window boundary and deliberately leaves `runs`, `last_kind` and `converged_at`
+     * alone, because those are the boot window's evidence and a mode applied at 10:00 must not move
+     * them. What it may still write is the reason this request was left undone, and it must not
+     * write `last_mode`: the pooler did not move, and a refusal that claimed a mode would be worse
+     * than the silence it replaces.
+     */
+    private function recordRefusal(string $mode, string $reason): void
+    {
+        $this->writeState([
+            ...$this->readState(),
+            'last_refusal' => $reason,
+            'last_refusal_at' => $this->nowIso(),
+            'last_refusal_mode' => $mode,
+        ]);
     }
 
     /**

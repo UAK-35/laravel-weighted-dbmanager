@@ -288,6 +288,31 @@ final class VariantShapeTest extends TestCase
     }
 
     /**
+     * The same question asked of one variant's own file rather than of the connection's pool names:
+     * the flip's refusal reads this before it swaps, and it must see a dead pool even when the
+     * connection names none of the variant's pools. The line is the prune's — every address dead is
+     * reported, one live address is not — and each setting is read from its own file.
+     */
+    public function test_unresolved_pools_are_read_from_one_variant_without_the_connections_names(): void
+    {
+        $shape = $this->shape(
+            readers: "[pools.writer_db_1]\n[pools.writer_db_1.shards.0]\nservers = [[\"lpr-db-01\", 5432]]\n"
+                ."[pools.reader_db_1]\n[pools.reader_db_1.shards.0]\nservers = [[\"gone-db-01\", 5432], [\"gone-db-02\", 5432]]\n"
+                ."[pools.reader_db_2]\n[pools.reader_db_2.shards.0]\nservers = [[\"gone-db-01\", 5432], [\"lpr-db-01\", 5432]]\n",
+            pools: ['write' => '', 'read' => []],
+        );
+
+        $this->assertSame(
+            [['pool' => 'reader_db_1', 'addresses' => ['gone-db-01', 'gone-db-02']]],
+            $shape->unresolvedPools('readers_path'),
+            'the dead pool is seen even though the connection names no pool at all',
+        );
+        $this->assertSame([], $shape->unresolvedPools('no_readers_path'), 'the writer-only file is judged by its own addresses');
+        $this->assertSame([], $shape->unresolvedPools('config_path'));
+        $this->assertSame([], $shape->unresolvedPools('missing_path'), 'an unset or empty setting declares nothing to ask');
+    }
+
+    /**
      * The line the prune reading draws in the other direction. One address that resolves is a pool
      * the prune leaves in place — narrowed, not gone — so reporting it would be reporting a fault
      * that is not there; and a pool whose servers are written some other way declares no address

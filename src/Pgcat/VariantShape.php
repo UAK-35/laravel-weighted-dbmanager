@@ -417,6 +417,54 @@ final class VariantShape
     }
 
     /**
+     * The pools one variant declares whose addresses this host cannot resolve at all, with the
+     * addresses it asked: a pool the container's boot would have pruned, read from the file rather
+     * than from the connection's pool names.
+     *
+     * WHY THIS IS NOT `warnings()`
+     *   `problems()` holds a variant to the pool names the pinned connection is written with, and
+     *   returns before the prune reading when the connection names no pool any variant declares.
+     *   That is the right line for a report about a connection, and the wrong one for a flip: the
+     *   question here is whether the file it is about to put in front of pgcat has a server this
+     *   container can reach, and the answer does not depend on which pool the connection weights.
+     *   So this asks each pool the file declares, and reports the ones where *none* of its addresses
+     *   resolves — the same line the prune draws: one live address survives the prune narrowed, and
+     *   calling that a fault would be reporting a fault that is not there.
+     *
+     * The caller decides what an answer means. A report leaves it a warning because resolution is a
+     * fact about the host that asks; a flip, running in the container pgcat will run in, can treat it
+     * as a refusal.
+     *
+     * @return list<array{pool: string, addresses: list<string>}>
+     */
+    public function unresolvedPools(string $setting): array
+    {
+        $path = trim($this->paths[$setting] ?? '');
+
+        if ($path === '' || !is_readable($path)) {
+            return [];
+        }
+
+        $toml = @file_get_contents($path);
+
+        if (!is_string($toml)) {
+            return [];
+        }
+
+        $unresolved = [];
+
+        foreach (PoolProbe::declaredPools($toml) as $pool) {
+            $addresses = $this->unresolvedAddresses($toml, $pool);
+
+            if ($addresses !== null) {
+                $unresolved[] = ['pool' => $pool, 'addresses' => $addresses];
+            }
+        }
+
+        return $unresolved;
+    }
+
+    /**
      * Whether a flip would be safe to take, as far as the shape goes. Warnings do not make it false:
      * a pool this host cannot resolve is a reading, and failing a rehearsal over it would fail on the
      * network the rehearsal happens to run in.
