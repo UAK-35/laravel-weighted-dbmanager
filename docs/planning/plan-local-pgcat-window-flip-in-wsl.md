@@ -36,7 +36,7 @@ flip writes.
 |---|---|---|
 | the pooler re-reads its config by itself | `autoreload = 15000` in `scripts/servers-startup/pgcat.toml` | a swap needs no supervisord, which this machine does not have |
 | a command that is not `supervisorctl` is **not** a fault | `SupervisorStep::FAULT_NOT_SUPERVISORCTL` — *"Not faults: the command drives something other than supervisorctl"* | the flip's pre-swap judge passes on a machine with no supervisord |
-| the flip judges the command **before** it swaps | `docs/issues/issue-pgcat-flip-force-mode-readers.md` — *"a flip refuses before it swaps the file, so nothing was replaced and no mode was recorded"* | the reload command has to resolve, or nothing else in the plan is observable |
+| the flip judges the command **before** it swaps | `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` — *"a flip refuses before it swaps the file, so nothing was replaced and no mode was recorded"* | the reload command has to resolve, or nothing else in the plan is observable |
 | `statusCommand()` refuses to guess at a command line holding two commands | `src/Pgcat/SupervisorStep.php` | the no-op command has to be a single command line |
 | the three paths are `config_path`, `readers_path`, `no_readers_path` | `config/db-manager.php`, the `pgcat` block | the three `external/*.toml` files are the production artefacts of exactly this trio |
 | the entry acts only inside `flip_window_seconds` (480 s shipped) | `config/db-manager.php`, the boot-window block | a boundary three minutes in is inside it, so the entry and not the window tasks does the flip |
