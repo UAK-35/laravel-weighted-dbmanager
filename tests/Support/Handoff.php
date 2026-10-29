@@ -769,11 +769,11 @@ final class Handoff
         ],
         '.agents/skills/wdm-issue/SKILL.md' => [
             'words' => 'the skill that records an WDM fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an WDM issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
-            'read' => 'sha256:9e80213c44d53ee82b718b8c1959b1d0d3d1529694c41bdf8ce6594348d25eec',
+            'read' => 'sha256:78a1cad09fe4913c84c321a26e92bb9573e412758b965a72bbf4f5b2129704fd',
         ],
         '.agents/skills/wdm-investigation/SKILL.md' => [
             'words' => 'the skill that records an WDM investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
-            'read' => 'sha256:4865a82fde33b60e5859d88809355c7dd1e979fcfd52c15a21acdd8eab84cebe',
+            'read' => 'sha256:52e087f8e2dc74585d8f863e2dcccb226648ca8df0b123174cbdc5eb84dec9ab',
         ],
         'docs/health-host-ip.md' => [
             'words' => 'the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip`',
@@ -813,7 +813,7 @@ final class Handoff
         ],
         '.agents/skills/wdm-plan/SKILL.md' => [
             'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
-            'read' => 'sha256:f2dbc8a018bb7f5a861f44e2c2a236035905e05a7c37e92a001cda555e77c319',
+            'read' => 'sha256:005c864aa3a9b2ac8d777dcc61f7ef0ce6dc3b0b2605d7e97c489f72dc2326cb',
         ],
         'docs/planning/plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
@@ -973,7 +973,7 @@ final class Handoff
         ],
         'docs/planning/plan-boot-stamp-read-only-check.md' => [
             'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
-            'read' => 'sha256:4d2541d5052acac801b8239affdc005389358056e747998037200acba9a10f91',
+            'read' => 'sha256:01d4cca8a75495f7b77d2f50032823c530416c6da66864c77854577fed2582ab',
         ],
         'opencode.jsonc.template' => [
             'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the default agent and its grants, the single skill target, the commands and the permission table, with the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine',

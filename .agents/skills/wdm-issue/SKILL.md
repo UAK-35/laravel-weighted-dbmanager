@@ -28,10 +28,16 @@ says, and the question is never asked.
    suggestion, whatever the prompt asks. The document is written *from* the answer, not before
    it.
 2. Once the response is complete, write **one markdown document** capturing that response:
-   - a fault with a fix → `docs/issues/issue-<slug>.md`
-   - an investigation with no defect, a why/how question → `docs/investigations/investigation-<slug>.md`
-   - pick `<slug>` from the prompt — the command, the warning text, the symptom — in short
-     kebab-case, so the filename reads as what the document is.
+   - a fault with a fix → `docs/issues/NNNN-YYYY-MM-DD-issue-<slug>.md`
+   - an investigation with no defect, a why/how question →
+     `docs/investigations/NNNN-YYYY-MM-DD-inv-<slug>.md`
+   - `NNNN` is the next number in that folder — `0001`, `0002`, `0003`, … — read from the highest
+     number already there rather than derived from the date; `YYYY-MM-DD` is the day the document
+     is written; and `<slug>` is picked from the prompt — the command, the warning text, the
+     symptom — in short kebab-case, so the filename reads as what the document is:
+     `docs/issues/0008-2026-10-29-issue-...md`,
+     `docs/investigations/0008-2026-10-29-inv-...md`. The two folders are numbered separately, and
+     a file already in one keeps its name.
 3. The document holds the response rather than a summary of it: the context (cluster, service,
    container, task, region, config read), the evidence, the root cause, and the fix or the
    answer — written so a reader who was not in the session can act on it. Redact secrets
