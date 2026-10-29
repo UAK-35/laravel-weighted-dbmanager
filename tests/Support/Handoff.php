@@ -815,7 +815,7 @@ final class Handoff
             'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
             'read' => 'sha256:005c864aa3a9b2ac8d777dcc61f7ef0ce6dc3b0b2605d7e97c489f72dc2326cb',
         ],
-        'docs/planning/plan-pgcat-both-mechanisms-armed.md' => [
+        'docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
             'read' => 'sha256:5f37d9be691614a3704d603d6cb7f9e3bf7fadd7063fe49df2caed9f2d422066',
         ],
@@ -923,9 +923,9 @@ final class Handoff
             'words' => 'the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers\' limit was the machine\'s rather than the gate\'s, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix',
             'read' => 'sha256:94d1a5826c320df2655aee44f1020674acc07df8bda71a5d38626278d3366fe2',
         ],
-        'docs/planning/plan-local-pgcat-window-flip-in-wsl.md' => [
+        'docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md' => [
             'words' => 'the plan for proving the pgcat window flip against a live pooler: the cold rig and the routing proof it ends with, the two variants `simple_db` can be told apart by, the app in `external/laravel-site` built and given a `.env` the flipper can use from inside WSL, a reader window three minutes out that lands inside the eight-minute boot window, the readings either side of the boundary, and what the plan deliberately leaves out',
-            'read' => 'sha256:77f3b7855e2f8715a1970ea3991115d6b499aa4b4ec73703416795a93be75100',
+            'read' => 'sha256:68e368c5894d665ad331befa945948614124527e60e9ff7aec1f18db32705b66',
         ],
         'scripts/windows/wsl-linux-php.ps1' => [
             'words' => 'the Windows-side wrapper that fetches a static Linux PHP CLI and runs a tree through it inside WSL: `-Setup`, `-Check` and `-Run`, the mount resolved by `wslpath` rather than assembled, the extraction done by the distribution\'s own tar, the runtime and manifest extension lines, the two roots derived from the file\'s own location, and the exit codes 0, 1 and 2',
@@ -971,7 +971,7 @@ final class Handoff
             'words' => 'the investigation of the live ECS task\'s `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image\'s entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes',
             'read' => 'sha256:55303bac7dc34da5f4f706bdf77f1cd6829350f92314f39e6639211233ec3ff5',
         ],
-        'docs/planning/plan-boot-stamp-read-only-check.md' => [
+        'docs/planning/0003-2026-10-27-plan-boot-stamp-read-only-check.md' => [
             'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
             'read' => 'sha256:01d4cca8a75495f7b77d2f50032823c530416c6da66864c77854577fed2582ab',
         ],
