@@ -1,9 +1,9 @@
 ---
-name: pkg-push
-description: Get commits and release tags from this package onto GitHub, and prove the tag landed - the HTTPS remote, the PowerShell 7 shell MSYS cannot replace, the workflow-scope refusal, and the three-layer verification of a tag. Invoke on @pkg-push mentions, a push that was refused, or a tag that has to be confirmed on the remote.
+name: wdm-push
+description: Get commits and release tags from this package onto GitHub, and prove the tag landed - the HTTPS remote, the PowerShell 7 shell MSYS cannot replace, the workflow-scope refusal, and the three-layer verification of a tag. Invoke on @wdm-push mentions, a push that was refused, or a tag that has to be confirmed on the remote.
 ---
 
-# `pkg-push` — getting this package onto its remote
+# `wdm-push` — getting this package onto its remote
 
 Run everything from the package root.
 
@@ -89,4 +89,4 @@ credential, and a private one or a dead credential fails in the way
 
 ## Do not push unless asked
 
-Pushing publishes. It is the user's call, and cutting a version and pushing it is `pkg-deploy`.
+Pushing publishes. It is the user's call, and cutting a version and pushing it is `wdm-deploy`.

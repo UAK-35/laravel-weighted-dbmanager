@@ -7,7 +7,7 @@ namespace Uak35\WeightedDbManager\Tests\Support;
 use RuntimeException;
 
 /**
- * The `.agents/skills/pkg-*` frontmatter descriptions, and the index that lists the skills,
+ * The `.agents/skills/wdm-*` frontmatter descriptions, and the index that lists the skills,
  * read as data.
  *
  * WHY THIS EXISTS
@@ -490,7 +490,7 @@ final class SkillDescriptions
 
     /**
      * A cell as the name it carries: the form two labels are compared in, so a backticked
-     * `pkg-commit` in the index is the same skill as the folder it names.
+     * `wdm-commit` in the index is the same skill as the folder it names.
      */
     private static function label(string $cell): string
     {

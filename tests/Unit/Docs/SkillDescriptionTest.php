@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Uak35\WeightedDbManager\Tests\Support\SkillDescriptions;
 
 /**
- * The `pkg-*` skill descriptions, held to the commands they name.
+ * The `wdm-*` skill descriptions, held to the commands they name.
  *
  * WHY THIS EXISTS
  * ---------------
@@ -206,15 +206,15 @@ final class SkillDescriptionTest extends TestCase
     {
         return [
             'a bin script that was renamed' => [
-                'Invoke on @pkg-commit mentions. Run `php bin/checks-gone.php --only=counts` before the commit.',
+                'Invoke on @wdm-commit mentions. Run `php bin/checks-gone.php --only=counts` before the commit.',
                 '`bin/checks-gone.php` is not a script in this package\'s bin/',
             ],
             'a console command that was removed' => [
-                'Invoke on @pkg-deploy mentions. Then `db:pgcat-gone --json` reports whether the boundary moved.',
+                'Invoke on @wdm-deploy mentions. Then `db:pgcat-gone --json` reports whether the boundary moved.',
                 '`db:pgcat-gone` is not a console command this package registers',
             ],
             'a composer script that was renamed' => [
-                'Invoke on @pkg-deploy mentions. Cut it with `composer release-gone -- --weigh`.',
+                'Invoke on @wdm-deploy mentions. Cut it with `composer release-gone -- --weigh`.',
                 '`composer release-gone` is neither a script composer.json declares nor one of Composer\'s own subcommands',
             ],
             'a skill that was renamed' => [
@@ -235,16 +235,16 @@ final class SkillDescriptionTest extends TestCase
     {
         return [
             'a skill and the fast gate' => [
-                'Invoke on @pkg-commit mentions. The fast gate is `php bin/checks.php --only=counts,sentences,pint,phpstan`.',
+                'Invoke on @wdm-commit mentions. The fast gate is `php bin/checks.php --only=counts,sentences,pint,phpstan`.',
             ],
             'a skill and one of this package\'s composer scripts' => [
-                'Invoke on @pkg-deploy mentions. Cut it with `composer release -- --weigh`, then `composer test:unit`.',
+                'Invoke on @wdm-deploy mentions. Cut it with `composer release -- --weigh`, then `composer test:unit`.',
             ],
             'a skill and the window flip' => [
-                'Invoke on @pkg-deploy mentions, and `db:pgcat-window-flip --mode=readers --at=07:00` is what moves the pooler.',
+                'Invoke on @wdm-deploy mentions, and `db:pgcat-window-flip --mode=readers --at=07:00` is what moves the pooler.',
             ],
             'a prose name that is not a command' => [
-                'Invoke on @pkg-push mentions. It runs on `dev`, reads `RELEASING.md`, and passes `--skip-ci` when the rail is not satisfied.',
+                'Invoke on @wdm-push mentions. It runs on `dev`, reads `RELEASING.md`, and passes `--skip-ci` when the rail is not satisfied.',
             ],
         ];
     }

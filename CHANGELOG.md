@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **The three package skills are renamed `wdm-commit`, `wdm-push` and `wdm-deploy`.** The folder
+  names, the frontmatter `name` and description, the index row, the invocation marker (`@wdm-commit`
+  and the two beside it) and every path that points at them move together, so a session told to
+  commit, push or release here is handed a name in the same family as `wdm-issue`,
+  `wdm-investigation` and `wdm-plan` rather than a second prefix saying the same thing twice. The
+  files' contents are otherwise unchanged, and the three are declared in the note's register as the
+  pending files they now are.
+
 - **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
   `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
   from the highest number already there rather than from the date — then the day the document is written

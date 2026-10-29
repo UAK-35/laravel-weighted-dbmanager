@@ -8,7 +8,7 @@ declare(strict_types=1);
  *
  * THE PAIR IT SHOWS
  * -----------------
- *   `pkg-commit` reads a commit back with four git reads and a look at the changelog, and a
+ *   `wdm-commit` reads a commit back with four git reads and a look at the changelog, and a
  *   release asks a fifth: whether the notes a commit wrote are still under `## Unreleased` or are
  *   published by a tag that carries the commit. Done by hand that is `git log`, `git show
  *   --name-only`, `git show <sha> -- CHANGELOG.md`, `git tag --contains` and a read of the tag's

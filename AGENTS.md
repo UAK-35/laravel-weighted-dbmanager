@@ -124,8 +124,8 @@ The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` 
 
 ## 4. Commits and pushes
 
-Follow the skills rather than inventing a shape: `.agents/skills/pkg-commit/SKILL.md` for a commit
+Follow the skills rather than inventing a shape: `.agents/skills/wdm-commit/SKILL.md` for a commit
 (the message `bin/weighing.php` reads back, the `## Unreleased` entry that decides the bump, the
-signature, and the files that are never committed) and `.agents/skills/pkg-push/SKILL.md` for
-getting it to GitHub from PowerShell 7. A release is `.agents/skills/pkg-deploy/SKILL.md` over
+signature, and the files that are never committed) and `.agents/skills/wdm-push/SKILL.md` for
+getting it to GitHub from PowerShell 7. A release is `.agents/skills/wdm-deploy/SKILL.md` over
 `RELEASING.md`.

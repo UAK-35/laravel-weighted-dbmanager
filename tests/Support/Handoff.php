@@ -769,11 +769,11 @@ final class Handoff
         ],
         '.agents/skills/wdm-issue/SKILL.md' => [
             'words' => 'the skill that records an WDM fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an WDM issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
-            'read' => 'sha256:78a1cad09fe4913c84c321a26e92bb9573e412758b965a72bbf4f5b2129704fd',
+            'read' => 'sha256:a10aa1ed900246ec2f55dc309af8f3c0425161d22a9bcc77505381a1bd6a139f',
         ],
         '.agents/skills/wdm-investigation/SKILL.md' => [
             'words' => 'the skill that records an WDM investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
-            'read' => 'sha256:52e087f8e2dc74585d8f863e2dcccb226648ca8df0b123174cbdc5eb84dec9ab',
+            'read' => 'sha256:ac1e0d7237e5f298bb72fd696bdbaa7a9fd4941428c3edbe7d903d98ba2b4188',
         ],
         'docs/health-host-ip.md' => [
             'words' => 'the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip`',
@@ -813,7 +813,7 @@ final class Handoff
         ],
         '.agents/skills/wdm-plan/SKILL.md' => [
             'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
-            'read' => 'sha256:005c864aa3a9b2ac8d777dcc61f7ef0ce6dc3b0b2605d7e97c489f72dc2326cb',
+            'read' => 'sha256:fb50da93f2f37e86a34d9211f1628be340c0c05ba77ae76408f6c8612e1a20e3',
         ],
         'docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
@@ -990,6 +990,18 @@ final class Handoff
         'docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md' => [
             'words' => 'the issue record for `AllServersDown` on the live application task: the 34 requests the 22:02 database reboot cost, the 13 the 22:00 pgcat restart cost, why a one-server pool has nothing to hand out while pgcat reconnects, the retry the application has to add, and the dead `reader_db_1` endpoint the next 10:00 reader window would activate',
             'read' => 'sha256:0144512cf5877fca944fc60715e94f092e81e23cce19a589392efca0930f6ac2',
+        ],
+        '.agents/skills/wdm-commit/SKILL.md' => [
+            'words' => 'the skill that commits a change in this package: the message shape `bin/weighing.php` reads back, the `## Unreleased` entry that decides the bump, the split rule for a tree holding several concerns, the signed commit, and the four reads that prove a commit holds what was intended',
+            'read' => 'sha256:42b0cc11f9df363e21d41158c1f08c0d059f2539481fde798692a32526874ff0',
+        ],
+        '.agents/skills/wdm-push/SKILL.md' => [
+            'words' => 'the skill that puts commits and annotated tags on GitHub from PowerShell 7: the HTTPS remote, the shell MSYS cannot replace, the workflow-scope and non-fast-forward refusals, and the three-layer proof that a tag landed',
+            'read' => 'sha256:50f37c44c179fd6a857a3c2e41bdd7af9dfe3a912786a0013dc6970a2e2c9906',
+        ],
+        '.agents/skills/wdm-deploy/SKILL.md' => [
+            'words' => 'the skill that publishes a version: the bump weighing, the promotion of the changelog into the version section, the tag and its push, the Packagist confirmation, and the pin a consumer raises',
+            'read' => 'sha256:3a1e7f5902e50367ddad3a0a671d100beed441e030c5f424e2f72563a78c837a',
         ],
         // @pending-descriptions-end
     ];

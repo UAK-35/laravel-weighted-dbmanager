@@ -59,4 +59,4 @@ This package holds its own records to the tree, and a new file under `docs/` is 
 ## Related
 
 - `AGENTS.md` section 0 — the scope rule every path above obeys.
-- `.agents/skills/pkg-commit/SKILL.md` — how a commit is made here, if one is asked for.
+- `.agents/skills/wdm-commit/SKILL.md` — how a commit is made here, if one is asked for.

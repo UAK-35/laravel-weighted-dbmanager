@@ -42,9 +42,9 @@
     "skills": {
         "index": ".agents/README.md",
         "dirs": [
-            ".agents/skills/pkg-commit",
-            ".agents/skills/pkg-deploy",
-            ".agents/skills/pkg-push"
+            ".agents/skills/wdm-commit",
+            ".agents/skills/wdm-deploy",
+            ".agents/skills/wdm-push"
         ]
     },
     "checks": {

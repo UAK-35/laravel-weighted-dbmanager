@@ -1,9 +1,9 @@
 ---
-name: pkg-commit
-description: Commit a change inside the laravel-weighted-dbmanager package - the message shape the weighing pass reads back, the CHANGELOG entry that decides the bump, the signature, and the two files that must never be committed. Invoke on @pkg-commit mentions, a request to commit work done in this package, or a request for a commit message here.
+name: wdm-commit
+description: Commit a change inside the laravel-weighted-dbmanager package - the message shape the weighing pass reads back, the CHANGELOG entry that decides the bump, the signature, and the two files that must never be committed. Invoke on @wdm-commit mentions, a request to commit work done in this package, or a request for a commit message here.
 ---
 
-# `pkg-commit` — committing inside `laravel-weighted-dbmanager`
+# `wdm-commit` — committing inside `laravel-weighted-dbmanager`
 
 This skill is scoped to the package repository — the directory that holds this package's
 `composer.json`. Everything below runs from there. The consuming application is a **different repository** with its own commit rules; a
@@ -184,4 +184,4 @@ see.
 ## Do not commit unless asked
 
 Writing the message is a normal part of the work; making the commit is the user's call
-unless they asked for it, and pushing is a separate step (`pkg-push`).
+unless they asked for it, and pushing is a separate step (`wdm-push`).

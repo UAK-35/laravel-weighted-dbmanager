@@ -138,7 +138,7 @@ stale `surface.tsv` line — so the tag's own run is the first thing that checke
 at, and it is green. `docs/issues/0005-2026-10-21-issue-release-v0-2-0-alpha7-ci-ungated.md` is the record of that.
 The tag is an annotated one (`7b4560c` the tag object, `2a771cc` the commit it peels to) and both are
 on the remote, pushed with `git push origin dev --follow-tags` from PowerShell 7 as `PUSHING.md` and
-`@pkg-push` require.
+`@wdm-push` require.
 
 **The two repairs before it.** Both were found on the runner rather than on the machine that wrote
 them, and both carry the `### Fixed` entries the release then promoted. `929094b` reads section 2 at
@@ -226,6 +226,9 @@ the tree.
 | File | What it is |
 |---|---|
 | `.agents/manage-config.py` | the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a `--check` mode that writes nothing and exits 1 when the pair is out of step, and a refusal — exit 1 — for a token nothing answers or a record missing the key |
+| `.agents/skills/wdm-commit/SKILL.md` | the skill that commits a change in this package: the message shape `bin/weighing.php` reads back, the `## Unreleased` entry that decides the bump, the split rule for a tree holding several concerns, the signed commit, and the four reads that prove a commit holds what was intended |
+| `.agents/skills/wdm-deploy/SKILL.md` | the skill that publishes a version: the bump weighing, the promotion of the changelog into the version section, the tag and its push, the Packagist confirmation, and the pin a consumer raises |
+| `.agents/skills/wdm-push/SKILL.md` | the skill that puts commits and annotated tags on GitHub from PowerShell 7: the HTTPS remote, the shell MSYS cannot replace, the workflow-scope and non-fast-forward refusals, and the three-layer proof that a tag landed |
 | `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
 | `docs/investigations/0002-2026-10-20-inv-pgcat-flip-writer-to-readers-failed.md` | the investigation of why the pooler was not flipped from writer to readers on a live ECS task: the automatic flips failed because `supervisorctl` is unreachable to the `www-data` the schedule runs as (a `root:root` 0700 socket), the root-owned flip target and empty boot stamp that would still bite, and the fix |
 | `docs/investigations/0003-2026-10-20-inv-pgcat-select-1-hang.md` | the investigation of the report that a bare `select 1` hangs through the pooler while `select 1 as ok` returns: the protocol matrix that could not reproduce it on pgcat 1.2.0, why an alias cannot reach the pooler at all, the named prepared-statement failure that does reproduce for both queries, and the checkout wait that is the only path a query genuinely waits on |
@@ -333,7 +336,7 @@ cycle cut promoted. Section 3's plan is a transcript taken before this cycle's t
 this register declares the lane's next number instead of repeating the one above it.
 
 The push itself goes through PowerShell 7 and nothing else; `PUSHING.md` is the runbook, and
-`@pkg-push` wraps it:
+`@wdm-push` wraps it:
 
 ```powershell
 # from the package root
@@ -426,7 +429,7 @@ php bin/release.php --version=0.2.0-alpha5 --branch=dev --dry-run
 
 Two lines of it are the state this note describes rather than a step of a release. `ci` is the
 interlock the unpushed commits leave: a real run refuses to tag until they are on `origin/dev`, which
-is section 2's job and the `pkg-push` runbook's rather than this note's. `branch` is `(dirty)` because
+is section 2's job and the `wdm-push` runbook's rather than this note's. `branch` is `(dirty)` because
 the re-take is measured in the working tree it was taken in; the note commit is what makes it clean.
 The `handoff note` line says what the release would move in this file, and it names two rows rather
 than three: the absent version this note already carries is `v0.2.0`, so the row is moved to the
@@ -512,7 +515,7 @@ repository is not an installation change until each of them happens.
 | PHP | The binary `.agents/machine.local.json` records as `php.exe` (8.4.27). It **is on `PATH`** in the shell, and a bare `php` resolves to that same binary today - which still decides nothing about which interpreter a command runs on: every script under `bin/` re-runs itself under the recorded one, so start it with whatever `php` this shell has and the work happens on the recorded interpreter. |
 | Composer | 2.10.3. `composer.phar` sits in the package root and is **gitignored**, so a test must never shell out to composer. |
 | Git identities | `origin` is HTTPS (`https://github.com/UAK-35/laravel-weighted-dbmanager.git`), `commit.gpgsign=true`, `user.signingkey=9CE840D871DE7A62`, and `core.hooksPath` is unset — this repository has **no** pre-commit gate of its own. |
-| Skills | `.agents/skills/{pkg-commit,pkg-push,pkg-deploy,wdm-issue,wdm-investigation,wdm-plan}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
+| Skills | `.agents/skills/{wdm-commit,wdm-push,wdm-deploy,wdm-issue,wdm-investigation,wdm-plan}/SKILL.md`, indexed by `.agents/README.md`. Hand-maintained — no `.skills/` sources, no generator, no `verify.py` — so a file there is the only copy. |
 | Checks | `php bin/checks.php --list` names thirteen; use `--only=` subsets. The full run and the whole `tests/` tree both exceed what a single agent command is allowed to take, so run one file or one directory at a time. The whole tree takes about a quarter of an hour on the machine that wrote this note, which is long enough for the JSON report `DbReplicaStatusTest` compares against a second reading of the file to land either side of a second boundary and fail on `checked_at` — a clock rather than a reading. `interpreter` is the one that reads the machine record — it fails on a `php.exe` that is gone, one that starts and cannot read the script it would be run on, one that reports another version, or one below the requirement the record carries. |
 | Style gate | `php bin/tool.php pint --test` (PSR-12). |
 | Static analysis | `phpstan.neon.dist`: level `max`, over `src/` only — a file under `tests/` is style-checked but not analysed. |

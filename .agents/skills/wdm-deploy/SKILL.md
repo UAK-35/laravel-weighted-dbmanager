@@ -1,9 +1,9 @@
 ---
-name: pkg-deploy
-description: Publish a version of this package - weigh the bump, promote the CHANGELOG, tag it, push the tag, confirm Packagist knows it, and hand the consumer the pin to raise. Invoke on @pkg-deploy mentions, a request to release or publish this package, or a request to point an application at a newer version.
+name: wdm-deploy
+description: Publish a version of this package - weigh the bump, promote the CHANGELOG, tag it, push the tag, confirm Packagist knows it, and hand the consumer the pin to raise. Invoke on @wdm-deploy mentions, a request to release or publish this package, or a request to point an application at a newer version.
 ---
 
-# `pkg-deploy` — releasing and distributing the package
+# `wdm-deploy` — releasing and distributing the package
 
 For a Composer library, "deploy" is two things and only the first is inside this repository:
 **publish a version** (cut it, tag it, get the tag onto the remote so Packagist derives it),
@@ -72,7 +72,7 @@ spellings would be one version published twice.
 
 ## 3. Publish it — the tag has to travel
 
-A release is not published until its tag is on the remote. That is `pkg-push`'s job, and the
+A release is not published until its tag is on the remote. That is `wdm-push`'s job, and the
 one command is:
 
 ```powershell
