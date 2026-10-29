@@ -11,6 +11,12 @@
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
 
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
+
 - **The harness configuration is carried as a template and rendered, so the file that names this
   machine is not the file a commit carries.** `opencode.jsonc.template` and
   `opencode.v1-backup.jsonc.template` hold the two configurations with the machine's temp directory
@@ -439,6 +445,12 @@
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
 
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
+
 - **`db:doctor`'s `pool probe` row is two rows: `pool probe armed` and `pool probe answer`.** The row
   answered two questions with one socket — whether anything can ask the pooler at all, and what the
   pooler said for each pool — so a build container could only ever leave the whole question out of a
@@ -670,6 +682,12 @@
   and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
+
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
 
 - **The front-door pool sweep asks every declared pool in one wave, under one timeout budget.** When
   the console cannot be read, the flipper used `PoolProbe::ask()` once per declared pool and once
@@ -1675,6 +1693,12 @@ interpreter through the machine file rather than spelling its path out.
   and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
+
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
 
 - **The behavioral guidelines a session writes by are a file of this repository, and the load order
   sends a reader to it before `README.md`.** `AGENTS.md` — the canonical rule set — gains the row in
@@ -2741,6 +2765,12 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
 
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
+
 - **Two of the boot audit's log lines are about the record's write instead of about a lost entry,
   and an alert rule written against the old one needs updating.** "The audit record changed while
   this boot was running …" no longer says `discarding N entries` — the entry is not discarded any
@@ -3133,6 +3163,12 @@ envelope" bullets now point at it.
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
 
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
+
 - **`db:pgcat-flip`'s `--json` object now writes the envelope's five keys first, with its evidence
   after them.** The keys are the same nine and the values are unchanged; the order is `command`,
   `kind`, `exit_code`, `reason`, `error`, then `mode`, `previous_mode`, `steps`, `status`. The order
@@ -3323,6 +3359,12 @@ Published without changelog - a mistake - will fix
   and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
+
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
 
 - **The pgcat mismatch sentence names the setting the connection came from.** It always
   said `… Set swrr.pgcat.enabled = false, or point database.default at the pgcat-fronted
@@ -3583,6 +3625,12 @@ found in the release tooling written alongside it. Each one is covered by tests.
   and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
   without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
+
+- **The seven investigation records are renamed to that scheme, numbered by creation date.**
+  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  citations in the issue, plan and investigation records — and the note's pending table — following them.
+  The documents themselves are unchanged; only the names, and the paths that point at them, move.
 
 - **`db:replica-status` says when the boot audit is not registered, instead of printing
   nothing.** The health payload has always answered `available: false` — with `error` null —
