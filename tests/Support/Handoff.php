@@ -960,8 +960,8 @@ final class Handoff
             'read' => 'sha256:fd3838a4aab8ff2d6295b1ddbd1a7f705c832669fe4b7a2c78dbc5a06efe9a2f',
         ],
         'opencode.v1-backup.jsonc.template' => [
-            'words' => 'the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the agent and command blocks, and the V1 permission maps — with the machine\'s temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine',
-            'read' => 'sha256:7c5eb0237de465e9bc19bab6483003b9852aca2bc1f03bb5633315148a2689ef',
+            'words' => 'the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the V1 permission maps with `bash`\'s `*` fallback first because opencode matches the last rule rather than the first, and no agent or command block of its own — with the machine\'s temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine',
+            'read' => 'sha256:b7ca045be61703ee51fb36759b42d75f4272f1a4c78d5df88e6d7c3878bad185',
         ],
         'docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md' => [
             'words' => 'the investigation into whether `swrr.pgcat.boot_file` is the container\'s boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment\'s entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written',
@@ -980,12 +980,12 @@ final class Handoff
             'read' => 'sha256:08d61baad0a8ca8a1866cf63bc29b544473cdbcb5902766bd4b61ce2deb90d55',
         ],
         'opencode.jsonc.template' => [
-            'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the default agent and its grants, the single skill target, the commands and the permission table, with the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine',
-            'read' => 'sha256:f306cfcb2f60dd445da8f0f309d49bc27c99937eb020b22301a7d8d3ecf0b738',
+            'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the single skill target, the permission table whose broad `shell` `*` fallback comes first so the narrow grants below it are the ones that match, and the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine — and no default agent, because the one it named had no body anywhere in this repository\'s history',
+            'read' => 'sha256:5b5ec3b89a597c82f9d18ccf6f83dc5090f040aace5412792f064434d1bfd68d',
         ],
         '.agents/manage-config.py' => [
-            'words' => 'the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a `--check` mode that writes nothing and exits 1 when the pair is out of step, and a refusal — exit 1 — for a token nothing answers or a record missing the key',
-            'read' => 'sha256:524009f434f6a16782cd4a4d8def0c2970686afdb44decaa1144407b1e3ddfe2',
+            'words' => 'the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a value encoded for the JSON string it lands in and read back through `json.loads` so a Windows separator cannot break it, a `--check` mode that writes nothing and exits 1 when the pair is out of step, a refusal — exit 1 — for a token nothing answers or a record missing the key, and exit 2 for a template or a record that is not there at all',
+            'read' => 'sha256:fe5b5ba8e4974eba453bf33b40f4585b8e64d93b761e4e3dc50ff9d0aaa348da',
         ],
         'docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md' => [
             'words' => 'the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay',

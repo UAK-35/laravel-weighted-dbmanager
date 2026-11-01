@@ -5,7 +5,6 @@
         "BEHAVE.mdc"
     ],
     "formatter": true,
-    "default_agent": "php-code-analyzer",
     "skills": {
         // `.agents/skills/` is the single real skill target (see .skills/README.md).
         // There is deliberately no `.opencode/skills/` - a second copy would drift
@@ -13,35 +12,6 @@
         "paths": [
             ".agents/skills"
         ]
-    },
-    "agent": {
-        "php-code-analyzer": {
-            "description": "Analyzes PHP files for syntax errors, logical bugs, cyclomatic complexity, PHP 8.4 modernization opportunities, duplicate code, and tool recommendations. Presents issues with numbered IDs and allows user to select which to fix via custom sub-agents.",
-            "mode": "primary",
-            "model": "opencode/north-mini-code-free",
-            // The canonical agent body lives under .agents/. This inline entry is only the
-            // OpenCode registration; the prompt points at the single source of truth.
-            "prompt": "Read and follow the canonical agent definition at .agents/agents/php-code-analyzer.md before acting. Skills live under .agents/skills/.",
-            "permission": {
-                "read": "allow",
-                "edit": "allow",
-                "bash": "allow",
-                "glob": "allow",
-                "grep": "allow",
-                "list": "allow"
-            }
-        }
-    },
-    "command": {
-        // This becomes the name of the command
-        "php-analyze": {
-            // This is the prompt that will be sent to the LLM
-            "template": "Run PHP code analysis on Laravel project - syntax, bugs, complexity, PHP 8.4 modernization, duplicates, tools",
-            // This is shown as the description in the TUI
-            "description": "Run the code analysis",
-            "agent": "php-code-analyzer",
-            "model": "opencode/north-mini-code-free"
-        }
     },
     // The permissions this session was granted, recorded in `permissions-01.md` (also gitignored).
     // opencode evaluates the LAST matching rule, so the broad `*` rules come first and the narrow
@@ -56,6 +26,7 @@
         "question": "allow",
         "todowrite": "allow",
         "bash": {
+            "*": "ask",
             "echo *": "allow",
             "curl *": "allow",
             "php *": "allow",
@@ -87,8 +58,7 @@
             "Start-Sleep *": "allow",
             "Write-Output *": "allow",
             "aws *": "allow",
-            "tar *": "allow",
-            "*": "ask"
+            "tar *": "allow"
         },
         "external_directory": {
             "*": "deny",

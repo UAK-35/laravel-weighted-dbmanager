@@ -24,3 +24,4 @@
 /app-externally-related.md
 /app-removables.md
 /.cloud-attachments
+/.agents/__pycache__/

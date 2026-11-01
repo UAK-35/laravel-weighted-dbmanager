@@ -97,6 +97,24 @@
 
 ### Fixed
 
+- **The harness configuration is one the harness can load, and the renderer that writes it cannot
+  produce a file that does not parse.** Four faults, all of them silent because each is read by a
+  matcher rather than by a person. The V2 template named `php-code-analyzer` as `default_agent` and
+  registered the agent and its `php-analyze` command, and no body for either ever existed in this
+  repository's history — so the registration goes rather than one being invented here. The V2
+  permission table put its broad `shell` `*` grant ahead of every narrow one, which is the wrong
+  order for a matcher that takes the last rule to match: the fallback now comes first, and the
+  grants under it are the ones that decide. The V1 backup carried the same two faults, its `agent`
+  and `command` blocks with nothing behind them and its `bash` map with `ask` everywhere and no
+  fallback first, and both move with the V2 file. And `manage-config.py` substituted a value into a
+  JSON string without encoding it, so the backslashes of the Windows path it renders on were read as
+  escapes and the output did not parse on the one machine it exists for; it now encodes each value
+  and reads it back through `json.loads` before writing, refusing rather than writing a value that
+  does not survive the round trip. A template or record that is not there is exit 2, leaving 1 for a
+  record it can read and cannot use. `.agents/__pycache__/` joins the ignored paths at the same
+  time: the renderer imported the way its own checks import it leaves a byte-code directory that
+  the handoff register then refuses to render over, which is a tree a session cannot commit from.
+
 - **A flip refuses a variant whose pools this container cannot resolve, instead of putting a pooler
   in front of a server it cannot reach.** `VariantShape::unresolvedPools()` asks one variant's own
   `[pools.*]` servers — not the connection's pool names, so a file is judged even when the

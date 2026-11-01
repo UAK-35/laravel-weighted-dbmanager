@@ -5,41 +5,12 @@
         "BEHAVE.mdc"
     ],
     "formatter": true,
-    "default_agent": "php-code-analyzer",
     // `.agents/skills/` is the single real skill target (see .skills/README.md).
     // There is deliberately no `.opencode/skills/` - a second copy would drift
     // out of sync with the canonical packages, which is what it used to do.
     "skills": [
         ".agents/skills"
     ],
-    "agents": {
-        "php-code-analyzer": {
-            "description": "Analyzes PHP files for syntax errors, logical bugs, cyclomatic complexity, PHP 8.4 modernization opportunities, duplicate code, and tool recommendations. Presents issues with numbered IDs and allows user to select which to fix via custom sub-agents.",
-            "mode": "primary",
-            "model": "opencode/north-mini-code-free",
-            // The canonical agent body lives under .agents/. This inline entry is only the
-            // OpenCode registration; the system prompt points at the single source of truth.
-            "system": "Read and follow the canonical agent definition at .agents/agents/php-code-analyzer.md before acting. Skills live under .agents/skills/.",
-            // V1 `"bash": "allow"` -> V2 `shell` allow. The other V1 entries (read/edit/glob/
-            // grep/list) already match V2's default-allow base policy, and `list` is not a V2
-            // permission action, so only the shell grant is carried over.
-            "permissions": [
-                {
-                    "action": "shell",
-                    "resource": "*",
-                    "effect": "allow"
-                }
-            ]
-        }
-    },
-    "commands": {
-        "php-analyze": {
-            "template": "Run PHP code analysis on Laravel project - syntax, bugs, complexity, PHP 8.4 modernization, duplicates, tools",
-            "description": "Run the code analysis",
-            "agent": "php-code-analyzer",
-            "model": "opencode/north-mini-code-free"
-        }
-    },
     // V1 had `"todowrite": "allow"`; todos are off by default in V2.
     "experimental": {
         "todo": true
@@ -53,6 +24,11 @@
     // `list` is not a V2 permission action (discovery tools are allowed by default), and
     // `todowrite` became `experimental.todo` above.
     "permissions": [
+        {
+            "action": "shell",
+            "resource": "*",
+            "effect": "ask"
+        },
         {
             "action": "shell",
             "resource": "& *bash.exe* -c *",
@@ -92,11 +68,6 @@
             "action": "question",
             "resource": "*",
             "effect": "allow"
-        },
-        {
-            "action": "shell",
-            "resource": "*",
-            "effect": "ask"
         },
         {
             "action": "shell",

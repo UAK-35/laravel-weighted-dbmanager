@@ -92,12 +92,38 @@ def answer(record: dict, token: str) -> str:
     return value.strip().rstrip("/\\")
 
 
+def escaped(value: str) -> str:
+    """The value as the *contents* of a JSON string, proved by reading it back.
+
+    The template writes every token inside a JSON string, so what is substituted is the text of a
+    string rather than a value beside one: a Windows separator in a recorded path is an escape
+    sequence there, and an unescaped quote ends the string early. Both are encoded here, a control
+    character is refused by name instead of encoded, and the encoding is put back through
+    `json.loads` — so the proof that the value survived is the parser's, not this docstring's.
+    """
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in value):
+        raise Refusal(
+            f"{value!r} holds a control character. A token stands inside a JSON string, and a "
+            f"control character has no single-line encoding there: measure the value again."
+        )
+
+    encoded = value.replace("\\", "\\\\").replace('"', '\\"')
+
+    if json.loads(f'"{encoded}"') != value:
+        raise Refusal(
+            f"{value!r} does not read back as itself once encoded for JSON, so the configuration "
+            f"this would write names a path the record does not. Nothing was written."
+        )
+
+    return encoded
+
+
 def render(template: str, record: dict) -> str:
     """The template with every mapped token answered, and nothing left unresolved."""
     rendered = template
 
     for token in SUBSTITUTIONS:
-        value = answer(record, token)
+        value = escaped(answer(record, token))
         rendered = rendered.replace(f"<{token}>", value).replace(token, value)
 
     remaining = sorted(set(TOKEN.findall(rendered)))
@@ -114,13 +140,8 @@ def render(template: str, record: dict) -> str:
 
 
 def read_record() -> dict:
-    """`.agents/machine.local.json`, as an object."""
-    if not RECORD.is_file():
-        raise Refusal(
-            f"{RECORD} is not in this checkout. Copy .agents/sample.machine.local.json to that name "
-            f"and replace each __TOKEN__ with this machine's own value."
-        )
-
+    """`.agents/machine.local.json`, as an object. Its absence is `main`'s to report: a record that
+    is not there is a setup failure (exit 2), not a refusal about what it holds (exit 1)."""
     try:
         record = json.loads(RECORD.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exception:
@@ -145,6 +166,15 @@ def main(argv: list[str]) -> int:
 
     if not TEMPLATE.is_file():
         print(f"the template is not there: {TEMPLATE}", file=sys.stderr)
+
+        return 2
+
+    if not RECORD.is_file():
+        print(
+            f"the record is not there: {RECORD}. Copy .agents/sample.machine.local.json to that "
+            f"name and replace each __TOKEN__ with this machine's own value.",
+            file=sys.stderr,
+        )
 
         return 2
 
