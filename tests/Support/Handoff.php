@@ -667,10 +667,6 @@ final class Handoff
         // The block `php bin/handoff.php --reaffirm` rewrites: the words each pending file is described
         // by, and the reading those words were written against.
         // @pending-descriptions
-        'docs/reports/0001-2026-10-30_rpt-agentic-setup-review.md' => [
-            'words' => 'the recreated agentic setup review: the original inventory of 22 setup files, supporting files, 15 findings and historical validation results, with restoration checks recorded separately',
-            'read' => 'sha256:d6bd2758148b0096d0ce34061aa6f1a45b8e1ace8149415358e3da60c77f7659',
-        ],
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
             'read' => 'sha256:2b8c20e499f57136208502f49cf6ac6e96624d5df1ead0dbb2d49ed70efd5cdf',
@@ -1010,6 +1006,10 @@ final class Handoff
         '.agents/skills/wdm-report/SKILL.md' => [
             'words' => 'the skill that records a report as a markdown document: the `/wdm-report` marker that always activates it, the "Is this an WDM report?" question it asks for the phrases "create a report", "report the" and "need a report", the `NNNN-YYYY-MM-DD_rpt-<slug>.md` name it gives the document, and the folder it files it in',
             'read' => 'sha256:0d0317140eb439d3ad2c9cf2d0ceef0809b506f9fbf9086fc7848298b5e461e6',
+        ],
+        '.agents/skills/wdm-runbook/SKILL.md' => [
+            'words' => 'the skill that records a runbook as a markdown document: the `/wdm-runbook` marker that always activates it, the "Is this an WDM runbook?" question it asks for the phrases "create a runbook" and "create this as a runbook", the `NNNN-YYYY-MM-DD_runbook-<slug>.md` name it gives the document, and the folder it files it in',
+            'read' => 'sha256:378bd632925d396c2ae8e7e869ff6d771261f7049831a55db5f48e7c7f93a83f',
         ],
         // @pending-descriptions-end
     ];

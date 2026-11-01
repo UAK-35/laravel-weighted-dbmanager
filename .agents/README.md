@@ -16,6 +16,7 @@ them; the frontmatter `description` is what decides when one is invoked.
 | `wdm-investigation` | record an WDM investigation as a markdown document: activate on the `/wdm-investigation` marker, or for a prompt containing investigate or "find out why" once the user answers yes to "Is this an WDM investigation?", then write the response into `docs/investigations/` |
 | `wdm-plan`          | record an WDM plan as a markdown document: activate on the `/wdm-plan` marker, or for a prompt containing "plan a", "plan the" or "need a plan" once the user answers yes to "Is this an WDM plan?", then write the response into `docs/planning/`                          |
 | `wdm-report`        | record a report as a markdown document: activate on the `/wdm-report` marker, or for a prompt containing "create a report", "report the" or "need a report" once the user answers yes to "Is this an WDM report?", then write the response into `docs/reports/`            |
+| `wdm-runbook`       | record a runbook as a markdown document: activate on the `/wdm-runbook` marker, or for a prompt containing "create a runbook" or "create this as a runbook" once the user answers yes to "Is this an WDM runbook?", then write the response into `docs/runbooks/`          |
 
 The written-down procedures they wrap are [`RELEASING.md`](../RELEASING.md) (what a release
 is, and what `bin/release.php` does at each step) and [`PUSHING.md`](../PUSHING.md) (the

@@ -4,6 +4,16 @@
 
 ### Added
 
+- **A `wdm-runbook` skill records a runbook as a markdown document under `docs/runbooks/`.** It
+  activates on the `/wdm-runbook` marker, or for a prompt containing "create a runbook" or "create
+  this as a runbook" once the user answers yes to "Is this an WDM runbook?", and after the response
+  is written it captures it into `NNNN-YYYY-MM-DD_runbook-<slug>.md`: the next number in the folder
+  rather than one derived from the date, the day the runbook is written, the underscore before
+  `runbook` as part of the name, and a slug taken from what the prompt asked to be written down. The
+  document carries what has to be true before the first step, the commands and the output that says
+  each one worked, what to check between steps, how to stop and undo, and what to do when a step
+  fails. The folder is ordered by creation date when it is normalized, earliest `0001`.
+
 - **A `wdm-report` skill records a report as a markdown document under `docs/reports/`.** It
   activates on the `/wdm-report` marker, or for a prompt containing "create a report", "report the"
   or "need a report" once the user answers yes to "Is this an WDM report?", and after the response
