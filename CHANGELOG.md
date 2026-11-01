@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- **A `wdm-report` skill records a report as a markdown document under `docs/reports/`.** It
+  activates on the `/wdm-report` marker, or for a prompt containing "create a report", "report the"
+  or "need a report" once the user answers yes to "Is this an WDM report?", and after the response
+  is written it captures it into `NNNN-YYYY-MM-DD_rpt-<slug>.md`: the next number in the folder
+  rather than one derived from the date, the day the report is written, the underscore before `rpt`
+  as part of the name, and a slug taken from what the prompt asked about. The folder's existing
+  reports are ordered by their creation date when it is normalized, earliest `0001`, and a report
+  already in order keeps its name.
+
 ### Changed
 
 - **The issue documents separate their date from their kind with an underscore.**
