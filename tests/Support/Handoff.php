@@ -975,6 +975,10 @@ final class Handoff
             'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
             'read' => 'sha256:be8b907ac0a214f1ef109ad46ac6d0434d2b07848f9ae0f5a7bcf0291e3df266',
         ],
+        'docs/planning/0004-2026-11-01_plan-agentic-setup-findings.md' => [
+            'words' => 'the plan for repairing the fifteen findings of the agentic setup review: why twelve of them are a reference or a claim written away from the thing it describes, the four decisions the repairs need — the default agent, the guards\' corpus, the handoff snapshot and the ignored rules copy — and the five batches in the order a session meets them, each step with the guard that holds it and what the review has moved since it was taken',
+            'read' => 'sha256:08d61baad0a8ca8a1866cf63bc29b544473cdbcb5902766bd4b61ce2deb90d55',
+        ],
         'opencode.jsonc.template' => [
             'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the default agent and its grants, the single skill target, the commands and the permission table, with the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine',
             'read' => 'sha256:f306cfcb2f60dd445da8f0f309d49bc27c99937eb020b22301a7d8d3ecf0b738',
@@ -1010,6 +1014,10 @@ final class Handoff
         '.agents/skills/wdm-runbook/SKILL.md' => [
             'words' => 'the skill that records a runbook as a markdown document: the `/wdm-runbook` marker that always activates it, the "Is this an WDM runbook?" question it asks for the phrases "create a runbook" and "create this as a runbook", the `NNNN-YYYY-MM-DD_runbook-<slug>.md` name it gives the document, and the folder it files it in',
             'read' => 'sha256:378bd632925d396c2ae8e7e869ff6d771261f7049831a55db5f48e7c7f93a83f',
+        ],
+        'docs/reports/0001-2026-10-30_rpt-agentic-setup-review.md' => [
+            'words' => 'the agentic setup inventory and review: configuration renderer probes, missing references, workflow inconsistencies, suggested corrections and the report naming rule',
+            'read' => 'sha256:2402c7b258d1a33ab8c48e41fe6054c18f16f55c9792735498c159e2da22cf2c',
         ],
         // @pending-descriptions-end
     ];
