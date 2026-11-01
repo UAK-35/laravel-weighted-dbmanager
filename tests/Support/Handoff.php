@@ -961,7 +961,7 @@ final class Handoff
         ],
         'opencode.v1-backup.jsonc.template' => [
             'words' => 'the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the V1 permission maps with `bash`\'s `*` fallback first because opencode matches the last rule rather than the first, and no agent or command block of its own — with the machine\'s temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine',
-            'read' => 'sha256:b7ca045be61703ee51fb36759b42d75f4272f1a4c78d5df88e6d7c3878bad185',
+            'read' => 'sha256:dbe387c6e6aea85d5b8664d356fe165d6e186aaa8def0de07e30924f208179b4',
         ],
         'docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md' => [
             'words' => 'the investigation into whether `swrr.pgcat.boot_file` is the container\'s boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment\'s entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written',
@@ -977,11 +977,11 @@ final class Handoff
         ],
         'docs/planning/0004-2026-11-01_plan-agentic-setup-findings.md' => [
             'words' => 'the plan for repairing the fifteen findings of the agentic setup review: why twelve of them are a reference or a claim written away from the thing it describes, the four decisions the repairs need — the default agent, the guards\' corpus, the handoff snapshot and the ignored rules copy — and the five batches in the order a session meets them, each step with the guard that holds it and what the review has moved since it was taken',
-            'read' => 'sha256:594447586bee6ac00b7c8230adcbef347eeaaf28952949108c4a94c07dea4af6',
+            'read' => 'sha256:0489769bcfb725fb4d71440a761ca2fd0a79c6992312cf3de2c44058e37eb754',
         ],
         'opencode.jsonc.template' => [
             'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the single skill target, the permission table whose broad `shell` `*` fallback comes first so the narrow grants below it are the ones that match, and the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine — and no default agent, because the one it named had no body anywhere in this repository\'s history',
-            'read' => 'sha256:5b5ec3b89a597c82f9d18ccf6f83dc5090f040aace5412792f064434d1bfd68d',
+            'read' => 'sha256:2feca073ffa4930920940ac2f96f73e897993b4c32b0590b825ce6709e39a6f1',
         ],
         '.agents/manage-config.py' => [
             'words' => 'the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a value encoded for the JSON string it lands in and read back through `json.loads` so a Windows separator cannot break it, a `--check` mode that writes nothing and exits 1 when the pair is out of step, a refusal — exit 1 — for a token nothing answers or a record missing the key, and exit 2 for a template or a record that is not there at all',

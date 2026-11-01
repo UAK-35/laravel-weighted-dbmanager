@@ -3,7 +3,7 @@
 These are for working **in this repository** — the directory that holds this package's
 `composer.json`. They are hand-maintained: unlike
 the application repository that installs the package, this one has no
-`.skills/` sources, no `_sync.py` generator and no `verify.py` guard, so a file here is the
+`.skills/` sources, no `_sync.py` generator of them and no `verify.py` guard, so a file here is the
 only copy and is edited in place. Every tool that reads `.agents/skills/<name>/SKILL.md` finds
 them; the frontmatter `description` is what decides when one is invoked.
 
@@ -23,19 +23,24 @@ is, and what `bin/release.php` does at each step) and [`PUSHING.md`](../PUSHING.
 remote, what authenticates here, and why MSYS fails). Those two files are the authority; a
 skill here names them rather than restating them, so the two cannot drift.
 
-The other two files here are records rather than instructions. `machine.local.json` is this
-machine's own facts, gitignored and copied from `sample.machine.local.json` in a fresh clone;
-`gate.json` is the last gate run as `php bin/checks.php --record` wrote it — committed, because
-`HANDOFF.md` renders its summary from it instead of a session copying the numbers out of a terminal;
-the same command re-renders that block from the record it just wrote, so the note and the run it quotes
-cannot be taken apart.
+The other four files here are not instructions. Two are records: `machine.local.json` is this
+machine's own facts, gitignored, and `gate.json` is the last gate run as
+`php bin/checks.php --record` wrote it — committed, because `HANDOFF.md` renders its summary from it
+instead of a session copying the numbers out of a terminal, and the same command re-renders that
+block from the record it just wrote, so the note and the run it quotes cannot be taken apart. The
+third is `sample.machine.local.json`, the copyable form of the first: a fresh clone has nothing to
+copy from, so this one is committed with a token where each of this machine's facts goes. The fourth
+is `manage-config.py`, the renderer that answers the harness templates out of the record and writes
+the configuration the harness reads — it writes no rule, which is why the skills beside it have none.
 
 Before the first command that shells out, take the interpreter from that record rather than from
 `PATH`, and do it even when a thread opened nothing but this file. `machine.local.json` names
-`php.exe`, and `php` is not on this shell's `PATH`, so a bare one fails rather than resolving, and
-searching the disk for a binary of that name is the search the record exists to replace. A fresh clone has nothing to copy from, so the same file in token form is committed as
-`sample.machine.local.json`: copy it to the name above and replace each `__TOKEN__` with this
-machine's own value. [`AGENTS.md`](../AGENTS.md) §2 carries the same rule in the load order it
+`php.exe` and states whether a bare `php` resolves in `php.onPath` — that answer is this machine's
+own fact rather than a rule, and the recorded interpreter is the one the gate and the tools were
+measured with either way. Searching the disk for a binary of that name is the search the record
+exists to replace. A fresh clone has nothing to copy from, so the same file in token form is
+committed as `sample.machine.local.json`: copy it to the name above and replace each `__TOKEN__` with
+this machine's own value. [`AGENTS.md`](../AGENTS.md) §2 carries the same rule in the load order it
 belongs to.
 
 The state of the work itself — what is uncommitted, unpushed and in no release a consumer can

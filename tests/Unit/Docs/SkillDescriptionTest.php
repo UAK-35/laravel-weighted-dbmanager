@@ -131,6 +131,48 @@ final class SkillDescriptionTest extends TestCase
     }
 
     /**
+     * The sample machine record lists the same skills as the tree — the third copy of that list,
+     * held to the same answer.
+     *
+     * WHY THIS IS HERE RATHER THAN IN THE SAMPLE'S OWN GUARD
+     * -----------------------------------------------------
+     *   `MachinePathsTest` owns what a token has to be and reads nothing about skills, so a
+     *   `skills.dirs` row that named three of eight was a list that had stopped following the tree
+     *   with every guard green: the index and the directories are what this class compares, and the
+     *   sample is the copy a reader copies. A ninth skill added to `.agents/skills/` now fails here
+     *   rather than leaving the sample at the old count.
+     */
+    public function test_the_sample_machine_record_lists_every_skill_and_no_other(): void
+    {
+        $skills = array_keys(SkillDescriptions::skills());
+
+        $raw = @file_get_contents(__DIR__.'/../../../.agents/sample.machine.local.json');
+
+        self::assertIsString($raw, 'the sample machine record is not there, so the list it carries is not read.');
+
+        $sample = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertIsArray($sample, 'The sample machine record does not read as one.');
+
+        $dirs = array_map(
+            static fn (string $dir): string => basename($dir),
+            is_array($sample['skills']['dirs'] ?? null) ? $sample['skills']['dirs'] : [],
+        );
+
+        sort($dirs);
+
+        $this->assertSame(
+            $skills,
+            $dirs,
+            sprintf(
+                ".agents/skills/ and the sample machine record do not list the same skills.\n  on disk: %s\n  in the sample: %s",
+                implode(', ', $skills),
+                implode(', ', $dirs),
+            ),
+        );
+    }
+
+    /**
      * The index's own sentences name nothing the package has lost — the same claim as the
      * descriptions, made about the file a person reads to choose a skill.
      */

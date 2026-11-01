@@ -1,8 +1,9 @@
 # AGENTS.md — the rules for working in this repository
 
-> Canonical, and hand-maintained. This repository has no `.skills/` sources, no generator and no
-> `verify.py` reading this file (`.agents/README.md` says the same about the skills), so this is the
-> only copy: edit it in place.
+> Canonical, and hand-maintained. This repository has no `.skills/` sources and no `verify.py`
+> reading this file (`.agents/README.md` says the same about the skills). The one generator it
+> carries writes no rule: `.agents/manage-config.py` answers the harness templates out of the machine
+> record, so this is the only copy of what follows: edit it in place.
 
 This is the rule set for anyone working in **this package** — `uak35/laravel-weighted-dbmanager`,
 the directory that holds `composer.json`, `src/`, `config/`, `bin/`, `tests/`, `docs/` and this
@@ -89,9 +90,11 @@ The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` 
 4. `.agents/README.md` — the skills, and the two runbooks they wrap;
 5. `HANDOFF.md` — the state of the work, as of the day it was taken, before you trust it as "now";
 6. `.agents/machine.local.json` — this machine's own facts, and the interpreter every command here
-   starts with. Read it before the first command that shells out and use the `php` it names: `php` is
-   not on `PATH` in this shell, so a bare one fails rather than resolving, and searching the disk for
-   an interpreter is what this rule replaces. The record is gitignored, so the path lives there and
+   starts with. Read it before the first command that shells out and use the `php` it names; whether
+   a bare `php` resolves is this machine's own fact and the record states it as `php.onPath`, so a
+   bare one is measured rather than assumed, and the recorded interpreter is the one the gate and the
+   tools were measured with either way. Searching the disk for an interpreter is what this rule
+   replaces. The record is gitignored, so the path lives there and
    never in a rule; `HANDOFF.md` section 5 holds its rows to it. A fresh clone has nothing to copy
    from, so the same file in token form is committed at `.agents/sample.machine.local.json`: copy it
    to the name above and replace each `__TOKEN__` with this machine's own value. The harness's own

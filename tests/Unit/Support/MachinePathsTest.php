@@ -211,16 +211,26 @@ final class MachinePathsTest extends TestCase
         self::assertIsArray($sample, 'The sample does not read as a machine record.');
 
         // Read by name rather than walked: it is these facts that differ between two machines and
-        // so have to be tokens. The versions, the origin URL and the tarball rows beside them are
-        // the same on every machine of this kind, which is why the record states them in full.
+        // so have to be tokens. The rule is what a machine measures against what the repository
+        // owns — every version, every `onPath` and the latest tag are read off the machine being
+        // set up, so they are tokens; the origin URL, the checks, the tarball rows and the skill
+        // directories are the repository's, which is why the record states those in full.
         $facts = [
             'php.exe' => $sample['php']['exe'],
             'php.dir' => $sample['php']['dir'],
+            'php.version' => $sample['php']['version'],
+            'php.onPath' => $sample['php']['onPath'],
             'pwsh.exe' => $sample['pwsh']['exe'],
+            'pwsh.onPath' => $sample['pwsh']['onPath'],
             'package.dir' => $sample['package']['dir'],
             'package.head' => $sample['package']['head'],
+            'package.latestTag' => $sample['package']['latestTag'],
             'composer.phar' => $sample['composer']['phar'],
+            'composer.version' => $sample['composer']['version'],
+            'composer.onPath' => $sample['composer']['onPath'],
             'search.rgExe' => $sample['search']['rgExe'],
+            'search.rgVersion' => $sample['search']['rgVersion'],
+            'search.rgOnPath' => $sample['search']['rgOnPath'],
             'psql.dir' => $sample['psql']['dir'],
             'git.userSigningKey' => $sample['git']['userSigningKey'],
         ];

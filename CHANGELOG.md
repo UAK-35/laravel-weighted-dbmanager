@@ -97,6 +97,35 @@
 
 ### Fixed
 
+- **The sample machine record is a sample: every fact a machine measures is a token, and the skill
+  list is the whole list.** `.agents/sample.machine.local.json` stated PHP `8.4.26` with `onPath`
+  false where the record beside it says `8.4.27` and true, and listed three skill directories where
+  the tree has eight — so a clone that copied it inherited a version, a `PATH` answer and a skill
+  list that were nobody's. The rule the repair settles is that a value a machine measures is a
+  token and a value the repository owns is stated: eight rows became tokens (the PHP, PowerShell,
+  Composer and ripgrep versions, their `onPath` answers, and the latest tag), the eight directories
+  are written in full in the index's order, and the `about` text now names the measured rows as
+  measured instead of telling the reader to leave them alone. Two guards move with it:
+  `tests/Unit/Support/MachinePathsTest.php` reads the eight new keys by name and asserts a token
+  where a value would be inherited, and `tests/Unit/Docs/SkillDescriptionTest.php` gains the sample
+  as the third reader of the skill list, so a ninth skill cannot leave it at eight.
+
+- **Whether a bare `php` resolves is this machine's fact, not a rule the repository states.**
+  `AGENTS.md` §2 and `.agents/README.md` both asserted that `php` is not on this shell's `PATH` and
+  explained a failure by it, where the record answers `true` and the handoff's PHP row repeats the
+  record and is measured against a bare `php` on every run. Both now say what survives either
+  answer: take the interpreter from the record, `php.onPath` states whether a bare one resolves,
+  and the recorded interpreter is the one the gate and the tools were measured with either way.
+
+- **The discovery and maintenance text follows the setup it describes.** `AGENTS.md`'s header said
+  the repository has no generator, where `.agents/manage-config.py` renders the harness
+  configuration — it now says the one generator writes no rule, which is the distinction that
+  matters. `.agents/README.md` counted two files beside the skills where it holds four: two records,
+  the copyable form of one, and the renderer, each named. Both templates' skill-target comment
+  pointed at `.skills/README.md`, which is the application repository's file rather than this one's.
+  And `HANDOFF.md`'s Skills row named the commit helper as the only Python a commit carries; the
+  renderer is the second, and the row says so.
+
 - **The five document skills state one activation rule, one path spelling, and the registration
   step that makes their own record render.** Three sentences that disagreed with the file beside
   them. The frontmatter named three ways in and the body named two, closing with a marker that
