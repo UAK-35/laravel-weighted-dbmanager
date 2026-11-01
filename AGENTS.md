@@ -119,9 +119,14 @@ The programs are in `bin/`: `checks.php` (the gate), `tool.php` and `tools.php` 
   own;
 - on Windows, Composer over an intercepting TLS scanner goes through `bin/composer-ca.ps1` rather
   than a bare `composer` — `docs/composer-tls-windows.md` says why;
-- `README.md`, `RELEASING.md` and every record under `docs/` are read by the guards in
-  `tests/Unit/Docs/`: the counts they state, the tests they cite and the exit codes they list are
-  compared with the code, so a number or a name written in prose is a claim rather than a comment.
+- `README.md`, `RELEASING.md` and the Markdown files **directly inside** `docs/` are the records the
+  count, sentence and citation guards read: the numbers they state, the tests they cite and the exit
+  codes they list are compared with the code, so a number or a name written in prose is a claim
+  rather than a comment. The records in the folders under `docs/` — `docs/issues/`,
+  `docs/investigations/`, `docs/planning/`, `docs/reports/` — are outside those three readers; a
+  record that quotes another is read wherever it sits, and the rest is held by the guards over every
+  file a commit carries: the repository-boundary walk, the machine-path reading, and the handoff
+  register, which refuses a record whose words were read against other bytes.
 
 ---
 

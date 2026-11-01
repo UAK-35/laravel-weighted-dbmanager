@@ -97,6 +97,16 @@
 
 ### Fixed
 
+- **`AGENTS.md` §3 names the corpus the guards actually read, instead of claiming every record under
+  `docs/`.** The count, sentence and citation readers all glob `docs/*.md`, so the twenty records in
+  `docs/issues/`, `docs/investigations/`, `docs/planning/` and `docs/reports/` sat outside all three
+  and a green gate established less than the sentence said. It now names `README.md`, `RELEASING.md`
+  and the Markdown files directly inside `docs/`, says that a record quoting another is read wherever
+  it sits, and names what holds the rest: the repository-boundary walk, the machine-path reading and
+  the handoff register. Narrowed rather than made recursive on purpose — a recursive reader would
+  audit historical records written under different conventions, which is a repair sweep of its own
+  and not a sentence edit.
+
 - **The sample machine record is a sample: every fact a machine measures is a token, and the skill
   list is the whole list.** `.agents/sample.machine.local.json` stated PHP `8.4.26` with `onPath`
   false where the record beside it says `8.4.27` and true, and listed three skill directories where
