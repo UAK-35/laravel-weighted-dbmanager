@@ -97,6 +97,34 @@
 
 ### Fixed
 
+- **The five document skills state one activation rule, one path spelling, and the registration
+  step that makes their own record render.** Three sentences that disagreed with the file beside
+  them. The frontmatter named three ways in and the body named two, closing with a marker that
+  "always wins" — broader than the opening it was meant to describe, so a literal reader either
+  asked on an explicit mention or activated on a marker quoted in unrelated text. The body now
+  orders them as the frontmatter does: an explicit `@wdm-…` mention, then a prompt that **opens**
+  with `/wdm-…`, then the keyword question, plus one sentence saying a marker quoted as an example
+  is not an invocation. The same five asked for `absolute-Unix only` paths in the document they
+  write — the one spelling that cannot be checked from here, and the one that names somebody's
+  machine — and now ask for repository-relative paths, with an absolute one only where a container's
+  own root is the point of the example. And `wdm-plan` named two steps of the registration where its
+  four siblings name three: the `php bin/handoff.php --reaffirm=<path>` reading was missing between
+  the description and the render, so a plan written by the literal procedure left a row
+  `tests/Support/Handoff.php` refuses, which is the failure this plan document itself met.
+
+- **`wdm-deploy` and `wdm-push` push the branch a release comes from, and link to files that exist.**
+  Both explained that a prerelease is cut from `dev` and then published with `git push origin main
+  --follow-tags`; after such a release, following either pushes a branch that is not the release,
+  and `--follow-tags` carries only the tags reachable from the history it did push. `wdm-push` now
+  reads `BRANCH="$(git rev-parse --abbrev-ref HEAD)"` and names the detached-`HEAD` case, where
+  that answers `HEAD` rather than a branch; `wdm-deploy` uses the branch the weighing plan printed,
+  `--branch` with its `main`/`dev` default, rather than assuming one. The preflight range and the
+  `--force-with-lease` example follow the variable. With them, the six relative links that climbed
+  out of a skill's own directory and landed inside `.agents/`, where neither runbook is, step up one
+  directory further: a skill is read from the directory that holds it, so a link leaving
+  `.agents/skills/wdm-push/` by two levels reaches `.agents/` and by three reaches the package root,
+  which is where `PUSHING.md` and `RELEASING.md` are.
+
 - **The harness configuration is one the harness can load, and the renderer that writes it cannot
   produce a file that does not parse.** Four faults, all of them silent because each is read by a
   matcher rather than by a person. The V2 template named `php-code-analyzer` as `default_agent` and

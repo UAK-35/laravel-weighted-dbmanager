@@ -7,21 +7,24 @@ description: Invoke on @wdm-plan mentions, on a prompt that opens with the `/wdm
 
 ## When it activates
 
-Two ways in, and only one of them asks:
+Three ways in, in the order they win, and only the last one asks:
 
-1. **The marker.** If the prompt opens with the marker `/wdm-plan`, activate this skill
-   immediately — no question — and treat the rest of the prompt as the plan to work on.
-2. **The phrases.** If the prompt does *not* open with the marker but contains the phrase
-   `plan a`, `plan the` or `need a plan`, ask the user one yes/no question **before doing
-   anything else**:
+1. **An explicit mention.** An `@wdm-plan` mention anywhere in the prompt activates this skill
+   immediately — no question — and the rest of the prompt is the plan to work on.
+2. **The marker.** If the prompt **opens** with `/wdm-plan`, activate this skill immediately — no
+   question — and treat the rest of the prompt as the plan to work on.
+3. **The phrases.** If neither is present but the prompt contains the phrase `plan a`, `plan the`
+   or `need a plan`, ask the user one yes/no question **before doing anything else**:
 
    > Is this an WDM plan?
 
    - **Yes** → activate this skill before writing the response.
    - **No** → do not activate it; answer the prompt as normal.
 
-The marker always wins: when `/wdm-plan` is present the skill is active whatever else the prompt
-says, and the question is never asked.
+The order is the rule: a mention, or a marker at the prompt's opening, wins over the words, and the
+question is never asked when either is present. What the first two do not cover is a marker or a
+mention **quoted** — inside backticks, in a sentence about this skill rather than addressed to it —
+and that is not an invocation: a quotation is a reader describing the convention, not using it.
 
 ## What it does
 
@@ -53,12 +56,16 @@ says, and the question is never asked.
 This package holds its own records to the tree, and a new file under `docs/` is no exception:
 
 - add a line for the new document to `Handoff::PENDING_DESCRIPTIONS` in
-  `tests/Support/Handoff.php`, then run `php bin/handoff.php --recorded` to re-render the note's
-  pending block — the table is rendered from the files this checkout has that the register does
-  not carry, so a file with no line declared for it is refused by name rather than rendered
-  blank;
-- keep paths in the document absolute-Unix only — no drive letters, home directories or network
-  shares — so `AGENTS.md` section 0's walk and the machine-path guard stay quiet;
+  `tests/Support/Handoff.php`, record the reading with
+  `php bin/handoff.php --reaffirm=<path>`, then run `php bin/handoff.php --recorded` to re-render
+  the note's pending block — the table is rendered from the files this checkout has that the
+  register does not carry, so a line with no current reading is refused by name rather than
+  rendered blank;
+- write paths in the document **repository-relative** — `docs/…`, `src/…`, `.agents/…` — which is
+  the spelling `AGENTS.md` and these skills already use; a Unix absolute path belongs only where a
+  container's own root is the point of the example, and never for a file this repository holds,
+  because a drive letter, a home directory or a network share is a machine and the guards in
+  `tests/Unit/Support/` report one;
 - do not commit unless the user asks; the document is the deliverable.
 
 ## Related

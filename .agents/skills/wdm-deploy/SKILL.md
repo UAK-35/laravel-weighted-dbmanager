@@ -12,7 +12,7 @@ second half happens in a different repository — name it, do not do it from her
 
 Everything in this skill that runs here runs from the package root.
 
-[RELEASING.md](../../RELEASING.md) is the authority on what a release is and what the script
+[RELEASING.md](../../../RELEASING.md) is the authority on what a release is and what the script
 does at each step. The version of this package is the **git tag** and nothing else — there is
 no `version` field and no version file, because a number stored in the repository is a second
 source of truth that drifts from the tag.
@@ -76,12 +76,16 @@ A release is not published until its tag is on the remote. That is `wdm-push`'s 
 one command is:
 
 ```powershell
-git push origin main --follow-tags      # from PowerShell 7, never MSYS
+git push origin "$BRANCH" --follow-tags      # from PowerShell 7, never MSYS
 ```
 
-Cutting and pushing in one step is fine on this layout (`--push` runs exactly that), and
-[PUSHING.md](../../PUSHING.md) is where the refusals and the workflow-scope trap are written
-down.
+`$BRANCH` is the branch the weighing plan named — `--branch`, defaulting to `main`, `dev` for a
+prerelease — not an assumption about which one a release comes from: step 1 printed it, and the
+command that names `main` for a prerelease cut from `dev` publishes a branch that is not the
+release, while `--follow-tags` carries only the tags reachable from the history it did push.
+Cutting and pushing in one step is fine on this layout (`--push` runs exactly that, on the branch
+the plan chose), and [PUSHING.md](../../../PUSHING.md) is where the refusals and the workflow-scope
+trap are written down.
 
 ## 4. Confirm it — three layers, cheapest first
 

@@ -304,7 +304,7 @@ that reads the handoff's environment claims against the record) and
 
 | File | Claim today | Change |
 |---|---|---|
-| `AGENTS.md` header | "this repository has no `.skills/` sources, no generator and no `verify.py` reading this file, so this is the only copy" | qualify it: no `.skills/` sources and no `verify.py`, and the one generator is the harness configuration renderer in `.agents/`, which writes no rule |
+| `AGENTS.md` header | "This repository has no `.skills/` sources", and no generator or `verify.py` either | qualify it: no `.skills/` sources and no `verify.py`, and the one generator is the harness configuration renderer in `.agents/`, which writes no rule |
 | `.agents/README.md` | "The other two files here are records" | name all four: `gate.json` and `machine.local.json` are records, `sample.machine.local.json` is the copyable form of the second, and `manage-config.py` is the renderer |
 | both templates, the skill-target comment | "see `.skills/README.md`" | `see .agents/README.md` |
 | `HANDOFF.md`'s maintenance sentence | names the commit helper as the only Python exception | add the config renderer beside it, which is what `HandoffEnvironmentTest` already allows |

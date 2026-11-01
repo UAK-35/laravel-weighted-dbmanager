@@ -768,12 +768,12 @@ final class Handoff
             'read' => 'sha256:2acaa17fbb4378a97d43688d4a2537cf7c51b766b2ece5f2eccf1c0803e076c3',
         ],
         '.agents/skills/wdm-issue/SKILL.md' => [
-            'words' => 'the skill that records an WDM fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an WDM issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
-            'read' => 'sha256:871b71f55a1f3b22f637dd1aac6d9eebd442317ed090d3b1ee27aef8fd2519da',
+            'words' => 'the skill that records an WDM fault as a markdown document: an `@wdm-issue` mention first, then the `/wdm-issue` marker at the prompt\'s opening, then the "Is this an WDM issue?" question it asks for a bare problem or issue once neither is present — and the issue/investigation folder its document lands in',
+            'read' => 'sha256:9cf03dcc36c919e8d705b32db0a771e3ef6175e41c2dae2142847ace54390b40',
         ],
         '.agents/skills/wdm-investigation/SKILL.md' => [
-            'words' => 'the skill that records an WDM investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
-            'read' => 'sha256:8396e02e26f7397a96b82ea6202873250a6a77dbe5b8314d1d9cb1ce88c95a00',
+            'words' => 'the skill that records an WDM investigation as a markdown document: an `@wdm-investigation` mention first, then the `/wdm-investigation` marker at the prompt\'s opening, then the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why" once neither is present — and the `docs/investigations/` folder its document lands in',
+            'read' => 'sha256:5fb0d1b1fb250269afe5b70b46c494a4eef9903b2753f796310a1f851f0c85f8',
         ],
         'docs/health-host-ip.md' => [
             'words' => 'the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip`',
@@ -812,8 +812,8 @@ final class Handoff
             'read' => 'sha256:2430be186f741a5d6a20a0d5df0e0e09661bf3c4448f7dceb56a1cbdb7bff0d6',
         ],
         '.agents/skills/wdm-plan/SKILL.md' => [
-            'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
-            'read' => 'sha256:0c82e6c2068d2d454143f1c2e83c7e7ab379c6b563853beedac006ada535b51c',
+            'words' => 'the skill that records an WDM plan as a markdown document: an `@wdm-plan` mention first, then the `/wdm-plan` marker at the prompt\'s opening, then the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan" once neither is present — and the `docs/planning/` folder its document lands in, registered with `--reaffirm` as its siblings are',
+            'read' => 'sha256:6dc843d70711fef7b7855e33e3f7c42343c20aab2addf17dddef4b0f721b12c9',
         ],
         'docs/planning/0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
@@ -977,7 +977,7 @@ final class Handoff
         ],
         'docs/planning/0004-2026-11-01_plan-agentic-setup-findings.md' => [
             'words' => 'the plan for repairing the fifteen findings of the agentic setup review: why twelve of them are a reference or a claim written away from the thing it describes, the four decisions the repairs need — the default agent, the guards\' corpus, the handoff snapshot and the ignored rules copy — and the five batches in the order a session meets them, each step with the guard that holds it and what the review has moved since it was taken',
-            'read' => 'sha256:08d61baad0a8ca8a1866cf63bc29b544473cdbcb5902766bd4b61ce2deb90d55',
+            'read' => 'sha256:594447586bee6ac00b7c8230adcbef347eeaaf28952949108c4a94c07dea4af6',
         ],
         'opencode.jsonc.template' => [
             'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the single skill target, the permission table whose broad `shell` `*` fallback comes first so the narrow grants below it are the ones that match, and the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine — and no default agent, because the one it named had no body anywhere in this repository\'s history',
@@ -1000,20 +1000,20 @@ final class Handoff
             'read' => 'sha256:42b0cc11f9df363e21d41158c1f08c0d059f2539481fde798692a32526874ff0',
         ],
         '.agents/skills/wdm-push/SKILL.md' => [
-            'words' => 'the skill that puts commits and annotated tags on GitHub from PowerShell 7: the HTTPS remote, the shell MSYS cannot replace, the workflow-scope and non-fast-forward refusals, and the three-layer proof that a tag landed',
-            'read' => 'sha256:50f37c44c179fd6a857a3c2e41bdd7af9dfe3a912786a0013dc6970a2e2c9906',
+            'words' => 'the skill that puts commits and annotated tags on GitHub from PowerShell 7: the HTTPS remote, the branch read from the checkout rather than assumed, the shell MSYS cannot replace, the workflow-scope and non-fast-forward refusals, and the three-layer proof that a tag landed',
+            'read' => 'sha256:465baef82206a421d0e50ad0e423bf6529f5136e1f139ed2717f81e13dcdb32c',
         ],
         '.agents/skills/wdm-deploy/SKILL.md' => [
             'words' => 'the skill that publishes a version: the bump weighing, the promotion of the changelog into the version section, the tag and its push, the Packagist confirmation, and the pin a consumer raises',
-            'read' => 'sha256:3a1e7f5902e50367ddad3a0a671d100beed441e030c5f424e2f72563a78c837a',
+            'read' => 'sha256:e3e47013a064e8a3e1acd35a643b768f38605cf904d3f51996a36e414a99f4c9',
         ],
         '.agents/skills/wdm-report/SKILL.md' => [
-            'words' => 'the skill that records a report as a markdown document: the `/wdm-report` marker that always activates it, the "Is this an WDM report?" question it asks for the phrases "create a report", "report the" and "need a report", the `NNNN-YYYY-MM-DD_rpt-<slug>.md` name it gives the document, and the folder it files it in',
-            'read' => 'sha256:0d0317140eb439d3ad2c9cf2d0ceef0809b506f9fbf9086fc7848298b5e461e6',
+            'words' => 'the skill that records a report as a markdown document: an `@wdm-report` mention first, then the `/wdm-report` marker at the prompt\'s opening, then the "Is this an WDM report?" question it asks for the phrases "create a report", "report the" and "need a report" once neither is present — the `NNNN-YYYY-MM-DD_rpt-<slug>.md` name it gives the document, and the folder it files it in',
+            'read' => 'sha256:41ff2ff8dc75389cb53915ccae2cdafaf6d6508b883a0483865ecf1a7d067733',
         ],
         '.agents/skills/wdm-runbook/SKILL.md' => [
-            'words' => 'the skill that records a runbook as a markdown document: the `/wdm-runbook` marker that always activates it, the "Is this an WDM runbook?" question it asks for the phrases "create a runbook" and "create this as a runbook", the `NNNN-YYYY-MM-DD_runbook-<slug>.md` name it gives the document, and the folder it files it in',
-            'read' => 'sha256:378bd632925d396c2ae8e7e869ff6d771261f7049831a55db5f48e7c7f93a83f',
+            'words' => 'the skill that records a runbook as a markdown document: an `@wdm-runbook` mention first, then the `/wdm-runbook` marker at the prompt\'s opening, then the "Is this an WDM runbook?" question it asks for the phrases "create a runbook" and "create this as a runbook" once neither is present — the `NNNN-YYYY-MM-DD_runbook-<slug>.md` name it gives the document, and the folder it files it in',
+            'read' => 'sha256:9efb101e2487006ff1ed057ffe03687ece6ac0e7ba56914efb739ebcc82fda4a',
         ],
         'docs/reports/0001-2026-10-30_rpt-agentic-setup-review.md' => [
             'words' => 'the agentic setup inventory and review: configuration renderer probes, missing references, workflow inconsistencies, suggested corrections and the report naming rule',
