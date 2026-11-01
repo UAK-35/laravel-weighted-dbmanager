@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **The issue documents separate their date from their kind with an underscore.**
+  `docs/issues/` now names a record `NNNN-YYYY-MM-DD_issue-<slug>.md`, so the seven files read
+  `0001-2026-10-19_issue-pgcat-flip-force-mode-readers.md` through
+  `0007-2026-10-28_issue-allserversdown-single-server-pool.md` — same numbers, same dates, same
+  slugs. The `wdm-issue` skill asks for the underscore in both branches it writes, the alpha6
+  record's citation and the plan that cites the force-mode issue follow their subjects, and the
+  note's prose row for the alpha7 record is re-pointed with them.
+
 - **The plan documents separate their date from their kind with an underscore.**
   `docs/planning/` now names a plan `NNNN-YYYY-MM-DD_plan-<slug>.md`, so the three files read
   `0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md`,
@@ -41,8 +49,8 @@
   The documents themselves are unchanged; only the names, and the paths that point at them, move.
 
 - **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
+  `docs/issues/0001-2026-10-19_issue-pgcat-flip-force-mode-readers.md` through
+  `docs/issues/0007-2026-10-28_issue-allserversdown-single-server-pool.md`, with the records that cite
   them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
   subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
 

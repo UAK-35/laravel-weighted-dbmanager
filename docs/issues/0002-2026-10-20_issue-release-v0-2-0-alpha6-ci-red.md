@@ -54,7 +54,7 @@ guards reading a tree that is not the tree the tag froze.
 HANDOFF.md names paths this package does not have:
   - .agents/skills/lpr-issue/SKILL.md (line 236)
   - docs/investigations/0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md (line 237)
-  - docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md (line 238)
+  - docs/issues/0001-2026-10-19_issue-pgcat-flip-force-mode-readers.md (line 238)
   - .agents/skills/lpr-issue/SKILL.md (line 494)
 ```
 

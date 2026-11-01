@@ -747,11 +747,11 @@ final class Handoff
             'words' => 'the plan for reading eth1\'s IPv4 in PHP and publishing it as `pinned.host_ip` — the native call, the null contract, the tests and the records the change would touch',
             'read' => 'sha256:a89f3262bedca663817329546e0655ba2de3a50610adc736c6a1dd5761c8e73f',
         ],
-        'docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md' => [
+        'docs/issues/0001-2026-10-19_issue-pgcat-flip-force-mode-readers.md' => [
             'words' => 'the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix',
             'read' => 'sha256:bd416e7b3d55ef32513f0fb9c46c918a95d624812f3b933dcd34ba60704d493f',
         ],
-        'docs/issues/0003-2026-10-20-issue-supervisord-socket-unreachable.md' => [
+        'docs/issues/0003-2026-10-20_issue-supervisord-socket-unreachable.md' => [
             'words' => 'the issue record for the supervisor control socket being unreachable to the user a flip runs as: why every flip refused before it could swap a file, the `FAULT_UNREACHABLE` fault that names the socket and the `chmod=0760` with `chown=root:www-data` repair, and the application-side half this package cannot do',
             'read' => 'sha256:b0aaa11bc2439c92266e4783f041424b54eebc6c0f770e2dca2eadd74513198d',
         ],
@@ -769,7 +769,7 @@ final class Handoff
         ],
         '.agents/skills/wdm-issue/SKILL.md' => [
             'words' => 'the skill that records an WDM fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an WDM issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
-            'read' => 'sha256:660d822f20672915ee4ea0d7c95546d3ea06025a7cfaff9ee54913e2e30e3b70',
+            'read' => 'sha256:871b71f55a1f3b22f637dd1aac6d9eebd442317ed090d3b1ee27aef8fd2519da',
         ],
         '.agents/skills/wdm-investigation/SKILL.md' => [
             'words' => 'the skill that records an WDM investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
@@ -791,9 +791,9 @@ final class Handoff
             'words' => 'the guard that holds a count stated in an `src/` comment to the table beside it: each claim read out of the file\'s own comment tokens, with its expectation derived from the constant or the family the sentence names, so a table that grows a member fails until its sentence says so',
             'read' => 'sha256:e3bf2d3f3d643998834cf54185844f697b4788442a0d85c328c2e88853ad89e6',
         ],
-        'docs/issues/0002-2026-10-20-issue-release-v0-2-0-alpha6-ci-red.md' => [
+        'docs/issues/0002-2026-10-20_issue-release-v0-2-0-alpha6-ci-red.md' => [
             'words' => 'the record of why the v0.2.0-alpha6 run is red: the tag\'s commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer',
-            'read' => 'sha256:3378ed0999a83d816bf47f4ddf4649a38ad5274ad00339c61cd24903f414abc4',
+            'read' => 'sha256:6bbbdade7c80ca1163a841a2c9ff195400d00284a3df6dee029f0e266a425465',
         ],
         'tests/Unit/Docs/ProseNumberAuditTest.php' => [
             'words' => 'the completeness half of the prose-number guard: every number a record bolds, either read by a claim or declared prose in `docs/prose-numbers.md`, with each prose row\'s reason drawn from the categories that record gives',
@@ -807,7 +807,7 @@ final class Handoff
             'words' => 'the investigation of the two `lpr-backend-sites` tasks that were stopped minutes after they started: the CloudTrail and service-event record that makes them a rolled-back revision rather than crashed containers, the log-path permission fatal and the unwritable pooler state directory their boots produced, the boot that upgrades its own vendor tree, and the drain and health-check arithmetic that makes each rollout slow',
             'read' => 'sha256:65bf2423b7fec0c666f3fddb57ac1ecc9589243793c19b1465cac9cb87d2c593',
         ],
-        'docs/issues/0004-2026-10-21-issue-pgcat-hanging-query-wire-capture.md' => [
+        'docs/issues/0004-2026-10-21_issue-pgcat-hanging-query-wire-capture.md' => [
             'words' => 'the issue record for capturing the wire traffic of a hanging query on a live ECS task: why the runbook\'s `tcpdump` is not in the image, the logging PostgreSQL proxy in `python3` that decodes both directions instead, the three things its decoder has to special-case, and the `SHOW POOLS` reading that tells a pooler-side checkout wait from a server-side one',
             'read' => 'sha256:2430be186f741a5d6a20a0d5df0e0e09661bf3c4448f7dceb56a1cbdb7bff0d6',
         ],
@@ -819,7 +819,7 @@ final class Handoff
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
             'read' => 'sha256:b4ee81f87372ceb052a1e4b13d9003260c26cfc18ddd988f128e0b47c5847234',
         ],
-        'docs/issues/0005-2026-10-21-issue-release-v0-2-0-alpha7-ci-ungated.md' => [
+        'docs/issues/0005-2026-10-21_issue-release-v0-2-0-alpha7-ci-ungated.md' => [
             'words' => 'the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen',
             'read' => 'sha256:a7d5599e2b4f82a36ec5e47506429acdcd01acfe6e58e2d649ff980ede27b593',
         ],
@@ -871,7 +871,7 @@ final class Handoff
             'words' => 'the setup script\'s counterpart: the machine file read once, the pooler then the standby then the primary stopped through their own scripts, and all three ports asked with `pg_isready` afterwards, where one that still answers fails the run',
             'read' => 'sha256:e1e180642d5ae5db06ee7bd2643490a737d1d8742c3be0346fafd53b9a796a30',
         ],
-        'docs/issues/0006-2026-10-23-issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md' => [
+        'docs/issues/0006-2026-10-23_issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md' => [
             'words' => 'the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in',
             'read' => 'sha256:e96953d2727202d489e71cea346aa575f3f2397f4d58cf7c605ce0b8ce0c4400',
         ],
@@ -925,7 +925,7 @@ final class Handoff
         ],
         'docs/planning/0002-2026-10-24_plan-local-pgcat-window-flip-in-wsl.md' => [
             'words' => 'the plan for proving the pgcat window flip against a live pooler: the cold rig and the routing proof it ends with, the two variants `simple_db` can be told apart by, the app in `external/laravel-site` built and given a `.env` the flipper can use from inside WSL, a reader window three minutes out that lands inside the eight-minute boot window, the readings either side of the boundary, and what the plan deliberately leaves out',
-            'read' => 'sha256:255fe068f3557863d2a4de0c389b08d91ee96c0ae1ae41f34d22606fa75cdc79',
+            'read' => 'sha256:c54fb28e752d7bc4782d98a5562f8997c3e2b274584825c20ce3805858c0dab3',
         ],
         'scripts/windows/wsl-linux-php.ps1' => [
             'words' => 'the Windows-side wrapper that fetches a static Linux PHP CLI and runs a tree through it inside WSL: `-Setup`, `-Check` and `-Run`, the mount resolved by `wslpath` rather than assembled, the extraction done by the distribution\'s own tar, the runtime and manifest extension lines, the two roots derived from the file\'s own location, and the exit codes 0, 1 and 2',
@@ -987,7 +987,7 @@ final class Handoff
             'words' => 'the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay',
             'read' => 'sha256:a7c6387fe905a8c4d1bd0ff9ffea077ade99d4519b035e7e37b2ef95d0d2774c',
         ],
-        'docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md' => [
+        'docs/issues/0007-2026-10-28_issue-allserversdown-single-server-pool.md' => [
             'words' => 'the issue record for `AllServersDown` on the live application task: the 34 requests the 22:02 database reboot cost, the 13 the 22:00 pgcat restart cost, why a one-server pool has nothing to hand out while pgcat reconnects, the retry the application has to add, and the dead `reader_db_1` endpoint the next 10:00 reader window would activate',
             'read' => 'sha256:0144512cf5877fca944fc60715e94f092e81e23cce19a589392efca0930f6ac2',
         ],
