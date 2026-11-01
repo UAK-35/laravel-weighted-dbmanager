@@ -141,7 +141,7 @@ digest that was rolled back does not describe the code that ran.
 The two tasks logged 889 and 777 `two mechanisms own the pooler's mode` warnings in their
 seventeen minutes, one per request. That is the known behaviour of a standing boot-audit
 finding under FPM; the warning, its cause and the fix are recorded in
-`docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md`, and today's running
+`docs/investigations/0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md`, and today's running
 tasks carry it at twenty-six to twenty-eight thousand lines per two hours.
 
 ## The rollout arithmetic

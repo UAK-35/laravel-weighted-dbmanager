@@ -755,25 +755,25 @@ final class Handoff
             'words' => 'the issue record for the supervisor control socket being unreachable to the user a flip runs as: why every flip refused before it could swap a file, the `FAULT_UNREACHABLE` fault that names the socket and the `chmod=0760` with `chown=root:www-data` repair, and the application-side half this package cannot do',
             'read' => 'sha256:b0aaa11bc2439c92266e4783f041424b54eebc6c0f770e2dca2eadd74513198d',
         ],
-        'docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md' => [
+        'docs/investigations/0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md' => [
             'words' => 'the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix',
             'read' => 'sha256:21c805aa8e3decd754a3bf771cdd9eb605e706742e93cb853ef2e5315084f863',
         ],
-        'docs/investigations/0003-2026-10-20-inv-pgcat-select-1-hang.md' => [
+        'docs/investigations/0003-2026-10-20_inv-pgcat-select-1-hang.md' => [
             'words' => 'the investigation of the report that a bare `select 1` hangs through the pooler while `select 1 as ok` returns: the protocol matrix that could not reproduce it on pgcat 1.2.0, why an alias cannot reach the pooler at all, the named prepared-statement failure that does reproduce for both queries, and the checkout wait that is the only path a query genuinely waits on',
             'read' => 'sha256:3849df95add361dff950c6ffee1554013b81e9406573ec1b2239ca4e169eafca',
         ],
-        'docs/investigations/0002-2026-10-20-inv-pgcat-flip-writer-to-readers-failed.md' => [
+        'docs/investigations/0002-2026-10-20_inv-pgcat-flip-writer-to-readers-failed.md' => [
             'words' => 'the investigation of why the pooler was not flipped from writer to readers on a live ECS task: the automatic flips failed because `supervisorctl` is unreachable to the `www-data` the schedule runs as (a `root:root` 0700 socket), the root-owned flip target and empty boot stamp that would still bite, and the fix',
             'read' => 'sha256:2acaa17fbb4378a97d43688d4a2537cf7c51b766b2ece5f2eccf1c0803e076c3',
         ],
         '.agents/skills/wdm-issue/SKILL.md' => [
             'words' => 'the skill that records an WDM fault as a markdown document: the `/wdm-issue` marker that always activates it, the "Is this an WDM issue?" question it asks for a bare problem or issue, and the issue/investigation folder its document lands in',
-            'read' => 'sha256:a10aa1ed900246ec2f55dc309af8f3c0425161d22a9bcc77505381a1bd6a139f',
+            'read' => 'sha256:660d822f20672915ee4ea0d7c95546d3ea06025a7cfaff9ee54913e2e30e3b70',
         ],
         '.agents/skills/wdm-investigation/SKILL.md' => [
             'words' => 'the skill that records an WDM investigation as a markdown document: the `/wdm-investigation` marker that always activates it, the "Is this an WDM investigation?" question it asks for the word investigate or the phrase "find out why", and the `docs/investigations/` folder its document lands in',
-            'read' => 'sha256:ac1e0d7237e5f298bb72fd696bdbaa7a9fd4941428c3edbe7d903d98ba2b4188',
+            'read' => 'sha256:8396e02e26f7397a96b82ea6202873250a6a77dbe5b8314d1d9cb1ce88c95a00',
         ],
         'docs/health-host-ip.md' => [
             'words' => 'the `pinned.host_ip` decision: why the standard library rather than a shell, why `null` is the answer for an absent or unusable interface, why the name is fixed to `eth1`, and the deployment check that holds the payload to `ip`',
@@ -793,7 +793,7 @@ final class Handoff
         ],
         'docs/issues/0002-2026-10-20-issue-release-v0-2-0-alpha6-ci-red.md' => [
             'words' => 'the record of why the v0.2.0-alpha6 run is red: the tag\'s commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer',
-            'read' => 'sha256:8676d37a8d7159ad0517ce2ae70a9df58ca4bf7f7f39c55f1074afbfa4503763',
+            'read' => 'sha256:3378ed0999a83d816bf47f4ddf4649a38ad5274ad00339c61cd24903f414abc4',
         ],
         'tests/Unit/Docs/ProseNumberAuditTest.php' => [
             'words' => 'the completeness half of the prose-number guard: every number a record bolds, either read by a claim or declared prose in `docs/prose-numbers.md`, with each prose row\'s reason drawn from the categories that record gives',
@@ -803,13 +803,13 @@ final class Handoff
             'words' => 'the guard on the sentences one record quotes from another: every `"…"` span beside a backticked `.md` path is held to the record it names, with `CHANGELOG.md` out of the corpus because a changelog quotes the sentence a version published',
             'read' => 'sha256:073d5b6d3e303fd35844f01e9345f52901c7b61d0854612d5562ac4d1abc4d04',
         ],
-        'docs/investigations/0004-2026-10-21-inv-ecs-rev31-rollback.md' => [
+        'docs/investigations/0004-2026-10-21_inv-ecs-rev31-rollback.md' => [
             'words' => 'the investigation of the two `lpr-backend-sites` tasks that were stopped minutes after they started: the CloudTrail and service-event record that makes them a rolled-back revision rather than crashed containers, the log-path permission fatal and the unwritable pooler state directory their boots produced, the boot that upgrades its own vendor tree, and the drain and health-check arithmetic that makes each rollout slow',
-            'read' => 'sha256:749c612596ccefe721b75621769d036819369b0a2ade5e0d8a9f18e6d10843ce',
+            'read' => 'sha256:65bf2423b7fec0c666f3fddb57ac1ecc9589243793c19b1465cac9cb87d2c593',
         ],
         'docs/issues/0004-2026-10-21-issue-pgcat-hanging-query-wire-capture.md' => [
             'words' => 'the issue record for capturing the wire traffic of a hanging query on a live ECS task: why the runbook\'s `tcpdump` is not in the image, the logging PostgreSQL proxy in `python3` that decodes both directions instead, the three things its decoder has to special-case, and the `SHOW POOLS` reading that tells a pooler-side checkout wait from a server-side one',
-            'read' => 'sha256:7fffdb1a9d2935eeb42e1bcb917c34e6c6e1adb0a0f39bb634ece756d182537d',
+            'read' => 'sha256:2430be186f741a5d6a20a0d5df0e0e09661bf3c4448f7dceb56a1cbdb7bff0d6',
         ],
         '.agents/skills/wdm-plan/SKILL.md' => [
             'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
@@ -817,7 +817,7 @@ final class Handoff
         ],
         'docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
-            'read' => 'sha256:5f37d9be691614a3704d603d6cb7f9e3bf7fadd7063fe49df2caed9f2d422066',
+            'read' => 'sha256:b4ee81f87372ceb052a1e4b13d9003260c26cfc18ddd988f128e0b47c5847234',
         ],
         'docs/issues/0005-2026-10-21-issue-release-v0-2-0-alpha7-ci-ungated.md' => [
             'words' => 'the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen',
@@ -963,17 +963,17 @@ final class Handoff
             'words' => 'the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the agent and command blocks, and the V1 permission maps — with the machine\'s temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine',
             'read' => 'sha256:7c5eb0237de465e9bc19bab6483003b9852aca2bc1f03bb5633315148a2689ef',
         ],
-        'docs/investigations/0005-2026-10-27-inv-boot-stamp-vs-container-boot-stamp.md' => [
+        'docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md' => [
             'words' => 'the investigation into whether `swrr.pgcat.boot_file` is the container\'s boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment\'s entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written',
             'read' => 'sha256:c205c4b807c737fb85ae06043b6676bab4a22b2d0ce69f65c355af0da202e5c9',
         ],
-        'docs/investigations/0006-2026-10-27-inv-boot-stamp-unwritable-warning.md' => [
+        'docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md' => [
             'words' => 'the investigation of the live ECS task\'s `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image\'s entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes',
             'read' => 'sha256:55303bac7dc34da5f4f706bdf77f1cd6829350f92314f39e6639211233ec3ff5',
         ],
         'docs/planning/0003-2026-10-27-plan-boot-stamp-read-only-check.md' => [
             'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
-            'read' => 'sha256:01d4cca8a75495f7b77d2f50032823c530416c6da66864c77854577fed2582ab',
+            'read' => 'sha256:be8b907ac0a214f1ef109ad46ac6d0434d2b07848f9ae0f5a7bcf0291e3df266',
         ],
         'opencode.jsonc.template' => [
             'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the default agent and its grants, the single skill target, the commands and the permission table, with the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine',
@@ -983,7 +983,7 @@ final class Handoff
             'words' => 'the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a `--check` mode that writes nothing and exits 1 when the pair is out of step, and a refusal — exit 1 — for a token nothing answers or a record missing the key',
             'read' => 'sha256:524009f434f6a16782cd4a4d8def0c2970686afdb44decaa1144407b1e3ddfe2',
         ],
-        'docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md' => [
+        'docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md' => [
             'words' => 'the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay',
             'read' => 'sha256:a7c6387fe905a8c4d1bd0ff9ffea077ade99d4519b035e7e37b2ef95d0d2774c',
         ],

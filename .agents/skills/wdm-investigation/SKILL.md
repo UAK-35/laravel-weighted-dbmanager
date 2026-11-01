@@ -29,14 +29,15 @@ prompt says, and the question is never asked.
    a fix suggestion, whatever the prompt asks. The document is written *from* the answer, not
    before it.
 2. Once the response is complete, write **one markdown document** capturing that response into
-   `docs/investigations/`, named `NNNN-YYYY-MM-DD-inv-<slug>.md`:
+   `docs/investigations/`, named `NNNN-YYYY-MM-DD_inv-<slug>.md`:
    - `NNNN` is the next number in the folder — `0001`, `0002`, `0003`, … — read from the highest
      number already there rather than derived from the date, so a record written today can never
      take a number an older record already holds;
-   - `YYYY-MM-DD` is the date the document is written, in that order;
+   - `YYYY-MM-DD` is the date the document is written, in that order, and the underscore before
+     `inv` is part of the name rather than a separator to be written as a hyphen;
    - pick `<slug>` from the prompt — the command, the warning text, the symptom — in short
      kebab-case, so the filename reads as what the document is;
-   - the result is e.g. `docs/investigations/0008-2026-10-29-inv-pgcat-select-1-hang.md`. A file
+   - the result is e.g. `docs/investigations/0008-2026-10-29_inv-pgcat-select-1-hang.md`. A file
      already in the folder keeps its name; the number and date are assigned once, when it is
      written, and never renumbered as later records arrive.
 3. The document holds the response rather than a summary of it: the context (cluster, service,

@@ -18,7 +18,7 @@ one: how do you capture that query's PostgreSQL wire traffic, and decode it, so 
 *client* side can be told from a wait on the *pooler* side — rather than guessing from the SQL text
 or from how long a prompt sat there.
 
-That capture is the third fix in `docs/investigations/0003-2026-10-20-inv-pgcat-select-1-hang.md`, which
+That capture is the third fix in `docs/investigations/0003-2026-10-20_inv-pgcat-select-1-hang.md`, which
 says to take a `tcpdump` of port 5433 on the task and read the frames. **That advice cannot be
 followed on this deployment**, because the tool is not in the image — which is the fault this
 record is written around.

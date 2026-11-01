@@ -4,6 +4,14 @@
 
 ### Changed
 
+- **The investigation documents separate their date from their kind with an underscore.**
+  `docs/investigations/` now names a record `NNNN-YYYY-MM-DD_inv-<slug>.md`, so the same seven files
+  read `0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md` through
+  `0007-2026-10-27_inv-force-mode-readers-reverts.md` — same numbers, same dates, same slugs. The
+  `wdm-investigation` skill that writes them and the `wdm-issue` skill that files investigations too
+  ask for the underscore, and the citations in the issue, plan and investigation records follow the
+  names.
+
 - **The three package skills are renamed `wdm-commit`, `wdm-push` and `wdm-deploy`.** The folder
   names, the frontmatter `name` and description, the index row, the invocation marker (`@wdm-commit`
   and the two beside it) and every path that points at them move together, so a session told to
@@ -20,8 +28,8 @@
   was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
 
 - **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
+  `docs/investigations/0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md` through
+  `docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
   citations in the issue, plan and investigation records — and the note's pending table — following them.
   The documents themselves are unchanged; only the names, and the paths that point at them, move.
 
@@ -457,30 +465,6 @@
 
 ### Changed
 
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
-
 - **`db:doctor`'s `pool probe` row is two rows: `pool probe armed` and `pool probe answer`.** The row
   answered two questions with one socket — whether anything can ask the pooler at all, and what the
   pooler said for each pool — so a build container could only ever leave the whole question out of a
@@ -705,30 +689,6 @@
   asserting the interfaces of the machine it runs on.
 
 ### Changed
-
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
 
 - **The front-door pool sweep asks every declared pool in one wave, under one timeout budget.** When
   the console cannot be read, the flipper used `PoolProbe::ask()` once per declared pool and once
@@ -1727,30 +1687,6 @@ now names the reading beside the climb one, and `HANDOFF.md`'s environment table
 interpreter through the machine file rather than spelling its path out.
 
 ### Changed
-
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
 
 - **The behavioral guidelines a session writes by are a file of this repository, and the load order
   sends a reader to it before `README.md`.** `AGENTS.md` — the canonical rule set — gains the row in
@@ -2810,30 +2746,6 @@ does not ship: `bin/`, `tests/`, `RELEASING.md`, `CHANGELOG.md` and the `*.tsv` 
 
 ### Changed
 
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
-
 - **Two of the boot audit's log lines are about the record's write instead of about a lost entry,
   and an alert rule written against the old one needs updating.** "The audit record changed while
   this boot was running …" no longer says `discarding N entries` — the entry is not discarded any
@@ -3219,30 +3131,6 @@ envelope" bullets now point at it.
 
 ### Changed
 
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
-
 - **`db:pgcat-flip`'s `--json` object now writes the envelope's five keys first, with its evidence
   after them.** The keys are the same nine and the values are unchanged; the order is `command`,
   `kind`, `exit_code`, `reason`, `error`, then `mode`, `previous_mode`, `steps`, `status`. The order
@@ -3426,30 +3314,6 @@ Published without changelog - a mistake - will fix
   connection is in play.
 
 ### Changed
-
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
 
 - **The pgcat mismatch sentence names the setting the connection came from.** It always
   said `… Set swrr.pgcat.enabled = false, or point database.default at the pgcat-fronted
@@ -3703,30 +3567,6 @@ found in the release tooling written alongside it. Each one is covered by tests.
   the discarded-change warning with its three-bullet cap, and the three exit codes.
 
 ### Changed
-
-- **The three record skills name their documents `NNNN-YYYY-MM-DD-<kind>-<slug>.md`.** `wdm-investigation`,
-  `wdm-issue` and `wdm-plan` now ask for a four-digit sequence taken from the folder — `0001` upward, read
-  from the highest number already there rather than from the date — then the day the document is written
-  and its kind (`inv`, `issue`, `plan`). A folder therefore sorts in the order its records were written
-  without depending on a commit or a filesystem timestamp, and a document already there keeps the name it
-  was given: the number is assigned once, when it is written, and never renumbered as later records arrive.
-
-- **The seven investigation records are renamed to that scheme, numbered by creation date.**
-  `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` through
-  `docs/investigations/0007-2026-10-27-inv-force-mode-readers-reverts.md`, earliest file `0001`, with the
-  citations in the issue, plan and investigation records — and the note's pending table — following them.
-  The documents themselves are unchanged; only the names, and the paths that point at them, move.
-
-- **The seven issue records are renamed the same way, numbered by creation date.**
-  `docs/issues/0001-2026-10-19-issue-pgcat-flip-force-mode-readers.md` through
-  `docs/issues/0007-2026-10-28-issue-allserversdown-single-server-pool.md`, with the records that cite
-  them — the alpha6 CI record, the hanging-query wire capture and the window-flip plan — following their
-  subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
-
-- **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
-  other following it, and the note's pending table re-rendered over the three folders together.
 
 - **`db:replica-status` says when the boot audit is not registered, instead of printing
   nothing.** The health payload has always answered `available: false` — with `error` null —

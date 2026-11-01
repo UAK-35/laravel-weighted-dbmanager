@@ -10,7 +10,7 @@
 | Log group | `/ecs/lpr-backend-sites-tdef-01` |
 | Code folder | `/app/site0/html` |
 | Config read | `/app/site0/html/config/db-manager.php`, `/etc/pgcat/*.toml` |
-| Record this plans against | `docs/investigations/0001-2026-10-19-inv-pgcat-both-mechanisms-armed-warning.md` |
+| Record this plans against | `docs/investigations/0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md` |
 
 ## What this plan is for
 
