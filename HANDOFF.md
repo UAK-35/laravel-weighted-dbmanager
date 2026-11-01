@@ -1,4 +1,4 @@
-# Handoff — the state of this package, taken 2026-10-22
+# Handoff — the state of this package, taken 2026-11-01
 
 This is a snapshot for whoever opens a thread in **this** repository next: what is written
 but uncommitted, what is committed but unpushed, what is not in any release a consumer can
@@ -38,14 +38,14 @@ it is the paragraph under that table rather than a row of it that names the work
 
 ## 1. Pending — written, green, uncommitted
 
-**Nothing is pending: the set is empty, and the table under the paragraph that renders it is its two
-header rows.** The working tree carries no file the register does not — which is the question the block
-asks, `git ls-files --cached --others --exclude-standard` minus `git ls-tree -r` of the register — so
-the batch this note lands is a set of modifications to paths a commit already carries, and a
-modification is not a row here.
+**The pending set is records written and not committed, and the table under the paragraph that renders
+it names them one by one.** The question the block asks is `git ls-files --cached --others
+--exclude-standard` minus `git ls-tree -r` of the register, so a modification to a path a commit
+already carries is not a row here — which is why the repairs this cycle committed and this note are not
+on it.
 
-**The batch this note is taken over is the pool-repair ledger, the readiness probe and the doctor's
-split pool-probe row, and it is the register's own commit, `98c80df`.** Every repair a container records is now an entry — when, the pool, the mode, and
+**The batch the note taken at `98c80df` was over is the pool-repair ledger, the readiness probe and the
+doctor's split pool-probe row, and it was that register's own commit.** Every repair a container records is now an entry — when, the pool, the mode, and
 whether the restart cleared it — instead of only a count and one moment, published as
 `pool_repairs.ledger` by `/health/db`, as `ledger` by `windowStatus()`, and as one `repair_N` row per
 entry by `db:pgcat-flip --status`. Beside it the controller gained the second action a load balancer
@@ -89,12 +89,13 @@ and the push that publishes it comes after. The version in each row moves and th
 left as it was, the three ways a note can be unmovable are refusals before anything is written, and the
 failing sentence a release's own commit has landed red on twice is section 3.
 
-**All of it but the batch above is committed, and none of it is pushed.** The eight commits past `origin/dev` are
-section 2's listing rather than a list restated here: four of them move the notes — the routing the
-setup script proves, the connector entry said again, the gate's `--at` hand-over, and the schedule
-switch the published config stopped declaring — and four are the readings those changes needed, the
-cookbook's third rule with its guard, the release fixture's missing script, the audit block's
-`store_probe`, and the boot-stamp test that no longer reads the clock twice.
+**All of it but the pending records is committed, and none of it is pushed.** The eighteen commits past
+`origin/dev` are section 2's listing rather than a list restated here: five are fixes, four of them the
+setup review's repairs and the fifth the flip refusing a variant whose pools this container cannot
+resolve; eleven are docs, the three numbering schemes with the records renamed under them, the record
+and package skills they rename, the two document skills, and the review with its plan; and two are
+chores, the harness configuration rendered from its template and an imported conversation taken out of
+the tree.
 
 The gate is green with this note in the tree, and the run that says so is the one recorded under
 `.agents/gate.json`: the summary and the per-check timings below are that run's, written by
@@ -108,21 +109,21 @@ moves the title forces the gate that verifies it.
 <!-- handoff:gate -->
 ```
 php bin/checks.php --record
-  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 980.1s
-      recorded 2026-10-25, PHP 8.4.27
-      syntax     PASS    21.5s  172 files, no syntax errors
-      ast        PASS     2.8s  172 files parsed
-      writeback  PASS     0.7s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
-      schema     PASS     3.7s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
-      platform   PASS     3.3s  20 platform requirements satisfied
-      interpreter PASS     0.2s  PHP 8.4.27 at the interpreter the record names, which satisfies ^8.4
+  --> exit 0: 13 checks: 13 passed, 0 failed, 0 skipped — 1127.1s
+      recorded 2026-11-01, PHP 8.4.27
+      syntax     PASS    33.6s  172 files, no syntax errors
+      ast        PASS    10.3s  172 files parsed
+      writeback  PASS     2.1s  4 write-back(s) in the shipped tree, every one declared; the detector agreed …
+      schema     PASS    11.1s  composer.json is valid; composer.lock is not part of this repository, so it is not checked
+      platform   PASS     6.7s  20 platform requirements satisfied
+      interpreter PASS     0.3s  PHP 8.4.27 at the interpreter the record names, which satisfies ^8.4
       tools      PASS     0.0s  4 installed: pint v1.32.1, phpstan 2.3.1, phpunit 11.5.57, yaml-lint v7.4.21
-      yaml       PASS     2.5s  [OK] All 1 YAML files contain valid syntax.
-      counts     PASS     1.0s  56 count(s) across 12 record(s), all in step with their derivations.
-      sentences  PASS     0.1s  10805 prose line(s) in 38 record(s), no fused sentence; the detector agreed w…
-      phpstan    PASS    61.8s  [OK] No errors
-      pint       PASS     7.5s  PASS … 172 files
-      tests      PASS   874.9s  Tests: 1679, Assertions: 11286, Skipped: 10.
+      yaml       PASS     5.4s  [OK] All 1 YAML files contain valid syntax.
+      counts     PASS     4.8s  56 count(s) across 12 record(s), all in step with their derivations.
+      sentences  PASS     0.5s  10808 prose line(s) in 38 record(s), no fused sentence; the detector agreed w…
+      phpstan    PASS    28.3s  [OK] No errors
+      pint       PASS    14.2s  PASS … 172 files
+      tests      PASS  1009.8s  Tests: 1684, Assertions: 11328, Skipped: 9.
 ```
 <!-- /handoff:gate -->
 
@@ -176,17 +177,17 @@ The three `.tsv` records describe the tree `v0.2.0-alpha7` was cut from, and the
 header line — the release rewrites them, which is why the record of one tag is the record of no later
 tree. That is the check reading the stamp and the rows: against the register this note names it exits
 1 on one line per record, because the tree that commit carries is not the tree the records were
-written at; and against this checkout it exits 1 on two of the three, because the branch has moved
-twenty commits past the tag the release wrote them at — the stamp names `v0.2.0-alpha7`, which is
+written at; and against this checkout it exits 1 on one of the three, because the branch has moved
+eighteen commits past the tag the release wrote them at — the stamp names `v0.2.0-alpha7`, which is
 the tag section 3 calls latest, and the rows under it are that tag's tree rather than this one:
 
 <!-- handoff:records -->
 ```
-php bin/inventory.php --check --at=365f300
-  --> exit 1: the inventory is out of step with the tree at 365f300
+php bin/inventory.php --check --at=114b09b
+  --> exit 1: the inventory is out of step with the tree at 114b09b
       files.tsv: 1 line(s) stale
       methods.tsv: 2 line(s) stale
-      surface.tsv: 2 line(s) stale
+      surface.tsv: 1 line(s) stale
 
 php bin/inventory.php --check
   --> exit 1: the inventory is out of step with the tree
@@ -213,9 +214,9 @@ transcript of the records and section 2's table and the listing under it. Its ro
 checkout has that the register does not carry (`git ls-files --cached --others --exclude-standard`
 minus `git ls-tree -r` of the register), one row apiece, with the prose column declared in
 `tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. Only a file no
-commit carries is on it, which is why this take's table is its header rows and nothing else: the batch
-it lands was committed before it, and a tracked path's modification is not a file the register lacks,
-while a file the register already carries is a file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
+commit carries is on it, which is why this take's table names records and nothing else: a tracked
+path's modification is not a file the register lacks, while a file the register already carries is a
+file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
 and one from the recorded run — and the note's own guard renders the same five and asserts the file
 says what they say, so a re-take cannot state a set of files, a count or a listing the tree does not
 have. A file the register does not carry and that has no line declared for it is refused by name
@@ -225,42 +226,10 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `.agents/manage-config.py` | the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a value encoded for the JSON string it lands in and read back through `json.loads` so a Windows separator cannot break it, a `--check` mode that writes nothing and exits 1 when the pair is out of step, a refusal — exit 1 — for a token nothing answers or a record missing the key, and exit 2 for a template or a record that is not there at all |
-| `.agents/skills/wdm-commit/SKILL.md` | the skill that commits a change in this package: the message shape `bin/weighing.php` reads back, the `## Unreleased` entry that decides the bump, the split rule for a tree holding several concerns, the signed commit, and the four reads that prove a commit holds what was intended |
-| `.agents/skills/wdm-deploy/SKILL.md` | the skill that publishes a version: the bump weighing, the promotion of the changelog into the version section, the tag and its push, the Packagist confirmation, and the pin a consumer raises |
-| `.agents/skills/wdm-push/SKILL.md` | the skill that puts commits and annotated tags on GitHub from PowerShell 7: the HTTPS remote, the branch read from the checkout rather than assumed, the shell MSYS cannot replace, the workflow-scope and non-fast-forward refusals, and the three-layer proof that a tag landed |
-| `.agents/skills/wdm-report/SKILL.md` | the skill that records a report as a markdown document: an `@wdm-report` mention first, then the `/wdm-report` marker at the prompt's opening, then the "Is this an WDM report?" question it asks for the phrases "create a report", "report the" and "need a report" once neither is present — the `NNNN-YYYY-MM-DD_rpt-<slug>.md` name it gives the document, and the folder it files it in |
-| `.agents/skills/wdm-runbook/SKILL.md` | the skill that records a runbook as a markdown document: an `@wdm-runbook` mention first, then the `/wdm-runbook` marker at the prompt's opening, then the "Is this an WDM runbook?" question it asks for the phrases "create a runbook" and "create this as a runbook" once neither is present — the `NNNN-YYYY-MM-DD_runbook-<slug>.md` name it gives the document, and the folder it files it in |
-| `docs/investigations/0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md` | the investigation of the boot-audit warning `swrr.pgcat.schedule.both_armed`: why it appears (both scheduling mechanisms armed), why it repeats on every FPM request, whether that is intended, and the fix |
-| `docs/investigations/0002-2026-10-20_inv-pgcat-flip-writer-to-readers-failed.md` | the investigation of why the pooler was not flipped from writer to readers on a live ECS task: the automatic flips failed because `supervisorctl` is unreachable to the `www-data` the schedule runs as (a `root:root` 0700 socket), the root-owned flip target and empty boot stamp that would still bite, and the fix |
-| `docs/investigations/0003-2026-10-20_inv-pgcat-select-1-hang.md` | the investigation of the report that a bare `select 1` hangs through the pooler while `select 1 as ok` returns: the protocol matrix that could not reproduce it on pgcat 1.2.0, why an alias cannot reach the pooler at all, the named prepared-statement failure that does reproduce for both queries, and the checkout wait that is the only path a query genuinely waits on |
-| `docs/investigations/0004-2026-10-21_inv-ecs-rev31-rollback.md` | the investigation of the two `lpr-backend-sites` tasks that were stopped minutes after they started: the CloudTrail and service-event record that makes them a rolled-back revision rather than crashed containers, the log-path permission fatal and the unwritable pooler state directory their boots produced, the boot that upgrades its own vendor tree, and the drain and health-check arithmetic that makes each rollout slow |
 | `docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md` | the investigation into whether `swrr.pgcat.boot_file` is the container's boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment's entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written |
 | `docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md` | the investigation of the live ECS task's `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image's entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes |
 | `docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md` | the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay |
-| `docs/issues/0001-2026-10-19_issue-pgcat-flip-force-mode-readers.md` | the incident record for the `db:pgcat-flip --force-mode=readers` failure on a live ECS task: why the same command succeeds as `root` and fails for the application user, the `root:root` 0700 supervisord socket behind it, and the fix |
-| `docs/issues/0002-2026-10-20_issue-release-v0-2-0-alpha6-ci-red.md` | the record of why the v0.2.0-alpha6 run is red: the tag's commit naming three records and a skill it does not carry, a release gate that reads untracked files as present, phpstan 2.3.1 meeting a toolchain nothing pinned, and the two runner-only failures a new tag still has to answer |
-| `docs/issues/0003-2026-10-20_issue-supervisord-socket-unreachable.md` | the issue record for the supervisor control socket being unreachable to the user a flip runs as: why every flip refused before it could swap a file, the `FAULT_UNREACHABLE` fault that names the socket and the `chmod=0760` with `chown=root:www-data` repair, and the application-side half this package cannot do |
-| `docs/issues/0004-2026-10-21_issue-pgcat-hanging-query-wire-capture.md` | the issue record for capturing the wire traffic of a hanging query on a live ECS task: why the runbook's `tcpdump` is not in the image, the logging PostgreSQL proxy in `python3` that decodes both directions instead, the three things its decoder has to special-case, and the `SHOW POOLS` reading that tells a pooler-side checkout wait from a server-side one |
-| `docs/issues/0005-2026-10-21_issue-release-v0-2-0-alpha7-ci-ungated.md` | the record of why v0.2.0-alpha7 read as an unrun CI: the tag run that was green twenty seconds after publication, the red commit eight minutes before it over one stale `surface.tsv` line, the release rail that permits only a green pushed HEAD or a skip, and the seven commits no remote run has seen |
-| `docs/issues/0006-2026-10-23_issue-db-doctor-pgsql-proxy-connector-and-variant-shape.md` | the issue record for a `db:doctor` run on the application task: the `pgsql_proxy` connection that cannot be built for a missing `database` key, the writer-only pgcat variant the application still weights in its read list, and the warning that the retired both-armed finding draws — with the order to fix them in |
-| `docs/issues/0007-2026-10-28_issue-allserversdown-single-server-pool.md` | the issue record for `AllServersDown` on the live application task: the 34 requests the 22:02 database reboot cost, the 13 the 22:00 pgcat restart cost, why a one-server pool has nothing to hand out while pgcat reconnects, the retry the application has to add, and the dead `reader_db_1` endpoint the next 10:00 reader window would activate |
-| `docs/phpstan-memory.md` | the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers' limit was the machine's rather than the gate's, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix |
-| `docs/planning/0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md` | the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding's removal, and a bound on re-logging a standing finding — each with what verifies it |
-| `docs/planning/0002-2026-10-24_plan-local-pgcat-window-flip-in-wsl.md` | the plan for proving the pgcat window flip against a live pooler: the cold rig and the routing proof it ends with, the two variants `simple_db` can be told apart by, the app in `external/laravel-site` built and given a `.env` the flipper can use from inside WSL, a reader window three minutes out that lands inside the eight-minute boot window, the readings either side of the boundary, and what the plan deliberately leaves out |
 | `docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md` | the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves |
-| `docs/planning/0004-2026-11-01_plan-agentic-setup-findings.md` | the plan for repairing the fifteen findings of the agentic setup review: why twelve of them are a reference or a claim written away from the thing it describes, the four decisions the repairs need — the default agent, the guards' corpus, the handoff snapshot and the ignored rules copy — and the five batches in the order a session meets them, each step with the guard that holds it and what the review has moved since it was taken |
-| `docs/reports/0001-2026-10-30_rpt-agentic-setup-review.md` | the agentic setup inventory and review: configuration renderer probes, missing references, workflow inconsistencies, suggested corrections and the report naming rule |
-| `docs/wsl-linux-php.md` | the runbook for the WSL Linux PHP: why the download happens on the Windows side, what the wrapper puts in the temp directory, the two presets and the one the code paths need, what `-Check` judges line by line, running the provided app in `external/laravel-site` rather than this package's own suites, and what the interpreter deliberately does not give you |
-| `opencode.jsonc.template` | the agent harness configuration for this repository, carried as a template: the instruction files it loads, the single skill target, the permission table whose broad `shell` `*` fallback comes first so the narrow grants below it are the ones that match, and the machine's own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine — and no default agent, because the one it named had no body anywhere in this repository's history |
-| `opencode.v1-backup.jsonc.template` | the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the V1 permission maps with `bash`'s `*` fallback first because opencode matches the last rule rather than the first, and no agent or command block of its own — with the machine's temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine |
-| `scripts/windows/build-external-laravel-site.ps1` | the one command that builds `external/laravel-site`: the copy, then the two removals and the file check, each run against the copy rather than `external/app` so the lists resolve there, a failed copy ending the run at the second exit code and the three later steps not stopping it, the summary one line per step, and the 21 files under `app/Data/ValidationObjects/refs/` that the folder list removes while the file list still names them — the difference between a green run and a red one |
-| `scripts/windows/copy-site-to-external.ps1` | the script that carries this machine's Laravel site checkout into `external/laravel-site`: the site path read from `site-path.local.cmd` beside it or passed as the first argument, the eleven top-level names visited and nothing else carried, files ending in `.txt`, `.text`, `.todo`, `.7z`, `.zip`, `.ignore` or `.gitignore` dropped at every depth, the folder structure copied whole so empty folders are kept, the copy additive so a file at the destination the site does not have is left alone, `-WhatIf` touching nothing, and the exit codes 0, 1 and 2 |
-| `scripts/windows/remove-external-app-files.ps1` | the removal of the files a list names: `ext/app-files-to-delete.txt` read as paths relative to `external/app` or to the checkout named as the first argument, blank lines and `#` lines ignored and a name listed twice attempted once, a name that is already gone reported rather than failed so the script is safe to run twice, a name that climbs out of the target or that names a directory skipped and reported, nothing deleted recursively, `-WhatIf` touching nothing, and the exit codes 0, 1 and 2 |
-| `scripts/windows/remove-external-app-folders.ps1` | the recursive removal, and the destructive one: `ext/app-folders-to-delete.txt` read exactly as the file list is, each name removed with everything beneath it after printing how many files that is, a trailing slash treated as decoration on the name, a name that is the target root itself or that climbs out of it skipped, an already-gone name reported rather than failed, `-WhatIf` touching nothing, and the exit codes 0, 1 and 2 |
-| `scripts/windows/site-path.sample.cmd` | the committed form of the machine file `copy-site-to-external.ps1` reads: `SITE_SOURCE` written as the `__SITE_SOURCE__` token, so a fresh checkout refuses by name rather than copying from a path somebody guessed at |
-| `scripts/windows/verify-external-app-files.ps1` | the check, which prints the finding rather than the progress: `ext/app-files-list.txt` read as paths relative to `external/app` or to the checkout named as the first argument, a name that is there printing nothing and a name that is not printed on its own line so the output can be piped, a name that resolves outside the target printed with a note instead of being checked, a folder where a file was expected counted as missing, and the exit codes 0, 1 and 2 — the last one also for a list that names nothing at all |
-| `scripts/windows/wsl-linux-php.ps1` | the Windows-side wrapper that fetches a static Linux PHP CLI and runs a tree through it inside WSL: `-Setup`, `-Check` and `-Run`, the mount resolved by `wslpath` rather than assembled, the extraction done by the distribution's own tar, the runtime and manifest extension lines, the two roots derived from the file's own location, and the exit codes 0, 1 and 2 |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
@@ -277,10 +246,10 @@ section 4 moves.
 | Field | At the snapshot |
 |---|---|
 | Branch | `dev` |
-| HEAD | `365f300` — *docs: the note is re-taken at 7d0eea8, and section 2 counts eight commits past origin/dev* |
-| `origin/dev` | `a99c22b` — *chore: a copy the agent harness left behind is not work this repository carries* |
-| Unpushed | 9 commits — the ones `git log --oneline origin/dev..HEAD` prints |
-| Since the last tag | docs 3, feat 2, fix 1, test 3 |
+| HEAD | `114b09b` — *fix: section 3 names the corpus the guards read, instead of every record under docs/* |
+| `origin/dev` | `d9e8db5` — *Release v0.2.0-alpha11* |
+| Unpushed | 18 commits — the ones `git log --oneline origin/dev..HEAD` prints |
+| Since the last tag | chore 2, docs 11, fix 5 |
 <!-- /handoff:unpushed -->
 
 The `HEAD` row is the basis every number in this file is read against, and the table above it is
@@ -289,8 +258,8 @@ rendered: the register and the remote tip are commits, and the count and the bre
 remote directly (`git ls-remote`, not the local ref) when this section was taken, which named the
 same commit the local ref does.
 
-The register is nine commits past the tip of `origin/dev`, and the table above is where that is counted: the push that
-carried it published thirty commits above `3dc70db` — the records of application-side work and the
+The register is eighteen commits past the tip of `origin/dev`, and the table above is where that is
+counted. The push before this state published thirty commits above `3dc70db` — the records of application-side work and the
 plan beside them, the third recording skill, the two halves the prose-number pass added, the doctor
 record's citation, the connector row's tests, the Laravel plugin's settings, the handoff note's
 one-command blocks, `/health/db`'s two schedule settings and its `connector` key, the pooler's mode
@@ -299,43 +268,43 @@ fresh-install sentence, the payload's key tables read as a set, the boot audit's
 and the carry beside a record a boot cannot write, and this note's two tag readings — together with
 the two tags that had been cut and never published, `v0.2.0-alpha8` and `v0.2.0-alpha9`.
 
-Unpushed at the register means what it says, and at this register it says nine: `a99c22b` is the tip
-of `origin/dev` and the register is `365f300`, so the nine commits in the table above are ones a
-consumer cannot fetch yet. That is the
+Unpushed at the register means what it says, and at this register it says eighteen: `d9e8db5` is the
+tip of `origin/dev` and the register is `114b09b`, so the eighteen commits in the table above are ones
+a consumer cannot fetch yet. That is the
 state the release this cycle cut was *not* in: `v0.2.0-alpha7` was cut with the CI rail skipped, from
 a commit that was not the tip of `origin/dev`, and the paragraph above the release section records
 that. The `ci` line of a plan is what refuses over it: `bin/release.php` refuses to tag while `HEAD`
 is not the tip of `origin/dev`, and it ends by pushing the commit and the tag together, so every
 commit the release made is one a consumer can fetch. This note stands above the register rather
-than on it: `842b916` recorded the register, and the prose pass over it, the `store_probe` fix, the
-gate's memory row and the reading's re-take came after it, as does this one — and they all travel on
+than on it: `114b09b` recorded the register, and this take is the commit after it, so the two travel on
 the push that follows.
 
 <!-- handoff:log -->
-The nine most recent are the ones a reader is most likely to be standing in the middle of:
+The ten most recent are the ones a reader is most likely to be standing in the middle of:
 
 ```
-365f300  docs: the note is re-taken at 7d0eea8, and section 2 counts eight commits past origin/dev
-7d0eea8  fix: the published copy leaves the schedule switch undeclared again
-c5f7f1e  feat: --at answers --list, and refuses --record with --only before it copies vendor/
-41a248c  docs: the connector note opens on what the installation saw, not on what the class did
-c5e420f  docs: the cookbook's third rule pages an audit that stopped, and the guard runs it
-8510c59  test: the audit block's store_probe is pinned where there is no record to read
-87e2634  test: the release fixture carries bin/entry.php, so the entry guard has a script to run
-3fa7922  feat: the setup script proves the routing through the pooler instead of printing the queries
-a2f73d4  test: the boot stamp is read once, so the test cannot step out of its own window
+114b09b  fix: section 3 names the corpus the guards read, instead of every record under docs/
+329fc48  fix: the sample record is a sample, and the text that introduces the setup follows it
+27c6f8c  fix: the skills name one activation rule, one path spelling, and the branch a release comes from
+6338856  fix: the harness configuration is one the harness can load, and the renderer cannot write a broken file
+0d5a65b  docs: the agentic setup review, and the plan its fifteen findings are repaired by
+e9933d2  chore: an imported conversation is not a file this repository carries
+cfad0ce  docs: a wdm-runbook skill records a runbook as a markdown document under docs/runbooks/
+3d62fc2  docs: a wdm-report skill records a report as a markdown document under docs/reports/
+58c6a97  docs: issue documents separate their date from their kind with an underscore
+c4a4769  docs: plan documents separate their date from their kind with an underscore
 ```
 <!-- /handoff:log -->
 
 The fence above is a ceiling rather than the whole range: `git log` is asked for the whole of it and the
 block carries what it prints up to that ceiling, so a range longer than the ceiling leaves its oldest
 commits to `git log --oneline origin/dev..HEAD`, which is the whole of it in every state. At this
-register the range is nine commits, under that ceiling, so the block above is the whole of it rather
-than a head of it.
+register the range is eighteen commits, over that ceiling, so the block above is the most recent ten of
+them and the other eight are `git log`'s to print.
 
 One consequence of that state is worth naming before the next release: the interlock the release checks
 is *satisfied* at this register once the push run on the commit after it is green - `HEAD` is the tip of
-`origin/dev` - and the Unreleased section carries five entries rather than the set the release this
+`origin/dev` - and the Unreleased section carries nineteen entries rather than the set the release this
 cycle cut promoted. Section 3's plan is a transcript taken before this cycle's tags, so a run against
 this register declares the lane's next number instead of repeating the one above it.
 
@@ -356,8 +325,8 @@ git push origin dev --follow-tags
 | Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10`, `v0.2.0-alpha11` |
 | The latest of them | `v0.2.0-alpha11` |
 | A version with no suffix | none — `v0.2.0` does not exist |
-| `## Unreleased` at the basis | 5 entries — 3 added, 2 fixed, 0 changed |
-| The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the gate's `--at`, the setup script's routing and the probe stamp's age on `/health/db`, with no `### Removed` entry beside them |
+| `## Unreleased` at the basis | 19 entries — 2 added, 8 fixed, 9 changed |
+| The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the two document skills, `wdm-runbook` and `wdm-report`, with no `### Removed` entry beside them |
 
 The absent version is the exact sentence that decides whether the next one may be a prerelease, and it
 may: a suffixless version above the tag just cut is still the lane ahead. It is the **smallest** such
@@ -365,17 +334,15 @@ version — the release a prerelease announces, or the next patch above a releas
 release writes it rather than a re-take, which is the same rule read backwards: this row said `v0.2.0`
 while the newest tag was `v0.2.0-alpha3`. The headings the weighing reads are the `### Added`,
 `### Changed`, `### Fixed` and `### Removed` a Keep a Changelog section writes, and at this basis the
-section carries two of them: `### Added`, with the gate's `--at`, the setup script's routing and
-`audit.store_probe`, and `### Fixed`, with the connector reading and the schedule switch. The loudest
-of the two is `### Added`, which is what `bin/weighing.php` reads as `minor`. The section stands where `v0.2.0-alpha10`'s release left it —
-that commit promoted the doctor's `probe stamp` row under `### Added` and the carry a boot writes
-beside a record it cannot write under `### Fixed`, and wrote the bare heading this change's note
-went under. What no release holds is the range above that tag at the register — `c081def`, the
-command that reads this note's log-and-record pair back; `fc9e9d8`, the re-take that followed it;
-`7c81bfc`, the probe stamp's age on `/health/db`; and every commit after them up to `365f300`, of
-which the nine section 2 counts are the part a consumer cannot fetch. The commits below those nine
-were pushed and released nowhere, so the register is a branch whose next release would publish both
-commands' answers and nothing a consumer can already install.
+section carries three of them: `### Added`, with the two document skills; `### Changed`, with the three
+numbering schemes and the skills they rename; and `### Fixed`, with the setup review's repairs and the
+flip's pool check. The loudest of the three is `### Added`, which is what `bin/weighing.php` reads as
+`minor`. The section stands above `v0.2.0-alpha11`'s release, the
+last tag cut, and what it holds is what the eighteen commits section 2 counts wrote after it — the
+harness configuration carried as a template, the three numbering schemes with the records and skills
+renamed under them, the two document skills, and the setup review's repairs — so the register is a
+branch whose next release would publish skills and naming rather than anything a consumer can already
+install. Every commit below those eighteen is in a released section, pushed as the tag that carries it.
 
 ### The release that cut this tag, and the three rows it could not write
 
@@ -447,22 +414,34 @@ working tree, which no guard here holds.
 
 ### What is actually in the unreleased section
 
-Five entries at the register, and they are this cycle's landings rather than a repair of the release
-before it. Three are under `### Added`: the gate running on a commit this checkout is not on, so a
-release's record can be refreshed without a hand-built checkout; the setup script walking the routing
-through the pooler before it calls the rig up; and `/health/db` publishing the age of the audit
-record's probe stamp. Two are under `### Fixed`: the published config leaving the flip schedule's
-switch undeclared again, and the connector row no longer calling a read/write connection unbuildable.
-Those two headings and nothing under `### Removed` or `### Changed` is what the weighing reads as
-`minor`; the `### Removed` entry this cycle's earlier notes carried — `swrr.pgcat.schedule.both_armed`
-and the constant that named it — is in `v0.2.0-alpha9`'s released section rather than here.
+Nineteen entries at the register, and they are this cycle's landings rather than a repair of the
+release before it. Two are under `### Added`: the `wdm-runbook` and `wdm-report` skills, which record a
+runbook and a report as Markdown documents under `docs/`. Nine are under `### Changed`: the three
+record folders renaming their files with an underscore before the kind, the records in each of them
+numbered by creation date rather than by date derived, the three package skills renamed `wdm-commit`,
+`wdm-push` and `wdm-deploy`, the record skills naming their documents by number, date and kind, and
+the harness configuration carried as a template rather than as a rendered file. Eight are under
+`### Fixed`: the harness configuration the harness can load and the renderer that writes it, one
+activation rule and one path spelling across the five document skills, the sample machine record whose
+machine facts are tokens, the discovery and maintenance text that follows the setup it describes, the
+two push commands naming the branch a release comes from, `AGENTS.md`'s `PATH` claim, section 3's
+corpus, and the flip refusing a variant whose pools this container cannot resolve. Those three
+headings and nothing under `### Removed` is what the weighing reads as `minor`; the `### Removed` entry
+this cycle's earlier notes carried — `swrr.pgcat.schedule.both_armed` and the constant that named it —
+is in `v0.2.0-alpha9`'s released section rather than here.
 
-Everything the release before this one carried is in `v0.2.0-alpha7`: the schedule that can be watched,
-the api page a past tree renders, the published config that says which key set it is, the paths a flip
-cycle writes, the supervisor's three failures, the read path with a silent schedule's causes and the
-bounded preflight, the shape of the file a flip would swap in, the deployment contract, the connector a
-connection is built through, the release that moves this file's tag rows, and the two repairs CI found
-for it. What those change for a consumer is written in the released section rather than repeated here.
+Everything the three releases before this one carried is in their own sections: `v0.2.0-alpha9` is the
+pool repair ledger, the readiness probe, the connector finding and its key, the doctor's two
+pool-probe rows, the two guards that read the tags this branch carries, and the removal of
+`swrr.pgcat.schedule.both_armed`; `v0.2.0-alpha10` is the boot audit's record read for whether it was
+written; `v0.2.0-alpha11` is the gate's `--at`, the setup script's routing, the probe stamp's age, the
+carried harness configuration and the five fixes their readings needed; and `v0.2.0-alpha7` is the
+schedule that can be watched, the api page a past tree renders, the published config that says which
+key set it is, the paths a flip cycle writes, the supervisor's three failures, the read path with a
+silent schedule's causes and the bounded preflight, the shape of the file a flip would swap in, the
+deployment contract, the connector a connection is built through, the release that moves this file's
+tag rows, and the two repairs CI found for it. What those change for a consumer is written in the
+released section rather than repeated here.
 
 ### The boundary flip, in a tag and in no installation
 
@@ -500,7 +479,7 @@ What publishing this release still needs, and what is done:
 
 1. the release itself — cut, tagged and pushed as `v0.2.0-alpha3`, on a commit the CI rail had
    verified, without `--skip-ci`: done;
-2. this note, re-taken at the register the release left — and at the twenty commits this cycle has
+2. this note, re-taken at the register the release left — and at the eighteen commits this cycle has
    landed on top of it, because a release is the state of the branch and not only of the tag —   and
    landed as a commit of its own on `dev`: this commit, the commit the register is followed by;
 3. raise the consumer's pin, in the application repository, to the new tag;

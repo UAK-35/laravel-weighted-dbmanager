@@ -1553,6 +1553,9 @@ from a payload has one place to look rather than four.
 | `runs` | how many runs the state file has recorded: every run that took the flip's lock and reached a decision (`flipped`, `no_change`, `repaired`, `failed`) |
 | `last_run_at` | when the last of those ran, ISO-8601 UTC, or `null` when none has |
 | `last_kind` | what that run found — `flipped`, `no_change`, `repaired` or `failed`, the kinds a recorded run can reach, or `null` when none has |
+| `last_refusal` | the sentence a run that left the file alone wrote — the variant it would have swapped in declares a pool with no address that resolves from this container — or `null` when the newest run acted, and when it refused nothing |
+| `last_refusal_at` | when that refusal was recorded, ISO-8601 UTC, or `null` |
+| `last_refusal_mode` | the mode whose variant was refused, on the same terms |
 | `pool_repairs` | how many pool repairs the container has recorded over its life |
 | `last_pool_repair_at` | when the last repair happened, ISO-8601 UTC, or `null` |
 | `last_repair_pool` | the pool the last repair was refused for, or `null` when there was no repair and for a state file written before the name was recorded |

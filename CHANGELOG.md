@@ -97,6 +97,16 @@
 
 ### Fixed
 
+- **The window block's table documents the three keys a refusal writes, which the payload has been
+  publishing without a row.** `last_refusal`, `last_refusal_at` and `last_refusal_mode` have been in
+  `PgcatConfigFlipper::windowStatus()` since a flip began refusing a variant whose pools this
+  container cannot resolve, and the README's table under **The window block: every key it publishes**
+  stopped at `last_kind` — so the guard holding that table to the published array was red on the
+  branch, and the one place that documents the block read as three keys shorter than it is. The
+  three rows are the flipper's own words for the fields: the sentence a run that left the file alone
+  wrote, when it was recorded, and the mode whose variant was refused, each cleared by a run that
+  acted so the reason cannot outlive the refusal it describes.
+
 - **`AGENTS.md` §3 names the corpus the guards actually read, instead of claiming every record under
   `docs/`.** The count, sentence and citation readers all glob `docs/*.md`, so the twenty records in
   `docs/issues/`, `docs/investigations/`, `docs/planning/` and `docs/reports/` sat outside all three

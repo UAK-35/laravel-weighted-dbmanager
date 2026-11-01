@@ -669,7 +669,7 @@ final class Handoff
         // @pending-descriptions
         '.agents/gate.json' => [
             'words' => 'the last recorded gate run: the totals, the exit code, the day and interpreter it was taken on, and every check with its verdict, seconds and note — what section 1\'s `gate` block is rendered from',
-            'read' => 'sha256:2b8c20e499f57136208502f49cf6ac6e96624d5df1ead0dbb2d49ed70efd5cdf',
+            'read' => 'sha256:76007abe1e3dcbe743be21fda5ee067ea6829cdb35a92be3b719ca811cbc1f70',
         ],
         'src/Support/DeploymentContract.php' => [
             'words' => 'the deployment contract as data: each requirement\'s key, its statement, and the `db:doctor` rows that answer it',
