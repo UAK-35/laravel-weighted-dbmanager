@@ -29,14 +29,15 @@ says, and the question is never asked.
    what it would be verified by, whatever the prompt asks. The document is written *from* the
    answer, not before it.
 2. Once the response is complete, write **one markdown document** capturing that response into
-   `docs/planning/`, named `NNNN-YYYY-MM-DD-plan-<slug>.md`:
+   `docs/planning/`, named `NNNN-YYYY-MM-DD_plan-<slug>.md`:
    - `NNNN` is the next number in the folder — `0001`, `0002`, `0003`, … — read from the highest
      number already there rather than derived from the date, so a plan written today can never
      take a number an older plan already holds;
-   - `YYYY-MM-DD` is the date the document is written, in that order;
+   - `YYYY-MM-DD` is the date the document is written, in that order, and the underscore before
+     `plan` is part of the name rather than a separator to be written as a hyphen;
    - pick `<slug>` from the prompt — the feature, the command, the change being planned — in
      short kebab-case, so the filename reads as what the document is;
-   - the result is e.g. `docs/planning/0004-2026-10-29-plan-...md`. A file already in the folder
+   - the result is e.g. `docs/planning/0004-2026-10-29_plan-...md`. A file already in the folder
      keeps its name; the number and date are assigned once, when it is written, and never
      renumbered as later plans arrive.
 3. The document holds the response rather than a summary of it: the context (cluster, service,

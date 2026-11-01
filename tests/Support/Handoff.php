@@ -813,9 +813,9 @@ final class Handoff
         ],
         '.agents/skills/wdm-plan/SKILL.md' => [
             'words' => 'the skill that records an WDM plan as a markdown document: the `/wdm-plan` marker that always activates it, the "Is this an WDM plan?" question it asks for the phrase "plan a", "plan the" or "need a plan", and the `docs/planning/` folder its document lands in',
-            'read' => 'sha256:fb50da93f2f37e86a34d9211f1628be340c0c05ba77ae76408f6c8612e1a20e3',
+            'read' => 'sha256:0c82e6c2068d2d454143f1c2e83c7e7ab379c6b563853beedac006ada535b51c',
         ],
-        'docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md' => [
+        'docs/planning/0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md' => [
             'words' => 'the plan for keeping both pgcat scheduling mechanisms armed while the `swrr.pgcat.schedule.both_armed` boot finding is retired: why the per-minute entry and the reader-window tasks are not substitutes, what disarming the entry costs `/health/db`, and the four changes — a shared account of the mode, the surfaces that read it, the finding\'s removal, and a bound on re-logging a standing finding — each with what verifies it',
             'read' => 'sha256:b4ee81f87372ceb052a1e4b13d9003260c26cfc18ddd988f128e0b47c5847234',
         ],
@@ -923,9 +923,9 @@ final class Handoff
             'words' => 'the record for phpstan dying on memory: a check that comes back red with a message about itself rather than a finding, why the workers\' limit was the machine\'s rather than the gate\'s, the six ways to fix it with what each one costs, why the gate states 512M rather than 1G or none, and what the change does not fix',
             'read' => 'sha256:94d1a5826c320df2655aee44f1020674acc07df8bda71a5d38626278d3366fe2',
         ],
-        'docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md' => [
+        'docs/planning/0002-2026-10-24_plan-local-pgcat-window-flip-in-wsl.md' => [
             'words' => 'the plan for proving the pgcat window flip against a live pooler: the cold rig and the routing proof it ends with, the two variants `simple_db` can be told apart by, the app in `external/laravel-site` built and given a `.env` the flipper can use from inside WSL, a reader window three minutes out that lands inside the eight-minute boot window, the readings either side of the boundary, and what the plan deliberately leaves out',
-            'read' => 'sha256:68e368c5894d665ad331befa945948614124527e60e9ff7aec1f18db32705b66',
+            'read' => 'sha256:255fe068f3557863d2a4de0c389b08d91ee96c0ae1ae41f34d22606fa75cdc79',
         ],
         'scripts/windows/wsl-linux-php.ps1' => [
             'words' => 'the Windows-side wrapper that fetches a static Linux PHP CLI and runs a tree through it inside WSL: `-Setup`, `-Check` and `-Run`, the mount resolved by `wslpath` rather than assembled, the extraction done by the distribution\'s own tar, the runtime and manifest extension lines, the two roots derived from the file\'s own location, and the exit codes 0, 1 and 2',
@@ -971,7 +971,7 @@ final class Handoff
             'words' => 'the investigation of the live ECS task\'s `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image\'s entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes',
             'read' => 'sha256:55303bac7dc34da5f4f706bdf77f1cd6829350f92314f39e6639211233ec3ff5',
         ],
-        'docs/planning/0003-2026-10-27-plan-boot-stamp-read-only-check.md' => [
+        'docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md' => [
             'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
             'read' => 'sha256:be8b907ac0a214f1ef109ad46ac6d0434d2b07848f9ae0f5a7bcf0291e3df266',
         ],

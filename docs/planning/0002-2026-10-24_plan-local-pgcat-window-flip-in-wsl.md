@@ -7,7 +7,7 @@
 | App | `external/laravel-site` (the site's source, carried by `scripts/windows/build-external-laravel-site.ps1`) |
 | Wrapper | `scripts/windows/wsl-linux-php.ps1` (ported out of `external/` by this plan) |
 | Runbook | `docs/wsl-linux-php.md` |
-| Read against | `docs/local-postgres-and-pgcat.md`, `scripts/servers-startup/README.md`, `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` |
+| Read against | `docs/local-postgres-and-pgcat.md`, `scripts/servers-startup/README.md`, `docs/planning/0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md` |
 
 ## What this plan is for
 

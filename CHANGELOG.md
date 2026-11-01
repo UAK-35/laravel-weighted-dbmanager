@@ -4,6 +4,13 @@
 
 ### Changed
 
+- **The plan documents separate their date from their kind with an underscore.**
+  `docs/planning/` now names a plan `NNNN-YYYY-MM-DD_plan-<slug>.md`, so the three files read
+  `0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md`,
+  `0002-2026-10-24_plan-local-pgcat-window-flip-in-wsl.md` and
+  `0003-2026-10-27_plan-boot-stamp-read-only-check.md` — same numbers, same dates, same slugs. The
+  `wdm-plan` skill asks for the underscore, and the plan that cites the other follows its subject.
+
 - **The investigation documents separate their date from their kind with an underscore.**
   `docs/investigations/` now names a record `NNNN-YYYY-MM-DD_inv-<slug>.md`, so the same seven files
   read `0001-2026-10-19_inv-pgcat-both-mechanisms-armed-warning.md` through
@@ -40,8 +47,8 @@
   subjects, and the note's prose row for the alpha7 record updated with it. The documents are unchanged.
 
 - **The plan records are renamed the same way, numbered by creation date.**
-  `docs/planning/0001-2026-10-21-plan-pgcat-both-mechanisms-armed.md` and
-  `docs/planning/0002-2026-10-24-plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
+  `docs/planning/0001-2026-10-21_plan-pgcat-both-mechanisms-armed.md` and
+  `docs/planning/0002-2026-10-24_plan-local-pgcat-window-flip-in-wsl.md`, with the plan that cites the
   other following it, and the note's pending table re-rendered over the three folders together.
 
 - **The harness configuration is carried as a template and rendered, so the file that names this
