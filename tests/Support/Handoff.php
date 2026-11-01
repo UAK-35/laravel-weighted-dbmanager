@@ -963,18 +963,6 @@ final class Handoff
             'words' => 'the V1 shape of that same configuration, carried as a template beside the V2 one: the same two instruction files, `skills` as a map with `paths`, the V1 permission maps with `bash`\'s `*` fallback first because opencode matches the last rule rather than the first, and no agent or command block of its own — with the machine\'s temp directory written as `<__SYSTEM_TEMP_FOLDER__>`, and no MCP server entry in either file, because the one that was there carried the state directory of a tool on one machine',
             'read' => 'sha256:dbe387c6e6aea85d5b8664d356fe165d6e186aaa8def0de07e30924f208179b4',
         ],
-        'docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md' => [
-            'words' => 'the investigation into whether `swrr.pgcat.boot_file` is the container\'s boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment\'s entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written',
-            'read' => 'sha256:c205c4b807c737fb85ae06043b6676bab4a22b2d0ce69f65c355af0da202e5c9',
-        ],
-        'docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md' => [
-            'words' => 'the investigation of the live ECS task\'s `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image\'s entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes',
-            'read' => 'sha256:55303bac7dc34da5f4f706bdf77f1cd6829350f92314f39e6639211233ec3ff5',
-        ],
-        'docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md' => [
-            'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
-            'read' => 'sha256:be8b907ac0a214f1ef109ad46ac6d0434d2b07848f9ae0f5a7bcf0291e3df266',
-        ],
         'docs/planning/0004-2026-11-01_plan-agentic-setup-findings.md' => [
             'words' => 'the plan for repairing the fifteen findings of the agentic setup review: why twelve of them are a reference or a claim written away from the thing it describes, the four decisions the repairs need — the default agent, the guards\' corpus, the handoff snapshot and the ignored rules copy — and the five batches in the order a session meets them, each step with the guard that holds it and what the review has moved since it was taken',
             'read' => 'sha256:0489769bcfb725fb4d71440a761ca2fd0a79c6992312cf3de2c44058e37eb754',
@@ -986,10 +974,6 @@ final class Handoff
         '.agents/manage-config.py' => [
             'words' => 'the renderer that writes `opencode.jsonc` from that template, answering each placeholder out of `.agents/machine.local.json`: one `SUBSTITUTIONS` entry per token mapping it to the section and key that hold the value, the angle brackets a template delimits a token with consumed as well as the bare token, a value encoded for the JSON string it lands in and read back through `json.loads` so a Windows separator cannot break it, a `--check` mode that writes nothing and exits 1 when the pair is out of step, a refusal — exit 1 — for a token nothing answers or a record missing the key, and exit 2 for a template or a record that is not there at all',
             'read' => 'sha256:fe5b5ba8e4974eba453bf33b40f4585b8e64d93b761e4e3dc50ff9d0aaa348da',
-        ],
-        'docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md' => [
-            'words' => 'the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay',
-            'read' => 'sha256:a7c6387fe905a8c4d1bd0ff9ffea077ade99d4519b035e7e37b2ef95d0d2774c',
         ],
         'docs/issues/0007-2026-10-28_issue-allserversdown-single-server-pool.md' => [
             'words' => 'the issue record for `AllServersDown` on the live application task: the 34 requests the 22:02 database reboot cost, the 13 the 22:00 pgcat restart cost, why a one-server pool has nothing to hand out while pgcat reconnects, the retry the application has to add, and the dead `reader_db_1` endpoint the next 10:00 reader window would activate',

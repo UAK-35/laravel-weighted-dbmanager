@@ -38,11 +38,11 @@ it is the paragraph under that table rather than a row of it that names the work
 
 ## 1. Pending — written, green, uncommitted
 
-**The pending set is records written and not committed, and the table under the paragraph that renders
-it names them one by one.** The question the block asks is `git ls-files --cached --others
---exclude-standard` minus `git ls-tree -r` of the register, so a modification to a path a commit
-already carries is not a row here — which is why the repairs this cycle committed and this note are not
-on it.
+**The table under the paragraph that renders it is the pending set — every file this checkout has
+that the register does not carry, one row apiece, and its two header rows alone when there is none.**
+The question the block asks is `git ls-files --cached --others --exclude-standard` minus `git ls-tree
+-r` of the register, so a modification to a path a commit already carries is not a row here — which
+is why the repairs this cycle committed and this note are not on it.
 
 **The batch the note taken at `98c80df` was over is the pool-repair ledger, the readiness probe and the
 doctor's split pool-probe row, and it was that register's own commit.** Every repair a container records is now an entry — when, the pool, the mode, and
@@ -214,9 +214,9 @@ transcript of the records and section 2's table and the listing under it. Its ro
 checkout has that the register does not carry (`git ls-files --cached --others --exclude-standard`
 minus `git ls-tree -r` of the register), one row apiece, with the prose column declared in
 `tests/Support/Handoff.php` beside the renderer — the one input git cannot answer. Only a file no
-commit carries is on it, which is why this take's table names records and nothing else: a tracked
-path's modification is not a file the register lacks, while a file the register already carries is a
-file somebody has committed. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
+commit carries is on it: a tracked path's modification is not a file the register lacks, while a file
+the register already carries is a file somebody has committed, which is why the rows here are records
+and never the edits this cycle made to committed paths. `php bin/handoff.php` writes all five blocks — three from git, one from the inventory check
 and one from the recorded run — and the note's own guard renders the same five and asserts the file
 says what they say, so a re-take cannot state a set of files, a count or a listing the tree does not
 have. A file the register does not carry and that has no line declared for it is refused by name
@@ -226,10 +226,6 @@ the tree.
 <!-- handoff:pending -->
 | File | What it is |
 |---|---|
-| `docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md` | the investigation into whether `swrr.pgcat.boot_file` is the container's boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment's entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written |
-| `docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md` | the investigation of the live ECS task's `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image's entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes |
-| `docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md` | the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay |
-| `docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md` | the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves |
 <!-- /handoff:pending -->
 
 The pgcat work this cycle's release carried was described by the note before this one and is released
