@@ -137,3 +137,25 @@ Follow the skills rather than inventing a shape: `.agents/skills/wdm-commit/SKIL
 signature, and the files that are never committed) and `.agents/skills/wdm-push/SKILL.md` for
 getting it to GitHub from PowerShell 7. A release is `.agents/skills/wdm-deploy/SKILL.md` over
 `RELEASING.md`.
+
+---
+
+## 5. Reports
+
+Write reports under `docs/reports/` as `NNNN-YYYY-MM-DD_rpt-<slug>.md`:
+
+- `NNNN` is the folder's sequential number, padded to at least four digits, starting at `0001`.
+  Order existing reports by their original creation date, earliest first. Prefer the first Git
+  addition (following renames); for untracked reports use the filesystem creation time. If neither
+  reliably records creation, use the date in the filename and state that fallback in the report.
+  Break ties by the existing filename so the ordering is reproducible.
+- When normalizing an existing collection, renumber reports to follow that order, preserving each
+  report's date, slug and contents. Plan collision-free renames and update repository references
+  and handoff declarations together. Do not renumber other document folders.
+- `YYYY-MM-DD` is the report's original creation date in the user's timezone; `<slug>` is a short
+  kebab-case description. Preserve the underscore before `rpt-` exactly as shown.
+- After normalization, give new reports the next unused number. Update the same report as its
+  review develops, preserving its filename and recording the date of later updates in its contents.
+- Register new or renamed reports in `Handoff::PENDING_DESCRIPTIONS`, record their readings with
+  `php bin/handoff.php --reaffirm=<path>`, then render `php bin/handoff.php --recorded`. Use the
+  interpreter from the machine record, as required by section 2.
