@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha12 - 2026-11-02
+
 ### Added
 
 - **A `wdm-runbook` skill records a runbook as a markdown document under `docs/runbooks/`.** It
