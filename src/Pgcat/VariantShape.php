@@ -97,6 +97,12 @@ final class VariantShape
     public const PROBLEM_UNRESOLVED_POOL = 'unresolved_pool';
 
     /**
+     * The readers variant and the writer-only one declare the same pools — the shape the boot's
+     * prune leaves when it removes the readers from both, and the one a flip cannot tell apart.
+     */
+    public const PROBLEM_VARIANTS_EQUAL = 'variants_equal';
+
+    /**
      * The three files, by the setting each is written with, and what each one is in a sentence:
      * a reader of a report should not have to know which of the three paths is the target.
      */
@@ -258,6 +264,33 @@ final class VariantShape
                     ),
                 );
             }
+        }
+
+        // The two variants a flip swaps between have to be two shapes: a readers variant and a
+        // writer-only one. When the boot's prune removes the readers from every file, both end up
+        // declaring the same pools, so the readers variant is a writer-only file under another name
+        // and the flip's "readers" mode serves nothing. It is asked before the connection's own
+        // names are judged, because after that prune no variant declares them and the reading below
+        // would have nothing left to hold.
+        $shared = $this->sharedVariantPools($declared);
+
+        if ($shared !== null) {
+            $readersPath = (string) ($this->paths['readers_path'] ?? '');
+            $writerOnlyPath = (string) ($this->paths['no_readers_path'] ?? '');
+
+            $problems[] = $this->problem(
+                'readers_path',
+                self::PROBLEM_VARIANTS_EQUAL,
+                $readersPath,
+                implode(', ', $shared),
+                self::SEVERITY_FAIL,
+                sprintf(
+                    'swrr.pgcat.readers_path [%s] and swrr.pgcat.no_readers_path [%s] declare the same pools (%s), so the readers variant is not a readers variant — a flip to it adds no pool, and every read to a pool missing from the file keeps failing.',
+                    $readersPath,
+                    $writerOnlyPath,
+                    $this->names($shared),
+                ),
+            );
         }
 
         $write = $this->judgedWritePool($declared);
@@ -565,6 +598,120 @@ final class VariantShape
         }
 
         return implode('; ', $sentences);
+    }
+
+    /**
+     * The pools the readers variant and the writer-only one both declare, where the two declare
+     * exactly the same set — the shape a prune leaves, and the one a flip cannot tell apart.
+     *
+     * Null when either file was not read, and null for two files that declare no pool at all:
+     * "both declare nothing" is nothing to compare rather than a shape that agreed, which is the
+     * same line `judged()` draws for a variant with no pool in it.
+     *
+     * @param array<string, list<string>> $declared
+     * @return list<string>|null
+     */
+    private function sharedVariantPools(array $declared): ?array
+    {
+        $readers = $declared['readers_path'] ?? null;
+        $writerOnly = $declared['no_readers_path'] ?? null;
+
+        if ($readers === null || $writerOnly === null || $readers === []) {
+            return null;
+        }
+
+        $left = array_values(array_unique($readers));
+        $right = array_values(array_unique($writerOnly));
+        sort($left);
+        sort($right);
+
+        return $left === $right ? $left : null;
+    }
+
+    /**
+     * The pools a variant's boot-time prune removed, read from the note the container's entrypoint
+     * writes into the file it narrowed.
+     *
+     * The note is the only record that survives the removal: the pool's section is gone, so nothing
+     * else in the file says which pool it was, and the address that could not be resolved is exactly
+     * what a re-render has to ask about. Its shape is one line per pool —
+     *
+     *     #   reader_db_1 -> lpr-database-4c-r7… (… getent exited 2 and printed nothing)
+     *
+     * — a pool name, the addresses it declared, and the resolver's own reason in parentheses. A
+     * file with no such note declares nothing removed, and a comment this cannot parse is not a pool
+     * to restore rather than a fault to report.
+     *
+     * @return list<array{pool: string, addresses: list<string>}>
+     */
+    public function prunedPools(string $setting): array
+    {
+        $path = trim($this->paths[$setting] ?? '');
+
+        if ($path === '' || !is_readable($path)) {
+            return [];
+        }
+
+        $toml = @file_get_contents($path);
+
+        if (!is_string($toml)) {
+            return [];
+        }
+
+        $pruned = [];
+        $seen = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', $toml) ?: [] as $line) {
+            if (preg_match('/^#\s+(?<pool>[A-Za-z0-9_.\-]+)\s*->\s*(?<addresses>.+?)\s*\((?<why>[^)]*)\)\s*$/', $line, $matches) !== 1) {
+                continue;
+            }
+
+            $pool = $matches['pool'];
+
+            if (isset($seen[$pool])) {
+                continue;
+            }
+
+            $seen[$pool] = true;
+            $addresses = preg_split('/\s+/', trim($matches['addresses'])) ?: [];
+
+            $pruned[] = [
+                'pool' => $pool,
+                'addresses' => array_values(array_filter(
+                    $addresses,
+                    static fn (string $address): bool => $address !== '',
+                )),
+            ];
+        }
+
+        return $pruned;
+    }
+
+    /**
+     * The pruned pools whose addresses this host can resolve again — the trigger a re-render needs,
+     * answered where the reading's own resolver already lives.
+     *
+     * A pool is returned once any of its addresses resolves: the prune removes a pool when *none* of
+     * them does, so one name answering again is the condition under which re-rendering would keep
+     * it, and the question stays the file's own rather than a second rule about addresses.
+     *
+     * @return list<array{pool: string, addresses: list<string>}>
+     */
+    public function reparablePools(string $setting): array
+    {
+        $reparable = [];
+
+        foreach ($this->prunedPools($setting) as $pool) {
+            foreach ($pool['addresses'] as $address) {
+                if (($this->resolves)($address)) {
+                    $reparable[] = $pool;
+
+                    break;
+                }
+            }
+        }
+
+        return $reparable;
     }
 
     /**

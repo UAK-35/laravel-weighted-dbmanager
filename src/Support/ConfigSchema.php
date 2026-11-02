@@ -67,7 +67,7 @@ final class ConfigSchema
      * those is something a published copy has to be republished to keep working. `RELEASED_IN` is
      * raised with it.
      */
-    public const GENERATION = 3;
+    public const GENERATION = 4;
 
     /**
      * The release that introduced each generation, for the warning that names one.
@@ -91,6 +91,10 @@ final class ConfigSchema
         1 => 'v0.2.0-alpha5',
         2 => 'v0.2.0',
         3 => 'v0.2.0',
+        // The pooler's refresh trigger: the command a flip runs when a pool the boot's prune
+        // removed has an address that resolves again. A published copy that predates the key
+        // reads the default, which is unset, so nothing is triggered until it republishes.
+        4 => 'v0.2.0',
     ];
 
     /** Not instantiable — a utility class with only static methods over config values. */

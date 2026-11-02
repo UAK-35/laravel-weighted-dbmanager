@@ -384,6 +384,78 @@ final class VariantShapeTest extends TestCase
     }
 
     /**
+     * The shape a boot's prune leaves: the readers removed from both variants, so the two files a
+     * flip swaps between declare exactly the same pool. It is a failure because the readers variant
+     * is then the writer-only one under another name — the mode would be reported while every read
+     * to the missing pool still failed — and the connection's own names cannot catch it, because no
+     * variant declares them any more.
+     */
+    public function test_the_two_variants_declaring_the_same_pools_is_a_failure(): void
+    {
+        $shape = $this->shape(
+            inPlace: "[pools.writer_db_1]\n",
+            readers: "[pools.writer_db_1]\n",
+            noReaders: "[pools.writer_db_1]\n",
+        );
+
+        $problem = $this->onlyProblem($shape, VariantShape::PROBLEM_VARIANTS_EQUAL);
+
+        $this->assertSame(VariantShape::SEVERITY_FAIL, $problem['severity']);
+        $this->assertSame('readers_path', $problem['setting']);
+        $this->assertSame('the readers variant', $problem['role']);
+        $this->assertStringContainsString('swrr.pgcat.readers_path [', $problem['sentence']);
+        $this->assertStringContainsString('swrr.pgcat.no_readers_path [', $problem['sentence']);
+        $this->assertStringContainsString('"writer_db_1"', $problem['sentence']);
+        $this->assertStringContainsString('not a readers variant', $problem['sentence']);
+        $this->assertFalse($shape->isShaped());
+    }
+
+    /**
+     * The negative half: two variants that declare different pools are the shape a flip can serve,
+     * so the reading must not report the ordinary installation as one shape.
+     */
+    public function test_variants_that_declare_different_pools_are_not_one_shape(): void
+    {
+        $shape = $this->shape();
+
+        $this->assertSame([], $this->problemsOfKind($shape, VariantShape::PROBLEM_VARIANTS_EQUAL));
+        $this->assertTrue($shape->isShaped());
+    }
+
+    /**
+     * The prune's note is the only record of what it removed, so it is read back: the pools it
+     * names, their addresses, and which of those this host can resolve again — the trigger a
+     * re-render needs. A note whose address still does not resolve is a pool to leave alone.
+     */
+    public function test_a_prune_note_names_the_pools_a_re_render_can_restore(): void
+    {
+        $note = "#   reader_db_1 -> lpr-db-01 (lpr-db-01: getent exited 2 and printed nothing)\n";
+        $dead = "#   reader_db_2 -> lpr-db-99 (lpr-db-99: getent exited 2 and printed nothing)\n";
+
+        $shape = $this->shape(
+            readers: $note.$dead."[pools.writer_db_1]\n",
+            noReaders: "[pools.writer_db_1]\n",
+        );
+
+        $this->assertSame(
+            [
+                ['pool' => 'reader_db_1', 'addresses' => ['lpr-db-01']],
+                ['pool' => 'reader_db_2', 'addresses' => ['lpr-db-99']],
+            ],
+            $shape->prunedPools('readers_path'),
+        );
+
+        // The fixture's resolver answers for lpr-db-01 and nothing else, so exactly one of the two
+        // pruned pools is one a re-render would keep.
+        $this->assertSame(
+            [['pool' => 'reader_db_1', 'addresses' => ['lpr-db-01']]],
+            $shape->reparablePools('readers_path'),
+        );
+        $this->assertSame([], $shape->prunedPools('no_readers_path'), 'a file with no note declares nothing removed');
+        $this->assertSame([], $shape->reparablePools('no_readers_path'));
+    }
+
+    /**
      * The installation under test: three files laid out in a temp directory, written as the case
      * asks, and the connection's own pool names. The default is the shape a flip can serve — the
      * write pool in every file, both read pools in the readers variant and neither in the

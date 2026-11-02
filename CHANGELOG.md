@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- **A pool the boot's prune removed is put back once its address resolves again.** The container's
+  entrypoint prunes every pool it cannot resolve before pgcat starts, from all three variants, and
+  a replica that comes up after the task started never puts its pool back — the next reader window
+  then flips to a "readers" variant that declares no reader at all, and every read to that pool
+  fails with the pooler's own `No pool configured`. `swrr.pgcat.refresh_command` names the
+  deployment's own renderer; a flip that finds a pruned pool whose address now resolves runs it
+  inside the flip's lock, before the mode is chosen, so the boundary applies a variant that can
+  serve the reads. Unset, nothing is triggered and the flipper behaves as it did before.
+
+- **Two variants that declare the same pools are a failure, and such a readers variant is not
+  swapped in.** `variant shape` gained `variants_equal`: the readers variant and the writer-only
+  one must not declare the same pool set, which is the shape a prune leaves and the one the older
+  reading could not see — with the readers gone from every file, no variant declares the read pool
+  the connection weights, so there was nothing left to hold. The flip's own refusal asks the same
+  reading before a readers swap, so a boundary records a skipped run with the sentence instead of
+  applying a file that serves nothing.
+
 ## 0.2.0-alpha12 - 2026-11-02
 
 ### Added

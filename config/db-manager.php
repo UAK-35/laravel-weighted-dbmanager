@@ -31,7 +31,7 @@ return [
     |
     */
 
-    'generation' => 3,
+    'generation' => 4,
 
     /*
     |--------------------------------------------------------------------------
@@ -140,6 +140,27 @@ return [
             'config_path' => env('SWRR_PGCAT_CONFIG', '/etc/pgcat/pgcat.toml'),
             'readers_path' => env('SWRR_PGCAT_READERS', '/etc/pgcat/pgcat-readers.toml'),
             'no_readers_path' => env('SWRR_PGCAT_NO_READERS', '/etc/pgcat/pgcat-no-readers.toml'),
+
+            // ── The prune's trigger (optional) ────────────────────────────────────────
+            //
+            // The container's entrypoint removes every pool whose addresses do not resolve before
+            // pgcat starts — from all three variants — and writes the pool it removed into the file
+            // it narrowed. That prune is a snapshot: a replica restored, or a name that only starts
+            // resolving, after the task started never puts the pool back by itself, and the next
+            // reader window then flips to a "readers" variant that declares no reader at all.
+            //
+            // This is the command that repairs it. Unset, nothing is triggered and the flipper
+            // behaves as it did before. Set, a flip that finds a pruned pool whose address NOW
+            // resolves runs this command inside its own lock, before it decides which variant to
+            // apply, so the deployment's renderer puts the pool back and the boundary applies a
+            // variant that can serve the reads it is pointed at. It is the deployment's command
+            // rather than this package's because the variants are the deployment's files: a
+            // renderer that substitutes secrets is not something this package can do for somebody
+            // else, and the pristine templates it renders from are the image's.
+            //
+            // A non-zero exit changes nothing: the file stays narrowed, the flip refuses a readers
+            // variant that is the writer-only one under another name, and the next run tries again.
+            'refresh_command' => env('SWRR_PGCAT_REFRESH_COMMAND'),
             // The program name is quoted because the command is a shell command line:
             // an unquoted pgcat:* is a glob the shell expands, and the name has to match
             // what supervisord runs — "pgcat:*" addresses every program in a group

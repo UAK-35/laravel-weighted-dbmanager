@@ -147,6 +147,56 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
+     * The readers variant a boot's prune leaves is the writer-only one under another name, and a
+     * flip to it cannot serve the reads it exists for: the mode would be reported while every read
+     * to the missing pool found nothing. The refusal is recorded and nothing is copied.
+     */
+    public function test_a_readers_variant_that_is_the_writer_only_one_is_not_swapped_in(): void
+    {
+        file_put_contents($this->tmp . '/pgcat-readers.toml', "[pools.writer_db_1]\n");
+        file_put_contents($this->tmp . '/pgcat-no-readers.toml', "[pools.writer_db_1]\n");
+
+        $flipper = $this->build('readers', connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']]);
+
+        $result = $flipper->forceMode('readers');
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $result->kind());
+        $this->assertStringContainsString('not a readers variant', (string) $result->reason);
+        $this->assertStringContainsString('not swapped', (string) $result->reason);
+        $this->assertCount(0, $this->copyLog, 'nothing was copied over the file pgcat is running on');
+        $this->assertSame([], $this->flipCommands(), 'and the pooler was not signalled');
+    }
+
+    /**
+     * The prune is a snapshot: the note it leaves names the pool it removed and the address that did
+     * not resolve then. When that address resolves again, the deployment's renderer is run before the
+     * mode is chosen — inside the lock — so the boundary applies a variant that can serve the reads
+     * rather than one that cannot.
+     */
+    public function test_a_pruned_pool_whose_address_resolves_again_is_re_rendered_before_the_swap(): void
+    {
+        file_put_contents(
+            $this->tmp . '/pgcat-readers.toml',
+            "#   reader_db_1 -> lpr-db-01 (lpr-db-01: getent exited 2 and printed nothing)\n"
+            ."[pools.writer_db_1]\n",
+        );
+
+        $flipper = $this->build(
+            'readers',
+            configOverrides: ['refresh_command' => 'render-pgcat-variants'],
+            hostResolver: static fn (string $address): bool => $address === 'lpr-db-01',
+        );
+
+        $result = $flipper->forceMode('readers');
+
+        $commands = array_column($this->flipCommands(), 0);
+
+        $this->assertSame('render-pgcat-variants', $commands[0], 'the renderer runs before anything is swapped');
+        $this->assertContains('supervisorctl restart pgcat', $commands, 'and the flip still applies the mode');
+        $this->assertSame('flipped', $result->kind());
+    }
+
+    /**
      * Build a flipper wired to a specific resolver mode and our capture closures.
      *
      * Mode is encoded by window WIDTH:
@@ -183,6 +233,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?string $auditFile = null,
         ?SupervisorStep $supervisorStep = null,
         ?\Closure $hostResolver = null,
+        array $connectionPools = ['write' => '', 'read' => []],
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -240,6 +291,7 @@ class PgcatConfigFlipperTest extends TestCase
             auditFile: $auditFile,
             supervisorStep: $supervisorStep,
             hostResolver: $hostResolver,
+            connectionPools: $connectionPools,
         );
 
         return $flipper;

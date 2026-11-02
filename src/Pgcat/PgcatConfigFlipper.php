@@ -542,6 +542,11 @@ final class PgcatConfigFlipper
         }
 
         try {
+            // The boot's prune is a snapshot, and a replica that comes up after it is a pool the
+            // variants no longer declare. The trigger runs here — inside the lock, before this run
+            // reads anything — so a refresh and a swap cannot write the same file in either order.
+            $this->refreshPrunedVariants();
+
             $currentMode = $this->resolver->currentModeName();
             $lastMode = $this->readLastMode();
 
@@ -712,6 +717,12 @@ final class PgcatConfigFlipper
         }
 
         try {
+            // The same trigger the scheduled run asks, and the one that matters most: a forced flip
+            // is the boundary that puts the readers variant in front of pgcat, and a pool the boot
+            // pruned is missing only because its address did not resolve *then*. Inside the lock,
+            // before the mode is chosen, so the refresh and the swap cannot interleave.
+            $this->refreshPrunedVariants();
+
             // A forced flip is the path that can take a window boundary by hand, so it gets the
             // same refusal the scheduled run gets: a mode this container cannot serve is not one
             // worth putting in front of pgcat, whether a resolver asked for it or an operator did.
@@ -1264,6 +1275,24 @@ final class PgcatConfigFlipper
     private function unservableVariant(string $mode): ?string
     {
         $setting = $mode === 'readers' ? 'readers_path' : 'no_readers_path';
+
+        // A readers variant that is the writer-only one under another name is the shape the boot's
+        // prune leaves, and swapping it in cannot repair it: the run would report the readers mode
+        // while every read to a pool the connection weights still found nothing. The reading is
+        // `VariantShape`'s own (`variants_equal`), so a rehearsal, a preflight and this refusal
+        // cannot disagree about the file. Only asked when the connection names a read pool: an
+        // installation with none has no reader to be missing.
+        if ($mode === 'readers' && $this->connectionPools['read'] !== []) {
+            foreach ($this->variantShape()->failures() as $problem) {
+                if ($problem['kind'] === VariantShape::PROBLEM_VARIANTS_EQUAL) {
+                    return sprintf(
+                        'pgcat config not swapped: %s A flip to it would report the readers mode with no pool for the reads it exists to serve, so the file was left as it is.',
+                        $problem['sentence'],
+                    );
+                }
+            }
+        }
+
         $unresolved = $this->variantShape()->unresolvedPools($setting);
 
         if ($unresolved === []) {
@@ -1285,6 +1314,56 @@ final class PgcatConfigFlipper
             ConfigValue::string($this->config[$setting] ?? null),
             $named,
         );
+    }
+
+    /**
+     * Put back the pools a variant lost to the container's boot prune, once their addresses resolve
+     * again — the trigger half of the prune's repair.
+     *
+     * The prune is a snapshot taken before pgcat starts: a pool whose addresses did not resolve then
+     * is removed from every rendered variant, and a replica that comes up later — a restored
+     * instance, a name created after the task started — never puts the pool back by itself. The
+     * variants are the deployment's files, so this does not rewrite them: it asks the deployment's
+     * own renderer, `swrr.pgcat.refresh_command`, to, and only when the note the prune left names an
+     * address this container can now resolve. Unset, nothing is triggered and the flipper behaves as
+     * it did before.
+     *
+     * It runs inside the flip's lock, before the run decides which variant to apply, so a refresh and
+     * a swap cannot write the same file in either order. A command that exits non-zero changes
+     * nothing: the file stays narrowed, `unservableVariant()` refuses the readers variant it cannot
+     * serve, and the next run tries again.
+     *
+     * @return array{pools: list<string>, command: string, exit: int}|null null when nothing was
+     *         triggered — no command configured, or no pruned pool whose addresses resolve here
+     */
+    public function refreshPrunedVariants(): ?array
+    {
+        $command = trim(ConfigValue::string($this->config['refresh_command'] ?? null));
+
+        if ($command === '') {
+            return null;
+        }
+
+        $shape = $this->variantShape();
+        $pools = [];
+
+        foreach (['readers_path', 'no_readers_path'] as $setting) {
+            foreach ($shape->reparablePools($setting) as $pool) {
+                $pools[$pool['pool']] = true;
+            }
+        }
+
+        if ($pools === []) {
+            return null;
+        }
+
+        [$exit] = ($this->commandRunner)($command);
+
+        return [
+            'pools' => array_keys($pools),
+            'command' => $command,
+            'exit' => $exit,
+        ];
     }
 
     /**
