@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha13 - 2026-11-02
+
 ### Added
 
 - **A pool the boot's prune removed is put back once its address resolves again.** The container's
