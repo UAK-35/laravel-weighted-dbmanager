@@ -168,13 +168,6 @@ final class Handoff
         'Machine record' => null,
     ];
 
-    /**
-     * The note's lines, read once: every claim, table, section and fence is read out of the same
-     * file, and the reader asks for it from a dozen places.
-     *
-     * @var list<string>
-     */
-    private static array $lines = [];
 
     /**
      * The entries of the package root, which decides whether a word is a path in this package.
@@ -3431,16 +3424,16 @@ final class Handoff
      */
     private static function lines(): array
     {
-        if (self::$lines !== []) {
-            return self::$lines;
-        }
-
+        // Read fresh every call. The previous cache was process-global and went stale when a
+        // test (or a release run inside a fixture) changed HANDOFF.md on disk, which made the line
+        // numbers Handoff::tagRowLines() reported disagree with the file the test was actually
+        // reading - the failure mode behind HandoffNoteTest's two tag-row assertions in CI.
         $raw = @file_get_contents(self::FILE);
 
         if ($raw === false) {
             throw new RuntimeException('No HANDOFF.md to hold to the tree: '.self::FILE);
         }
 
-        return self::$lines = explode("\n", str_replace("\r\n", "\n", $raw));
+        return explode("\n", str_replace("\r\n", "\n", $raw));
     }
 }
