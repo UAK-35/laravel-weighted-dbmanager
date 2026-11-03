@@ -682,7 +682,7 @@ final class Handoff
         ],
         'docs/health-payload.md' => [
             'words' => 'the payload contract: why the shape a monitor reads by name is pinned rather than left to each block\'s tests, what the tables\' cells mean, the open shapes and why they are open, and every path and key the endpoint publishes',
-            'read' => 'sha256:6409c9c6b81d7e9687d8e5dd7230bd1c945401b374709de5d6a2723a0c92da5b',
+            'read' => 'sha256:d210eba4a372c42cf3b9dbce13369f41e54da4c51c8a1a19b060403cf599791b',
         ],
         'docs/pool-repair-rate.md' => [
             'words' => 'the repair-rate decision: why a count cannot separate the self-heal from a pooler that keeps needing one, why the moments live in the state file, and why the endpoint warns rather than fails',

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **A readers transition whose reader is unreachable is deferred onto the writer fallback instead
+  of failing the flip or pointing pgcat at a source it cannot serve.** `PgcatConfigFlipper` now
+  reads the readers variant's declared pools before a swap: when a dedicated reader's addresses do
+  not resolve from the container, it keeps (or puts) the validated writer-only variant in front of
+  pgcat, records the degradation in the state file (`deferred_mode`/`deferred_at`/`deferred_pools`/
+  `deferred_reason`), and returns `FlipResult::readersDeferred()` - `readers_deferred`, exit 0,
+  `mode` naming the fallback that is actually serving. The readers mode is never recorded as
+  applied, and the schedule retries every run, so a recovered address restores reader routing with
+  no rebuild. A writer that cannot serve its own pool is still refused and named as a writer
+  failure rather than disguised as reader degradation. `dryRun()` reports the same decision as
+  `would_defer_readers`, `readerWindowVerdict()` reports `deferred` (a warning, not a stale-flip
+  failure), and `/health/db` publishes the block as `pgcat.deferred`. This is Part 1 Step 4 of the
+  pgcat promotion-gate plan.
+
 ## 0.2.0-alpha14 - 2026-11-03
 
 ### Fixed

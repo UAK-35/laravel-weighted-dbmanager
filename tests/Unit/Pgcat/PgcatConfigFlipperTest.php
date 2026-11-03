@@ -3,6 +3,7 @@
 namespace Uak35\WeightedDbManager\Tests\Unit\Pgcat;
 
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
+use Uak35\WeightedDbManager\Pgcat\DryRunResult;
 use Uak35\WeightedDbManager\Pgcat\FlipResult;
 use Uak35\WeightedDbManager\Pgcat\FlipWindow;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
@@ -97,6 +98,7 @@ class PgcatConfigFlipperTest extends TestCase
         @unlink($this->tmp . '/pgcat-readers.toml');
         @unlink($this->tmp . '/pgcat-no-readers.toml');
         @unlink($this->tmp . '/pgcat.toml');
+        @unlink($this->tmp . '/booted-at');
         @unlink($this->tmp . '/blocked');
         @unlink($this->standIn);
         @unlink($this->reloader);
@@ -194,6 +196,233 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame('render-pgcat-variants', $commands[0], 'the renderer runs before anything is swapped');
         $this->assertContains('supervisorctl restart pgcat', $commands, 'and the flip still applies the mode');
         $this->assertSame('flipped', $result->kind());
+    }
+
+    /**
+     * A readers variant that declares a dedicated reader whose address this container cannot
+     * resolve is not swapped in: the writer-only fallback is put in front of pgcat, the mode
+     * recorded is `writer` (never `readers`), the deferral is recorded, and the readers source is
+     * left exactly as it was. That is step 4's safe degradation.
+     */
+    public function test_a_reader_that_does_not_resolve_defers_the_readers_mode_onto_the_writer_fallback(): void
+    {
+        $this->writeReaderDeferralFixtures();
+        $readersBefore = (string) file_get_contents($this->tmp . '/pgcat-readers.toml');
+
+        $flipper = $this->readerDeferralFlipper();
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $result->kind());
+        $this->assertSame('writer', $result->mode, 'the honest mode is the fallback actually in place');
+        $this->assertStringContainsString('deferred', $result->summary());
+
+        $this->assertSame(
+            (string) file_get_contents($this->tmp . '/pgcat-no-readers.toml'),
+            (string) file_get_contents($this->tmp . '/pgcat.toml'),
+            'the writer-only fallback was put in front of pgcat',
+        );
+        $this->assertSame($readersBefore, (string) file_get_contents($this->tmp . '/pgcat-readers.toml'), 'the readers source was not touched');
+
+        $state = $this->readStateFile();
+
+        $this->assertSame('writer', $state['last_mode'], 'a deferred run never records the readers mode as applied');
+        $this->assertSame('readers', $state['deferred_mode']);
+        $this->assertSame(['reader_db_1'], $state['deferred_pools']);
+        $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $state['last_kind']);
+        $this->assertCount(1, $this->copyLog, 'only the writer fallback was copied in');
+        $this->assertSame($this->tmp . '/pgcat-no-readers.toml', $this->copyLog[0][0]);
+    }
+
+    /**
+     * Recovery is the schedule retrying: once the reader's address resolves, the same run applies
+     * the readers mode and clears the deferral - no rebuild, no operator step.
+     */
+    public function test_a_deferred_reader_mode_is_applied_once_the_address_resolves(): void
+    {
+        $this->writeReaderDeferralFixtures();
+        $resolves = false;
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static function (string $address) use (&$resolves): bool {
+                return $address === 'writer-host' || ($resolves && $address === 'reader-host');
+            },
+        );
+
+        $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $flipper->applyCurrentState()->kind());
+
+        $resolves = true;
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame('readers', $result->mode);
+        $this->assertSame(
+            (string) file_get_contents($this->tmp . '/pgcat-readers.toml'),
+            (string) file_get_contents($this->tmp . '/pgcat.toml'),
+            'reader routing is restored by the same schedule',
+        );
+
+        $state = $this->readStateFile();
+
+        $this->assertSame('readers', $state['last_mode']);
+        $this->assertFalse($flipper->deferralStatus()['active'], 'applying readers retires the deferral');
+    }
+
+    /**
+     * A writer that cannot serve its own pool is a writer failure, not reader degradation: the run
+     * refuses and the sentence names the fallback. Nothing is copied.
+     */
+    public function test_a_writer_that_cannot_be_served_is_refused_rather_than_deferred(): void
+    {
+        $this->writeReaderDeferralFixtures();
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => false,
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $result->kind());
+        $this->assertStringContainsString('writer-only fallback is unusable', (string) $result->reason);
+        $this->assertCount(0, $this->copyLog, 'an unusable fallback is not swapped in');
+        $this->assertFalse($flipper->deferralStatus()['active']);
+    }
+
+    /**
+     * The forced path takes the same decision: a reader-window boundary that cannot reach its
+     * reader defers onto the writer fallback and reports the mode that is in place.
+     */
+    public function test_a_forced_readers_flip_defers_onto_the_writer_fallback(): void
+    {
+        $this->writeReaderDeferralFixtures();
+
+        $flipper = $this->readerDeferralFlipper('writer');
+
+        $result = $flipper->forceMode('readers', PgcatConfigFlipper::VIA_WINDOW);
+
+        $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $result->kind());
+        $this->assertSame('writer', $result->mode);
+
+        $state = $this->readStateFile();
+
+        $this->assertSame('writer', $state['last_mode']);
+        $this->assertSame('window', $state['flipped_via'], 'the boundary is who put the fallback in place');
+        $this->assertSame('readers', $state['deferred_mode']);
+    }
+
+    /**
+     * A rehearsal agrees with the real run: it reports `would_defer_readers` and proves the
+     * writer fallback it would keep, rather than claiming the readers mode would be applied.
+     */
+    public function test_a_rehearsal_reports_a_deferred_readers_mode_as_such(): void
+    {
+        $this->writeReaderDeferralFixtures(activeIsWriter: true);
+        $targetBefore = (string) file_get_contents($this->tmp . '/pgcat.toml');
+
+        $flipper = $this->readerDeferralFlipper();
+
+        $result = $flipper->dryRun();
+
+        $this->assertSame(DryRunResult::KIND_WOULD_DEFER_READERS, $result->kind());
+        $this->assertSame('readers', $result->mode);
+        $this->assertNotNull($result->step('reader activation'), 'the deferral is a step an operator can see');
+        $this->assertSame(DryRunResult::STEP_REFUSED, $result->step('reader activation')['outcome']);
+        $this->assertSame($targetBefore, (string) file_get_contents($this->tmp . '/pgcat.toml'), 'a rehearsal changes nothing');
+        $this->assertCount(0, $this->copyLog);
+    }
+
+    /**
+     * `/health/db` must not read a deferred writer fallback as a stale flip, and it must not read
+     * it as healthy either: `reader_window` reports `deferred`, the reason names the reader, and
+     * `failed` stays false so a container that is serving is not failed by a monitor.
+     */
+    public function test_a_deferred_reader_mode_is_a_warning_not_a_stale_reader_window_failure(): void
+    {
+        $this->writeReaderDeferralFixtures();
+        file_put_contents($this->tmp . '/booted-at', (string) (time() - 3600));
+
+        $flipper = $this->readerDeferralFlipper('readers', [
+            'boot_file' => $this->tmp . '/booted-at',
+            'flip_window_seconds' => 480,
+        ]);
+
+        $flipper->forceMode('readers', PgcatConfigFlipper::VIA_WINDOW);
+        $verdict = $flipper->readerWindowVerdict();
+
+        $this->assertTrue($verdict['deferred']);
+        $this->assertFalse($verdict['failed'], 'a safely degraded container is not a stale flip');
+        $this->assertSame('readers', $verdict['expected']);
+        $this->assertSame('writer', $verdict['applied']);
+        $this->assertStringContainsString('reader_db_1', (string) $verdict['reason']);
+        $this->assertTrue($flipper->healthSummary()['deferred']['active']);
+    }
+
+    /**
+     * A flipper whose pinned connection has a dedicated reader, with a resolver that answers for
+     * the writer and not the reader. `$mode` is the resolver mode the scheduled path would ask for.
+     *
+     * @param array<string, mixed> $configOverrides
+     */
+    private function readerDeferralFlipper(string $mode = 'readers', array $configOverrides = []): PgcatConfigFlipper
+    {
+        return $this->build(
+            $mode,
+            configOverrides: $configOverrides,
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => $address === 'writer-host',
+        );
+    }
+
+    /**
+     * Two variants a pooler could serve: the readers one declares the write pool and the dedicated
+     * reader, the writer-only one declares only the write pool. Both name an address; the test's
+     * resolver decides which of them answers.
+     */
+    private function writeReaderDeferralFixtures(bool $activeIsWriter = false): void
+    {
+        $readers = $this->variantToml(['writer_db_1' => 'writer-host', 'reader_db_1' => 'reader-host']);
+        $writer = $this->variantToml(['writer_db_1' => 'writer-host']);
+
+        file_put_contents($this->tmp . '/pgcat-readers.toml', $readers);
+        file_put_contents($this->tmp . '/pgcat-no-readers.toml', $writer);
+
+        if ($activeIsWriter) {
+            file_put_contents($this->tmp . '/pgcat.toml', $writer);
+        }
+    }
+
+    /**
+     * @param array<string, string> $pools pool name => server host
+     */
+    private function variantToml(array $pools): string
+    {
+        $toml = "[general]\nport = 6432\n\n";
+
+        foreach ($pools as $name => $address) {
+            $toml .= "[pools.{$name}]\npool_mode = \"transaction\"\n\n";
+            $toml .= "[pools.{$name}.shards.0]\nservers = [[\"{$address}\", 5432, \"primary\"]]\n\n";
+        }
+
+        return $toml;
+    }
+
+    /**
+     * The state file decoded, for the assertions about what a run recorded.
+     *
+     * @return array<string, mixed>
+     */
+    private function readStateFile(): array
+    {
+        $raw = (string) file_get_contents($this->stateFile);
+
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+
+        return $decoded;
     }
 
     /**

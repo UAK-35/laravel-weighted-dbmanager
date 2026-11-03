@@ -58,10 +58,21 @@ class DryRunResultTest extends TestCase
         );
     }
 
+    public function test_a_deferred_readers_rehearsal_is_not_a_flip_and_exits_zero(): void
+    {
+        $result = DryRunResult::wouldDeferReaders('readers', 'writer', 'reader_db_1 does not resolve', $this->steps);
+
+        $this->assertSame(DryRunResult::KIND_WOULD_DEFER_READERS, $result->kind());
+        $this->assertFalse($result->wouldFlipHappen(), 'the readers mode would not be applied');
+        $this->assertSame(0, $result->exitCode(), 'deferring is the safe half of the transition');
+        $this->assertStringContainsString('would defer readers (mode=readers)', $result->summary());
+        $this->assertStringContainsString('reader_db_1 does not resolve', $result->reason);
+        $this->assertSame($this->steps, $result->toArray()['steps']);
+    }
+
     public function test_a_rehearsal_a_flip_would_skip_is_not_a_failure_either(): void
     {
         $result = DryRunResult::skipped('readers', 'another flipper instance holds the lock', $this->steps);
-
         $this->assertFalse($result->wouldFlipHappen());
         $this->assertSame(0, $result->exitCode(), 'a flip would skip too — the lock is doing its job');
         $this->assertStringContainsString('a flip would be skipped (mode=readers)', $result->summary());

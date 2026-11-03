@@ -197,13 +197,13 @@ final class DocumentedExitCounts
                 'record' => self::RECORD,
                 // `\s+` before `cells` where this record's line wrap falls, so the claim is pinned
                 // to the sentence rather than to the column it happens to break at.
-                'pinned' => '/(?|a (\w+)-cell matrix, plus named tests|documented cases against (\w+)\s+cells|the flip\'s \w+ documented cases, their numbers, and that every one of its (\w+) cells|\*\*The flip\'s (\w+) cells\.\*\*)/',
+                'pinned' => '/(?|a ([\w-]+)-cell matrix, plus named tests|documented cases against ([\w-]+)\s+cells|the flip\'s \w+ documented cases, their numbers, and that every one of its ([\w-]+) cells|\*\*The flip\'s ([\w-]+) cells\.\*\*)/',
                 'counts' => '`DbFlipPgcatCommandTest::exitCodeProvider()`',
                 'expected' => self::cells(DbFlipPgcatCommandTest::class),
             ],
             'the flip\'s documented cases, as documented-exit-codes.md counts them' => [
                 'record' => self::RECORD,
-                'pinned' => '/(?|table is (\w+) documented cases against|flip\'s (\w+) documented cases)/',
+                'pinned' => '/(?|table is ([\w-]+) documented cases against|flip\'s ([\w-]+) documented cases)/',
                 'counts' => 'the distinct cases `DbFlipPgcatCommandTest::documentedSituations()` names',
                 'expected' => self::documentedCases(DbFlipPgcatCommandTest::class),
             ],

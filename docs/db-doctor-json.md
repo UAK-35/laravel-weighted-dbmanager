@@ -78,7 +78,7 @@ depends on the state is a rule a gate can write wrong once and keep: `jq -e '.ch
 
 ### F — `kind` for the run, to match the flip
 
-The flip's `kind` is a verdict about *what happened* — `flipped`, `would_flip`, `refused`, one of twelve
+The flip's `kind` is a verdict about *what happened* — `flipped`, `would_flip`, `refused`, one of fourteen
 values a run can reach. The doctor's run verdict is the loudest of its rows, drawn from the same three
 strings the rows use, and the table already prints them in its left column. Naming the run's verdict
 `kind` would put two vocabularies on one page for no gain: a gate would have to learn that a `WARN`

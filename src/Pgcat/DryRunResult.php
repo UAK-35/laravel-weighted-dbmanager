@@ -22,6 +22,17 @@ final class DryRunResult
     /** The mode would change, and every step a flip needs was proven to work. */
     public const KIND_WOULD_FLIP = 'would_flip';
 
+    /**
+     * A flip would ask for the readers mode and defer it: the readers variant declares a reader
+     * this container cannot reach, so the writer-only fallback would stay in front of pgcat. See
+     * {@see \Uak35\WeightedDbManager\Pgcat\FlipResult::KIND_READERS_DEFERRED}.
+     *
+     * Separate from `would_flip` because the mode a rehearsal names is the mode that would be
+     * *applied*, and this run would not apply readers. It exits 0: deferring is the safe half of
+     * the transition, not a failure of the rehearsal.
+     */
+    public const KIND_WOULD_DEFER_READERS = 'would_defer_readers';
+
     /** Nothing to do: the mode is unchanged, or the flipper is not armed for this driver. */
     public const KIND_WOULD_NOT_FLIP = 'would_not_flip';
 
@@ -81,6 +92,14 @@ final class DryRunResult
     /**
      * @param list<array{step: string, outcome: string, detail: string}> $steps
      */
+    public static function wouldDeferReaders(string $mode, ?string $previousMode, string $reason, array $steps): self
+    {
+        return new self(self::KIND_WOULD_DEFER_READERS, $mode, $previousMode, $reason, null, $steps);
+    }
+
+    /**
+     * @param list<array{step: string, outcome: string, detail: string}> $steps
+     */
     public static function wouldNotFlip(string $mode, string $reason, array $steps): self
     {
         return new self(self::KIND_WOULD_NOT_FLIP, $mode, null, $reason, null, $steps);
@@ -134,6 +153,7 @@ final class DryRunResult
                 $this->mode ?? '?',
             ),
             self::KIND_WOULD_NOT_FLIP => sprintf('would not flip (mode=%s): %s', $this->mode, $this->reason),
+            self::KIND_WOULD_DEFER_READERS => sprintf('would defer readers (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_SKIPPED => sprintf('a flip would be skipped (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_FAILED => sprintf('a flip would fail (mode=%s): %s', $this->mode, $this->error ?? '(none)'),
             default => sprintf('%s (mode=%s): %s', $this->kind, $this->mode, $this->reason),

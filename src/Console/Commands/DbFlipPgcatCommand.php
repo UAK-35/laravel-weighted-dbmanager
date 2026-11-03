@@ -267,6 +267,9 @@ class DbFlipPgcatCommand extends Command
         match ($result->kind()) {
             DryRunResult::KIND_WOULD_FLIP => $this->info($line),
             DryRunResult::KIND_WOULD_NOT_FLIP, DryRunResult::KIND_SKIPPED => $this->warn($line),
+            // A deferred readers transition is a safe degradation rather than a rehearsal that
+            // could not run: the run did what it could, and the writer fallback is serving.
+            DryRunResult::KIND_WOULD_DEFER_READERS => $this->warn($line),
             // KIND_FAILED, plus anything a newer version might write.
             default => $this->error($line),
         };
@@ -715,6 +718,7 @@ class DbFlipPgcatCommand extends Command
             // for a pool — a fault worth a line an operator notices, not one that failed the run.
             FlipResult::KIND_SKIPPED,
             FlipResult::KIND_REPAIRED,
+            FlipResult::KIND_READERS_DEFERRED,
             FlipResult::KIND_WINDOW_CLOSED => $skipped(),
             // KIND_FAILED, plus anything a newer version might write.
             default => $failed(),
@@ -771,8 +775,9 @@ class DbFlipPgcatCommand extends Command
      * way and acted on another.
      *
      * `kind` is the verdict, from one vocabulary: a flip's (`flipped`, `no_change`, `skipped`,
-     * `failed`), a rehearsal's (`would_flip`, `would_not_flip`, `skipped`, `failed`), or one this
-     * command answers without asking the flipper (`status`, `disabled`, `refused`, `unbound`).
+     * `failed`, `repaired`, `window_closed`, `readers_deferred`), a rehearsal's (`would_flip`,
+     * `would_not_flip`, `would_defer_readers`, `skipped`, `failed`), or one this command answers
+     * without asking the flipper (`status`, `disabled`, `refused`, `unbound`).
      *
      * @param array<string, mixed> $payload the route's own evidence, `kind` among it
      */

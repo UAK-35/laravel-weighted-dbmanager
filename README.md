@@ -741,14 +741,15 @@ one name the payload chooses at runtime: `replicas` is keyed by the connection t
 | `connector` | `binding`, `connection`, `connection_class`, `connection_driver`, `connection_error`, `connector`, `driver`, `error`, `factory`, `factory_error`, `resolver`, `resolver_applied`, `source` | the class that builds that connection's PDO, reported and never judged |
 | `replicas` | `<connection>` | a map holding the one connection the package follows |
 | `replicas.<connection>` | `cpu_factor`, `degraded`, `formula`, `next_mode_change_at`, `primary_store`, `ram_factor`, `read_mode`, `replicas`, `resolver_cache_size`, `store`, `store_healthy` | that connection's replica summary: weights, mode and store, as `db:replica-status` prints it |
-| `pgcat` | `armed_reason`, `configured_enabled`, `connection`, `driver`, `driver_supported`, `enabled`, `last_mode`, `mismatch`, `reader_window`, `reason`, `resolver_mode`, `schedule`, `warning`, `window` | the flipper's own snapshot, the array `db:pgcat-flip --status` shows |
-| `pgcat.reader_window` | `applied`, `direction`, `expected`, `failed`, `in_step`, `reason` | whether the pooler is on the variant the reader windows are asking for |
+| `pgcat` | `armed_reason`, `configured_enabled`, `connection`, `deferred`, `driver`, `driver_supported`, `enabled`, `last_mode`, `mismatch`, `reader_window`, `reason`, `resolver_mode`, `schedule`, `warning`, `window` | the flipper's own snapshot, the array `db:pgcat-flip --status` shows |
+| `pgcat.reader_window` | `applied`, `deferred`, `direction`, `expected`, `failed`, `in_step`, `reason` | whether the pooler is on the variant the reader windows are asking for |
+| `pgcat.deferred` | `active`, `at`, `mode`, `pools`, `reason` | the readers transition this container has deferred onto the writer fallback, and why |
 | `pgcat.schedule` | `applicable`, `age_seconds`, `last_beat_at`, `not_judged`, `reason`, `stale`, `stale_after_seconds` | the schedule record's beat, read off the state file the entry writes |
 | `pgcat.window` | — | the boot window inside the snapshot — the same array as `flip.window` |
 | `flip` | `applicable`, `failed`, `reason`, `window` | the boot-window verdict, and the one pgcat reading the status rests on |
 | `flip.window` | — | the boot window, documented key by key under [The window block](#the-window-block-every-key-it-publishes) |
 | `schedule` | `applicable`, `age_seconds`, `causes`, `failed`, `interval_minutes`, `last_beat_at`, `missed_runs`, `not_judged`, `reason`, `stale_after_seconds` | whether anything is still running the entry that moves the mode, and why not when it is silent |
-| `reader_window` | `applicable`, `applied`, `expected`, `failed`, `reason` | the window verdict alone, for a reader that does not want the flipper's snapshot |
+| `reader_window` | `applicable`, `applied`, `deferred`, `expected`, `failed`, `reason` | the window verdict alone, for a reader that does not want the flipper's snapshot |
 | `pool_probe` | `address`, `admin`, `answered`, `applicable`, `control`, `discriminates`, `enabled`, `failed`, `host`, `judged`, `pools`, `port`, `reason`, `verified`, `warned` | what the running pooler holds, and whether a pool the application reads from is missing |
 | `pool_repairs` | `applicable`, `count`, `in_window`, `judged`, `last_at`, `ledger`, `max_repairs`, `reason`, `warned`, `window_seconds` | how often the container has had to repair a pool, whether that rate is past the threshold, and the repairs themselves as a small ledger — the one block that warns rather than fails |
 | `audit` | `available`, `checked_at`, `count`, `counts`, `current`, `error`, `findings`, `oldest`, `scope`, `severity`, `store_probe` | the boot audit's standing findings, as `db:doctor` reads them, and whether the record is still being written |
@@ -2649,6 +2650,7 @@ way:
 | a running pooler that could not answer for a pool, so the config was re-applied | `0` |
 | a flip that was forced                                        | `0` |
 | the container's boot window had closed                        | `0` |
+| the readers mode was deferred and the writer-only fallback stayed in place | `0` |
 | a rehearsal, whether it would flip, would not, or was forced  | `0` |
 | the flipper is not armed for this connection                  | `0` |
 | `--status`: a state report was asked for                      | `0` |
@@ -2739,10 +2741,12 @@ jq -e '[.steps[].outcome] | all(. == "done" or . == "would")' rehearsal.json
 | `no_change`                                                                                                               | the mode on record already matched, so nothing was done                      | `0`  |
 | `skipped`                                                                                                                 | another flipper instance held the lock                                       | `0`  |
 | `window_closed`                                                                                                           | the boot window had closed before the flip converged                         | `0`  |
+| `readers_deferred`                                                                                                        | the readers mode was deferred and the writer-only fallback stayed in place   | `0`  |
 | `disabled`                                                                                                                | flipping is off, or pgcat cannot front this driver                           | `0`  |
 | `status`                                                                                                                  | a state report was asked for (`--status`)                                    | `0`  |
 | `would_flip`                                                                                                              | a rehearsal proved a flip would apply                                        | `0`  |
 | `would_not_flip`                                                                                                          | a rehearsal found nothing to do                                              | `0`  |
+| `would_defer_readers`                                                                                                     | a rehearsal found the readers mode would be deferred onto the writer fallback | `0`  |
 | `failed`                                                                                                                  | a step a flip needs did not work — a flip, or a rehearsal of one             | `1`  |
 | `refused`                                                                                                                 | a flag combination was refused before anything was read                      | `1`  |
 | `unbound`                                                                                                                 | the container has no pgcat flipper                                           | `1`  |

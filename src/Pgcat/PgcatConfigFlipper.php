@@ -550,11 +550,33 @@ final class PgcatConfigFlipper
             $currentMode = $this->resolver->currentModeName();
             $lastMode = $this->readLastMode();
 
+            // The reader half of the same pre-swap question, and the one step 4 adds: when the
+            // readers variant declares an endpoint this container cannot resolve, the run defers
+            // the readers transition, puts (or keeps) the validated writer-only fallback in front
+            // of pgcat, records the degradation, and reports it as deferred - never as applied.
+            // The schedule retries every run, so a recovered address restores reader routing
+            // without a rebuild. It is asked before `unservableVariant()` so a deferrable reader
+            // loss is not turned into the fatal refusal that method answers.
+            $deferral = $this->readerDeferral($currentMode);
+
+            if ($deferral !== null) {
+                $swapped = $this->appliedMode() !== 'writer';
+
+                if ($swapped) {
+                    $this->swap('writer');
+                }
+
+                $this->recordDeferred($currentMode, $deferral, $swapped, self::VIA_SCHEDULE);
+                $this->recordRun(FlipResult::KIND_READERS_DEFERRED, 'writer');
+
+                return FlipResult::readersDeferred($currentMode, 'writer', $deferral['reason']);
+            }
+
             // The file this run would put in front of pgcat, read before anything is swapped: a
             // variant whose every address for a pool is unresolvable is one pgcat will not serve,
             // and the pooler's own start-up validates the servers. It runs here rather than in
             // `swap()` because this is the one moment the host asking is the host pgcat will run
-            // on — the shape's resolver warning is the same answer seen from a laptop — and it is
+            // on - the shape's resolver warning is the same answer seen from a laptop - and it is
             // recorded as a skipped run rather than a failure: nothing was wrong with this run,
             // and the next one tries again.
             $refusal = $this->unservableVariant($currentMode);
@@ -724,11 +746,26 @@ final class PgcatConfigFlipper
             $this->refreshPrunedVariants();
 
             // A forced flip is the path that can take a window boundary by hand, so it gets the
-            // same refusal the scheduled run gets: a mode this container cannot serve is not one
-            // worth putting in front of pgcat, whether a resolver asked for it or an operator did.
-            // It records the reason without a run — `runs` and `last_kind` are the boot window's
-            // evidence and a hand-applied mode must not move them — and leaves `last_mode` alone,
-            // because the pooler did not move.
+            // same deferral and the same refusal the scheduled run gets: a readers mode this
+            // container cannot serve is deferred onto the validated writer fallback (never
+            // reported as applied), and any other unusable target is not worth putting in front
+            // of pgcat, whether a resolver asked for it or an operator did. The forced path records
+            // no run - `runs` and `last_kind` are the boot window's evidence and a hand-applied
+            // mode must not move them - but it does record the fallback mode and the deferral.
+            $deferral = $this->readerDeferral($mode);
+
+            if ($deferral !== null) {
+                $swapped = $this->appliedMode() !== 'writer';
+
+                if ($swapped) {
+                    $this->swap('writer');
+                }
+
+                $this->recordDeferred($mode, $deferral, $swapped, $via);
+
+                return FlipResult::readersDeferred($mode, 'writer', $deferral['reason']);
+            }
+
             $refusal = $this->unservableVariant($mode);
 
             if ($refusal !== null) {
@@ -881,9 +918,16 @@ final class PgcatConfigFlipper
      */
     private function rehearse(string $mode, ?string $lastMode, array $steps): DryRunResult
     {
+        // The reader transition a real run would defer. It changes which source the rehearsal
+        // proves: a deferred readers run does not swap the readers variant, it keeps (or puts) the
+        // writer-only fallback in front of pgcat, so that is the file whose readability, shape,
+        // temp write and supervisor command are the ones a flip would really depend on.
+        $deferral = $this->readerDeferral($mode);
+        $effective = $deferral !== null ? 'writer' : $mode;
+
         $target = ConfigValue::string($this->config['config_path'] ?? null);
         $source = ConfigValue::string(
-            $mode === 'readers'
+            $effective === 'readers'
                 ? ($this->config['readers_path'] ?? null)
                 : ($this->config['no_readers_path'] ?? null),
         );
@@ -965,6 +1009,14 @@ final class PgcatConfigFlipper
                 ? $shape->summary()
                 : implode(' ', array_column($shapeWarnings, 'sentence')),
         ];
+
+        if ($deferral !== null) {
+            $steps[] = [
+                'step' => 'reader activation',
+                'outcome' => DryRunResult::STEP_REFUSED,
+                'detail' => $deferral['reason'],
+            ];
+        }
 
         // The step a flip takes between reading the source and replacing the target. It is
         // read-only — `supervisorctl status "pgcat:*"` and nothing else — so the rehearsal
@@ -1071,12 +1123,14 @@ final class PgcatConfigFlipper
         $steps[] = [
             'step' => 'pool read',
             'outcome' => DryRunResult::STEP_WOULD,
-            'detail' => $this->poolProbe === null
-                ? 'nothing would be asked: the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the pooler\'s own file), so the flip would report the transition on supervisord\'s word'
-                : sprintf(
+            'detail' => match (true) {
+                $deferral !== null => 'nothing would be asked: the run defers the readers mode and keeps the writer-only fallback, so there is no new readers variant to read back from the pooler',
+                $this->poolProbe === null => 'nothing would be asked: the probe is not armed (swrr.pgcat.pool_probe.enabled, and a dialable `[general] port` in the pooler\'s own file), so the flip would report the transition on supervisord\'s word',
+                default => sprintf(
                     'the pools %s declares would be read back from the pooler, and a pool it refused would be repaired by a restart on that file',
                     $source,
                 ),
+            },
         ];
 
         if (!$this->stateFileWritable()) {
@@ -1100,7 +1154,9 @@ final class PgcatConfigFlipper
             'detail' => sprintf('%s (writable, left as it is)', $this->stateFile),
         ];
 
-        return DryRunResult::wouldFlip($mode, $lastMode, $steps);
+        return $deferral !== null
+            ? DryRunResult::wouldDeferReaders($mode, $lastMode, $deferral['reason'], $steps)
+            : DryRunResult::wouldFlip($mode, $lastMode, $steps);
     }
 
     /**
@@ -1299,6 +1355,21 @@ final class PgcatConfigFlipper
             return null;
         }
 
+        // The readers mode is the only one with a fallback, and when both sides are unusable the
+        // writer is the failure that matters: a container whose primary cannot be reached is not
+        // reader degradation, and naming only the reader would send an operator to the wrong
+        // outage. The writer is asked first here, before the reader's own sentence is built.
+        if ($mode === 'readers' && $this->connectionPools['read'] !== []) {
+            $fallback = $this->writerFallbackFault();
+
+            if ($fallback !== null) {
+                return sprintf(
+                    'pgcat config not swapped: the readers mode cannot be served and the writer-only fallback is unusable too — %s The file was left as it is.',
+                    $fallback,
+                );
+            }
+        }
+
         $named = implode(', ', array_map(
             static fn (array $pool): string => sprintf(
                 '"%s" (%s)',
@@ -1314,6 +1385,92 @@ final class PgcatConfigFlipper
             ConfigValue::string($this->config[$setting] ?? null),
             $named,
         );
+    }
+
+    /**
+     * The readers mode a run can safely defer, or null when it cannot.
+     *
+     * Step 4 of the pgcat promotion plan: a readers variant that retains an endpoint unavailable
+     * at boot must not be swapped in, and must not stop a working pooler either. When the
+     * connection weights a dedicated reader and the readers variant declares one whose addresses
+     * do not resolve from here, the caller puts the writer-only fallback in front of pgcat, records
+     * the deferral, and reports it as such. The schedule retries every run and applies readers
+     * once the address resolves, so recovery needs no rebuild.
+     *
+     * Two refusals are deliberately *not* deferrable:
+     *
+     *   - a topology defect (`variants_equal`) is not reader loss, and no endpoint coming back
+     *     changes the shape of the file;
+     *   - a writer-only fallback that cannot serve the write pool is a writer failure, and the
+     *     refusal path names it rather than pretending the run deferred a reader.
+     *
+     * Only an unresolved endpoint is deferred, and only for the readers mode. The caller runs this
+     * immediately before a swap, so the resolver is asked on the host pgcat will run on.
+     *
+     * @return array{pools: list<array{pool: string, addresses: list<string>}>, reason: string}|null
+     */
+    private function readerDeferral(string $mode): ?array
+    {
+        if ($mode !== 'readers' || $this->connectionPools['read'] === []) {
+            return null;
+        }
+
+        $shape = $this->variantShape();
+        $unresolved = $shape->unresolvedPools('readers_path');
+
+        if ($unresolved === []) {
+            return null;
+        }
+
+        foreach ($shape->failures() as $problem) {
+            if ($problem['kind'] === VariantShape::PROBLEM_VARIANTS_EQUAL) {
+                return null;
+            }
+        }
+
+        if ($this->writerFallbackFault() !== null) {
+            return null;
+        }
+
+        $named = implode(', ', array_map(
+            static fn (array $pool): string => sprintf(
+                '"%s" (%s)',
+                $pool['pool'],
+                implode(', ', $pool['addresses']),
+            ),
+            $unresolved,
+        ));
+
+        return [
+            'pools' => $unresolved,
+            'reason' => sprintf(
+                'the readers mode was deferred: swrr.pgcat.readers_path [%s] declares %s, and none of those addresses resolves from this container — the writer-only fallback stays in front of pgcat so reads keep reaching the writer, the readers mode is not recorded as applied, and the next run retries until the address resolves.',
+                ConfigValue::string($this->config['readers_path'] ?? null),
+                $named,
+            ),
+        ];
+    }
+
+    /**
+     * Why the writer-only variant cannot be the fallback a deferred readers mode leaves serving,
+     * or null when it can.
+     *
+     * Two questions, both about the file a fallback would put in front of pgcat: does it hold the
+     * connection's write pool (and none of the dedicated readers), and does every pool it declares
+     * have an address this container can resolve. A writer that fails either is a writer failure,
+     * and `unservableVariant()` is where that is named.
+     */
+    private function writerFallbackFault(): ?string
+    {
+        $shape = $this->variantShape();
+
+        foreach ($shape->failures() as $problem) {
+            if ($problem['setting'] === 'no_readers_path') {
+                return $problem['sentence'];
+            }
+        }
+
+        return $this->unservableVariant('writer');
     }
 
     /**
@@ -2044,7 +2201,7 @@ final class PgcatConfigFlipper
      * for the third time and the same reason: four surfaces print this verdict and none of them may
      * compute it.
      *
-     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}, schedule: array{applicable: bool, stale: bool|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, reason: string|null}}
+     * @return array{enabled: bool, configured_enabled: bool, connection: string, driver: string, driver_supported: bool, resolver_mode: string, last_mode: string|null, reason: string|null, armed_reason: string|null, mismatch: bool, warning: string|null, window: array<string, mixed>, reader_window: array{expected: string, applied: string|null, in_step: bool|null, failed: bool, deferred: bool, direction: string|null, reason: string|null}, deferred: array{active: bool, mode: string|null, at: string|null, pools: list<string>, reason: string|null}, schedule: array{applicable: bool, stale: bool|null, not_judged: string|null, last_beat_at: string|null, age_seconds: int|null, stale_after_seconds: int, reason: string|null}}
      */
     public function healthSummary(): array
     {
@@ -2062,6 +2219,7 @@ final class PgcatConfigFlipper
             'warning' => $this->armingWarning(),
             'window' => $this->windowStatus(),
             'reader_window' => $this->readerWindowVerdict(),
+            'deferred' => $this->deferralStatus(),
             'schedule' => $this->scheduleStatus(),
         ];
     }
@@ -2145,11 +2303,12 @@ final class PgcatConfigFlipper
      * `windowStatus()`'s consumers — surfaces that already read the state file — and never by
      * `disabledReason()` or a flip's own hot path.
      *
-     * @return array{expected: string, applied: string|null, in_step: bool|null, failed: bool, direction: string|null, reason: string|null}
+     * @return array{expected: string, applied: string|null, in_step: bool|null, failed: bool, deferred: bool, direction: string|null, reason: string|null}
      */
     public function readerWindowVerdict(): array
     {
         $expected = $this->resolver->currentModeName();
+        $deferral = $this->deferralStatus();
 
         if (!$this->isEnabled() || $this->resolver->isAlwaysReaderMode()) {
             return [
@@ -2157,21 +2316,36 @@ final class PgcatConfigFlipper
                 'applied' => null,
                 'in_step' => null,
                 'failed' => false,
+                'deferred' => false,
                 'direction' => null,
                 'reason' => null,
             ];
         }
 
         $applied = $this->appliedMode();
-        $failed = $applied !== null && $applied !== $expected && $this->window->closed();
+
+        // A deferred readers transition is a known, safe degradation: the pooler is deliberately
+        // on the writer fallback because the reader it would route to does not resolve. Calling
+        // that a "stale flip" would fail a container that is serving, and calling it in step would
+        // hide the outage - so it is its own state, reported as a warning with the reader's name.
+        $deferred = $deferral['active']
+            && $deferral['mode'] === 'readers'
+            && $expected === 'readers'
+            && $applied === 'writer'
+            && $this->window->closed();
+
+        $failed = !$deferred && $applied !== null && $applied !== $expected && $this->window->closed();
 
         return [
             'expected' => $expected,
             'applied' => $applied,
             'in_step' => $applied === null ? null : $applied === $expected,
             'failed' => $failed,
+            'deferred' => $deferred,
             'direction' => $failed ? ($expected === 'readers' ? 'inside_window' : 'outside_window') : null,
-            'reason' => $failed ? $this->readerWindowReason($expected, $applied) : null,
+            'reason' => $deferred
+                ? (string) $deferral['reason']
+                : ($failed ? $this->readerWindowReason($expected, $applied) : null),
         ];
     }
 
@@ -4218,6 +4392,15 @@ final class PgcatConfigFlipper
             'last_refusal' => null,
             'last_refusal_at' => null,
             'last_refusal_mode' => null,
+            // A reader transition that was deferred is no longer deferred once a mode has been
+            // applied: either readers were applied (the deferral is over) or the writer was
+            // applied deliberately (there is nothing deferred). Both are a clean slate, and
+            // leaving the keys behind would make `/health/db` report a degradation that the
+            // applied mode has retired.
+            'deferred_mode' => null,
+            'deferred_at' => null,
+            'deferred_pools' => null,
+            'deferred_reason' => null,
         ]);
     }
 
@@ -4286,7 +4469,7 @@ final class PgcatConfigFlipper
     private function recordRun(string $kind, string $mode, ?string $pool = null, ?bool $cleared = null, ?string $refusal = null): void
     {
         $state = $this->readState();
-        $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE, FlipResult::KIND_REPAIRED], true);
+        $usable = in_array($kind, [FlipResult::KIND_FLIPPED, FlipResult::KIND_NO_CHANGE, FlipResult::KIND_REPAIRED, FlipResult::KIND_READERS_DEFERRED], true);
         $at = $this->nowIso();
 
         $state['runs'] = ConfigValue::int($state['runs'] ?? null, 0) + 1;
@@ -4328,6 +4511,85 @@ final class PgcatConfigFlipper
             'last_refusal_at' => $this->nowIso(),
             'last_refusal_mode' => $mode,
         ]);
+    }
+
+    /**
+     * The state a deferred readers transition leaves: the writer fallback in place, and the
+     * deferral itself recorded so `/health/db` and `--status` can report a degradation whose cause
+     * is a reader that is not reachable yet.
+     *
+     * `last_mode` is the mode actually applied - `writer` - and never the requested `readers`,
+     * which is the plan's "never mark the reader mode as successfully applied when it was
+     * deferred". `deferred_at` is written once and kept across retries, so a reader outage is one
+     * degradation with a start rather than a fresh one every minute.
+     *
+     * `$swapped` says whether this run put the fallback in place (it was not already there). Only
+     * then are `last_flipped_at` and `flipped_via` moved: a run that found the fallback already in
+     * place did not flip anything, and claiming it did would make the mode record say more than
+     * happened. A deferral is not a refusal either, so the refusal keys are cleared.
+     *
+     * @param array{pools: list<array{pool: string, addresses: list<string>}>, reason: string} $deferral
+     */
+    private function recordDeferred(string $requestedMode, array $deferral, bool $swapped, string $via): void
+    {
+        $state = $this->readState();
+        $previous = is_string($state['last_mode'] ?? null) ? $state['last_mode'] : null;
+        $at = is_string($state['deferred_at'] ?? null) && $state['deferred_at'] !== ''
+            ? $state['deferred_at']
+            : $this->nowIso();
+
+        $state['last_mode'] = 'writer';
+
+        if ($swapped) {
+            $state['previous_mode'] = $previous;
+            $state['last_flipped_at'] = $this->nowIso();
+            $state['flipped_by'] = 'pgcat-flipper';
+            $state['flipped_via'] = $via;
+        }
+
+        $state['deferred_mode'] = $requestedMode;
+        $state['deferred_at'] = $at;
+        $state['deferred_pools'] = array_map(
+            static fn (array $pool): string => $pool['pool'],
+            $deferral['pools'],
+        );
+        $state['deferred_reason'] = $deferral['reason'];
+        $state['last_refusal'] = null;
+        $state['last_refusal_at'] = null;
+        $state['last_refusal_mode'] = null;
+
+        $this->writeState($state);
+    }
+
+    /**
+     * The readers transition this container has deferred, as a struct a surface can print - the
+     * `deferred` block of `healthSummary()`, and the state `readerWindowVerdict()` reads so a
+     * deferred writer fallback is not mistaken for a stale flip.
+     *
+     * `active` is the key a caller branches on; the rest is evidence. A file written before this
+     * key existed reads as "nothing deferred", which is the same rule every other optional state
+     * block follows.
+     *
+     * @return array{active: bool, mode: string|null, at: string|null, pools: list<string>, reason: string|null}
+     */
+    public function deferralStatus(): array
+    {
+        $state = $this->readState();
+        $mode = $state['deferred_mode'] ?? null;
+        $at = $state['deferred_at'] ?? null;
+        $active = is_string($mode) && $mode !== '' && is_string($at) && $at !== '';
+        $pools = $state['deferred_pools'] ?? [];
+        $reason = $state['deferred_reason'] ?? null;
+
+        return [
+            'active' => $active,
+            'mode' => $active ? $mode : null,
+            'at' => $active ? $at : null,
+            'pools' => $active && is_array($pools)
+                ? array_values(array_filter($pools, static fn (mixed $pool): bool => is_string($pool) && $pool !== ''))
+                : [],
+            'reason' => $active && is_string($reason) && $reason !== '' ? $reason : null,
+        ];
     }
 
     /**

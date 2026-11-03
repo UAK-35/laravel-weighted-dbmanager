@@ -2904,6 +2904,15 @@ class DbDoctor extends Command
             return $this->row($name, self::PASS, 'nothing was compared: no reader window is configured, or pgcat\'s configuration could not be read');
         }
 
+        if ($verdict['deferred'] === true) {
+            return $this->row($name, self::WARN, sprintf(
+                'deferred - %s',
+                is_string($verdict['reason']) && $verdict['reason'] !== ''
+                    ? $verdict['reason']
+                    : 'the readers mode is deferred because a reader is not reachable, and the writer-only fallback is serving',
+            ));
+        }
+
         if ($verdict['failed'] !== true) {
             return $this->row($name, self::PASS, $expected === 'readers'
                 ? 'in step — a reader window is open and pgcat is on the readers config'

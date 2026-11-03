@@ -22,6 +22,7 @@ use Uak35\WeightedDbManager\Database\Weighted\LocalStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\RedisAtomicStateStore;
 use Uak35\WeightedDbManager\Database\Weighted\TimeWindowResolver;
 use Uak35\WeightedDbManager\Database\Weighted\WeightedDatabaseManager;
+use Uak35\WeightedDbManager\Pgcat\FlipResult;
 use Uak35\WeightedDbManager\Pgcat\FlipSchedule;
 use Uak35\WeightedDbManager\Pgcat\PgcatConfigFlipper;
 use Uak35\WeightedDbManager\Pgcat\ScheduleBeat;
@@ -2325,6 +2326,58 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('a reader window is open', $output);
 
         $this->assertSame(1, $exit);
+    }
+
+    /**
+     * A readers window is open, the pooler is on the writer-only fallback, and that is deliberate:
+     * the reader the readers variant declares does not resolve, so step 4 deferred the transition.
+     * The row warns rather than fails - the container is serving reads on the writer - but it does
+     * not pass, because a green row saying "in step - pgcat is on the readers config" would be a
+     * false statement about a deferred mode.
+     */
+    public function test_the_pgcat_mode_row_warns_for_a_deferred_readers_transition(): void
+    {
+        $this->bindRedis(reachable: true);
+
+        $boot = time() - 3600;
+        $stamp = $this->tempDir().'/container-booted-at';
+        file_put_contents($stamp, (string) $boot);
+
+        $paths = $this->armPgcat(['boot_file' => $stamp, 'flip_window_seconds' => 480]);
+
+        $this->useReaderFallback([['start' => '00:00:00', 'end' => '23:59:59']], [1, 2, 3, 4, 5, 6, 7]);
+
+        file_put_contents($paths['readers_path'], "[pools.writer_db_1]\n[pools.reader_db_1]\n");
+        file_put_contents($paths['no_readers_path'], "[pools.writer_db_1]\n");
+        copy($paths['no_readers_path'], $paths['config_path']);
+
+        // A container that converged inside its window and then deferred a later readers
+        // transition: every other row of the run still judges a working installation, so the only
+        // reason for a non-zero code would be a row this test is not about.
+        $converged = gmdate(DATE_ATOM, $boot + 60);
+
+        file_put_contents($paths['state_file'], (string) json_encode([
+            ScheduleBeat::STATE_KEY => gmdate(DATE_ATOM),
+            'runs' => 1,
+            'last_kind' => FlipResult::KIND_READERS_DEFERRED,
+            'last_mode' => 'writer',
+            'last_flipped_at' => $converged,
+            'converged_at' => $converged,
+            'converged_mode' => 'writer',
+            'deferred_mode' => 'readers',
+            'deferred_at' => gmdate(DATE_ATOM),
+            'deferred_pools' => ['reader_db_1'],
+            'deferred_reason' => 'the readers mode was deferred: swrr.pgcat.readers_path declares "reader_db_1" (reader-host), and none of those addresses resolves from this container',
+        ]));
+
+        [$output, $exit] = $this->doctor();
+        $row = $this->rowContaining($output, 'pgcat mode');
+
+        $this->assertStringStartsWith('WARN  pgcat mode', $row);
+        $this->assertStringContainsString('deferred', $row);
+        $this->assertStringContainsString('reader_db_1', $row);
+        $this->assertStringNotContainsString('in step - a reader window is open', $row);
+        $this->assertSame(0, $exit, 'a warned row is a degradation to watch, not a failed installation');
     }
 
     /**

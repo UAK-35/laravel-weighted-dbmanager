@@ -7,9 +7,9 @@ namespace Uak35\WeightedDbManager\Pgcat;
 /**
  * Outcome of a PgcatConfigFlipper operation.
  *
- * Variant-style: one of noChange / flipped / skipped / failed / windowClosed.
- * Carries enough metadata for the CLI to render a useful line and for
- * log aggregators to tag the event with `kind`.
+ * Variant-style: one of noChange / flipped / skipped / failed / windowClosed / repaired /
+ * readersDeferred. Carries enough metadata for the CLI to render a useful line and for log
+ * aggregators to tag the event with `kind`.
  */
 final class FlipResult
 {
@@ -48,6 +48,23 @@ final class FlipResult
      * a signal pgcat did not act on needs a process that reads the file to happen at all.
      */
     public const KIND_REPAIRED = 'repaired';
+
+    /**
+     * The readers mode was asked for, its variant declares a dedicated reader this container cannot
+     * reach, and the writer-only variant was put in front of pgcat instead.
+     *
+     * This is the safe-degradation outcome step 4 of the pgcat promotion plan asks for: reader
+     * loss preserves service because reads fall back to the writer, and the pooler is never
+     * pointed at a source whose server it cannot resolve. It is deliberately distinct from
+     * `skipped` - that is a refusal, while this is a *transition that was deferred* and left a
+     * validated fallback serving - and from `flipped`, because the readers mode was not applied.
+     * `mode` is therefore the mode actually in place (`writer`), never the requested one.
+     *
+     * It exits 0: the run did what it could safely do, and the standing degradation is reported
+     * by `/health/db`'s `reader_window` block (a deferred transition, not a stale flip) rather
+     * than by a non-zero code on a schedule that will keep retrying.
+     */
+    public const KIND_READERS_DEFERRED = 'readers_deferred';
 
     private function __construct(
         private readonly string $kind,
@@ -101,6 +118,21 @@ final class FlipResult
         return new self(self::KIND_REPAIRED, $mode, null, $reason, null);
     }
 
+    /**
+     * The readers mode was deferred: `$appliedMode` is the mode the pooler is actually on (the
+     * writer-only fallback), never the requested one. See {@see KIND_READERS_DEFERRED}.
+     */
+    public static function readersDeferred(string $requestedMode, string $appliedMode, string $reason): self
+    {
+        return new self(
+            self::KIND_READERS_DEFERRED,
+            $appliedMode,
+            null,
+            sprintf('requested "%s", deferred and left on "%s": %s', $requestedMode, $appliedMode, $reason),
+            null,
+        );
+    }
+
     public function kind(): string
     {
         return $this->kind;
@@ -114,6 +146,7 @@ final class FlipResult
             self::KIND_NO_CHANGE,
             self::KIND_SKIPPED,
             self::KIND_REPAIRED,
+            self::KIND_READERS_DEFERRED,
             self::KIND_WINDOW_CLOSED => 0,
             default => 1,
         };
@@ -130,6 +163,7 @@ final class FlipResult
             ),
             self::KIND_SKIPPED   => sprintf('skipped (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_REPAIRED  => sprintf('repaired (mode=%s): %s', $this->mode, $this->reason),
+            self::KIND_READERS_DEFERRED => sprintf('readers deferred (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_WINDOW_CLOSED => sprintf('window closed (mode=%s): %s', $this->mode, $this->reason),
             self::KIND_FAILED    => sprintf(
                 'failed (mode=%s): %s — error: %s',

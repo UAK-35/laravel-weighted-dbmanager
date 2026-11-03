@@ -384,15 +384,25 @@ class DbWindowFlipCommand extends Command
             ),
             // The mode is applied and the pooler was not holding it. The transition is the part a
             // reader of the boundary needs, and the flipper's own sentence carries the pool, what
-            // was done about it and what was seen afterwards — so it is quoted rather than
+            // was done about it and what was seen afterwards - so it is quoted rather than
             // summarized a second time here.
             FlipResult::KIND_REPAIRED => sprintf(
-                'the boundary at %s arrived and %s — %s',
+                'the boundary at %s arrived and %s - %s',
                 $boundaryAt,
                 $this->probeSentence($probe),
                 $result?->reason !== null && $result->reason !== ''
                     ? $result->reason
                     : 'the mode was applied and the pooler did not answer for a pool of it',
+            ),
+            // A readers boundary whose reader is unreachable: the transition was deferred onto the
+            // writer-only fallback rather than applied, and the flipper's sentence names the pool.
+            FlipResult::KIND_READERS_DEFERRED => sprintf(
+                'the boundary at %s arrived and %s - %s',
+                $boundaryAt,
+                $this->probeSentence($probe),
+                $result?->reason !== null && $result->reason !== ''
+                    ? $result->reason
+                    : 'the readers mode was deferred and the writer-only fallback stayed in place',
             ),
             FlipResult::KIND_FAILED => 'the flip threw' . ($result?->error !== null ? ': ' . $result->error : ''),
             default => $result?->summary() ?? sprintf('the flipper did not change the mode for the boundary at %s', $boundaryAt),

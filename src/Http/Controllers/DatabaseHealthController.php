@@ -596,7 +596,7 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
      *
      * @param array<string, mixed>|null $pgcat the summary `index()` already read
      *
-     * @return array{applicable: bool, failed: bool, reason: string|null, expected: string|null, applied: string|null}
+     * @return array{applicable: bool, failed: bool, deferred: bool, reason: string|null, expected: string|null, applied: string|null}
      */
     private function readerWindowVerdict(?array $pgcat): array
     {
@@ -604,15 +604,24 @@ class DatabaseHealthController extends \Illuminate\Routing\Controller
         $block = is_array($pgcat['reader_window'] ?? null) ? $pgcat['reader_window'] : null;
 
         $failed = ($block['failed'] ?? false) === true;
+        $deferred = ($block['deferred'] ?? false) === true;
+        $reason = null;
+
+        if ($failed) {
+            $reason = is_string($block['reason'] ?? null) && $block['reason'] !== ''
+                ? $block['reason']
+                : 'pgcat is on a configuration the reader windows are not asking for';
+        } elseif ($deferred) {
+            $reason = is_string($block['reason'] ?? null) && $block['reason'] !== ''
+                ? $block['reason']
+                : 'the readers transition is deferred because the reader is not reachable, and the writer-only fallback is serving';
+        }
 
         return [
             'applicable' => $block !== null,
             'failed' => $failed,
-            'reason' => $failed
-                ? (is_string($block['reason'] ?? null) && $block['reason'] !== ''
-                    ? $block['reason']
-                    : 'pgcat is on a configuration the reader windows are not asking for')
-                : null,
+            'deferred' => $deferred,
+            'reason' => $reason,
             'expected' => is_string($block['expected'] ?? null) ? $block['expected'] : null,
             'applied' => is_string($block['applied'] ?? null) ? $block['applied'] : null,
         ];

@@ -76,9 +76,13 @@ final class DbFlipPgcatCommandTest extends TestCase
         $untouched = "# live file pgcat reads\npool = 'unknown'\n";
         $readers = "# readers variant\npool = 'readers'\n";
         $writer = "# writer-only variant\npool = 'writer-only'\n";
-        // A readers variant that declares a pool — the fixture the repair row needs, because
+        // A readers variant that declares a pool - the fixture the repair row needs, because
         // the pools a probe asks about are the section headers of the file a flip would apply.
         $poolReaders = "[pools.reader_db_2]\npool_mode = 'transaction'\n";
+        // The two realistic variants the deferral rows need: the readers one names a dedicated
+        // reader, the writer-only one does not, and the test's resolver answers for the write
+        // host only - so the readers mode is deferred onto the writer fallback.
+        $deferredWriter = self::deferredWriterVariant();
 
         return [
             // ── the four kinds a flip can have ────────────────────────────────────────
@@ -101,6 +105,10 @@ final class DbFlipPgcatCommandTest extends TestCase
             'the boot window had closed before the flip converged, so it stopped trying' => [
                 'preset' => 'expired', 'options' => [], 'exit' => 0,
                 'kind' => FlipResult::KIND_WINDOW_CLOSED, 'line' => 'window closed (mode=readers): the flip window closed', 'target' => $untouched, 'recorded' => false,
+            ],
+            'the readers mode is deferred and the writer fallback is kept' => [
+                'preset' => 'deferred', 'options' => [], 'exit' => 0,
+                'kind' => FlipResult::KIND_READERS_DEFERRED, 'line' => 'readers deferred (mode=writer)', 'target' => $deferredWriter, 'recorded' => true,
             ],
             'the supervisor command cannot work, so the flip fails' => [
                 'preset' => 'unknown-program', 'options' => [], 'exit' => 1,
@@ -127,6 +135,10 @@ final class DbFlipPgcatCommandTest extends TestCase
             'a rehearsal a flip would refuse exits one' => [
                 'preset' => 'unknown-program', 'options' => ['--dry-run' => true], 'exit' => 1,
                 'kind' => 'failed', 'line' => 'a flip would fail', 'target' => $untouched, 'recorded' => false,
+            ],
+            'a rehearsal of a deferred readers mode exits zero' => [
+                'preset' => 'deferred', 'options' => ['--dry-run' => true], 'exit' => 0,
+                'kind' => DryRunResult::KIND_WOULD_DEFER_READERS, 'line' => 'would defer readers', 'target' => $deferredWriter, 'recorded' => false,
             ],
             'a rehearsal cannot be a watch daemon' => [
                 'preset' => 'armed', 'options' => ['--dry-run' => true, '--watch' => true], 'exit' => 1,
@@ -676,6 +688,8 @@ final class DbFlipPgcatCommandTest extends TestCase
             'the flipper is not armed for this driver, so nothing runs' => 'the flipper is not armed for this connection',
             '--status reports and never flips' => '--status: a state report was asked for',
             'the boot window had closed before the flip converged, so it stopped trying' => "the container's boot window had closed",
+            'the readers mode is deferred and the writer fallback is kept' => 'the readers mode was deferred and the writer-only fallback stayed in place',
+            'a rehearsal of a deferred readers mode exits zero' => 'a rehearsal, whether it would flip, would not, or was forced',
             'the supervisor command cannot work, so the flip fails' => 'a step a flip needs did not work, or a rehearsal of one',
             'the source config is not there, so the flip fails' => 'a step a flip needs did not work, or a rehearsal of one',
             'a rehearsal a flip would refuse exits one' => 'a step a flip needs did not work, or a rehearsal of one',
@@ -1179,7 +1193,37 @@ final class DbFlipPgcatCommandTest extends TestCase
             $this->withThePoolerMissingAPool($installation);
         }
 
+        if ($preset === 'deferred') {
+            // A readers variant with a dedicated reader this container cannot resolve, and a
+            // writer-only fallback it can: the shape step 4 defers onto. The active file is the
+            // writer variant, as a container that booted outside a reader window leaves it. The
+            // resolver is the seam, because the answer has to be the test's rather than the build
+            // host's DNS.
+            file_put_contents($installation->path('readers_path'), self::deferredReadersVariant());
+            file_put_contents($installation->path('no_readers_path'), self::deferredWriterVariant());
+            file_put_contents($installation->path('config_path'), self::deferredWriterVariant());
+            app()->instance(PgcatConfigFlipper::class, new PgcatConfigFlipper(
+                resolver: app()->make(TimeWindowResolver::class),
+                config: $installation->config(),
+                stateFile: $installation->path('state_file'),
+                lockFile: $installation->path('lock_file'),
+                supervisorStep: app()->make(SupervisorStep::class),
+                connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+                hostResolver: static fn (string $address): bool => $address === 'writer-host',
+            ));
+        }
+
         return $installation;
+    }
+
+    private static function deferredReadersVariant(): string
+    {
+        return "[general]\nport = 6432\n\n[pools.writer_db_1]\n\n[pools.writer_db_1.shards.0]\nservers = [[\"writer-host\", 5432, \"primary\"]]\n\n[pools.reader_db_1]\n\n[pools.reader_db_1.shards.0]\nservers = [[\"reader-host\", 5432, \"replica\"]]\n";
+    }
+
+    private static function deferredWriterVariant(): string
+    {
+        return "[general]\nport = 6432\n\n[pools.writer_db_1]\n\n[pools.writer_db_1.shards.0]\nservers = [[\"writer-host\", 5432, \"primary\"]]\n";
     }
 
     /**
