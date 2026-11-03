@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha15 - 2026-11-03
+
 ### Added
 
 - **A readers transition whose reader is unreachable is deferred onto the writer fallback instead
