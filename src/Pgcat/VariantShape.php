@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Uak35\WeightedDbManager\Pgcat;
 
 use Uak35\WeightedDbManager\Support\ConfigValue;
+use Uak35\WeightedDbManager\Support\ReplicaMetadata;
 
 /**
  * Is the shape of what a flip swaps to one this installation can serve?
@@ -27,9 +28,13 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
  *   declares are the `[pools.<name>]` section headers of that file, read by the same reader the
  *   pool probe uses (`PoolProbe::declaredPools()`), so "the pools a variant declares" means one
  *   thing in this package rather than two. The connection is the one the package follows, and the
- *   pool names it is written with are its own `database` — which is what pgcat addresses a pool by,
- *   and how a client reaches one — plus the `database` of each entry in its `read` list, since a
- *   weighted pick is a pick between pools when the connection points at a pooler.
+ *   pool names it is written with are the effective write pool — the `write` block's `database`
+ *   whether Laravel wrote it as one block or as a list, otherwise the connection's own `database`,
+ *   which is what pgcat addresses a pool by and how a client reaches one — plus the `database` of
+ *   each enabled read entry that names a pool other than the write pool. A read entry that names
+ *   the write pool is a read *of* that pool rather than a second pool, and is not a dedicated
+ *   reader; an entry the resolver disables (`weight: 0`, or a weight it cannot read) is not one
+ *   either.
  *
  *   The comparison is deliberately narrower than "the connection's database against the file".
  *   Laravel's `database` is a database name on every connection and a *pool* name only where a
@@ -40,13 +45,14 @@ use Uak35\WeightedDbManager\Support\ConfigValue;
  *   so every other variant is expected to serve it too, and a file in place that has lost it is the
  *   defect the reading exists for:
  *
- *     - every readable variant declares the write pool the connection writes through;
- *     - the readers variant declares every read pool the connection weights;
- *     - the writer-only variant declares none of them, because leaving the readers out is what that
- *       file is for;
- *     - the file in place is one of the two shapes rather than a mixture of both — all of the read
- *       pools or none of them, which is what a half-rendered variant (a pool commented out, a
- *       template rendered twice under two names) looks like from the outside.
+ *     - every readable variant declares the write pool the connection writes through, even when that
+ *       pool is also a weighted read destination — writing has no other pool to reach;
+ *     - the readers variant declares every dedicated read pool the connection weights;
+ *     - the writer-only variant declares none of the dedicated readers, because leaving the readers
+ *       out is what that file is for; the write pool it declares is not one of them;
+ *     - the file in place is one of the two shapes rather than a mixture of both — all of the
+ *       dedicated readers or none of them, which is what a half-rendered variant (a pool commented
+ *       out, a template rendered twice under two names) looks like from the outside.
  *
  * THE PRUNE IS REPORTED, NOT ASSUMED AWAY
  *   A pool whose addresses do not resolve is a pool the container's boot removes before supervisord
@@ -148,39 +154,101 @@ final class VariantShape
     }
 
     /**
-     * What one connection is written with, as pool names: the pool it writes through and the pools
-     * its read list weights.
+     * What one connection is written with, as pool names: the pool it writes through and the
+     * *dedicated* pools its read list weights.
      *
-     * The write pool is the `write` block's own `database` when it names one — a connection can
-     * write to a different database than it reads from, and the copy Laravel merges for a write is
-     * the one a query lands with — and otherwise the connection's own. A read entry that names no
-     * `database` inherits it, so it names no pool of its own and is not counted; a read entry that
-     * names the connection's own database is a read of the write pool rather than a second pool,
-     * and is not one either. What is left is the set of names a pooler would have to hold for this
-     * connection to work.
+     * THE WRITE SIDE HAS TWO SHAPES
+     *   Laravel's read/write split writes `write` as a **list of one connection** — the shape this
+     *   installation uses — while a single write block is an associative array. Reading only the
+     *   associative form left the write pool empty, so every read entry (including the write pool
+     *   itself) became a required reader and the writer-only variant was failed for declaring the
+     *   pool it exists to keep. Both shapes are read here, and the first entry of a list is the
+     *   effective write: that is the copy Laravel merges for a write, the one a query lands with.
+     *   A write entry that names no `database` falls back to the connection's own, and so does a
+     *   connection with no `write` block at all.
+     *
+     *   A read entry that names no `database` inherits the write connection, so it names no pool
+     *   of its own and is not counted. A read entry that names the write pool is a read *of* that
+     *   pool rather than a second pool, and is not a dedicated reader either — that is the case
+     *   the writer-only variant has to keep serving. What is left is the set of names a pooler
+     *   has to hold in addition to the write pool for this connection to work.
+     *
+     * A read entry the resolver disables is not counted. `WeightResolver` drops a replica whose
+     * weight reads as `0` — `weight: 0` is the documented disable, and a weight it cannot read or
+     * that truncates to zero is dropped as a refusal — so requiring its pool in the readers variant
+     * would fail a configuration that never routes a read there. A read entry with no weight is
+     * left to the resolver's CPU/RAM formula and is counted; a destination whose weight is a
+     * positive number is counted.
      *
      * @param array<string, mixed> $connection one `database.connections.<name>` entry
      * @return array{write: string, read: list<string>}
      */
     public static function namedPools(array $connection): array
     {
-        $write = trim(ConfigValue::string(ConfigValue::assoc($connection['write'] ?? null)['database'] ?? null));
-
-        if ($write === '') {
-            $write = trim(ConfigValue::string($connection['database'] ?? null));
-        }
-
+        $write = self::effectiveWriteDatabase($connection);
         $read = [];
 
         foreach (ConfigValue::assocList($connection['read'] ?? null) as $entry) {
             $name = trim(ConfigValue::string($entry['database'] ?? null));
 
-            if ($name !== '' && $name !== $write) {
-                $read[] = $name;
+            if ($name === '' || $name === $write || self::readDestinationDisabled($entry)) {
+                continue;
             }
+
+            $read[] = $name;
         }
 
         return ['write' => $write, 'read' => array_values(array_unique($read))];
+    }
+
+    /**
+     * The pool the effective write connection lands in: the first entry of a `write` list, the
+     * `database` of a single `write` block, or the connection's own `database` when neither names
+     * one.
+     *
+     * @param array<string, mixed> $connection
+     */
+    private static function effectiveWriteDatabase(array $connection): string
+    {
+        $write = $connection['write'] ?? null;
+
+        // A `write` list (Laravel's read/write split) is a list of connection arrays; a single
+        // write block is associative and `assocList()` returns no entries for it. The first list
+        // entry is the effective write, which is the same "first host" rule the rest of the
+        // package uses for a list.
+        $first = ConfigValue::assocList($write)[0] ?? null;
+
+        if (is_array($first)) {
+            $name = trim(ConfigValue::string($first['database'] ?? null));
+
+            if ($name !== '') {
+                return $name;
+            }
+        }
+
+        $name = trim(ConfigValue::string(ConfigValue::assoc($write)['database'] ?? null));
+
+        return $name !== '' ? $name : trim(ConfigValue::string($connection['database'] ?? null));
+    }
+
+    /**
+     * Whether the resolver drops this read destination: a weight that reads as `0` — the
+     * documented disable, a value it cannot read, or a fraction that truncates onto the floor.
+     *
+     * A read entry with no `weight` is not dropped here: the resolver computes its weight from
+     * the CPU/RAM formula, and this class does not have those factors. Leaving it counted is the
+     * safe side of the line, because a destination the resolver does keep must have its pool in
+     * the readers variant.
+     *
+     * @param array<string, mixed> $entry
+     */
+    private static function readDestinationDisabled(array $entry): bool
+    {
+        if (!array_key_exists('weight', $entry)) {
+            return false;
+        }
+
+        return max(ReplicaMetadata::WEIGHT_FLOOR, ConfigValue::int($entry['weight'])) <= ReplicaMetadata::WEIGHT_FLOOR;
     }
 
     /**
@@ -266,13 +334,20 @@ final class VariantShape
             }
         }
 
+        $write = $this->judgedWritePool($declared);
+        $read = $this->judgedReadPools($declared);
+
         // The two variants a flip swaps between have to be two shapes: a readers variant and a
         // writer-only one. When the boot's prune removes the readers from every file, both end up
         // declaring the same pools, so the readers variant is a writer-only file under another name
-        // and the flip's "readers" mode serves nothing. It is asked before the connection's own
-        // names are judged, because after that prune no variant declares them and the reading below
-        // would have nothing left to hold.
-        $shared = $this->sharedVariantPools($declared);
+        // and the flip's "readers" mode serves nothing.
+        //
+        // Asked only when the connection has a dedicated reader. A connection that reads only
+        // through its write pool has no second topology for the readers variant to hold, so two
+        // identical files are its valid shape rather than an unintended one. It is asked before
+        // the per-variant checks below because after the prune no variant declares the dedicated
+        // reader and those checks would report the missing pool as the only symptom.
+        $shared = $this->pools['read'] === [] ? null : $this->sharedVariantPools($declared);
 
         if ($shared !== null) {
             $readersPath = (string) ($this->paths['readers_path'] ?? '');
@@ -285,16 +360,15 @@ final class VariantShape
                 implode(', ', $shared),
                 self::SEVERITY_FAIL,
                 sprintf(
-                    'swrr.pgcat.readers_path [%s] and swrr.pgcat.no_readers_path [%s] declare the same pools (%s), so the readers variant is not a readers variant — a flip to it adds no pool, and every read to a pool missing from the file keeps failing.',
+                    'swrr.pgcat.readers_path [%s] and swrr.pgcat.no_readers_path [%s] declare the same pools (%s), so the readers variant is not a readers variant — it is missing the dedicated reader%s %s — a flip to it adds no pool, and every read to a pool missing from the file keeps failing.',
                     $readersPath,
                     $writerOnlyPath,
                     $this->names($shared),
+                    count($this->pools['read']) === 1 ? '' : 's',
+                    $this->names($this->pools['read']),
                 ),
             );
         }
-
-        $write = $this->judgedWritePool($declared);
-        $read = $this->judgedReadPools($declared);
 
         if ($write === '' && $read === []) {
             return $problems;   // nothing this connection is written with is a pool any variant declares
@@ -607,6 +681,9 @@ final class VariantShape
      * Null when either file was not read, and null for two files that declare no pool at all:
      * "both declare nothing" is nothing to compare rather than a shape that agreed, which is the
      * same line `judged()` draws for a variant with no pool in it.
+     *
+     * The caller asks this only when the connection has a dedicated reader. Two files that both
+     * declare only the write pool are the no-dedicated-reader shape, not an unintended one.
      *
      * @param array<string, list<string>> $declared
      * @return list<string>|null

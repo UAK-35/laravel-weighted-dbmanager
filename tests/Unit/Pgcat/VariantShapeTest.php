@@ -65,6 +65,22 @@ final class VariantShapeTest extends TestCase
             ]),
         );
 
+        // Laravel's read/write split writes `write` as a list of one connection. The first entry
+        // is the effective write, and the write pool itself is not a dedicated reader even when
+        // it is also weighted for reads - the shape this application actually ships.
+        $this->assertSame(
+            ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            VariantShape::namedPools([
+                'write' => [
+                    ['host' => '127.0.0.1', 'database' => 'writer_db_1', 'port' => 5433],
+                ],
+                'read' => [
+                    ['host' => '127.0.0.1', 'database' => 'writer_db_1', 'port' => 5433, 'weight' => 145.0],
+                    ['host' => '127.0.0.1', 'database' => 'reader_db_1', 'port' => 5433, 'weight' => 500.0],
+                ],
+            ]),
+        );
+
         // A connection that writes to a different database than it reads from is written with the
         // write block's own name — the copy Laravel merges for a write is what a query lands with.
         $this->assertSame(
@@ -419,6 +435,68 @@ final class VariantShapeTest extends TestCase
         $shape = $this->shape();
 
         $this->assertSame([], $this->problemsOfKind($shape, VariantShape::PROBLEM_VARIANTS_EQUAL));
+        $this->assertTrue($shape->isShaped());
+    }
+
+    /**
+     * A read entry the resolver drops is not a pool the readers variant has to declare. `weight: 0`
+     * is the documented disable; a weight the package cannot read, and a negative one, are dropped
+     * the same way. An entry with no weight is left to the CPU/RAM formula and stays a dedicated
+     * reader, because the resolver may well keep it.
+     */
+    public function test_a_read_destination_the_resolver_disables_is_not_a_required_reader(): void
+    {
+        $this->assertSame(
+            ['write' => 'writer_db_1', 'read' => ['reader_db_4', 'reader_db_5']],
+            VariantShape::namedPools([
+                'write' => [['database' => 'writer_db_1']],
+                'read' => [
+                    ['database' => 'writer_db_1', 'weight' => 145],
+                    ['database' => 'reader_db_1', 'weight' => 0],
+                    ['database' => 'reader_db_2', 'weight' => 'heavy'],
+                    ['database' => 'reader_db_3', 'weight' => -1],
+                    ['database' => 'reader_db_4', 'weight' => 500],
+                    ['database' => 'reader_db_5'],
+                ],
+            ]),
+        );
+    }
+
+    /**
+     * A connection that reads only through its write pool has one topology, so the readers and
+     * writer-only files are allowed to be identical. The failure the identical check exists for is
+     * a *distinct* reader that the prune removed from both; with no distinct reader there is
+     * nothing to have lost.
+     */
+    public function test_two_identical_variants_are_allowed_when_no_dedicated_reader_is_configured(): void
+    {
+        $shape = $this->shape(
+            inPlace: "[pools.writer_db_1]\n",
+            readers: "[pools.writer_db_1]\n",
+            noReaders: "[pools.writer_db_1]\n",
+            pools: ['write' => 'writer_db_1', 'read' => []],
+        );
+
+        $this->assertSame([], $this->problemsOfKind($shape, VariantShape::PROBLEM_VARIANTS_EQUAL));
+        $this->assertSame([], $shape->problems(), 'a writer-only connection has one valid topology');
+        $this->assertTrue($shape->isShaped());
+    }
+
+    /**
+     * The write pool is required in the writer-only variant even when the connection also weights
+     * it for reads. That is the false positive the promotion plan names: the pool is not a
+     * dedicated reader, so its presence is what the file is for rather than a reader left in.
+     */
+    public function test_a_write_pool_weighted_for_reads_is_not_a_reader_in_the_writer_only_variant(): void
+    {
+        $shape = $this->shape(
+            inPlace: "[pools.writer_db_1]\n[pools.reader_db_1]\n",
+            readers: "[pools.writer_db_1]\n[pools.reader_db_1]\n",
+            noReaders: "[pools.writer_db_1]\n",
+            pools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+        );
+
+        $this->assertSame([], $shape->problems());
         $this->assertTrue($shape->isShaped());
     }
 

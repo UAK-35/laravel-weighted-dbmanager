@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+
+- **A connection whose `write` side is a list is classified by that list's effective pool, and a
+  write pool weighted for reads is no longer a forbidden reader.** Laravel's read/write split writes
+  `write` as a list of one connection; `VariantShape::namedPools()` read only a single associative
+  block, so the write pool came out empty and every read entry - including the write pool itself -
+  became a required reader. The writer-only variant was then failed for declaring the pool it
+  exists to keep. The mapping now reads either shape, subtracts the effective write pool from the
+  read destinations, and drops a read entry the resolver disables (`weight: 0`, or a weight it
+  cannot read). The identical-variants failure is asked only when a dedicated reader is configured,
+  so a writer-only connection whose two variants are the same is a valid shape, while the pruned
+  readers variant that has lost its dedicated reader still fails. This is Part 1 Step 2 of the
+  pgcat promotion-gate plan.
+
 ## 0.2.0-alpha13 - 2026-11-02
 
 ### Added
