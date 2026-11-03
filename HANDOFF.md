@@ -190,7 +190,7 @@ php bin/inventory.php --check --at=114b09b
       surface.tsv: 4 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 54 files, 269 public methods, 316 key(s)/member(s), described as v0.2.0-alpha13
+  --> exit 0: inventory is current — 54 files, 269 public methods, 316 key(s)/member(s), described as v0.2.0-alpha14
 ```
 <!-- /handoff:records -->
 
@@ -228,6 +228,7 @@ the tree.
 | `docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md` | the investigation into whether `swrr.pgcat.boot_file` is the container's boot stamp or a second, pgcat-owned file: the evidence that there is one path with one writer — the deployment's entrypoint — and no writer in the package, the reason the window is measured from the task rather than from a PHP process, the `state_file` that is the mutable file the question was thinking of, and the writability requirement that fails an immutable stamp because it asks the application whether a file it never writes could be written |
 | `docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md` | the investigation of the live ECS task's `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image's entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes |
 | `docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md` | the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay |
+| `docs/investigations/0008-2026-11-03_inv-pgcat-binary-missing-image.md` | the investigation of why a stopped ECS task refused every database connection on 127.0.0.1:5433: the task definition 39 image `d24c27b3` ships the pgcat supervisor config but not the 17,489,448-byte `/usr/local/bin/pgcat` binary, the older healthy image `23965683` has the 5.99 MB layer with the binary and the `/etc/pgcat` chown, and the entrypoint prints `ALL STARTED` with the pooler FATAL |
 | `docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md` | the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves |
 | `docs/reports/0002-2026-10-31_rpt-config-src-tests-bug-review.md` | the bug review of config, src and tests: nine findings on replica health, Redis recovery, disabled replicas, endpoint identity, health probing, window transitions and a timing-sensitive assertion, with reproduction evidence and validation results |
 <!-- /handoff:pending -->
@@ -322,8 +323,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10`, `v0.2.0-alpha11`, `v0.2.0-alpha12`, `v0.2.0-alpha13` |
-| The latest of them | `v0.2.0-alpha13` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10`, `v0.2.0-alpha11`, `v0.2.0-alpha12`, `v0.2.0-alpha13`, `v0.2.0-alpha14` |
+| The latest of them | `v0.2.0-alpha14` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 19 entries — 2 added, 8 fixed, 9 changed |
 | The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the two document skills, `wdm-runbook` and `wdm-report`, with no `### Removed` entry beside them |

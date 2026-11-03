@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha14 - 2026-11-03
+
 ### Fixed
 
 - **A connection whose `write` side is a list is classified by that list's effective pool, and a
