@@ -1016,6 +1016,24 @@ final class PgcatConfigFlipper
                 'outcome' => DryRunResult::STEP_REFUSED,
                 'detail' => $deferral['reason'],
             ];
+        } else {
+            // The one refusal the shape step cannot see: a pool whose addresses do not resolve is a
+            // warning to `VariantShape` (a laptop's resolver is not the pooler's), and a real flip
+            // turns it into a refusal before it swaps. The rehearsal must not report `would_flip`
+            // for a file the real run would leave alone, so it asks the same question the run asks.
+            $refusal = $this->unservableVariant($mode);
+
+            if ($refusal !== null) {
+                return DryRunResult::failed(
+                    mode: $mode,
+                    error: $refusal.' - a flip would refuse before it swaps the file, so nothing would be replaced',
+                    steps: [...$steps, [
+                        'step' => 'target served',
+                        'outcome' => DryRunResult::STEP_FAILED,
+                        'detail' => $refusal,
+                    ]],
+                );
+            }
         }
 
         // The step a flip takes between reading the source and replacing the target. It is
@@ -1327,6 +1345,13 @@ final class PgcatConfigFlipper
      * Only the target is asked — `readers_path` for readers, `no_readers_path` for the writer. The
      * file in place is not being swapped in, and holding it to this rule would refuse to leave a
      * container on the file it is already running, which is the case the next boundary fixes.
+     *
+     * The same "only the target" line is drawn for the shape's fatal failures: a target that
+     * declares no write pool, no dedicated reader the connection weights, a reader in the
+     * writer-only variant, a section this package cannot read, or the writer-only pools under the
+     * readers name is refused here rather than swapped in and discovered by pgcat at start-up. The
+     * file in place is exempt for the same reason: a broken active file is the reason to flip, not
+     * a reason to refuse, and this method is where a flip decides what it would put there.
      */
     private function unservableVariant(string $mode): ?string
     {
@@ -1346,6 +1371,21 @@ final class PgcatConfigFlipper
                         $problem['sentence'],
                     );
                 }
+            }
+        }
+
+        // The rest of the shape's fatal failures, for the target only: a file missing the write
+        // pool, missing a dedicated reader the connection weights, carrying a reader in the
+        // writer-only variant, or declaring a section this package cannot read is a pooler that
+        // starts with nowhere to write (or not at all). The rehearsal already refuses these; the
+        // real flip now refuses them too, so a rehearsal cannot pass a file the flip would not
+        // swap in.
+        foreach ($this->variantShape()->failures() as $problem) {
+            if ($problem['setting'] === $setting) {
+                return sprintf(
+                    'pgcat config not swapped: %s A flip to it would put a file in front of pgcat that this installation cannot serve, so the file was left as it is.',
+                    $problem['sentence'],
+                );
             }
         }
 
@@ -1423,7 +1463,11 @@ final class PgcatConfigFlipper
         }
 
         foreach ($shape->failures() as $problem) {
-            if ($problem['kind'] === VariantShape::PROBLEM_VARIANTS_EQUAL) {
+            // Any fatal failure on the readers target is a topology defect rather than reader
+            // loss: a file missing the write pool, missing the reader it exists to serve, or
+            // declaring a section this package cannot read is not repaired by an address coming
+            // back, and the refusal path names it.
+            if ($problem['setting'] === 'readers_path') {
                 return null;
             }
         }

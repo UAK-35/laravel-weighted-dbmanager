@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The real flip now refuses a target variant the shape reading calls broken, and the rehearsal
+  refuses an unservable target instead of predicting a flip.** `unservableVariant()` held the
+  target only to `variants_equal` and unresolved pools, so a readers variant missing the write
+  pool, missing a dedicated reader, declaring a section this package cannot read, or carrying a
+  reader in the writer-only variant could be swapped in by the scheduled or forced flip while
+  `dryRun()` failed it. The target's `VariantShape::failures()` are now part of the refusal (the
+  file already in place stays exempt, because replacing it is the point), and `rehearse()` asks the
+  same question, reporting `failed` rather than `would_flip` for a file the run would leave alone.
+  This is Part 1 Step 6 of the pgcat promotion-gate plan; its package tests also cover read-only
+  sources, source hashes across both transitions, partial DNS loss, a failed target replacement, an
+  unreadable state file, target-directory denial, and dry-run/real agreement.
+
 ## 0.2.0-alpha15 - 2026-11-03
 
 ### Added

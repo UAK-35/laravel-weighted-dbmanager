@@ -362,6 +362,282 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
+     * Step 6's source-immutability half: the flip reads a source even when it is not writable, and
+     * writes only the target. The release ships the two variants read-only, so a flip that needed
+     * write access would work on a developer's machine and fail in the container.
+     */
+    public function test_a_flip_reads_a_read_only_source_and_writes_only_the_target(): void
+    {
+        $this->writeReaderDeferralFixtures();
+
+        $readers = $this->tmp . '/pgcat-readers.toml';
+        $writer = $this->tmp . '/pgcat-no-readers.toml';
+        $readersBefore = (string) file_get_contents($readers);
+        $writerBefore = (string) file_get_contents($writer);
+
+        @chmod($readers, 0444);
+        @chmod($writer, 0444);
+
+        try {
+            $flipper = $this->build(
+                'readers',
+                connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+                hostResolver: static fn (string $address): bool => true,
+            );
+
+            $result = $flipper->applyCurrentState();
+
+            $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+            $this->assertSame($readersBefore, (string) file_get_contents($readers), 'the readers source was not written');
+            $this->assertSame($writerBefore, (string) file_get_contents($writer), 'the writer source was not written');
+            $this->assertCount(1, $this->copyLog, 'the only copy is source -> target');
+            $this->assertSame([$readers, $this->tmp . '/pgcat.toml'], $this->copyLog[0]);
+        } finally {
+            @chmod($readers, 0666);
+            @chmod($writer, 0666);
+        }
+    }
+
+    /**
+     * The source hashes survive a real transition in both directions: the release ships the two
+     * variants as immutable desired configurations, and a flip that rewrote either would claim a
+     * topology the next boot did not render.
+     */
+    public function test_both_source_hashes_survive_a_readers_flip_and_a_writer_flip(): void
+    {
+        $this->writeReaderDeferralFixtures();
+
+        $readers = $this->tmp . '/pgcat-readers.toml';
+        $writer = $this->tmp . '/pgcat-no-readers.toml';
+        $readersHash = hash_file('sha256', $readers);
+        $writerHash = hash_file('sha256', $writer);
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => true,
+        );
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $flipper->applyCurrentState()->kind());
+        $this->assertSame($readersHash, hash_file('sha256', $readers));
+        $this->assertSame($writerHash, hash_file('sha256', $writer));
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $flipper->forceMode('writer')->kind());
+        $this->assertSame($readersHash, hash_file('sha256', $readers), 'the readers source is unchanged after the writer flip');
+        $this->assertSame($writerHash, hash_file('sha256', $writer), 'the writer source is unchanged after the writer flip');
+    }
+
+    /**
+     * Partial loss is not loss: a pool with two addresses survives if either one resolves, which is
+     * the line the boot prune draws. The readers mode is applied rather than deferred.
+     */
+    public function test_a_reader_pool_with_one_live_address_is_not_deferred(): void
+    {
+        file_put_contents(
+            $this->tmp . '/pgcat-readers.toml',
+            $this->variantToml([
+                'writer_db_1' => 'writer-host',
+                'reader_db_1' => ['reader-host-a', 'reader-host-b'],
+            ]),
+        );
+        file_put_contents($this->tmp . '/pgcat-no-readers.toml', $this->variantToml(['writer_db_1' => 'writer-host']));
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => $address !== 'reader-host-a',
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertSame('readers', $result->mode);
+        $this->assertSame(
+            (string) file_get_contents($this->tmp . '/pgcat-readers.toml'),
+            (string) file_get_contents($this->tmp . '/pgcat.toml'),
+        );
+    }
+
+    /**
+     * A target the copy cannot be installed over is a failed run, not a silent one: the mode stays
+     * unrecorded so the next poll retries, and no supervisor command was run over a file that was
+     * never installed.
+     */
+    public function test_a_failed_target_replacement_is_a_failed_run_with_no_mode(): void
+    {
+        $this->writeReaderDeferralFixtures();
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => true,
+            fileCopier: function (string $from, string $to): bool {
+                $this->copyLog[] = [$from, $to];
+
+                return false;
+            },
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FAILED, $result->kind());
+        $this->assertStringContainsString('Failed to copy', (string) $result->error);
+        $this->assertSame([], $this->flipCommands(), 'the pooler was not signalled over a file that was never installed');
+
+        $state = $this->readStateFile();
+
+        $this->assertArrayNotHasKey('last_mode', $state, 'a failed replacement records no mode, so the next poll retries');
+        $this->assertSame(FlipResult::KIND_FAILED, $state['last_kind']);
+    }
+
+    /**
+     * A state file that is not JSON is "never applied", not a fatal: the file is bookkeeping, and a
+     * container that cannot read it must still converge rather than flip forever or stop.
+     */
+    public function test_an_unreadable_state_file_is_treated_as_never_applied(): void
+    {
+        file_put_contents($this->stateFile, '{ not json');
+
+        $flipper = $this->build('readers');
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_FLIPPED, $result->kind());
+        $this->assertNull($result->previousMode, 'nothing readable was on record');
+        $this->assertSame('readers', $this->readStateFile()['last_mode']);
+    }
+
+    /**
+     * Target-directory denial, the rehearsal's half: the temp file a swap writes beside the target
+     * cannot be created, so the rehearsal says a flip would fail rather than `would_flip`.
+     */
+    public function test_a_rehearsal_that_cannot_write_the_target_directory_fails(): void
+    {
+        $this->writeReaderDeferralFixtures();
+
+        $flipper = $this->build(
+            'readers',
+            configOverrides: ['config_path' => $this->tmp . '/no-such-directory/pgcat.toml'],
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => true,
+        );
+
+        $result = $flipper->dryRun();
+
+        $this->assertSame(DryRunResult::KIND_FAILED, $result->kind());
+        $this->assertStringContainsString('temp file', (string) $result->error);
+        $this->assertCount(0, $this->copyLog);
+    }
+
+    /**
+     * A target that the shape reading calls broken is not swapped in by the real flip either. The
+     * rehearsal already refuses it; this is the run agreeing.
+     */
+    public function test_a_target_missing_the_write_pool_is_not_swapped_in(): void
+    {
+        file_put_contents(
+            $this->tmp . '/pgcat-readers.toml',
+            $this->variantToml(['reader_db_1' => 'reader-host']),
+        );
+        file_put_contents($this->tmp . '/pgcat-no-readers.toml', $this->variantToml(['writer_db_1' => 'writer-host']));
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => true,
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $result->kind());
+        $this->assertStringContainsString('declares no pool "writer_db_1"', (string) $result->reason);
+        $this->assertCount(0, $this->copyLog);
+
+        $this->assertSame(DryRunResult::KIND_FAILED, $flipper->dryRun()->kind(), 'the rehearsal refuses what the flip refuses');
+    }
+
+    /**
+     * A section this package cannot read a pool name out of is a malformed target, and the real
+     * flip refuses it for the same reason the rehearsal does.
+     */
+    public function test_a_target_with_an_unreadable_section_is_not_swapped_in(): void
+    {
+        file_put_contents(
+            $this->tmp . '/pgcat-readers.toml',
+            $this->variantToml(['writer_db_1' => 'writer-host', 'reader_db_1' => 'reader-host']) . "[pools.]\n",
+        );
+        file_put_contents($this->tmp . '/pgcat-no-readers.toml', $this->variantToml(['writer_db_1' => 'writer-host']));
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => true,
+        );
+
+        $result = $flipper->applyCurrentState();
+
+        $this->assertSame(FlipResult::KIND_SKIPPED, $result->kind());
+        $this->assertStringContainsString('cannot read a pool name', (string) $result->reason);
+        $this->assertCount(0, $this->copyLog);
+    }
+
+    /**
+     * Dry run and the real run agree about what would happen: a healthy readers flip is a flip in
+     * both, and a deferred reader is a deferral in both.
+     */
+    public function test_a_healthy_readers_flip_is_a_flip_in_the_rehearsal_and_the_run(): void
+    {
+        $this->writeReaderDeferralFixtures(activeIsWriter: true);
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => true,
+        );
+
+        $this->assertSame(DryRunResult::KIND_WOULD_FLIP, $flipper->dryRun()->kind());
+        $this->assertSame(FlipResult::KIND_FLIPPED, $flipper->applyCurrentState()->kind());
+    }
+
+    public function test_a_deferred_readers_flip_is_a_deferral_in_the_rehearsal_and_the_run(): void
+    {
+        $this->writeReaderDeferralFixtures(activeIsWriter: true);
+
+        $flipper = $this->readerDeferralFlipper();
+
+        $this->assertSame(DryRunResult::KIND_WOULD_DEFER_READERS, $flipper->dryRun()->kind());
+        $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $flipper->applyCurrentState()->kind());
+    }
+
+    /**
+     * The unservable case is a failure in the rehearsal and a refusal in the run, and neither
+     * swaps: a rehearsal that said `would_flip` here would promote a candidate the flip leaves
+     * alone.
+     */
+    public function test_an_unservable_target_is_refused_by_the_rehearsal_and_the_run(): void
+    {
+        $this->writeReaderDeferralFixtures();
+        $target = (string) file_get_contents($this->tmp . '/pgcat.toml');
+
+        $flipper = $this->build(
+            'readers',
+            connectionPools: ['write' => 'writer_db_1', 'read' => ['reader_db_1']],
+            hostResolver: static fn (string $address): bool => false,
+        );
+
+        $rehearsal = $flipper->dryRun();
+        $this->assertSame(DryRunResult::KIND_FAILED, $rehearsal->kind());
+        $this->assertNotSame(DryRunResult::KIND_WOULD_FLIP, $rehearsal->kind());
+
+        $run = $flipper->applyCurrentState();
+        $this->assertSame(FlipResult::KIND_SKIPPED, $run->kind());
+        $this->assertStringContainsString('writer-only fallback is unusable', (string) $run->reason);
+
+        $this->assertSame($target, (string) file_get_contents($this->tmp . '/pgcat.toml'), 'neither swapped anything');
+        $this->assertCount(0, $this->copyLog);
+    }
+
+    /**
      * A flipper whose pinned connection has a dedicated reader, with a resolver that answers for
      * the writer and not the reader. `$mode` is the resolver mode the scheduled path would ask for.
      *
@@ -396,15 +672,20 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
-     * @param array<string, string> $pools pool name => server host
+     * @param array<string, string|list<string>> $pools pool name => server host(s)
      */
     private function variantToml(array $pools): string
     {
         $toml = "[general]\nport = 6432\n\n";
 
-        foreach ($pools as $name => $address) {
+        foreach ($pools as $name => $hosts) {
+            $servers = implode(', ', array_map(
+                static fn (string $host): string => sprintf('["%s", 5432, "primary"]', $host),
+                (array) $hosts,
+            ));
+
             $toml .= "[pools.{$name}]\npool_mode = \"transaction\"\n\n";
-            $toml .= "[pools.{$name}.shards.0]\nservers = [[\"{$address}\", 5432, \"primary\"]]\n\n";
+            $toml .= "[pools.{$name}.shards.0]\nservers = [{$servers}]\n\n";
         }
 
         return $toml;
@@ -463,6 +744,7 @@ class PgcatConfigFlipperTest extends TestCase
         ?SupervisorStep $supervisorStep = null,
         ?\Closure $hostResolver = null,
         array $connectionPools = ['write' => '', 'read' => []],
+        ?\Closure $fileCopier = null,
     ): PgcatConfigFlipper {
         $resolver = $mode === 'readers'
             ? new TimeWindowResolver(
@@ -489,7 +771,7 @@ class PgcatConfigFlipperTest extends TestCase
             config: $config,
             stateFile: $stateFile ?? $this->stateFile,
             lockFile: $lockFile ?? $this->lockFile,
-            fileCopier: function (string $from, string $to): bool {
+            fileCopier: $fileCopier ?? function (string $from, string $to): bool {
                 $this->copyLog[] = [$from, $to];
                 return @copy($from, $to);
             },
