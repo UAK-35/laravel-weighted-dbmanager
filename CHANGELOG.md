@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha17 - 2026-11-03
+
 ### Added
 
 - **A structured disposition on the flip/rehearsal JSON: `fatal`, `degraded`, `cause` and
