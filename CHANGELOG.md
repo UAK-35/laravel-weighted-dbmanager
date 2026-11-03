@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha16 - 2026-11-03
+
 ### Fixed
 
 - **The real flip now refuses a target variant the shape reading calls broken, and the rehearsal
