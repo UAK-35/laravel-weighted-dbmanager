@@ -55,6 +55,18 @@ final class DryRunResult
     public const STEP_FAILED = 'failed';
 
     /**
+     * The stable machine codes `cause` carries, part of the JSON contract in `pgcat-flip-json.md`.
+     * A `VariantShape::PROBLEM_*` code is used verbatim when the refusal came from the shape.
+     */
+    public const CAUSE_NO_CHANGE = 'no_change';
+
+    public const CAUSE_LOCK_HELD = FlipResult::CAUSE_LOCK_HELD;
+
+    public const CAUSE_READER_ENDPOINT_UNRESOLVED = FlipResult::CAUSE_READER_ENDPOINT_UNRESOLVED;
+
+    public const CAUSE_STEP_FAILED = 'step_failed';
+
+    /**
      * @param string $kind one of the KIND_ constants
      * @param string|null $mode the mode a flip would apply
      * @param string|null $previousMode the mode on record, before it
@@ -69,6 +81,11 @@ final class DryRunResult
         public readonly string $reason,
         public readonly ?string $error,
         public readonly array $steps,
+        private readonly bool $fatal = false,
+        private readonly bool $degraded = false,
+        private readonly ?string $cause = null,
+        /** @var array<string, mixed> */
+        private readonly array $evidence = [],
     ) {
     }
 
@@ -91,10 +108,22 @@ final class DryRunResult
 
     /**
      * @param list<array{step: string, outcome: string, detail: string}> $steps
+     * @param list<string> $pools the reader pools a deferred transition could not reach
      */
-    public static function wouldDeferReaders(string $mode, ?string $previousMode, string $reason, array $steps): self
+    public static function wouldDeferReaders(string $mode, ?string $previousMode, string $reason, array $steps, array $pools = []): self
     {
-        return new self(self::KIND_WOULD_DEFER_READERS, $mode, $previousMode, $reason, null, $steps);
+        return new self(
+            self::KIND_WOULD_DEFER_READERS,
+            $mode,
+            $previousMode,
+            $reason,
+            null,
+            $steps,
+            false,
+            true,
+            self::CAUSE_READER_ENDPOINT_UNRESOLVED,
+            ['pools' => $pools, 'fallback' => 'writer'],
+        );
     }
 
     /**
@@ -102,7 +131,7 @@ final class DryRunResult
      */
     public static function wouldNotFlip(string $mode, string $reason, array $steps): self
     {
-        return new self(self::KIND_WOULD_NOT_FLIP, $mode, null, $reason, null, $steps);
+        return new self(self::KIND_WOULD_NOT_FLIP, $mode, null, $reason, null, $steps, false, false, self::CAUSE_NO_CHANGE);
     }
 
     /**
@@ -110,15 +139,30 @@ final class DryRunResult
      */
     public static function skipped(string $mode, string $reason, array $steps): self
     {
-        return new self(self::KIND_SKIPPED, $mode, null, $reason, null, $steps);
+        return new self(self::KIND_SKIPPED, $mode, null, $reason, null, $steps, false, false, self::CAUSE_LOCK_HELD);
     }
 
     /**
+     * A rehearsal a gate must not promote past. `$cause` is the stable machine code (a
+     * `VariantShape::PROBLEM_*` for a target the shape refused, else {@see CAUSE_STEP_FAILED}).
+     *
      * @param list<array{step: string, outcome: string, detail: string}> $steps
+     * @param array<string, mixed> $evidence
      */
-    public static function failed(string $mode, string $error, array $steps): self
+    public static function failed(string $mode, string $error, array $steps, ?string $cause = null, array $evidence = []): self
     {
-        return new self(self::KIND_FAILED, $mode, null, 'a step a flip needs did not work', $error, $steps);
+        return new self(
+            self::KIND_FAILED,
+            $mode,
+            null,
+            'a step a flip needs did not work',
+            $error,
+            $steps,
+            true,
+            false,
+            $cause ?? self::CAUSE_STEP_FAILED,
+            $evidence,
+        );
     }
 
     public function kind(): string
@@ -179,7 +223,41 @@ final class DryRunResult
     }
 
     /**
-     * @return array{kind: string, mode: string|null, previous_mode: string|null, reason: string, error: string|null, steps: list<array{step: string, outcome: string, detail: string}>}
+     * Whether a gate must not promote past this rehearsal: the target is unservable, or a step a
+     * flip needs did not work. `skipped` (a held lock) and `would_defer_readers` are not fatal.
+     */
+    public function fatal(): bool
+    {
+        return $this->fatal;
+    }
+
+    /**
+     * Whether the rehearsal found a proven safe degradation - the readers mode would be deferred
+     * onto a validated writer fallback, with `evidence['pools']` naming what could not be reached.
+     */
+    public function degraded(): bool
+    {
+        return $this->degraded;
+    }
+
+    /** The stable machine code behind the kind, or null when the kind is the whole answer. */
+    public function cause(): ?string
+    {
+        return $this->cause;
+    }
+
+    /**
+     * The structured evidence a gate reads instead of the sentence.
+     *
+     * @return array<string, mixed>
+     */
+    public function evidence(): array
+    {
+        return $this->evidence;
+    }
+
+    /**
+     * @return array<string, mixed>
      */
     public function toArray(): array
     {
@@ -190,6 +268,10 @@ final class DryRunResult
             'reason' => $this->reason,
             'error' => $this->error,
             'steps' => $this->steps,
+            'fatal' => $this->fatal,
+            'degraded' => $this->degraded,
+            'cause' => $this->cause,
+            'evidence' => $this->evidence,
         ];
     }
 }

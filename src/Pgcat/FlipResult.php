@@ -66,12 +66,35 @@ final class FlipResult
      */
     public const KIND_READERS_DEFERRED = 'readers_deferred';
 
+    /**
+     * The stable machine codes `cause` carries when the kind alone is not the whole answer. A
+     * `VariantShape::PROBLEM_*` code is used verbatim for a target the shape reading refused; these
+     * are the causes a run or a rehearsal decides itself.
+     *
+     * They are part of the JSON contract (`pgcat-flip-json.md`), so they are a closed vocabulary: a
+     * gate branches on them, and a new spelling is a new thing a gate has to learn.
+     */
+    public const CAUSE_LOCK_HELD = 'lock_held';
+
+    public const CAUSE_READER_ENDPOINT_UNRESOLVED = 'reader_endpoint_unresolved';
+
+    public const CAUSE_WINDOW_CLOSED = 'window_closed';
+
+    public const CAUSE_POOL_UNANSWERABLE = 'pool_unanswerable';
+
+    public const CAUSE_EXCEPTION = 'exception';
+
     private function __construct(
         private readonly string $kind,
         public readonly ?string $mode,
         public readonly ?string $previousMode,
         public readonly string $reason,
         public readonly ?string $error,
+        private readonly bool $fatal = false,
+        private readonly bool $degraded = false,
+        private readonly ?string $cause = null,
+        /** @var array<string, mixed> */
+        private readonly array $evidence = [],
     ) {
     }
 
@@ -85,14 +108,35 @@ final class FlipResult
         return new self(self::KIND_FLIPPED, $newMode, $previousMode, 'state transitioned', null);
     }
 
-    public static function skipped(string $currentMode, string $reason): self
-    {
-        return new self(self::KIND_SKIPPED, $currentMode, null, $reason, null);
+    /**
+     * A flip declined or refused. `$fatal` is the contract's line between the two: a lock another
+     * instance holds is not fatal, while a target this container cannot serve is - a gate must not
+     * promote a candidate whose intended topology the flip will not apply.
+     *
+     * @param array<string, mixed> $evidence
+     */
+    public static function skipped(
+        string $currentMode,
+        string $reason,
+        bool $fatal = false,
+        ?string $cause = null,
+        array $evidence = [],
+    ): self {
+        return new self(self::KIND_SKIPPED, $currentMode, null, $reason, null, $fatal, false, $cause, $evidence);
     }
 
     public static function failed(string $currentMode, string $error): self
     {
-        return new self(self::KIND_FAILED, $currentMode, null, 'exception during flip', $error);
+        return new self(
+            self::KIND_FAILED,
+            $currentMode,
+            null,
+            'exception during flip',
+            $error,
+            true,
+            false,
+            self::CAUSE_EXCEPTION,
+        );
     }
 
     /**
@@ -104,7 +148,7 @@ final class FlipResult
      */
     public static function windowClosed(string $currentMode, string $reason): self
     {
-        return new self(self::KIND_WINDOW_CLOSED, $currentMode, null, $reason, null);
+        return new self(self::KIND_WINDOW_CLOSED, $currentMode, null, $reason, null, false, false, self::CAUSE_WINDOW_CLOSED);
     }
 
     /**
@@ -115,14 +159,19 @@ final class FlipResult
      */
     public static function repaired(string $mode, string $reason): self
     {
-        return new self(self::KIND_REPAIRED, $mode, null, $reason, null);
+        return new self(self::KIND_REPAIRED, $mode, null, $reason, null, false, false, self::CAUSE_POOL_UNANSWERABLE);
     }
 
     /**
      * The readers mode was deferred: `$appliedMode` is the mode the pooler is actually on (the
      * writer-only fallback), never the requested one. See {@see KIND_READERS_DEFERRED}.
+     *
+     * `$pools` is the evidence a gate reads instead of the sentence: the reader pools that did not
+     * resolve, with `fallback` naming the mode that is serving in their place.
+     *
+     * @param list<string> $pools
      */
-    public static function readersDeferred(string $requestedMode, string $appliedMode, string $reason): self
+    public static function readersDeferred(string $requestedMode, string $appliedMode, string $reason, array $pools = []): self
     {
         return new self(
             self::KIND_READERS_DEFERRED,
@@ -130,6 +179,10 @@ final class FlipResult
             null,
             sprintf('requested "%s", deferred and left on "%s": %s', $requestedMode, $appliedMode, $reason),
             null,
+            false,
+            true,
+            self::CAUSE_READER_ENDPOINT_UNRESOLVED,
+            ['pools' => $pools, 'fallback' => $appliedMode],
         );
     }
 
@@ -176,7 +229,41 @@ final class FlipResult
     }
 
     /**
-     * @return array<string, string|null>
+     * Whether the run is a refusal a gate must not promote past: `failed`, or a `skipped` whose
+     * cause is an unservable target. See `pgcat-flip-json.md`.
+     */
+    public function fatal(): bool
+    {
+        return $this->fatal;
+    }
+
+    /**
+     * Whether the run is a proven safe degradation - the readers mode deferred onto a validated
+     * writer fallback, with `evidence['pools']` naming what could not be reached.
+     */
+    public function degraded(): bool
+    {
+        return $this->degraded;
+    }
+
+    /** The stable machine code behind the kind, or null when the kind is the whole answer. */
+    public function cause(): ?string
+    {
+        return $this->cause;
+    }
+
+    /**
+     * The structured evidence a gate reads instead of the sentence.
+     *
+     * @return array<string, mixed>
+     */
+    public function evidence(): array
+    {
+        return $this->evidence;
+    }
+
+    /**
+     * @return array<string, mixed>
      */
     public function toArray(): array
     {
@@ -186,6 +273,10 @@ final class FlipResult
             'previous_mode' => $this->previousMode,
             'reason'        => $this->reason,
             'error'         => $this->error,
+            'fatal'         => $this->fatal,
+            'degraded'      => $this->degraded,
+            'cause'         => $this->cause,
+            'evidence'      => $this->evidence,
         ];
     }
 }

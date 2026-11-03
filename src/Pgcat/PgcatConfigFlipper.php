@@ -569,7 +569,12 @@ final class PgcatConfigFlipper
                 $this->recordDeferred($currentMode, $deferral, $swapped, self::VIA_SCHEDULE);
                 $this->recordRun(FlipResult::KIND_READERS_DEFERRED, 'writer');
 
-                return FlipResult::readersDeferred($currentMode, 'writer', $deferral['reason']);
+                return FlipResult::readersDeferred(
+                    $currentMode,
+                    'writer',
+                    $deferral['reason'],
+                    array_column($deferral['pools'], 'pool'),
+                );
             }
 
             // The file this run would put in front of pgcat, read before anything is swapped: a
@@ -582,9 +587,15 @@ final class PgcatConfigFlipper
             $refusal = $this->unservableVariant($currentMode);
 
             if ($refusal !== null) {
-                $this->recordRun(FlipResult::KIND_SKIPPED, $currentMode, refusal: $refusal);
+                $this->recordRun(FlipResult::KIND_SKIPPED, $currentMode, refusal: $refusal['sentence']);
 
-                return FlipResult::skipped($currentMode, $refusal);
+                return FlipResult::skipped(
+                    $currentMode,
+                    $refusal['sentence'],
+                    fatal: true,
+                    cause: $refusal['code'],
+                    evidence: ['pools' => $refusal['pools']],
+                );
             }
 
             // A missing state file falls through to the swap below: with no
@@ -763,15 +774,26 @@ final class PgcatConfigFlipper
 
                 $this->recordDeferred($mode, $deferral, $swapped, $via);
 
-                return FlipResult::readersDeferred($mode, 'writer', $deferral['reason']);
+                return FlipResult::readersDeferred(
+                    $mode,
+                    'writer',
+                    $deferral['reason'],
+                    array_column($deferral['pools'], 'pool'),
+                );
             }
 
             $refusal = $this->unservableVariant($mode);
 
             if ($refusal !== null) {
-                $this->recordRefusal($mode, $refusal);
+                $this->recordRefusal($mode, $refusal['sentence']);
 
-                return FlipResult::skipped($mode, $refusal);
+                return FlipResult::skipped(
+                    $mode,
+                    $refusal['sentence'],
+                    fatal: true,
+                    cause: $refusal['code'],
+                    evidence: ['pools' => $refusal['pools']],
+                );
             }
 
             $lastMode = $this->readLastMode();
@@ -1026,12 +1048,14 @@ final class PgcatConfigFlipper
             if ($refusal !== null) {
                 return DryRunResult::failed(
                     mode: $mode,
-                    error: $refusal.' - a flip would refuse before it swaps the file, so nothing would be replaced',
+                    error: $refusal['sentence'].' - a flip would refuse before it swaps the file, so nothing would be replaced',
                     steps: [...$steps, [
                         'step' => 'target served',
                         'outcome' => DryRunResult::STEP_FAILED,
-                        'detail' => $refusal,
+                        'detail' => $refusal['sentence'],
                     ]],
+                    cause: $refusal['code'],
+                    evidence: ['pools' => $refusal['pools']],
                 );
             }
         }
@@ -1173,7 +1197,13 @@ final class PgcatConfigFlipper
         ];
 
         return $deferral !== null
-            ? DryRunResult::wouldDeferReaders($mode, $lastMode, $deferral['reason'], $steps)
+            ? DryRunResult::wouldDeferReaders(
+                $mode,
+                $lastMode,
+                $deferral['reason'],
+                $steps,
+                array_column($deferral['pools'], 'pool'),
+            )
             : DryRunResult::wouldFlip($mode, $lastMode, $steps);
     }
 
@@ -1352,8 +1382,15 @@ final class PgcatConfigFlipper
      * readers name is refused here rather than swapped in and discovered by pgcat at start-up. The
      * file in place is exempt for the same reason: a broken active file is the reason to flip, not
      * a reason to refuse, and this method is where a flip decides what it would put there.
+     *
+     * The answer is structured, not only a sentence: `code` is a stable machine value (a
+     * `VariantShape::PROBLEM_*` for a shape refusal, `writer_fallback_unusable` when both sides
+     * are down) and `pools` names what the refusal is about, so the JSON report can carry a
+     * gate-readable refusal without the gate parsing prose.
+     *
+     * @return array{code: string, sentence: string, pools: list<string>}|null
      */
-    private function unservableVariant(string $mode): ?string
+    private function unservableVariant(string $mode): ?array
     {
         $setting = $mode === 'readers' ? 'readers_path' : 'no_readers_path';
 
@@ -1366,10 +1403,14 @@ final class PgcatConfigFlipper
         if ($mode === 'readers' && $this->connectionPools['read'] !== []) {
             foreach ($this->variantShape()->failures() as $problem) {
                 if ($problem['kind'] === VariantShape::PROBLEM_VARIANTS_EQUAL) {
-                    return sprintf(
-                        'pgcat config not swapped: %s A flip to it would report the readers mode with no pool for the reads it exists to serve, so the file was left as it is.',
-                        $problem['sentence'],
-                    );
+                    return [
+                        'code' => VariantShape::PROBLEM_VARIANTS_EQUAL,
+                        'sentence' => sprintf(
+                            'pgcat config not swapped: %s A flip to it would report the readers mode with no pool for the reads it exists to serve, so the file was left as it is.',
+                            $problem['sentence'],
+                        ),
+                        'pools' => [],
+                    ];
                 }
             }
         }
@@ -1382,10 +1423,16 @@ final class PgcatConfigFlipper
         // swap in.
         foreach ($this->variantShape()->failures() as $problem) {
             if ($problem['setting'] === $setting) {
-                return sprintf(
-                    'pgcat config not swapped: %s A flip to it would put a file in front of pgcat that this installation cannot serve, so the file was left as it is.',
-                    $problem['sentence'],
-                );
+                $pool = trim($problem['pool']);
+
+                return [
+                    'code' => $problem['kind'],
+                    'sentence' => sprintf(
+                        'pgcat config not swapped: %s A flip to it would put a file in front of pgcat that this installation cannot serve, so the file was left as it is.',
+                        $problem['sentence'],
+                    ),
+                    'pools' => $pool === '' ? [] : [$pool],
+                ];
             }
         }
 
@@ -1403,13 +1450,18 @@ final class PgcatConfigFlipper
             $fallback = $this->writerFallbackFault();
 
             if ($fallback !== null) {
-                return sprintf(
-                    'pgcat config not swapped: the readers mode cannot be served and the writer-only fallback is unusable too — %s The file was left as it is.',
-                    $fallback,
-                );
+                return [
+                    'code' => 'writer_fallback_unusable',
+                    'sentence' => sprintf(
+                        'pgcat config not swapped: the readers mode cannot be served and the writer-only fallback is unusable too - %s The file was left as it is.',
+                        $fallback['sentence'],
+                    ),
+                    'pools' => $fallback['pools'],
+                ];
             }
         }
 
+        $names = array_map(static fn (array $pool): string => $pool['pool'], $unresolved);
         $named = implode(', ', array_map(
             static fn (array $pool): string => sprintf(
                 '"%s" (%s)',
@@ -1419,12 +1471,16 @@ final class PgcatConfigFlipper
             $unresolved,
         ));
 
-        return sprintf(
-            'pgcat config not swapped: swrr.pgcat.%s [%s] declares %s, and none of those addresses resolves from this container — pgcat validates its servers when it starts, so a flip to this file would leave the pooler unable to serve; the file was left as it is.',
-            $setting,
-            ConfigValue::string($this->config[$setting] ?? null),
-            $named,
-        );
+        return [
+            'code' => VariantShape::PROBLEM_UNRESOLVED_POOL,
+            'sentence' => sprintf(
+                'pgcat config not swapped: swrr.pgcat.%s [%s] declares %s, and none of those addresses resolves from this container - pgcat validates its servers when it starts, so a flip to this file would leave the pooler unable to serve; the file was left as it is.',
+                $setting,
+                ConfigValue::string($this->config[$setting] ?? null),
+                $named,
+            ),
+            'pools' => $names,
+        ];
     }
 
     /**
@@ -1503,14 +1559,22 @@ final class PgcatConfigFlipper
      * connection's write pool (and none of the dedicated readers), and does every pool it declares
      * have an address this container can resolve. A writer that fails either is a writer failure,
      * and `unservableVariant()` is where that is named.
+     *
+     * @return array{code: string, sentence: string, pools: list<string>}|null
      */
-    private function writerFallbackFault(): ?string
+    private function writerFallbackFault(): ?array
     {
         $shape = $this->variantShape();
 
         foreach ($shape->failures() as $problem) {
             if ($problem['setting'] === 'no_readers_path') {
-                return $problem['sentence'];
+                $pool = trim($problem['pool']);
+
+                return [
+                    'code' => $problem['kind'],
+                    'sentence' => $problem['sentence'],
+                    'pools' => $pool === '' ? [] : [$pool],
+                ];
             }
         }
 

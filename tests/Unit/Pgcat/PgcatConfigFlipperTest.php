@@ -232,6 +232,15 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $state['last_kind']);
         $this->assertCount(1, $this->copyLog, 'only the writer fallback was copied in');
         $this->assertSame($this->tmp . '/pgcat-no-readers.toml', $this->copyLog[0][0]);
+
+        // The contract a gate reads instead of the sentence: safe, degraded, and why.
+        $this->assertFalse($result->fatal());
+        $this->assertTrue($result->degraded());
+        $this->assertSame(FlipResult::CAUSE_READER_ENDPOINT_UNRESOLVED, $result->cause());
+        $this->assertSame(
+            ['pools' => ['reader_db_1'], 'fallback' => 'writer'],
+            $result->evidence(),
+        );
     }
 
     /**
@@ -553,6 +562,12 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertStringContainsString('declares no pool "writer_db_1"', (string) $result->reason);
         $this->assertCount(0, $this->copyLog);
 
+        // A refused target is fatal, with the shape code and the pool as the evidence.
+        $this->assertTrue($result->fatal());
+        $this->assertFalse($result->degraded());
+        $this->assertSame('write_pool_missing', $result->cause());
+        $this->assertSame(['pools' => ['writer_db_1']], $result->evidence());
+
         $this->assertSame(DryRunResult::KIND_FAILED, $flipper->dryRun()->kind(), 'the rehearsal refuses what the flip refuses');
     }
 
@@ -616,7 +631,7 @@ class PgcatConfigFlipperTest extends TestCase
      */
     public function test_an_unservable_target_is_refused_by_the_rehearsal_and_the_run(): void
     {
-        $this->writeReaderDeferralFixtures();
+        $this->writeReaderDeferralFixtures(activeIsWriter: true);
         $target = (string) file_get_contents($this->tmp . '/pgcat.toml');
 
         $flipper = $this->build(
@@ -628,10 +643,13 @@ class PgcatConfigFlipperTest extends TestCase
         $rehearsal = $flipper->dryRun();
         $this->assertSame(DryRunResult::KIND_FAILED, $rehearsal->kind());
         $this->assertNotSame(DryRunResult::KIND_WOULD_FLIP, $rehearsal->kind());
+        $this->assertTrue($rehearsal->fatal(), 'an unservable target is the fatal half of the contract');
+        $this->assertSame('writer_fallback_unusable', $rehearsal->cause());
 
         $run = $flipper->applyCurrentState();
         $this->assertSame(FlipResult::KIND_SKIPPED, $run->kind());
         $this->assertStringContainsString('writer-only fallback is unusable', (string) $run->reason);
+        $this->assertTrue($run->fatal());
 
         $this->assertSame($target, (string) file_get_contents($this->tmp . '/pgcat.toml'), 'neither swapped anything');
         $this->assertCount(0, $this->copyLog);

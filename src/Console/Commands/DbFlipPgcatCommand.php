@@ -76,8 +76,13 @@ class DbFlipPgcatCommand extends Command
      * `status()` array, not the table's substitutions: `(not set)` is how a table prints a `null`,
      * and a machine has to be able to test a path for being unset without matching an English
      * sentence. `steps` is a rehearsal's pipeline, and empty on every other route. `pool_probe` is
-     * `PgcatConfigFlipper::poolProbeVerdict()`, present only on a `--status --pool-probe` run — a
+     * `PgcatConfigFlipper::poolProbeVerdict()`, present only on a `--status --pool-probe` run - a
      * `null` is the offline report rather than a probe that found nothing.
+     *
+     * `fatal`, `degraded`, `cause` and `evidence` are the structured disposition: `fatal` is the
+     * one a gate must not promote past, `degraded` marks a proven safe fallback, `cause` is the
+     * stable machine code behind the kind, and `evidence` carries the pools it is about. See
+     * `docs/pgcat-flip-json.md`.
      */
     private const EVIDENCE = [
         'mode' => null,
@@ -85,6 +90,12 @@ class DbFlipPgcatCommand extends Command
         'steps' => [],
         'status' => null,
         'pool_probe' => null,
+        // The structured disposition: a gate can branch on `fatal`/`degraded`/`cause` instead of
+        // matching a sentence, and `evidence` carries the pool names behind a deferral or refusal.
+        'fatal' => false,
+        'degraded' => false,
+        'cause' => null,
+        'evidence' => [],
     ];
 
     protected $signature = 'db:pgcat-flip
@@ -738,7 +749,7 @@ class DbFlipPgcatCommand extends Command
     private function refuse(string $reason, string $kind = self::KIND_REFUSED): int
     {
         if ($this->option('json')) {
-            return $this->report(['kind' => $kind, 'reason' => $reason], self::FAILURE);
+            return $this->report(['kind' => $kind, 'reason' => $reason, 'fatal' => true, 'cause' => $kind], self::FAILURE);
         }
 
         $this->error($reason);

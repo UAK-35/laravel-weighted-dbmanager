@@ -110,7 +110,41 @@ class DryRunResultTest extends TestCase
             'reason' => $result->reason,
             'error' => null,
             'steps' => $this->steps,
+            'fatal' => false,
+            'degraded' => false,
+            'cause' => null,
+            'evidence' => [],
         ], $result->toArray());
+    }
+
+    /**
+     * The disposition is the contract a gate reads instead of the sentence: a deferred reader is
+     * safe degradation with the pool it could not reach, a lock is unexercised rather than fatal,
+     * and a broken step is the only fatal rehearsal.
+     */
+    public function test_the_disposition_separates_safe_degradation_from_a_fatal_rehearsal(): void
+    {
+        $deferred = DryRunResult::wouldDeferReaders(
+            'readers',
+            'writer',
+            'reader_db_1 does not resolve',
+            $this->steps,
+            ['reader_db_1'],
+        );
+
+        $this->assertFalse($deferred->fatal());
+        $this->assertTrue($deferred->degraded());
+        $this->assertSame(DryRunResult::CAUSE_READER_ENDPOINT_UNRESOLVED, $deferred->cause());
+        $this->assertSame(['pools' => ['reader_db_1'], 'fallback' => 'writer'], $deferred->evidence());
+
+        $locked = DryRunResult::skipped('readers', 'locked', $this->steps);
+        $this->assertFalse($locked->fatal(), 'a held lock is unexercised, not a refusal');
+        $this->assertSame(DryRunResult::CAUSE_LOCK_HELD, $locked->cause());
+
+        $failed = DryRunResult::failed('readers', 'unservable', $this->steps, 'write_pool_missing', ['pools' => ['writer_db_1']]);
+        $this->assertTrue($failed->fatal());
+        $this->assertSame('write_pool_missing', $failed->cause());
+        $this->assertSame(['pools' => ['writer_db_1']], $failed->evidence());
     }
 
     /**

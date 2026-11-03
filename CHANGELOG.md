@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- **A structured disposition on the flip/rehearsal JSON: `fatal`, `degraded`, `cause` and
+  `evidence`.** A gate can now distinguish a fatal refusal from proven safe degradation without
+  parsing `reason`: `fatal` is true for `failed`, `refused`, `unbound` and a `skipped` whose target
+  the shape reading refused; `degraded` is true for `readers_deferred`/`would_defer_readers`; `cause`
+  is a stable machine code (a `VariantShape::PROBLEM_*`, or a run's own such as
+  `reader_endpoint_unresolved`, `writer_fallback_unusable` or `lock_held`); and `evidence` carries
+  the pools and fallback behind it. `unservableVariant()` now returns the code and pools alongside
+  its sentence, so a refusal is structured end to end. Documented in `docs/pgcat-flip-json.md` and
+  the README's JSON contract.
+
 ## 0.2.0-alpha16 - 2026-11-03
 
 ### Fixed

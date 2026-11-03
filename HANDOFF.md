@@ -190,7 +190,9 @@ php bin/inventory.php --check --at=114b09b
       surface.tsv: 6 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 54 files, 272 public methods, 318 key(s)/member(s), described as v0.2.0-alpha16
+  --> exit 1: the inventory is out of step with the tree
+      methods.tsv: 12 line(s) stale
+      surface.tsv: 9 line(s) stale
 ```
 <!-- /handoff:records -->
 

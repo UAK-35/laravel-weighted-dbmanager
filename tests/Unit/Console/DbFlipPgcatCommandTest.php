@@ -263,7 +263,7 @@ final class DbFlipPgcatCommandTest extends TestCase
         $report = $this->report($output);
 
         $this->assertSame(
-            [...array_keys(JsonEnvelope::CORE), 'mode', 'previous_mode', 'steps', 'status', 'pool_probe'],
+            [...array_keys(JsonEnvelope::CORE), 'mode', 'previous_mode', 'steps', 'status', 'pool_probe', 'fatal', 'degraded', 'cause', 'evidence'],
             array_keys($report),
             'the keys are always present, so a rule never has to guard for a missing one — and the '
             .'report begins with the envelope\'s own keys, read from the class rather than restated, '
@@ -328,7 +328,29 @@ final class DbFlipPgcatCommandTest extends TestCase
     }
 
     /**
-     * A rehearsal's report is its pipeline, not a sentence — which is the whole reason the mode
+     * The structured disposition, end to end: a deferred reader is not fatal and is marked
+     * degraded, with the pool that could not be reached and the mode serving in its place, so the
+     * project's gate can decide without matching a sentence.
+     */
+    public function test_the_json_report_names_a_deferred_reader_as_safe_degradation(): void
+    {
+        $installation = $this->installation('deferred');
+        $recordBefore = $this->recordedMode($installation);
+
+        $this->assertSame(0, Artisan::call('db:pgcat-flip', ['--json' => true]));
+        $report = $this->report(Artisan::output());
+
+        $this->assertSame(FlipResult::KIND_READERS_DEFERRED, $report['kind']);
+        $this->assertFalse($report['fatal'], 'reader loss is service preserved, not a refusal');
+        $this->assertTrue($report['degraded']);
+        $this->assertSame(FlipResult::CAUSE_READER_ENDPOINT_UNRESOLVED, $report['cause']);
+        $this->assertSame(['pools' => ['reader_db_1'], 'fallback' => 'writer'], $report['evidence']);
+        $this->assertSame('writer', $report['mode']);
+        $this->assertNotSame($recordBefore, $this->recordedMode($installation), 'the fallback mode was recorded');
+    }
+
+    /**
+     * A rehearsal's report is its pipeline, not a sentence - which is the whole reason the mode
      * exists: a job asserting "the flip would work" wants the steps that prove it, and the step
      * whose outcome is neither `done` nor `would` is the one to print in the failure message.
      */

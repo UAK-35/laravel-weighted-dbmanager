@@ -109,15 +109,19 @@ beside the object, so the whole of stdout is the report:
     "previous_mode": null,
     "steps": [{"step": "lock", "outcome": "done", "detail": "…"}],
     "status": null,
-    "pool_probe": null
+    "pool_probe": null,
+    "fatal": false,
+    "degraded": false,
+    "cause": null,
+    "evidence": {}
 }
 ```
 
 The five keys that come first are no longer this command's alone: they are `Console\JsonEnvelope`,
 written in that order by `db:probe-replicas` and `db:replica-status` as well, with each command's
 evidence after them — see [command-json-envelope.md](command-json-envelope.md). What is this
-command's own is the evidence (`mode`, `previous_mode`, `steps`, `status`, `pool_probe`) and the
-`kind` vocabulary below.
+command's own is the evidence (`mode`, `previous_mode`, `steps`, `status`, `pool_probe`, and the
+disposition `fatal`/`degraded`/`cause`/`evidence`) and the `kind` vocabulary below.
 
 The keys are written on every route, `null` or an empty list where the route has nothing for one,
 which is the same rule the health payload's `counts` follows: a rule that has to check whether a
@@ -170,17 +174,25 @@ routes answer without asking the flipper at all:
 
 | constant | `kind` | what it means | exit |
 |---|---|---|---|
-| — | `flipped` | a flip applied | `0` |
-| — | `no_change` | the mode on record already matched | `0` |
-| — | `skipped` | another instance held the lock | `0` |
+| - | `flipped` | a flip applied | `0` |
+| - | `repaired` | a running pooler was not answering for a pool, so its configuration was re-applied | `0` |
+| - | `no_change` | the mode on record already matched | `0` |
+| - | `skipped` | another instance held the lock, or the target variant cannot be served | `0` |
 | `KIND_WINDOW_CLOSED` | `window_closed` | the container's boot window had closed, so the flipper stopped trying until it is replaced | `0` |
+| - | `readers_deferred` | the readers mode was deferred onto the validated writer-only fallback | `0` |
 | `KIND_STATUS` | `status` | a state report was asked for | `0` |
 | `KIND_DISABLED` | `disabled` | flipping is off, or pgcat cannot front this driver | `0` |
-| — | `would_flip` | a rehearsal proved a flip would apply | `0` |
-| — | `would_not_flip` | a rehearsal found nothing to do | `0` |
-| — | `failed` | a step a flip needs did not work — a flip, or a rehearsal | `1` |
+| - | `would_flip` | a rehearsal proved a flip would apply | `0` |
+| - | `would_not_flip` | a rehearsal found nothing to do | `0` |
+| - | `would_defer_readers` | a rehearsal found the readers mode would be deferred onto the writer fallback | `0` |
+| - | `failed` | a step a flip needs did not work - a flip, or a rehearsal | `1` |
 | `KIND_REFUSED` | `refused` | a flag combination was refused before anything was read | `1` |
 | `KIND_UNBOUND` | `unbound` | the container has no pgcat flipper | `1` |
+
+`skipped` covers two different facts, and the disposition below is what tells them apart: another
+instance holding the lock is unexercised, while a target this container cannot serve is a refusal.
+The kind is kept because both leave the pooler untouched and exit `0`; `fatal` and `cause` are
+what a gate branches on.
 
 `refused` and `unbound` are separate kinds because they are separate repairs — a flag to fix
 versus a deployment whose provider never registered — and because the exit-code table already
@@ -192,8 +204,51 @@ exactly what it should have, so the *command* exits `0` and a scheduler never se
 would have to interpret. What failed is the container, and `/health/db` is where that is reported
 (`flip.failed`, with `pgcat.window.failed_reason` naming which of the three ways it failed). A
 kind that exited non-zero would put an error line in a scheduler's log every minute for the rest of
-the container's life — the one line that says why, buried by sixty repetitions an hour of the
+the container's life - the one line that says why, buried by sixty repetitions an hour of the
 sentence "it still has not worked".
+
+### The disposition: `fatal`, `degraded`, `cause`, `evidence`
+
+`kind` answers *what happened*; the four disposition keys answer *what a gate does about it*, and
+they are the reason a gate never has to match a sentence. They are written on every route, `null`
+or empty where a route has nothing for one, like the rest of the evidence.
+
+- **`fatal`** is the one a gate must not promote past: `true` for `failed`, for the two command
+  refusals (`refused`, `unbound`), and for a `skipped` whose `cause` is a shape refusal (`the
+  target variant cannot be served`). `false` for everything else, including a `skipped` caused by
+  a held lock, which is unexercised rather than refused.
+- **`degraded`** marks a **proven safe degradation**: `true` only for `readers_deferred` and
+  `would_defer_readers`. The pooler is on the validated writer-only fallback, the readers source is
+  unchanged, and the schedule will retry; a gate may promote with a warning.
+- **`cause`** is a stable machine code, not a sentence. A target the shape reading refused carries
+  the `VariantShape::PROBLEM_*` value (`variants_equal`, `write_pool_missing`, `read_pool_missing`,
+  `reader_pool_in_writer_only`, `header`, `unresolved_pool`); a run's own decisions carry
+  `reader_endpoint_unresolved`, `writer_fallback_unusable`, `lock_held`, `window_closed`,
+  `pool_unanswerable` or `exception`; a rehearsal's remaining cases carry `no_change` or
+  `step_failed`. `null` where the kind is the whole answer (`flipped`, `would_flip`, `status`).
+- **`evidence`** is the structured detail behind the disposition. A deferral carries
+  `{"pools": ["reader_db_1"], "fallback": "writer"}`; a shape refusal carries the pool it is
+  about, e.g. `{"pools": ["writer_db_1"]}`; everything else carries `{}`.
+
+The line the four keys draw is the one the plan asks for: a **fatal refusal** (`fatal: true`) is a
+run that must not be promoted past, while **proven safe degradation** (`degraded: true`,
+`fatal: false`) is a run that kept the service on a validated fallback and may be promoted with a
+visible warning. A rehearsal that finds a broken step is fatal; a rehearsal that finds a reader it
+cannot reach - with a servable writer fallback - is degraded. A runtime flip that refuses an
+unservable target is fatal, so a monitoring rule can page on it; the same condition in the
+rehearsal is `failed`, so the deploy rolls back.
+
+```bash
+php artisan db:pgcat-flip --dry-run --json > rehearsal.json
+jq -e '.fatal == false' rehearsal.json                       # may promote
+jq -e '.degraded == true' rehearsal.json                     # ...with this warning
+jq -e '.evidence.pools' rehearsal.json                       # ...naming the reader
+```
+
+The kinds, causes and evidence are pinned by `DryRunResultTest` and the JSON half of the command
+matrix (`DbFlipPgcatCommandTest`), and by the flipper tests that assert a deferral's pools and a
+shape refusal's code. A gate that reads the four fields is reading a contract that changes only
+when the tests change.
 
 ### The four command-level kinds and the routes that produce them
 
@@ -244,19 +299,32 @@ kind that nothing produces is a lie in a table a job may already be written agai
 | `--status` opens no socket unless `--pool-probe` asks, and the key is `null` when it did not | `test_the_status_report_stays_offline_without_the_pool_probe_flag` |
 | the flag asks the pooler on that run, reports the verdict beside the status, and leaves the exit code at `0` | `test_the_status_report_asks_the_pooler_when_the_flag_is_given` |
 | a documented kind is a produced kind, code included | `test_every_json_kind_is_documented_with_its_exit_code` |
+| a deferred reader is safe degradation (`fatal: false`, `degraded: true`, the pool and fallback in `evidence`) | `test_the_json_report_names_a_deferred_reader_as_safe_degradation`, plus the flipper's deferral test |
+| a refused target is fatal with the `VariantShape` code and the pool | `PgcatConfigFlipperTest::test_a_target_missing_the_write_pool_is_not_swapped_in` |
+| the disposition values themselves, separate from any rendering | `DryRunResultTest::test_the_disposition_separates_safe_degradation_from_a_fatal_rehearsal` |
 | `--json --watch` is refused, and never reaches the flipper | the matrix's `a JSON report cannot be a watch daemon` row, plus `test_a_refused_flag_combination_never_reaches_the_flipper` |
 
 Mutations this decision has been checked against: the object's `exit_code` set to `0` while the
 process's code is right (seven cells fail on the field), `--json` printed *beside* the rendered
 report instead of replacing it (eight cells fail to decode), a key renamed in the envelope (every
 cell fails on the key list), the `unbound` route losing its kind (one cell fails), and the README
-kind table documenting `failed` as exiting `0` (the binding test fails).
+kind table documenting `failed` as exiting `0` (the binding test fails). The disposition is
+separately pinned: a deferral whose `fatal` flips to `true`, a refusal whose `cause` loses its
+shape code, and an unsafe target whose run reports `degraded` each fail the tests above.
 
 ## Known limitations
 
 - **The steps' details are prose, and platform-shaped.** A step's detail carries real paths and a
   real command, with the separators of the platform that ran it; a job should assert on the step
   *names* and outcomes, which are part of the contract, and not on the detail strings.
+- **`kind: skipped` covers two facts.** A held lock and an unservable target are both `skipped`
+  and both exit `0`; the kind is kept because both leave the pooler untouched. A consumer that
+  reads only `kind` cannot tell them apart - the disposition's `fatal` and `cause` are the
+  supported answer, and the only one this contract promises.
+- **`degraded` is a claim about the source, not about application routing.** It says the writer
+  fallback is a validated source and the readers mode was not applied; whether every application
+  query (including existing Octane workers) actually routes to the writer is the project's proof,
+  not this report's.
 - **The report is pretty-printed**, so a consumer that reads it line by line sees fragments
   rather than an object per line. Decoding the whole output is the supported way to read it.
 - **`disabled` exits `0`.** A job that treats "not a rehearsal and not a flip" as an error will
@@ -303,9 +371,11 @@ kind table documenting `failed` as exiting `0` (the binding test fails).
 | `src/Console/Commands/DbFlipPgcatCommand.php` | `--json`, the four `KIND_*` constants, its `EVIDENCE` table, `report()`, and a JSON branch in each route |
 | `src/Console/JsonEnvelope.php` | the five keys, the raw write and the refusals, shared with the other two commands |
 | `docs/command-json-envelope.md` | the envelope as a package-wide decision, which this record's `--json` follows |
-| `src/Pgcat/FlipResult.php` | `toArray()` — the flip's evidence, already in the shape the envelope carries |
-| `src/Pgcat/DryRunResult.php` | `toArray()` — the rehearsal's evidence, `steps` included |
-| `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the JSON half of the exit matrix, the two focused reports, and the kind-table binding |
+| `src/Pgcat/FlipResult.php` | `toArray()` - the flip's evidence and the disposition (`fatal`/`degraded`/`cause`/`evidence`), already in the shape the envelope carries |
+| `src/Pgcat/DryRunResult.php` | `toArray()` - the rehearsal's evidence (`steps` included) and the same disposition |
+| `tests/Unit/Console/DbFlipPgcatCommandTest.php` | the JSON half of the exit matrix, the deferred-disposition report, the two focused reports, and the kind-table binding |
+| `tests/Unit/Pgcat/PgcatConfigFlipperTest.php` | the refusal and deferral dispositions, with their shape codes and pools |
+| `tests/Unit/Pgcat/DryRunResultTest.php` | the disposition values themselves |
 | `tests/Support/Readme.php` | reads the kind table out of the README as data |
 | `README.md` | the envelope, the sample object, the `jq` examples, and the kind table |
 | `docs/pgcat-flip-dry-run.md` | what a rehearsal can prove, which the JSON report reports |

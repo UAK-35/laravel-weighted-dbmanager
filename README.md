@@ -2710,7 +2710,11 @@ $ php artisan db:pgcat-flip --dry-run --json
         {"step": "supervisor", "outcome": "would", "detail": "/…/supervisorctl restart \"pgcat:*\""},
         {"step": "state file", "outcome": "would", "detail": "/…/pgcat-flip-state.json (writable, left as it is)"}
     ],
-    "status": null
+    "status": null,
+    "fatal": false,
+    "degraded": false,
+    "cause": null,
+    "evidence": {}
 }
 ```
 
@@ -2751,8 +2755,25 @@ jq -e '[.steps[].outcome] | all(. == "done" or . == "would")' rehearsal.json
 | `refused`                                                                                                                 | a flag combination was refused before anything was read                      | `1`  |
 | `unbound`                                                                                                                 | the container has no pgcat flipper                                           | `1`  |
 
+`fatal`, `degraded`, `cause` and `evidence` are the structured disposition, so a gate decides
+without matching a sentence:
+
+| disposition | kinds | what a gate does |
+|---|---|---|
+| `fatal: true` | `failed`, `refused`, `unbound`, and a `skipped` whose `cause` is a shape refusal | do not promote |
+| `degraded: true`, `fatal: false` | `readers_deferred`, `would_defer_readers` | promote, and warn: the writer-only fallback is serving, and `evidence.pools` names the reader it could not reach |
+| `fatal: false`, `degraded: false` | `flipped`, `no_change`, `repaired`, `window_closed`, `disabled`, `status`, `would_flip`, `would_not_flip`, and a `skipped` caused by `lock_held` | proceed |
+
+`cause` is a stable machine code, not a sentence: a `VariantShape` problem (`variants_equal`,
+`write_pool_missing`, `read_pool_missing`, `reader_pool_in_writer_only`, `header`,
+`unresolved_pool`), a run's own (`reader_endpoint_unresolved`, `writer_fallback_unusable`,
+`lock_held`, `window_closed`, `pool_unanswerable`, `exception`), or `no_change`/`step_failed` for
+a rehearsal. `evidence` carries the structured detail: `{"pools": ["reader_db_1"], "fallback":
+"writer"}` for a deferral, and `{"pools": ["writer_db_1"]}` for a shape refusal. `reason` and
+`error` stay for a person.
+
 `mode` and `previous_mode` are the modes the run is about. A `status` report carries its two
-inside `status`, which is the flipper's own `status()` array — with `null` for an unset path
+inside `status`, which is the flipper's own `status()` array - with `null` for an unset path
 rather than the `(not set)` the table substitutes, because a job has to be able to test a path
 for being unset. `steps` is a rehearsal's pipeline and empty for every other route; `reason` and
 `error` are the sentence a refusal or a failure would otherwise have printed down a human
