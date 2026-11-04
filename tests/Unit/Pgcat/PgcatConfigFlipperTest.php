@@ -3647,27 +3647,21 @@ class PgcatConfigFlipperTest extends TestCase
     }
 
     /**
-     * The two paths a flip *cycle* writes that no step of a flip names: the container's boot
-     * stamp and the `.lock` companion the audit record is locked on.
+     * The boot stamp is a *read* input and the audit lock a *write*: a stamp this process cannot
+     * use is `missing`/`unreadable`/`empty`/`unparseable`, never a directory that will not take a
+     * write, and a readable-but-unwritable stamp is valid. The lock keeps its write check.
      *
-     * They are the gap a deployment found — a container that passed every other gate and could not
-     * flip, logging that its target and its record were not writable — and the reading that judges
-     * them is the list `fileProblems()` already answers with, so a preflight that asks whether this
-     * installation can carry out what it is configured to do asks it about these too. Each sentence
-     * carries the consequence (a window that never closes, two boots writing one record) and the
-     * mode and owner found, because "not writable" is one question away from "by whom".
-     *
-     * The blocked directory is a regular file where a directory is wanted, which holds on every
-     * filesystem — no mode bits are involved, which is why that half is asserted on all of them. The
-     * lock is a real file with the read-only bit on, so the case needs a filesystem that honours it
-     * (`chmod` on Windows sets the attribute, and PHP reads it back through `is_writable()`).
+     * The blocked boot stamp is a regular file where a directory is wanted, which holds on every
+     * filesystem - no mode bits are involved. The lock is a real file with the read-only bit on,
+     * so that half needs a filesystem that honours it (`chmod` on Windows sets the attribute, and
+     * PHP reads it back through `is_writable()`).
      */
-    public function test_the_paths_a_flip_cycle_writes_are_judged_beside_the_ones_a_flip_step_names(): void
+    public function test_the_boot_stamp_is_judged_as_a_read_input_and_the_audit_lock_as_a_write(): void
     {
         $blocked = $this->tmp.'/blocked';
         file_put_contents($blocked, '');
 
-        // The record itself is usable — that is what makes its lock worth judging at all — and the
+        // The record itself is usable - that is what makes its lock worth judging at all - and the
         // lock beside it is not: a record that cannot be written is one finding, the audit's own.
         $record = $this->tmp.'/swrr-audit.json';
         file_put_contents($record, '{}');
@@ -3692,13 +3686,13 @@ class PgcatConfigFlipperTest extends TestCase
             $problems[$problem['setting']] = $problem;
         }
 
-        $line = 'chmod +wx '.escapeshellarg($blocked);
+        $stamp = $blocked.'/container-booted-at';
 
-        $this->assertSame(PgcatConfigFlipper::FILE_DIRECTORY_UNWRITABLE, $problems['boot_file']['kind']);
-        $this->assertSame($blocked, $problems['boot_file']['path'], 'the directory is what a mode is changed on, so it is what the line names');
-        $this->assertSame($line, $problems['boot_file']['suggestion']);
-        $this->assertStringContainsString('boot window never closes', $problems['boot_file']['sentence']);
-        $this->assertStringContainsString('mode ', $problems['boot_file']['sentence'], 'the facts the path was found with travel with the sentence');
+        $this->assertSame(PgcatConfigFlipper::FILE_MISSING, $problems['boot_file']['kind']);
+        $this->assertSame($stamp, $problems['boot_file']['path'], 'the stamp itself is the path the sentence names');
+        $this->assertNull($problems['boot_file']['suggestion'], 'the package never tells the application to write the stamp');
+        $this->assertStringContainsString('cannot be used', $problems['boot_file']['sentence']);
+        $this->assertStringContainsString('the file is not there', $problems['boot_file']['sentence']);
 
         $this->assertSame(PgcatConfigFlipper::FILE_UNWRITABLE, $problems['audit_lock']['kind']);
         $this->assertSame($lock, $problems['audit_lock']['path']);
@@ -3708,23 +3702,24 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertSame(
             ['boot_file' => 'swrr.pgcat.boot_file', 'audit_lock' => 'swrr.audit.file.lock'],
             PgcatConfigFlipper::fileSettingPaths(),
-            'the record names where each of the two settings is written, because neither is a setting a flip step reads',
+            'the record names the boot stamp setting and the lock setting, because neither is a setting a flip step reads',
         );
     }
 
     public function test_a_writable_tree_says_nothing_about_the_paths_a_flip_cycle_writes(): void
     {
+        file_put_contents($this->tmp.'/container-booted-at', (string) time());
+
         $flipper = $this->build(
             'readers',
             ['boot_file' => $this->tmp.'/container-booted-at'],
             auditFile: $this->tmp.'/swrr-audit.json',
         );
 
-
         $this->assertSame(
             [],
             $flipper->fileProblems(),
-            'none of the three exists yet, which is normal for all of them, and the directory that will take each one is writable',
+            'a readable stamp and a lock the record\'s directory will take are not faults',
         );
     }
 
@@ -3760,12 +3755,11 @@ class PgcatConfigFlipperTest extends TestCase
                 'no_readers_path',
                 'state_file',
                 'lock_file',
-                'boot_file',
                 'audit_lock',
                 'audit_file',
             ],
             array_keys($paths),
-            'the inventory is every path a flip cycle writes, not only the ones that failed',
+            'the inventory is every path a flip cycle writes, not only the ones that failed; the boot stamp is a read input, so it is not here',
         );
 
         $this->assertSame($this->tmp.'/pgcat.toml', $paths['config_path']['path']);
@@ -3773,38 +3767,35 @@ class PgcatConfigFlipperTest extends TestCase
         $this->assertStringContainsString('mode ', (string) $paths['config_path']['facts']);
         $this->assertStringContainsString('copy into place', $paths['config_path']['cost']);
 
-        // The state, lock and stamp files do not exist yet, which is normal for all of them: the
-        // path whose mode decides the write is the directory that will have to take them.
+        // The state and lock files do not exist yet, which is normal for both: the path whose mode
+        // decides the write is the directory that will have to take them.
         $this->assertSame($this->tmp, $paths['state_file']['path']);
-        $this->assertSame($this->tmp, $paths['boot_file']['path']);
-        $this->assertStringContainsString('boot window never closes', $paths['boot_file']['cost']);
 
         // The record itself is here, so its path and mode are its own.
         $this->assertSame($record, $paths['audit_file']['path']);
         $this->assertStringContainsString('mode ', (string) $paths['audit_file']['facts']);
 
-        // The two a flip step never names are described by the table, not by this method: the label
+        // The one a flip step never names is described by the table, not by this method: the label
         // and the cost the row prints are the row's own fields, so the fault list and this inventory
-        // cannot describe one path two ways.
+        // cannot describe one path two ways. The boot stamp is not in either: it is an input the
+        // package only reads.
         $table = (new \ReflectionClassConstant(PgcatConfigFlipper::class, 'UNNAMED_WRITTEN_PATHS'))->getValue();
 
-        $this->assertSame($table['boot_file']['label'], $paths['boot_file']['label']);
-        $this->assertSame($table['boot_file']['cost'], $paths['boot_file']['cost']);
         $this->assertSame($table['audit_lock']['label'], $paths['audit_lock']['label']);
         $this->assertSame($table['audit_lock']['cost'], $paths['audit_lock']['cost']);
     }
 
     /**
      * The paths a flip never names are one table, and every row describes itself: the label and the
-     * cost both surfaces print, the config key the record names, where its path comes from, and
-     * whether it is judged only while the record it guards is usable.
+     * cost both surfaces print, the config key the record names, and where its path comes from.
      *
      * The count in `docs/boot-audit-surfaces.md` is derived from this table's length rather than
      * restated beside it (`ProseNumbersTest`), which is only honest if a row cannot be added half
      * described: a missing label or cost is a row the fault list and the inventory can print
      * differently, and a missing config key is a setting the audit record cannot name. The config
      * column is also what `fileSettingPaths()` returns, so the record's "where this is written" and
-     * the table are one list rather than two.
+     * the table are one list rather than two. The boot stamp is the one setting `fileSettingPaths()`
+     * declares explicitly: it is read, not written, and so is not a row of this table.
      */
     public function test_every_path_a_flip_never_names_is_described_by_its_own_row(): void
     {
@@ -3817,35 +3808,43 @@ class PgcatConfigFlipperTest extends TestCase
             $this->assertNotSame('', $row['cost'], "{$setting} states what an unwritable one costs");
             $this->assertStringStartsWith('swrr.', $row['config'], "{$setting} names the setting the audit record quotes");
             $this->assertContains($row['from'], ['boot_file', 'audit_file'], "{$setting} says where its path comes from");
-            $this->assertIsBool($row['needs_record_writable'], "{$setting} says whether it waits for the record");
         }
 
         $this->assertSame(
-            array_keys($table),
+            ['boot_file', 'audit_lock'],
             array_keys(PgcatConfigFlipper::fileSettingPaths()),
-            'the record names every setting the table holds, in the order it holds them',
+            'the record names the boot stamp setting and every setting the table holds',
         );
 
         $this->assertSame(
-            array_column($table, 'config'),
+            ['swrr.pgcat.boot_file', 'swrr.audit.file.lock'],
             array_values(PgcatConfigFlipper::fileSettingPaths()),
-            'and the config column is the one home for where each is written',
+            'the boot stamp is declared explicitly, and the table supplies the rest',
         );
     }
 
     /**
-     * A path a flip cannot write is marked, and carries the cost the inventory prints — the
-     * reading `db:doctor` builds its failure from. The blocked directory is a regular file where
-     * a directory is wanted, which holds on every filesystem.
+     * A path a flip cannot write is marked, and carries the cost the inventory prints - the
+     * reading `db:doctor` builds its failure from. The audit lock is a real file with the
+     * read-only bit on, so the case needs a filesystem that honours it.
      */
     public function test_write_paths_marks_an_unwritable_path_and_keeps_its_cost(): void
     {
-        $blocked = $this->tmp.'/blocked';
-        file_put_contents($blocked, '');
+        $record = $this->tmp.'/swrr-audit.json';
+        file_put_contents($record, '{}');
+
+        $lock = $record.'.lock';
+        file_put_contents($lock, '');
+        @chmod($lock, 0o444);
+
+        if (is_writable($lock)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
 
         $flipper = $this->build(
             'readers',
-            ['boot_file' => $blocked.'/container-booted-at'],
+            ['boot_file' => $this->tmp.'/container-booted-at'],
+            auditFile: $record,
         );
 
         $paths = [];
@@ -3854,11 +3853,13 @@ class PgcatConfigFlipperTest extends TestCase
             $paths[$path['setting']] = $path;
         }
 
-        $this->assertArrayHasKey('boot_file', $paths);
-        $this->assertFalse($paths['boot_file']['writable']);
-        $this->assertSame($blocked, $paths['boot_file']['path']);
-        $this->assertStringContainsString('boot window never closes', $paths['boot_file']['cost']);
-        $this->assertStringContainsString('mode ', (string) $paths['boot_file']['facts']);
+        $this->assertArrayHasKey('audit_lock', $paths);
+        $this->assertFalse($paths['audit_lock']['writable']);
+        $this->assertSame($lock, $paths['audit_lock']['path']);
+        $this->assertStringContainsString('two boots can write the record at once', $paths['audit_lock']['cost']);
+        $this->assertStringContainsString('mode ', (string) $paths['audit_lock']['facts']);
+
+        @chmod($lock, 0o666);
     }
 
     /**

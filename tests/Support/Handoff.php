@@ -965,8 +965,8 @@ final class Handoff
             'read' => 'sha256:55303bac7dc34da5f4f706bdf77f1cd6829350f92314f39e6639211233ec3ff5',
         ],
         'docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md' => [
-            'words' => 'the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves',
-            'read' => 'sha256:be8b907ac0a214f1ef109ad46ac6d0434d2b07848f9ae0f5a7bcf0291e3df266',
+            'words' => 'the boot-stamp validation plan, updated on 2026-11-04: the startup-owned immutable file must exist, be readable and contain a non-empty usable timestamp; the shared classifier, removal from write requirements, warning and recovery surfaces, regression matrix and deployment acceptance checks that preserve read-only permissions',
+            'read' => 'sha256:6dc200138c52f11400c182941d33345f26c237390f0947b09bdfd39ec4ad60e6',
         ],
         'docs/planning/0004-2026-11-01_plan-agentic-setup-findings.md' => [
             'words' => 'the plan for repairing the fifteen findings of the agentic setup review: why twelve of them are a reference or a claim written away from the thing it describes, the four decisions the repairs need — the default agent, the guards\' corpus, the handoff snapshot and the ignored rules copy — and the five batches in the order a session meets them, each step with the guard that holds it and what the review has moved since it was taken',

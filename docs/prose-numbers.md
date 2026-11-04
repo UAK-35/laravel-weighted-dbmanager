@@ -160,7 +160,7 @@ row set now has.
 | the rows a doctor asks on a run that resolves, as db-doctor-json.md counts them in its limit | "resolve, **twenty-six** otherwise" | the README's `db:doctor` check table |
 | the kinds a flip run can reach, as db-doctor-json.md counts them | "one of **fourteen** values a run can reach" | the README's `kind` table |
 | the reasons a replica is excluded, as pool-exclusions.md counts them | "The reason vocabulary is closed at **three**" | `WeightResolver::EXCLUSION_REASONS` |
-| the paths on the fault list that are not pgcat's, as boot-audit-surfaces.md counts them | "**two** paths on it are not pgcat's at all" | the `UNNAMED_WRITTEN_PATHS` table on `PgcatConfigFlipper` |
+| the paths on the fault list that are not pgcat's, as boot-audit-surfaces.md counts them | "**one** path on it is not pgcat's at all" | the `UNNAMED_WRITTEN_PATHS` table on `PgcatConfigFlipper` |
 | the supervisor faults a flip refuses on, as pgcat-supervisor-preflight.md counts them | "catches all **ten** faults this record lists" | the `usable: false` verdicts in `SupervisorStep::inspect()`, with the declared `FAULT_*` constants asserted to be exactly the faults it builds |
 | the keys the envelope writes, as command-json-envelope.md counts them | "writes **five** keys, in the same order, for every report", "holds the **five** keys in the order", "one of the **five** core keys" | `JsonEnvelope::CORE` |
 | the metadata floors, as replica-metadata-refusal.md counts them | "the **three** `*_FLOOR` constants" | the `*_FLOOR` constants on `ReplicaMetadata` |

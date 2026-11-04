@@ -200,7 +200,7 @@ final class ProseNumbersTest extends TestCase
             ],
             'the paths on the fault list that are not pgcat\'s, as boot-audit-surfaces.md counts them' => [
                 'record' => 'docs/boot-audit-surfaces.md',
-                'pinned' => '/row prints: (\w+) paths on it are not pgcat/',
+                'pinned' => '/row prints: (\w+) path(?:s)? on it (?:is|are) not pgcat/',
                 'counts' => '`PgcatConfigFlipper`\'s `UNNAMED_WRITTEN_PATHS` table',
                 'expected' => count(self::privateConstant(PgcatConfigFlipper::class, 'UNNAMED_WRITTEN_PATHS')),
             ],

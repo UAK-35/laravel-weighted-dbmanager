@@ -1769,24 +1769,41 @@ final class PgcatConfigFlipper
             }
         }
 
+        // The boot stamp is an *input*, not a path this package writes: the container's entrypoint
+        // creates it once, and the runtime only reads it. Judging it as a writer was the defect
+        // this plan repairs - a readable 0644 root-owned stamp is valid even though the application
+        // may not write it, so the question is presence, readability and contents. The classifier
+        // is `FlipWindow`'s own, so the window and this reading cannot disagree about a stamp, and
+        // an unconfigured path (`bootFile() === ''`) is the documented opt-out rather than a fault.
+        $stamp = $this->window->stampProblem();
+
+        if ($stamp !== null) {
+            $stampPath = $this->window->bootFile();
+
+            $problems[] = $this->fileProblem(
+                'boot_file',
+                $stamp['state'],
+                $stampPath,
+                "boot stamp [{$stampPath}] cannot be used: {$stamp['reason']}, so the boot window is not judged and the per-minute entry keeps running instead of standing down after it.",
+            );
+        }
+
         // The paths this package has to be able to write that no step of a flip names, judged
         // beside every path above because an unwritable one is the same class of fault as the rest:
-        // the boot stamp the container's entrypoint writes, and the `.lock` companion two boots
-        // serialise the audit record's write on. `writtenPaths()` is the set and its rule about when
-        // each is judged, so how many are added is that table's length rather than a number stated
-        // here. They were the gap the deployment this list came from found — a container that passed
-        // every other gate and could not flip, logging that its target was not writable — so a
-        // preflight that answers "can this installation carry out what it is configured to do?"
-        // answers it about these too, in the row and the record that already list the rest. The
-        // record *file*
-        // is deliberately not among them: `store probe` and the boot audit's own finding judge it,
-        // and a second sentence for it would be one fault reported twice.
+        // the `.lock` companion two boots serialise the audit record's write on. `writtenPaths()` is
+        // the set and its rule about when each is judged, so how many are added is that table's
+        // length rather than a number stated here. They were the gap the deployment this list came
+        // from found - a container that passed every other gate and could not flip, logging that its
+        // target was not writable - so a preflight that answers "can this installation carry out
+        // what it is configured to do?" answers it about these too, in the row and the record that
+        // already list the rest. The record *file* is deliberately not among them: `store probe`
+        // and the boot audit's own finding judge it, and a second sentence for it would be one fault
+        // reported twice.
         //
-        // Each is judged as a *writer*: both may legitimately not exist yet (a container an hour
-        // old has a stamp; one being provisioned does not), so what is asked is the directory
-        // they will be created in, and the file itself only when it is already there and cannot be
-        // written. The cost sentence is the reason the path is on the list at all, and the mode and
-        // owner travel with it: see fileProblem().
+        // Each is judged as a *writer*: it may legitimately not exist yet, so what is asked is the
+        // directory it will be created in, and the file itself only when it is already there and
+        // cannot be written. The cost sentence is the reason the path is on the list at all, and the
+        // mode and owner travel with it: see fileProblem().
         foreach ($this->writtenPaths() as $setting => $row) {
             $path = $row['path'];
 
@@ -1795,7 +1812,7 @@ final class PgcatConfigFlipper
             }
 
             // The file itself when it is there, and the directory that will have to take it when
-            // it is not — which is where the mode is changed either way, so it is the path the
+            // it is not - which is where the mode is changed either way, so it is the path the
             // sentence and the repair line name.
             $there = file_exists($path);
 
@@ -1834,11 +1851,12 @@ final class PgcatConfigFlipper
      * WHAT IS ON IT, AND WHAT IS NOT
      *   The flip target and the directory the atomic swap writes beside it; the two variants a
      *   deployment renders (a flip reads them, the entrypoint writes them); the state and lock
-     *   files a flip records itself in; the boot stamp the window is measured from; and the audit
-     *   record and its lock, which the package writes for a different reason — findings and the
-     *   probe's throttle share that file. That is every path `fileProblems()` judges as a
-     *   *writer*, plus the record itself, which `store probe` owns as a verdict and which is on
-     *   this list because the question here is the inventory rather than the fault.
+     *   files a flip records itself in; and the audit record and its lock, which the package
+     *   writes for a different reason - findings and the probe's throttle share that file. That is
+     *   every path `fileProblems()` judges as a *writer*, plus the record itself, which `store
+     *   probe` owns as a verdict and which is on this list because the question here is the
+     *   inventory rather than the fault. The boot stamp is not on this list: the package only reads
+     *   it, and `fileProblems()` judges it as an input.
      *
      *   Empty while the flipper is inert, exactly like `fileProblems()`: nothing is written then,
      *   and a reading that named paths anyway would describe a swap that cannot happen.
@@ -1904,8 +1922,9 @@ final class PgcatConfigFlipper
             }
         }
 
-        // The two the fault list already carries — the boot stamp and the record's lock — so their
-        // sentences and this inventory cannot describe the same path two ways.
+        // The one the fault list already carries - the record's lock - so its sentence and this
+        // inventory cannot describe the same path two ways. The boot stamp is not here: it is an
+        // input the package only reads, and `fileProblems()` judges it as one.
         foreach ($this->writtenPaths() as $setting => $row) {
             if ($row['path'] === '') {
                 continue;   // an unset key is the arming's problem, not a path to judge
@@ -1971,46 +1990,40 @@ final class PgcatConfigFlipper
      * names, `writePaths()` prints the labels and costs from here so the fault and the inventory
      * cannot describe one path two ways, and `fileSettingPaths()` is the `config` column read back.
      * `docs/boot-audit-surfaces.md` says how many of the fault list's paths are not pgcat's at all,
-     * and `ProseNumbersTest` binds that sentence to this table's length — so the count is derived
-     * from the set rather than restated beside it, and a third path added here is a record that
+     * and `ProseNumbersTest` binds that sentence to this table's length - so the count is derived
+     * from the set rather than restated beside it, and a second path added here is a record that
      * fails until it says so rather than a sentence somebody has to remember to change.
      *
-     * `boot_file` is judged whenever the window has a stamp path. `audit_lock` only while the record
-     * it locks is usable: a record that cannot be written is one finding already — `BootAudit`'s and
-     * the store probe's — and a lock judged beside it would be that same fault said twice.
+     * The boot stamp is deliberately **not** here: the runtime only reads it, and the package must
+     * never create or write it. It is judged as a read input by `fileProblems()` and named by
+     * `fileSettingPaths()` below.
      *
-     * @var array<string, array{config: string, label: string, cost: string, from: string, needs_record_writable: bool}>
+     * `audit_lock` is judged only while the record it locks is usable: a record that cannot be
+     * written is one finding already - `BootAudit`'s and the store probe's - and a lock judged
+     * beside it would be that same fault said twice.
+     *
+     * @var array<string, array{config: string, label: string, cost: string, from: string}>
      */
     private const UNNAMED_WRITTEN_PATHS = [
-        'boot_file' => [
-            'config' => 'swrr.pgcat.boot_file',
-            'label' => 'boot stamp',
-            'cost' => 'the container cannot record when it booted, and the boot window never '
-                .'closes: the entry flips on every run instead of standing down after it',
-            'from' => 'boot_file',
-            'needs_record_writable' => false,
-        ],
         'audit_lock' => [
             'config' => 'swrr.audit.file.lock',
             'label' => 'audit lock',
             'cost' => 'two boots can write the record at once: one boot\'s findings are '
                 .'overwritten by the other\'s rather than merged with them',
             'from' => 'audit_file',
-            'needs_record_writable' => true,
         ],
     ];
 
     /**
      * The paths this package must be able to write while a flip is armed, and what an unwritable
-     * one costs — the ones in `UNNAMED_WRITTEN_PATHS`, one entry per setting, each kept only while
-     * the condition its row names holds.
+     * one costs - the ones in `UNNAMED_WRITTEN_PATHS`, one entry per setting. The record's lock is
+     * kept only while the record itself is usable; a record that cannot be written is one finding
+     * already, and a lock judged beside it would be that same fault said twice.
      *
      * The consequences are the ones the faults were observed with rather than a general statement
-     * about permissions: an unwritable boot stamp leaves `FlipWindow::closed()` permanently false,
-     * so the per-minute entry keeps flipping instead of standing down after the window; an
-     * unwritable record cannot be the store probe's throttle and carries its findings beside itself
-     * instead, so the store is PINGed on every boot; and an untakeable lock lets two boots
-     * write the record at once, which is the merge the audit's own log line reports.
+     * about permissions: an unwritable record cannot be the store probe's throttle and carries its
+     * findings beside itself instead, so the store is PINGed on every boot; and an untakeable lock
+     * lets two boots write the record at once, which is the merge the audit's own log line reports.
      *
      * `swrr.audit.file` is not a key of this class's slice — the provider resolves it and passes it
      * in, because the class that owns the paths is the class that should judge them. The record
@@ -2018,7 +2031,7 @@ final class PgcatConfigFlipper
      * `BootAudit`'s finding already judge it (`BootAudit::probeUnwritableSentence()`), the reading
      * belongs to the object that owns the record, and a second row printing the same sentence would
      * be one fault reported twice. What is on the list is the record's **lock**, which nothing
-     * judged, and the boot stamp, which nothing judged. The record *is* on `writePaths()`'s list
+     * judged. The record *is* on `writePaths()`'s list
      * below, which is the inventory rather than this fault list: it names every path the package
      * writes, and a record it cannot write is reported there with the cost of that. The two rows
      * print different sentences — the probe's is about the throttle — and both reach the verdict the
@@ -2037,12 +2050,12 @@ final class PgcatConfigFlipper
             // record prints — and the lock's state beside it is moot: the same unwritable directory
             // would be two findings for one fault, and a reader would have to work out that they
             // are one fault from two sentences.
-            if ($row['needs_record_writable'] && ($auditFile === '' || ! self::writable($auditFile))) {
+            if ($auditFile === '' || ! self::writable($auditFile)) {
                 continue;
             }
 
             $paths[$setting] = [
-                'path' => $row['from'] === 'boot_file' ? $this->window->bootFile() : $auditFile.'.lock',
+                'path' => $auditFile.'.lock',
                 'label' => $row['label'],
                 'cost' => $row['cost'],
             ];
@@ -2052,17 +2065,19 @@ final class PgcatConfigFlipper
     }
 
     /**
-     * The config path each setting above is written at, for the record's context: neither is one of
-     * pgcat's own — the boot stamp is the flip's and the lock is the audit record's.
+     * The config path each setting a flip reads or the package writes is configured at, for the
+     * record's context.
      *
-     * Read out of the table rather than written down again, so a setting added to the set is one
-     * the record can name without a second line here to forget.
+     * The boot stamp is here even though it is no longer a written path: the finding still names
+     * `swrr.pgcat.boot_file`, and the provider's context must name the setting the operator edits.
+     * It is declared explicitly rather than read out of `UNNAMED_WRITTEN_PATHS`, which now carries
+     * only paths the package writes.
      *
      * @return array<string, string>
      */
     public static function fileSettingPaths(): array
     {
-        $paths = [];
+        $paths = ['boot_file' => 'swrr.pgcat.boot_file'];
 
         foreach (self::UNNAMED_WRITTEN_PATHS as $setting => $row) {
             $paths[$setting] = $row['config'];

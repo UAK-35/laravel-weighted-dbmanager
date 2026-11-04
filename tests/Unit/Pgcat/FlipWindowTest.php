@@ -240,11 +240,111 @@ final class FlipWindowTest extends TestCase
      * is refused rather than parsed on a guess, because a guessed boot time is a guessed
      * deadline.
      */
+    /**
+     * A stamp that is not a unix timestamp is refused rather than parsed on a guess, because a
+     * guessed boot time is a guessed deadline.
+     */
     public function test_a_stamp_that_is_not_a_unix_timestamp_is_not_read_as_one(): void
     {
         $file = $this->dir.'/container-booted-at';
         file_put_contents($file, '2026-09-28T00:00:00Z');
 
         $this->assertNull((new FlipWindow($file))->bootedAt());
+    }
+
+    /**
+     * The classifier `stampProblem()` exposes is the one the file reading uses, and it names the
+     * four states separately so a diagnostic can say which one it found. `bootFile === ''` is the
+     * documented opt-out and is not a problem.
+     */
+    public function test_the_stamp_problem_names_which_of_the_four_states_it_is(): void
+    {
+        $file = $this->dir.'/container-booted-at';
+
+        $this->assertSame(
+            FlipWindow::STAMP_MISSING,
+            (new FlipWindow($file))->stampProblem()['state'],
+            'a configured path whose file is absent is a problem; an unconfigured path is not',
+        );
+        $this->assertNull((new FlipWindow(''))->stampProblem());
+
+        // A path that names a directory is not a regular file, so it is missing rather than read.
+        @mkdir($this->dir.'/a-directory');
+        $this->assertSame(
+            FlipWindow::STAMP_MISSING,
+            (new FlipWindow($this->dir.'/a-directory'))->stampProblem()['state'],
+        );
+
+        $cases = [
+            ['', FlipWindow::STAMP_EMPTY],
+            ["   \n", FlipWindow::STAMP_EMPTY],
+            ['not-a-number', FlipWindow::STAMP_UNPARSEABLE],
+            ['0', FlipWindow::STAMP_UNPARSEABLE],
+            ['-1', FlipWindow::STAMP_UNPARSEABLE],
+        ];
+
+        foreach ($cases as [$written, $expected]) {
+            file_put_contents($file, $written);
+
+            $problem = (new FlipWindow($file))->stampProblem();
+
+            $this->assertNotNull($problem, sprintf('A stamp of %s is a problem.', var_export($written, true)));
+            $this->assertSame($expected, $problem['state'], sprintf('A stamp of %s.', var_export($written, true)));
+            $this->assertNotSame('', $problem['reason']);
+        }
+
+        file_put_contents($file, (string) self::BOOTED_AT."\n");
+        $this->assertNull((new FlipWindow($file))->stampProblem());
+    }
+
+    /**
+     * A readable stamp is valid whether or not the application may write it: ownership and an
+     * absent write bit are diagnostic facts, never a reason for the window to be unjudged.
+     *
+     * Skipped where the platform ignores the read-only bit, because the branch cannot be reached
+     * there.
+     */
+    public function test_a_readable_stamp_is_valid_even_when_it_is_not_writable(): void
+    {
+        $file = $this->dir.'/container-booted-at';
+        file_put_contents($file, (string) self::BOOTED_AT);
+        @chmod($file, 0o444);
+
+        if (is_writable($file)) {
+            $this->markTestSkipped('This environment cannot make a file read-only.');
+        }
+
+        $window = new FlipWindow($file, 480, static fn (): float => self::BOOTED_AT);
+
+        $this->assertNull($window->stampProblem(), 'writability is not part of the reading');
+        $this->assertSame((float) self::BOOTED_AT, $window->bootedAt());
+        $this->assertSame((float) (self::BOOTED_AT + 480), $window->deadline());
+
+        @chmod($file, 0o666);
+    }
+
+    /**
+     * A read-only stamp that the process cannot read is `unreadable`, not missing: the distinction
+     * exists so the repair can name read access rather than a write bit.
+     *
+     * Skipped where the platform ignores mode bits.
+     */
+    public function test_a_stamp_this_process_cannot_read_is_reported_as_unreadable(): void
+    {
+        $file = $this->dir.'/container-booted-at';
+        file_put_contents($file, (string) self::BOOTED_AT);
+        @chmod($file, 0o000);
+
+        if (is_readable($file)) {
+            $this->markTestSkipped('This environment cannot make a file unreadable.');
+        }
+
+        $problem = (new FlipWindow($file))->stampProblem();
+
+        $this->assertNotNull($problem);
+        $this->assertSame(FlipWindow::STAMP_UNREADABLE, $problem['state']);
+        $this->assertNull((new FlipWindow($file))->bootedAt(), 'nothing is fabricated from an unreadable stamp');
+
+        @chmod($file, 0o666);
     }
 }

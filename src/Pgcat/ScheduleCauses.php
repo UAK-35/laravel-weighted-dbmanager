@@ -39,13 +39,13 @@ use Throwable;
  *     container is reported as one nobody asked about.
  *
  * WHAT THESE ARE, AND WHAT THEY ARE NOT
- *   Each is a reading — the store's name and whether it answered, the two counts, the file's
- *   existence with its mode and owner — attached to whatever verdict the beat reached, and none of
- *   them moves an exit code. That is deliberate rather than timid: "the schedule has stopped" and "a
- *   store did not answer once" are different claims, and the second is already a row of its own
- *   (`db:doctor`'s `store`), so a report that failed on it here would be one fact failing two rows
- *   for different reasons. What these do is make a silence diagnosable: an operator who reads
- *   `stale` gets the three readings beside it instead of three commands to run.
+ *   Each is a reading - the store's name and whether it answered, the two counts, the file's
+ *   presence, readability and contents with its mode and owner - attached to whatever verdict the
+ *   beat reached, and none of them moves an exit code. That is deliberate rather than timid: "the
+ *   schedule has stopped" and "a store did not answer once" are different claims, and the second is
+ *   already a row of its own (`db:doctor`'s `store`), so a report that failed on it here would be
+ *   one fact failing two rows for different reasons. What these do is make a silence diagnosable:
+ *   an operator who reads `stale` gets the three readings beside it instead of three commands to run.
  *
  * NOTHING IS WRITTEN, AND AN UNARMED INSTALLATION IS NOT ASKED
  *   The mutex store is asked for a **read** of a key no run can hold — a report that a deploy
@@ -86,7 +86,7 @@ final class ScheduleCauses
     /** How many entries run this package's command, and how many carry the installation's name. */
     public const KEY_ENTRY = 'schedule_entry';
 
-    /** The file the boot window is measured from: whether it is there, readable and writable. */
+    /** The file the boot window is measured from: whether it is there, readable and holds a timestamp. */
     public const KEY_BOOT_STAMP = 'boot_stamp';
 
     /**
@@ -326,12 +326,15 @@ final class ScheduleCauses
     }
 
     /**
-     * The file the window is measured from: there, readable, writable, and what it was found with.
+     * The file the window is measured from: present, readable, and holding a usable timestamp -
+     * with what it was found with.
      *
-     * The distinction this exists for is between *absent* and *unreadable*, which the window itself
-     * cannot make: `bootedAt()` answers `null` to both, and the silence that follows is the same
-     * sentence for a container nobody stamped and for one whose stamp belongs to another account.
-     * Only the second is a fault, and only here is it named as one.
+     * The distinction this exists for is between the four ways a configured stamp is unusable
+     * (`FlipWindow::stampProblem()`'s classifier): it is missing or not a regular file, this
+     * process cannot read it, it is empty or whitespace, or its contents are not a positive
+     * timestamp. Only a read/input failure is a fault, and none of the sentences presents
+     * writability as a requirement or tells the application to re-stamp the file: the entrypoint
+     * writes the stamp once, and the runtime only reads it.
      */
     private function bootStampReading(): string
     {
@@ -340,35 +343,51 @@ final class ScheduleCauses
                 .'is measured from nothing on every boot';
         }
 
-        if (! file_exists($this->bootFile)) {
-            return sprintf(
-                'there is no boot stamp at %s, which is the file the window is measured from: a local '
-                .'run, or an image whose entrypoint predates the stamp — the window is not judged and '
-                .'neither is the beat inside it',
-                $this->bootFile,
-            );
-        }
-
+        $problem = (new FlipWindow($this->bootFile))->stampProblem();
         $mode = PgcatConfigFlipper::facts($this->bootFile);
+        $facts = $mode === null ? '' : ' ('.$mode.')';
 
-        if (! is_readable($this->bootFile)) {
+        if ($problem === null) {
             return sprintf(
-                'the boot stamp %s is there and cannot be read by this process%s, so this boot is '
-                .'judged as a container that never stamped a file: the window never closes, the beat '
-                .'inside it is never judged, and a schedule that has stopped is reported as one '
-                .'nobody asked about — grant it to the user the schedule runs as, or re-stamp it '
-                .'where that user can read it',
+                'the boot stamp %s is readable and holds a usable boot time%s, so the window is '.
+                'judged from it - writability is not required, because the container\'s entrypoint '.
+                'writes it once and this process only reads it',
                 $this->bootFile,
-                $mode === null ? '' : ' ('.$mode.')',
+                $facts,
             );
         }
 
-        return sprintf(
-            'the boot stamp %s is readable%s%s',
-            $this->bootFile,
-            is_writable($this->bootFile) ? ' and writable' : ' and not writable',
-            $mode === null ? '' : ' ('.$mode.')',
-        );
+        return match ($problem['state']) {
+            FlipWindow::STAMP_MISSING => sprintf(
+                'there is no boot stamp at %s, which is the file the window is measured from: a local '.
+                'run, an image whose entrypoint predates the stamp, or a configured path that does '.
+                'not name a regular file - the window is not judged and neither is the beat inside it',
+                $this->bootFile,
+            ),
+            FlipWindow::STAMP_UNREADABLE => sprintf(
+                'the boot stamp %s is there and cannot be read by this process%s, so this boot is '.
+                'judged as a container that never stamped a file: the window never closes, the beat '.
+                'inside it is never judged, and a schedule that has stopped is reported as one '.
+                'nobody asked about - grant read access to the user the schedule runs as; the '.
+                'package must not re-stamp it',
+                $this->bootFile,
+                $facts,
+            ),
+            FlipWindow::STAMP_EMPTY => sprintf(
+                'the boot stamp %s is empty or holds only whitespace%s, so no boot time was '.
+                'recorded: the container\'s startup writer did not write one, and this process must '.
+                'not manufacture it - the window is not judged',
+                $this->bootFile,
+                $facts,
+            ),
+            default => sprintf(
+                'the boot stamp %s is there and readable%s but does not hold a usable boot time - '.
+                'its first token is not a positive unix timestamp - so the window is not judged: '.
+                'inspect the container\'s startup writer rather than re-stamping it here',
+                $this->bootFile,
+                $facts,
+            ),
+        };
     }
 
     /**

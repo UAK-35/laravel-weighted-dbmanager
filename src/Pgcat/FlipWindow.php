@@ -115,20 +115,54 @@ final class FlipWindow
     /**
      * When this container booted, or null when nothing recorded it.
      *
-     * The stamp is a bare unix timestamp — `date +%s` — so there is one format to agree on
+     * The stamp is a bare unix timestamp - `date +%s` - so there is one format to agree on
      * rather than two. A file that exists but does not hold a positive number is reported as
      * absent rather than guessed at.
+     *
+     * This is the one reading both the window and the diagnostics use: `stampProblem()` reads
+     * the same result and says *why* there is no boot time, so a readable-but-unwritable file
+     * cannot be reported as one the package could not use, and an empty file cannot pass.
      */
     public function bootedAt(): ?float
     {
-        if ($this->bootFile === '' || !is_file($this->bootFile)) {
-            return null;
+        return $this->readStamp()['booted'];
+    }
+
+    /**
+     * The one read of the configured stamp, classified.
+     *
+     * `state` is null when a usable positive timestamp was read, and one of the STAMP_*
+     * constants otherwise. `bootFile === ''` is *unconfigured* rather than missing: it is the
+     * documented opt-out, so it reads as "nothing recorded" without being a fault.
+     *
+     * A `file_get_contents()` that fails after `is_readable()` said yes is reported as
+     * `unreadable` rather than allowed to warn or throw: a race or an ACL is a diagnostic, and
+     * a boot must never be stopped by one.
+     *
+     * @return array{state: string|null, raw: string|null, booted: float|null}
+     */
+    private function readStamp(): array
+    {
+        if ($this->bootFile === '') {
+            return ['state' => null, 'raw' => null, 'booted' => null];
+        }
+
+        if (!is_file($this->bootFile)) {
+            return ['state' => self::STAMP_MISSING, 'raw' => null, 'booted' => null];
+        }
+
+        if (!is_readable($this->bootFile)) {
+            return ['state' => self::STAMP_UNREADABLE, 'raw' => null, 'booted' => null];
         }
 
         $raw = @file_get_contents($this->bootFile);
 
-        if ($raw === false || trim($raw) === '') {
-            return null;
+        if ($raw === false) {
+            return ['state' => self::STAMP_UNREADABLE, 'raw' => null, 'booted' => null];
+        }
+
+        if (trim($raw) === '') {
+            return ['state' => self::STAMP_EMPTY, 'raw' => $raw, 'booted' => null];
         }
 
         // Whole seconds on disk; anything after the first whitespace-separated token is
@@ -136,12 +170,47 @@ final class FlipWindow
         $first = preg_split('/\s+/', trim($raw))[0] ?? '';
 
         if (!is_numeric($first)) {
-            return null;
+            return ['state' => self::STAMP_UNPARSEABLE, 'raw' => $raw, 'booted' => null];
         }
 
         $booted = (float) $first;
 
-        return $booted > 0 ? $booted : null;
+        return $booted > 0
+            ? ['state' => null, 'raw' => $raw, 'booted' => $booted]
+            : ['state' => self::STAMP_UNPARSEABLE, 'raw' => $raw, 'booted' => null];
+    }
+
+    /**
+     * Why the configured stamp is not a usable boot time, or null when it is.
+     *
+     * The four states are the plan's: a path that is absent or not a regular file (`missing`), a
+     * file this process cannot read (`unreadable`), a file whose contents are empty or only
+     * whitespace (`empty`), and non-empty contents without a usable timestamp (`unparseable`).
+     * A readable stamp is valid whether or not the application may write it, so writability is
+     * never part of the answer.
+     *
+     * `reason` is a fragment the caller puts in its own sentence; it never says the package will
+     * create or re-stamp the file, because the application must not.
+     *
+     * @return array{state: string, reason: string}|null
+     */
+    public function stampProblem(): ?array
+    {
+        $reading = $this->readStamp();
+
+        if ($reading['state'] === null) {
+            return null;
+        }
+
+        return [
+            'state' => $reading['state'],
+            'reason' => match ($reading['state']) {
+                self::STAMP_MISSING => 'the file is not there, or the path does not name a regular file',
+                self::STAMP_UNREADABLE => 'the file exists but this process cannot read it',
+                self::STAMP_EMPTY => 'the file is empty or holds only whitespace, so no boot time was recorded',
+                default => 'the contents do not start with a positive unix timestamp',
+            },
+        ];
     }
 
     public function deadline(): ?float
@@ -224,4 +293,17 @@ final class FlipWindow
     public const SOURCE_STAMPED = 'stamped';
 
     public const SOURCE_NO_STAMP = 'no_stamp';
+
+    /**
+     * The four ways a configured stamp can be unusable, as `stampProblem()` reports them and as
+     * the audit finding's `state` context carries them. A readable stamp is valid whether or not
+     * the application may write it, so there is no `unwritable` state.
+     */
+    public const STAMP_MISSING = 'missing';
+
+    public const STAMP_UNREADABLE = 'unreadable';
+
+    public const STAMP_EMPTY = 'empty';
+
+    public const STAMP_UNPARSEABLE = 'unparseable';
 }

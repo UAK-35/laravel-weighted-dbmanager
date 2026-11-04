@@ -283,8 +283,12 @@ return [
             // Where `entrypoint.sh` stamps the container's boot time (`date +%s`), which is what
             // the window is measured from. Deliberately not the PHP process start: every Octane
             // and queue worker has its own, and the whole point is a moment the container cannot
-            // re-begin. With no stamp the window is *not judged* — `closed()` stays false and
-            // nothing fails — so a local run or an older image is quiet instead of guessing.
+            // re-begin. The startup writer creates the file once; the runtime only reads it, and
+            // requires an existing, readable file whose contents start with a positive timestamp.
+            // It never creates, re-stamps or changes the mode of this file - a readable stamp is
+            // valid even when the application cannot write it. A missing, unreadable, empty or
+            // unparseable file means the window is *not judged* (`closed()` stays false and
+            // nothing fails), and `db:doctor`/the boot audit name which of those it is.
             'boot_file' => env('SWRR_PGCAT_BOOT_FILE', sys_get_temp_dir() . '/container-booted-at'),
 
             // ── The per-minute schedule (optional) ──────────────────────────────────

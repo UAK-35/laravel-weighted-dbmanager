@@ -101,7 +101,7 @@ final class ScheduleCausesTest extends TestCase
         $this->assertStringContainsString('answered a read', $readings[0]['reading']);
         $this->assertStringContainsString('1 entry carries `'.self::NAME.'`', $readings[1]['reading']);
         $this->assertStringContainsString($stamp, $readings[2]['reading']);
-        $this->assertStringContainsString('readable and writable', $readings[2]['reading']);
+        $this->assertStringContainsString('readable and holds a usable boot time', $readings[2]['reading']);
 
         $sentence = $causes->sentence();
 
@@ -338,15 +338,16 @@ final class ScheduleCausesTest extends TestCase
         $this->assertStringContainsString('is there and cannot be read by this process', $reading);
         $this->assertStringContainsString('mode 0000', $reading);
         $this->assertStringContainsString('judged as a container that never stamped a file', $reading);
-        $this->assertStringContainsString('grant it to the user the schedule runs as', $reading);
+        $this->assertStringContainsString('grant read access to the user the schedule runs as', $reading);
+        $this->assertStringContainsString('must not re-stamp it', $reading);
     }
 
     /**
-     * Readable and not writable: the reading reports both bits, because the half that decides whether
-     * the window is judged is the read one, and the row that judges what a flip must write is not this
-     * one.
+     * Readable and not writable: the reading reports the stamp as usable and says writability is
+     * not required, because the window is judged from the read. There is no "not writable" warning
+     * to report, and the package never tells the application to re-stamp it.
      */
-    public function test_a_stamp_that_cannot_be_written_is_reported_as_readable_without_being_failed(): void
+    public function test_a_stamp_that_cannot_be_written_is_still_readable_and_judged(): void
     {
         $stamp = $this->stamp();
         @chmod($stamp, 0o444);
@@ -357,9 +358,43 @@ final class ScheduleCausesTest extends TestCase
 
         $reading = $this->reading($this->schedule(named: 1), ScheduleCauses::KEY_BOOT_STAMP, bootFile: $stamp);
 
-        $this->assertStringContainsString('is readable and not writable', $reading);
+        $this->assertStringContainsString('is readable and holds a usable boot time', $reading);
+        $this->assertStringContainsString('writability is not required', $reading);
         $this->assertStringContainsString('mode 0444', $reading);
         $this->assertStringNotContainsString('cannot be read', $reading, 'a read-only stamp is still read');
+        $this->assertStringNotContainsString('and not writable', $reading, 'writability is not a requirement');
+    }
+
+    /**
+     * An empty stamp is its own reading: the file is there and readable, and no boot time was
+     * recorded, so the startup writer needs inspecting rather than the application re-stamping.
+     */
+    public function test_an_empty_stamp_names_the_startup_writer_rather_than_a_repair_here(): void
+    {
+        $stamp = $this->stamp();
+        file_put_contents($stamp, "   \n");
+
+        $reading = $this->reading($this->schedule(named: 1), ScheduleCauses::KEY_BOOT_STAMP, bootFile: $stamp);
+
+        $this->assertStringContainsString('is empty or holds only whitespace', $reading);
+        $this->assertStringContainsString('startup writer', $reading);
+        $this->assertStringContainsString('must not manufacture it', $reading);
+    }
+
+    /**
+     * A non-empty stamp without a positive timestamp is `unparseable`, the fourth state, and the
+     * reading says the window is not judged.
+     */
+    public function test_a_stamp_that_is_not_a_positive_timestamp_is_unparseable(): void
+    {
+        $stamp = $this->stamp();
+        file_put_contents($stamp, 'not-a-timestamp');
+
+        $reading = $this->reading($this->schedule(named: 1), ScheduleCauses::KEY_BOOT_STAMP, bootFile: $stamp);
+
+        $this->assertStringContainsString('does not hold a usable boot time', $reading);
+        $this->assertStringContainsString('not a positive unix timestamp', $reading);
+        $this->assertStringContainsString('window is not judged', $reading);
     }
 
     /**

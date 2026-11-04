@@ -129,17 +129,18 @@ feature: is flipping armed, and can it act. The audit is the opposite: its keys 
 `database.read.cpu_cores.refused` and `database.read.ram_gb.refused` — the last three being
 the replica settings, which are the connection's rather than `swrr`'s, so their keys name
 the path an operator edits and the connection is in the finding's context instead. Five of
-them are the paths this package has to be able to write while a flip is armed —
+them are the paths this package has to be able to write while a flip is armed -
 `swrr.pgcat.config_path.unusable`, `swrr.pgcat.readers_path.unusable`,
-`swrr.pgcat.no_readers_path.unusable`, `swrr.pgcat.state_file.unusable`,
-`swrr.pgcat.lock_file.unusable`, `swrr.pgcat.boot_file.unusable` and
-`swrr.audit.file.lock.unusable` — one per setting, so a source that cannot be read and a target
+`swrr.pgcat.no_readers_path.unusable`, `swrr.pgcat.state_file.unusable` and
+`swrr.pgcat.lock_file.unusable` - one per setting, so a source that cannot be read and a target
 that cannot be written are two findings with two repairs rather than one that resolves both
 together. They come from `PgcatConfigFlipper::fileProblems()` as one list, which is also what
-`db:doctor`'s `pgcat files` row prints: two paths on it are not pgcat's at all — the boot stamp
-the container's entrypoint writes, and the `.lock` companion the audit record is locked on — and
-the record *file* itself is not on it, because `swrr.audit.file.unwritable` below is that path's
-reading and the object that owns the record is the one that judges it. Two are the store probe's own states —
+`db:doctor`'s `pgcat files` row prints: one path on it is not pgcat's at all - the `.lock`
+companion the audit record is locked on - and `swrr.pgcat.boot_file.unusable` is another, an
+*input* the package only reads rather than a path it writes; a readable stamp is valid even when
+the application cannot write it, and a missing, unreadable, empty or unparseable one is its own
+finding. The record *file* itself is not on it, because `swrr.audit.file.unwritable` below is that
+path's reading and the object that owns the record is the one that judges it. Two are the store probe's own states —
 `swrr.audit.store_probe_seconds.off` for a probe switched off on purpose, and
 `swrr.audit.file.unwritable` for the record that throttles it — a boot repairs a read-only record
 before deciding, and one this account cannot change is carried beside the record rather than left

@@ -92,13 +92,12 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *   write paths       every path this package must be able to write while the flipper is
  *                     armed, in one row: the flip target and the directory its temp file is
  *                     written in, the two variants a deployment renders, the state and lock a
- *                     flip records itself in, the boot stamp the window is measured from, and
- *                     the audit record with its lock. Each names the path whose mode decides
- *                     the write, the mode and owner it was found with, and what an unwritable
- *                     one costs — the inventory `pgcat files` only speaks of when one of them
- *                     fails, so an operator can see what the package writes and a gate can
- *                     find a state directory an entrypoint moved. Fails naming every path that
- *                     cannot be written, and passes with the labels it judged otherwise; prints
+ *                     flip records itself in, and the audit record with its lock. Each names the
+ *                     path whose mode decides the write, the mode and owner it was found with, and
+ *                     what an unwritable one costs - the inventory `pgcat files` only speaks of
+ *                     when one of them fails, so an operator can see what the package writes and a
+ *                     gate can find a state directory an entrypoint moved. Fails naming every path
+ *                     that cannot be written, and passes with the labels it judged otherwise; prints
  *                     no suggestion, because the `chmod` lines and the findings they are dated
  *                     from are `pgcat files`'
  *   variant shape     the file a flip would swap *in* is one this installation cannot
@@ -1903,14 +1902,15 @@ class DbDoctor extends Command
      *   until one of the writes fails, and a deployment that moves its state directory has no
      *   reading that confirms the new path is the one being judged. This row is that inventory:
      *   the flip target and the directory beside it, the two variants the deployment renders, the
-     *   state and lock a flip records itself in, the boot stamp the window is measured from, and
-     *   the audit record and its lock. The list is `PgcatConfigFlipper::writePaths()`'s, so the
-     *   doctor judges exactly the paths the class that writes them judges.
+     *   state and lock a flip records itself in, and the audit record and its lock. The list is
+     *   `PgcatConfigFlipper::writePaths()`'s, so the doctor judges exactly the paths the class that
+     *   writes them judges. The boot stamp is not on it: the package only reads it, so it is an
+     *   input judged by `pgcat files` rather than a write.
      *
      * WHAT IT SAYS, AND WHAT IT DOES NOT
      *   Each entry carries the mode and owner the path was found with, and the sentence that says
-     *   what an unwritable one costs — a flip that cannot get its copy into place, a window that
-     *   never closes, two boots that write one record at once. That is the fact a bare "not
+     *   what an unwritable one costs - a flip that cannot get its copy into place, two boots that
+     *   write one record at once. That is the fact a bare "not
      *   writable" sentence leaves out: the check already asked the filesystem, and an operator is
      *   one question — *by whom* — away from the repair. The repairs themselves stay in
      *   `pgcat files`: that row owns the `chmod` lines because it owns the per-setting findings

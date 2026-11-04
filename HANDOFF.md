@@ -190,7 +190,9 @@ php bin/inventory.php --check --at=114b09b
       surface.tsv: 15 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 54 files, 280 public methods, 327 key(s)/member(s), described as v0.2.0-alpha17
+  --> exit 1: the inventory is out of step with the tree
+      methods.tsv: 1 line(s) stale
+      surface.tsv: 4 line(s) stale
 ```
 <!-- /handoff:records -->
 
@@ -229,7 +231,7 @@ the tree.
 | `docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md` | the investigation of the live ECS task's `boot stamp … is not writable` warning: the evidence that the package has no writer and asks `is_writable()` as the application while the image's entrypoint stamps the file as root, the three states this task passed through — a working window beside a false alarm, the 09:59 edit that pointed the config at an empty file, and the resulting `no_stamp` with a flip at the 10:00 boundary and a silent audit — and the two coherent fixes |
 | `docs/investigations/0007-2026-10-27_inv-force-mode-readers-reverts.md` | the investigation of why `db:pgcat-flip --force-mode=readers` is reverted within a minute on the live ECS task: the measured before/after/75s state of `/etc/pgcat/pgcat.toml` and the flip record, the three reasons — a forced mode is an application rather than a latch, the per-minute entry converges the pooler to a resolver that says writer outside the reader windows, and the boot window never closes because the boot stamp is empty — and the three ways to make readers stay |
 | `docs/investigations/0008-2026-11-03_inv-pgcat-binary-missing-image.md` | the investigation of why a stopped ECS task refused every database connection on 127.0.0.1:5433: the task definition 39 image `d24c27b3` ships the pgcat supervisor config but not the 17,489,448-byte `/usr/local/bin/pgcat` binary, the older healthy image `23965683` has the 5.99 MB layer with the binary and the `/etc/pgcat` chown, and the entrypoint prints `ALL STARTED` with the pooler FATAL |
-| `docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md` | the plan for judging the boot stamp by readability rather than writability: the immutability contract it rests on, the write-path row the stamp leaves and the read-path table it joins, the `stampProblem()` answer that makes an empty stamp a fault, the four surfaces that repeat the old sentence and the two counting sentences `bin/counts.php` renders, the tests each step moves, and the live pair of doctor runs that proves both halves |
+| `docs/planning/0003-2026-10-27_plan-boot-stamp-read-only-check.md` | the boot-stamp validation plan, updated on 2026-11-04: the startup-owned immutable file must exist, be readable and contain a non-empty usable timestamp; the shared classifier, removal from write requirements, warning and recovery surfaces, regression matrix and deployment acceptance checks that preserve read-only permissions |
 | `docs/reports/0002-2026-10-31_rpt-config-src-tests-bug-review.md` | the bug review of config, src and tests: nine findings on replica health, Redis recovery, disabled replicas, endpoint identity, health probing, window transitions and a timing-sensitive assertion, with reproduction evidence and validation results |
 <!-- /handoff:pending -->
 

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The boot stamp is judged as a readable, non-empty input instead of a path the package must
+  write.** A readable `0644 root:root` stamp is valid even though the application cannot write it,
+  so a writable-directory test no longer produces a false `unwritable` finding. `FlipWindow` now has
+  one shared reading and classifier (`stampProblem()` over `missing`, `unreadable`, `empty` and
+  `unparseable`) that `bootedAt()` and the diagnostics both use; `boot_file` left
+  `UNNAMED_WRITTEN_PATHS` and `writePaths()` (it is not a write), while `fileSettingPaths()` still
+  names `swrr.pgcat.boot_file` and `fileProblems()` reports the four read states with no
+  `chmod +w` suggestion. `ScheduleCauses`, the boot audit's resolution, `db:doctor`, the published
+  config, the README and the deployment contract now say the startup writer creates the stamp once
+  and the runtime requires an existing, readable file with a usable timestamp; the package never
+  creates, re-stamps, chmods or chowns it. Configured missing and empty stamps are now observable
+  findings rather than silence.
+
 ## 0.2.0-alpha17 - 2026-11-03
 
 ### Added

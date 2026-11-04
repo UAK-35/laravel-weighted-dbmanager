@@ -1,167 +1,250 @@
-# Plan — the boot stamp is read, never written: replace the writability check with a readability one
+# Plan — validate the immutable boot stamp as a readable, non-empty input
 
-| | |
+Created: 2026-10-27. Updated: 2026-11-04 (Asia/Karachi).
+Status: planned; implementation remains outstanding. Source re-read at `41f761c` on 2026-11-04.
+
+This update incorporates the requirement that the configured boot file must exist and be non-empty,
+closes the previous plan's contradictory treatment of missing files, and corrects its release/API
+assumptions. It updates this existing plan rather than creating a duplicate.
+
+## Required behavior
+
+The server's startup process writes `swrr.pgcat.boot_file` once when the container starts. The
+application reads that file to calculate the boot window. A stamp readable by the application is
+valid even when the application cannot write it. The package must never create, truncate, rewrite,
+chmod or chown the stamp, or use the current PHP process time as a replacement boot time.
+
+The reported live warning names `/tmp/container-booted-at` with mode `0644`, owner `root:root`.
+That mode ordinarily permits the application to read it, which is the permission the package needs.
+Ownership or an absent write bit alone must produce no boot-file warning.
+
+When pgcat flipping is armed and a non-empty boot-file path is configured, apply these checks in
+order and report one reason for that path:
+
+| Condition | Result | Warning state |
+|---|---|---|
+| Configured path is absent or is not a regular file | Warn that the startup stamp file is missing or the path is not a file | `missing` |
+| File exists but the application cannot read it, including an actual failed read | Warn that the application cannot read the boot stamp | `unreadable` |
+| Read succeeds but the contents are empty or only whitespace | Warn that no boot timestamp was recorded | `empty` |
+| Non-empty contents contain no usable timestamp under the existing parser's rules | Warn that the contents are not a usable boot timestamp | `unparseable` |
+| File is readable and contains a usable timestamp, regardless of writability | No standing boot-file warning; calculate the normal window | none |
+
+Presence, readability and non-empty contents are mandatory for a configured path. Do not let an
+absent file pass because its parent directory is writable, or let an empty file pass because
+`is_readable()` is true. Read and trim the contents; file size alone does not reject whitespace or
+prove that reading succeeded.
+
+Keep the existing opt-out behavior when pgcat flipping is disabled or unsupported, or no boot-file
+path is configured. An intentionally unconfigured path differs from a configured path whose file is
+missing. A local run that configures a missing path will now warn, as required by the presence check.
+
+## Why the warning is wrong today
+
+`src/Pgcat/PgcatConfigFlipper.php` puts `boot_file` in `UNNAMED_WRITTEN_PATHS` beside the audit lock.
+Its `fileProblems()` loop calls the write-permission helper and emits the quoted warning. The provider
+turns that file problem into the standing boot-audit finding. `FlipWindow::bootedAt()` independently
+reads the stamp, so a readable but unwritable file can already close the window correctly while the
+warning falsely says it cannot.
+
+The reverse case is also wrong: a writable empty file passes the write check, but the window has no
+boot time to use. Earlier incident evidence is recorded in
+`docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md` and
+`docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md`; those are historical readings,
+not a fresh inspection of the live server on the date of this update.
+
+## Implementation steps
+
+1. **Give the stamp one shared reader and classifier.** In `src/Pgcat/FlipWindow.php`, factor the
+   actual file read and existing timestamp parsing into one internal reading used by `bootedAt()`
+   and a diagnostic accessor such as `stampProblem()`. Classify missing/non-file, unreadable,
+   empty/whitespace and unparseable separately. Handle `file_get_contents()` returning false even
+   after a successful permission check; a race or ACL must become a diagnostic rather than an
+   uncaught warning or exception. Preserve the existing positive numeric first-token parsing,
+   including its trailing-newline/comment compatibility. Preserve the boot time, deadline,
+   `closed()` arithmetic and `stamped`/`no_stamp` payload vocabulary. Do not cache or substitute a
+   process start time. Verify with `tests/Unit/Pgcat/FlipWindowTest.php`.
+
+2. **Remove the stamp from the package's write requirements.** In
+   `src/Pgcat/PgcatConfigFlipper.php`, remove `boot_file` from `UNNAMED_WRITTEN_PATHS` and from
+   `writePaths()`. Retain the write checks for the flip target, state, lock and audit files. Add the
+   stamp to the file-problem/read-input handling and consume the shared classifier from step 1.
+   Retain `boot_file => swrr.pgcat.boot_file` in `fileSettingPaths()` even though it no longer comes
+   from the written-path table; provider context must still name the correct setting. Do not invent
+   a general filesystem abstraction just for this input. Verify the missing, unreadable, empty and
+   healthy cases, and the unchanged audit-lock checks, in
+   `tests/Unit/Pgcat/PgcatConfigFlipperTest.php`.
+
+3. **Keep the warning and correct every surface.** Preserve finding key
+   `swrr.pgcat.boot_file.unusable`, its warning level, existing audit cadence, and the context fields
+   `setting`, `path` and `state`. Update the provider's documentation and `fileResolution()` in
+   `src/Providers/WeightedDatabaseServiceProvider.php`. The warning must name a read/input failure,
+   and recovery must say a usable stamp can be read again. A previously recorded `unwritable`
+   finding must resolve on a readable, non-empty valid stamp and stay resolved on subsequent boots.
+   `src/Pgcat/ScheduleCauses.php` must report missing, unreadable, empty and invalid contents
+   consistently, without presenting writability as a requirement or advising an application to
+   re-stamp the file. Update affected sentences in `src/Console/Commands/DbDoctor.php` and verify the
+   audit block exposed by `src/Http/Controllers/DatabaseHealthController.php`. Use existing
+   diagnostic status/strict-mode behavior; no new endpoint status policy is part of this repair.
+
+4. **Make remediation match the fault.** A read failure may suggest granting the application's
+   actual runtime user read access. Never suggest `chmod +w` for the stamp. Missing and empty stamps
+   require investigation of the server's startup writer or configured path; the application must
+   not touch the file to manufacture a passing check. Keep mode and owner as diagnostic facts.
+
+5. **Update the contract and generated records.** Update the `boot_file` comment in
+   `config/db-manager.php`, the relevant README boot-window, `pgcat files` and `write paths` text,
+   `docs/boot-audit-surfaces.md`, and `docs/deployment-contract.md`. Update
+   `src/Support/DeploymentContract.php` together with the deployment-contract record if its
+   statement changes. State that startup creates the stamp once and the runtime requires an
+   existing, readable file with non-empty usable contents. Run `php bin/counts.php` to render owned
+   counts, then `php bin/counts.php --check`. Add a `CHANGELOG.md` fix entry and describe the
+   diagnostic state changes and missing/empty-file checks. Keep historical incident transcripts
+   unchanged.
+
+6. **Validate before release, then verify in the deployment.** Run the focused tests below, then
+   the complete gate on a stable working tree. Only after implementation is complete, follow the
+   release workflow and evaluate the bump from the actual change. A proposed public accessor or
+   constant is an API addition: the earlier plan's claim that no public surface changes was wrong.
+   Do not hand-edit the release inventory snapshots or assert that the bump must be patch-only.
+   Plan creation itself does not publish or deploy the fix.
+
+## Regression cases and acceptance criteria
+
+| Case | Expected behavior |
 |---|---|
-| Subject | `swrr.pgcat.boot_file` is judged by the package as a path it must write, and it never writes it |
-| Records read | `docs/investigations/0005-2026-10-27_inv-boot-stamp-vs-container-boot-stamp.md`, `docs/investigations/0006-2026-10-27_inv-boot-stamp-unwritable-warning.md` |
-| Code to change | `src/Pgcat/PgcatConfigFlipper.php`, `src/Pgcat/FlipWindow.php`, `src/Providers/WeightedDatabaseServiceProvider.php`, `src/Pgcat/ScheduleCauses.php`, `src/Console/Commands/DbDoctor.php` (sentences only) |
-| Records to change | `README.md`, `docs/boot-audit-surfaces.md`, `docs/deployment-contract.md`, `config/db-manager.php`, `CHANGELOG.md` |
-| Contract this plan writes down | the boot stamp is written **once**, by the deployment, at container start, and never again |
+| Existing valid stamp readable but unwritable to the application | No boot-file finding; deadline and closed-window behavior still work |
+| Parent directory writable, stamp absent | `missing` warning; no file created |
+| Path names a directory | `missing`/not-a-file diagnostic; no attempt to read it as a stamp |
+| Existing stamp unreadable to the application | `unreadable` warning with the path and permission facts |
+| Read fails after the preliminary access check | A read diagnostic, no crash and no fabricated timestamp |
+| Zero-byte file | `empty` warning |
+| File containing only spaces/newlines | `empty` warning |
+| Non-empty invalid contents, zero or negative timestamp | `unparseable` warning under the existing positive-time rule |
+| Valid timestamp with trailing newline or supported comment | Same boot time and deadline as before |
+| Old `unwritable` finding followed by valid read-only input | Correct recovery message once; no recurring boot-file warning |
+| Invalid input followed by valid input | Existing finding resolves without a package write to the stamp |
+| Other mutable package paths become unwritable | Their existing warnings remain effective |
+| Flipping disabled, unsupported driver, or no configured stamp path | Existing inactive/not-judged behavior |
 
-## The premise, stated so the code can be held to it
+For the valid read-only case, assert that bytes, modification time, owner and permissions remain
+unchanged by repeated audits and polls, and that `writePaths()` excludes the stamp while
+`fileSettingPaths()` retains its correct configuration name. Test expiry using an injected clock,
+not an eight-minute sleep. Permission-sensitive tests must run as the application user on Linux;
+`chmod` under root or Windows does not establish that the runtime user lacks access. Where the host
+cannot express the permission case, skip it explicitly and retain the Linux acceptance check.
 
-The stamp is immutable. The deployment writes `date +%s` into it once per container start — before the
-pooler is started, so it exists even in the failure the window exists to catch — and nothing rewrites
-it. The package's entire relationship with the file is a **read**.
+Focused implementation verification, from this package's root, using the PHP interpreter recorded
+in `.agents/machine.local.json` in place of the `php` spelling below:
 
-That makes the current check a category error rather than a strictness setting. `PgcatConfigFlipper`
-judges the stamp with `writable()`, which is `is_writable()` on the file (or on its directory when the
-file is absent), and reports the answer as a fact about the container: *"the container cannot record
-when it booted, and the boot window never closes"*. The two questions are different, and the live ECS
-task is the proof of both halves:
-
-| live state | what actually happened | what the package said |
-|---|---|---|
-| `/tmp/container-booted-at`, `0644 root:root`, stamped 09:37:33 | the window closed on time and the container converged at `09:39:04` | **warned every minute** that the container could not record its boot |
-| `/var/swrr/container-booted-at`, `0664 www-data`, **empty** | `source: no_stamp`, so `closed()` was never true and the entry flipped again at `10:00:03` | **silent**, because the empty file is writable |
-
-So the check is wrong in both directions at once: it alarms on a working installation and says nothing
-about a broken one.
-
-## Step 1 — the stamp leaves the written-path set and becomes a read path
-
-`PgcatConfigFlipper` already owns the vocabulary this needs. `UNNAMED_WRITTEN_PATHS` is a table of
-settings, and every one of them is judged as a writer by a loop in `fileProblems()`. The stamp is moved
-out of it, and the `audit_lock` row stays — the package does write that one.
-
-| Change | Where | Detail |
-|---|---|---|
-| the stamp stops being a written path | `PgcatConfigFlipper::UNNAMED_WRITTEN_PATHS` | delete the `boot_file` row; `audit_lock` is the only entry left |
-| a read-path table is added beside it | `PgcatConfigFlipper` | one row — setting `swrr.pgcat.boot_file`, label `boot stamp`, path from `$this->window->bootFile()` — read by both the fault list and any inventory that wants to name it |
-| the fault becomes a read fault | `fileProblems()`, after the named sources | judge `!is_file()` → `FILE_MISSING`; `!is_readable()` → `FILE_UNREADABLE`; never `writable()` |
-| the inventory drops it | `writePaths()` | the stamp is no longer a path this package must be able to write, so `db:doctor`'s `write paths` stops naming it; the `pgcat files` row still does, as a read |
-| the sentences say read | the row's `cost` text | *"the boot stamp cannot be read, so the flip window is never judged and the per-minute entry never stands down: it keeps acting at every boundary instead of standing down after its first minutes"* |
-
-The kinds are already there — `missing` and `unreadable` are two of the five `FILE_*` constants, used
-by the reader and writer sources today — so no vocabulary is invented and the finding's published
-`state` field becomes one of them.
-
-`SWRR_PGCAT_BOOT_FILE` is not renamed, and neither is the finding key `swrr.pgcat.boot_file.unusable`.
-A key a dashboard matches is not worth churning for a word: the *condition* is what was wrong.
-
-**Verified by** `PgcatConfigFlipperTest`: a stamp that is `0644 root:root` and readable produces no
-problem (the live task's shape); one that is `0600 root` produces `unreadable`; an absent one produces
-`missing`; and `writePaths()` no longer carries the label `boot stamp`.
-
-## Step 2 — an empty stamp is a fault, not silence
-
-This is the half the live task exposed and the first half does not cover: an empty file is *readable*,
-so a readability check passes it, and `FlipWindow::bootedAt()` folds it into `null` — which the whole
-codebase treats as "not judged". The window then never closes and nothing says so.
-
-Add to `FlipWindow` one method that answers *why* there is no stamp, leaving `bootedAt()`, `closed()`
-and the published `source` values (`stamped` / `no_stamp`) exactly as they are:
-
-```php
-public const STAMP_EMPTY = 'empty';
-public const STAMP_UNPARSEABLE = 'unparseable';
-
-/** null when the file holds a usable stamp, or why it does not. */
-public function stampProblem(): ?string
+```bash
+php bin/tool.php phpunit tests/Unit/Pgcat/FlipWindowTest.php
+php bin/tool.php phpunit tests/Unit/Pgcat/PgcatConfigFlipperTest.php
+php bin/tool.php phpunit tests/Unit/Pgcat/ScheduleCausesTest.php
+php bin/tool.php phpunit tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php
+php bin/tool.php phpunit tests/Unit/Console/DbDoctorTest.php
+php bin/tool.php phpunit tests/Unit/Http/DatabaseHealthControllerTest.php
+php bin/tool.php phpunit tests/Unit/Support/BootAuditTest.php
+php bin/tool.php phpunit tests/Unit/Docs
+php bin/counts.php --check
+php bin/checks.php
 ```
 
-- absent or unreadable → `null` here, because Step 1 already reports those as `missing`/`unreadable`
-  and one fault must not be said twice;
-- present and readable, but empty or all whitespace → `empty`;
-- present and readable, holding something that is not a positive number → `unparseable`.
+The deployment acceptance check belongs to the application/server owner after installation of the
+fixed package. Run `php artisan db:doctor --strict --env=prod` as the same user that runs the
+scheduler. A readable, valid `0644 root:root` startup stamp must produce no boot-file problem and
+must allow the window to close at the original startup timestamp plus its configured duration.
+Other unrelated doctor failures can still make that command nonzero; inspect its boot-file row.
 
-The same finding fires for those two, so a container in the live task's second state fails its
-preflight instead of passing it quietly. `bootedAt()` keeps returning `null` for them, so the window
-semantics do not move and `/health/db`'s block is unchanged.
+In an isolated test container or test configuration, repeat with a configured missing path, an
+unreadable file, a zero-byte file, whitespace-only contents and invalid contents. Each must produce
+the corresponding boot-file warning, with an unchanged file and no application-created replacement.
+Do not remove or truncate the live container's stamp to run these negative checks. Observe repeated
+scheduled boots after the healthy case to confirm the false write-permission warning has stopped.
 
-**Decision, and the recommendation is yes:** fire on `empty` and `unparseable`. The alternative —
-leaving them silent because the file is readable — reproduces the exact state that made this
-investigation necessary. A dev run with no file at all stays *not judged*, so nothing local starts
-failing over a stamp nobody was ever going to write.
+## Compatibility and scope
 
-**Verified by** `FlipWindowTest` for the three new answers, and `PgcatConfigFlipperTest` for a stamp
-that exists, is readable, and is empty → the finding names `empty`.
+Configured missing and empty files intentionally become observable faults, even when their
+containing directory or file is writable. The finding name stays stable; consumers matching only
+`state=unwritable` must accommodate the corrected states. Without a usable timestamp the window
+continues its existing `no_stamp`/not-judged behavior; diagnostics now explain why instead of
+silently accepting an empty file. Making that state fatal to container readiness would be a
+separate policy change.
 
-## Step 3 — every surface that repeats the old claim
+This plan changes the package's validation contract. It does not request permission changes on the
+live file, a second boot stamp, a mutable package-owned copy, a path relocation, automatic
+re-stamping, or a change to how the server writes the original startup timestamp.
 
-The same false sentence is printed by four surfaces, and the records that describe them are held to
-the code by `ProseNumbersTest` and the doc guards, so the moves are not optional.
+## Implementation note (2026-11-04)
 
-| Surface | Change |
-|---|---|
-| `WeightedDatabaseServiceProvider::KEY_PGCAT_BOOT_FILE_UNUSABLE` | the docblock says the stamp is what the window reads and cannot be written; it becomes: written once by the deployment, read here, and unreadable or empty is the fault |
-| the finding's resolution text | *"the boot stamp is writable where swrr.pgcat.boot_file points"* → *"the boot stamp is readable where swrr.pgcat.boot_file points — the container stamps it once at start and never writes it again"* |
-| `ScheduleCauses::bootStampReading()` | the reading names an empty setting today; it also names a file that is there and holds nothing, since that is the state a stopped window is diagnosed from |
-| `DbDoctor`'s `pgcat files` and `write paths` rows | sentences only: the first already says "missing, unreadable or unwritable" of the files it reads, and gains "or holding no stamp"; the second stops listing the stamp |
-| `docs/boot-audit-surfaces.md` | the sentence that counts how many of the fault list's paths *"are not pgcat's at all"* loses the stamp and keeps the audit lock, and the sentence about the paths this package must write is re-derived |
-| `docs/deployment-contract.md` | the boot-stamp row states the contract: **written once at container start, by the deployment, and never rewritten; the package only reads it** |
-| `README.md` | the `write paths` row drops the stamp, the `pgcat files` row says read, and the boot-window section says the stamp is a read-only input |
-| `config/db-manager.php` | the comment above `boot_file` states the immutability — one write per container start, nothing in this package writes or rewrites it, and a container that cannot read it is the fault the preflight reports |
+Status: implemented in the package source repository at `41f761c`; the full gate is green. This note
+updates the plan in place rather than creating a second copy.
 
-The two counting sentences are rendered by `bin/counts.php` rather than retyped, and the number comes
-out of the table's own length.
+**Step 1 - one shared reader and classifier (`src/Pgcat/FlipWindow.php`).** `readStamp()` is now the
+single read: `bootedAt()` returns its `booted` value, and `stampProblem()` returns
+`{state, reason}` for `STAMP_MISSING`, `STAMP_UNREADABLE`, `STAMP_EMPTY` or `STAMP_UNPARSEABLE`.
+`bootFile === ''` is the documented opt-out and is not a problem; a path that names a directory is
+`missing`; `is_readable()` false *and* a `file_get_contents()` that returns false after it both read
+as `unreadable`; empty/whitespace is `empty`; a non-numeric, zero or negative first token is
+`unparseable`. The positive first-token parsing (trailing newline and comment compatible) is
+unchanged, as are the boot time, deadline, `closed()`/`contains()` arithmetic, `stamped`/`no_stamp`,
+and the no-caching/no-process-time rule. `toArray()` keeps its exact key set.
 
-**Verified by** `php bin/counts.php --check`, `ProseNumbersTest`, and the two guards over the records —
-`DocCitationsTest` and `QuotedRecordsTest` — because the deployment contract's new sentence is a quote
-of nothing and the findings' sentences are the code's, not another record's.
+**Step 2 - the stamp left the write requirements (`src/Pgcat/PgcatConfigFlipper.php`).** `boot_file`
+is gone from `UNNAMED_WRITTEN_PATHS` and therefore from `writePaths()`; the table now holds only
+`audit_lock`, and `writtenPaths()` asks the record-writable condition unconditionally. `fileProblems()`
+adds the stamp as a read input and consumes `FlipWindow::stampProblem()`, so the four states are the
+finding's `kind`/`state`. `fileSettingPaths()` still returns `boot_file => swrr.pgcat.boot_file`
+(explicitly, since the table no longer carries it) plus `audit_lock => swrr.audit.file.lock`. The
+audit-lock write checks are unchanged. The stamp's repair line is `chmod +r` for `unreadable` and
+none for the other three: there is no `chmod +w` and no instruction to create or re-stamp it.
 
-## Step 4 — the notes
+**Step 3 - the warning and every surface.** Finding key `swrr.pgcat.boot_file.unusable`, its warning
+level, cadence and `setting`/`path`/`state` context are preserved; `state` is now one of the four
+read states rather than `unwritable`. `WeightedDatabaseServiceProvider`'s key docblock and
+`fileResolution('boot_file')` say a usable stamp can be read again. `ScheduleCauses::bootStampReading()`
+uses the same classifier, distinguishes the four states, reports a healthy stamp as readable with a
+usable boot time (writability is not required), and never advises re-stamping. `db:doctor`'s `pgcat
+files`/`write paths`/`schedule beat` sentences and the health payload (which reads the audit block)
+were updated with the same reading.
 
-One `### Fixed` entry: the stamp is judged by the question the package can answer — can it be read —
-so a stamp its writer left unwritable and a stamp nothing wrote are told apart, and the live task's
-`0644 root:root` stamp stops warning while an empty one starts failing. One `### Changed` entry: the
-finding's published `state` becomes `missing`, `unreadable`, `empty` or `unparseable` instead of
-`unwritable`, and `db:doctor`'s `write paths` no longer lists the stamp. The immutability contract is
-stated in the `### Fixed` entry rather than its own heading, because it is the premise of the repair
-rather than a feature.
+**Step 4 - remediation matches the fault.** A read failure suggests granting the runtime user read
+access; missing, empty and unparseable stamps suggest investigating the startup writer or the
+configured path. Mode and owner stay diagnostic facts, and no surface proposes `chmod +w`.
 
-**Weighing:** `fix` and `changed` are both a patch by the policy, and the public surface does not
-move — no class, method, constant or config key is added or removed, only a published *value*. The
-weighing pass is run before release, not as part of this change.
+**Step 5 - contract and records.** `config/db-manager.php`'s `boot_file` comment, the README boot
+window and `pgcat files`/`write paths` text, `docs/boot-audit-surfaces.md` (the "not pgcat's" count is
+now one, derived from the table), `docs/deployment-contract.md` (the state directory no longer lists
+the stamp), `docs/prose-numbers.md` and the `CHANGELOG.md` `### Fixed` entry were updated.
+`php bin/counts.php` rendered the owned counts; `--check` is clean. Historical investigation
+transcripts were left unchanged.
 
-**Verified by** `php bin/release.php --weigh --dry-run --branch=dev`, which must report a bump no
-louder than the notes call for and must not report a silent surface change.
+**Step 6 - validation.** The focused suite passes, and so does the complete gate on a stable tree. The
+new public surface (`FlipWindow::stampProblem()` and the four `STAMP_*` constants) is an API addition,
+so the next release will refresh the inventory and `API.md`; the plan's earlier "patch only" claim was
+wrong and is not repeated.
 
-## Step 5 — the order, and what each step is held to
+Measured on this checkout:
 
-| # | Step | Held to |
-|---|---|---|
-| 1 | the read-path table and the fault (Step 1) | `php bin/tool.php phpunit tests/Unit/Pgcat/PgcatConfigFlipperTest.php` |
-| 2 | `stampProblem()` and the empty case (Step 2) | `php bin/tool.php phpunit tests/Unit/Pgcat/FlipWindowTest.php`, and the same flipper test |
-| 3 | the surfaces and the sentences (Step 3) | `php bin/tool.php phpunit tests/Unit/Console/DbDoctorTest.php --filter 'pgcat files\|write paths'`, `tests/Unit/Pgcat/ScheduleCausesTest.php`, `tests/Unit/Weighted/WeightedDatabaseServiceProviderTest.php` and `tests/Unit/Support/BootAuditTest.php` for the finding |
-| 4 | the records and their counts | `php bin/counts.php --check`, `php bin/tool.php phpunit --filter 'ProseNumbersTest\|DocCitationsTest\|QuotedRecordsTest'` |
-| 5 | the notes and the whole gate | `php bin/checks.php`, then the live confirmation below |
+- `FlipWindowTest` + `PgcatConfigFlipperTest` + `ScheduleCausesTest` + `DbDoctorTest` - OK (436 tests,
+  4,214 assertions, 3 skipped).
+- `WeightedDatabaseServiceProviderTest` + `DatabaseHealthControllerTest` + `BootAuditTest` - OK (208
+  tests, 1,247 assertions).
+- `tests/Unit/Docs` - OK (164 tests, 1,248 assertions).
+- `php bin/checks.php` - 13 checks passed, `Tests: 1722, Assertions: 11575, Skipped: 10`.
 
-**The live confirmation, on the task this plan came from:** `php artisan db:doctor --env=prod` must
-stop reporting the stamp at `/tmp/container-booted-at` (it is `0644 root:root`, and readable), and a
-run with `boot_file` pointed at the empty `/var/swrr/container-booted-at` must **fail**, naming
-`empty`. That pair is the whole point of the change, in one command each.
+The regression matrix is covered as follows: a readable unwritable stamp has no finding and still
+closes (`FlipWindowTest`); a writable directory with an absent stamp is `missing` and creates nothing
+(`PgcatConfigFlipperTest`); a directory path is `missing`; an unreadable stamp is `unreadable` with
+its facts (skipped where the platform ignores mode bits); empty, whitespace and invalid contents are
+`empty`/`unparseable`; a valid trailing newline/comment keeps the same boot time and deadline; an old
+`unwritable` finding resolves through the new provider resolution; the audit lock's write checks are
+unchanged; and flipping off, an unsupported driver or an empty path keep the inactive behaviour.
+`writePaths()` excludes the stamp while `fileSettingPaths()` retains its setting.
 
-## Risks, and the one that needs a decision
-
-| Risk | What it looks like | What the plan does |
-|---|---|---|
-| a published `state` value changes | a dashboard matching `"state":"unwritable"` stops matching | the `### Changed` entry names it; the key and the `setting`/`path` fields are untouched |
-| the writability signal is lost | the incident where a stamp directory stopped taking the write is no longer reported as such | with one write per start, that incident arrives as `missing` — the file was not written — which is the same fault named more directly, and the record's own `WARNING: … could not be written` line stays the entrypoint's |
-| the empty check trips a dev environment | a hand-made empty file fails a local preflight | only a file that exists is judged; a checkout with no stamp at all stays `not judged` |
-| the fault list is read on every boot | an extra `is_file`/`is_readable`/size check | three stat-level calls, no full read; the stamp is a few bytes when it is there |
-| a second file appears “to be safe” | the deployment's stamp and a package-owned copy that drift apart | deliberately excluded below: one file, one writer, one clock |
-
-## Deliberately not in this plan
-
-- **A second stamp file, or a package-owned one.** Two stamps are two clocks, and the window has one
-  meaning.
-- **Changing `bootedAt()`, `closed()` or the published `source` vocabulary.** The repair is where the
-  *fault* is reported, not what the window computes; moving `source` would move `/health/db`'s block
-  for every reader of it.
-- **Judging the deployment's write.** The package cannot know the writer's credentials, and with one
-  write per start there is nothing to judge after the fact.
-- **Moving the stamp to `/var/swrr`.** That remains the deployment's decision and an image change; this
-  plan makes the package correct on either path, which is what it can own.
-- **Renaming `SWRR_PGCAT_BOOT_FILE` or the finding key.** A published name is a contract; the wrong
-  half of this one was the question, not the word.
+**Not done, and named rather than implied:** the live deployment acceptance is the application/
+server owner's - `db:doctor --strict --env=prod` as the scheduler user against the real
+`0644 root:root` stamp, and the negative cases in an isolated container. The permission-sensitive
+tests skip visibly where `chmod` is inert (this Windows checkout) and remain for the Linux image. The
+`file_get_contents()`-after-`is_readable()` race cannot be driven from a test, so it stays a guard;
+a consumer matching only `state=unwritable` must now accept the four corrected states. No live file
+was changed, and the package still writes nothing to the stamp.

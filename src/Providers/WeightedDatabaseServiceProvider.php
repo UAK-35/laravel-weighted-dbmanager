@@ -261,14 +261,17 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
     public const KEY_PGCAT_LOCK_FILE_UNUSABLE = 'swrr.pgcat.lock_file.unusable';
 
     /**
-     * The container's boot stamp cannot be written where `swrr.pgcat.boot_file` points.
+     * The container's boot stamp is missing, unreadable, empty, or holds no usable timestamp.
      *
-     * The stamp is what `FlipWindow::closed()` reads, and a window with no stamp is *closed* by
-     * nothing: the per-minute entry keeps flipping for the whole life of the container instead of
-     * standing down after its first minutes, so the window the configuration describes never
-     * exists. It is audited for the reason every other file precondition is — the fault is a fact
-     * about the installation from the moment the directory stops taking the write, and the boot
-     * that finds it is the only surface that can say so before a deploy's rehearsal does.
+     * The stamp is what `FlipWindow::closed()` reads, and a stamp the application cannot read as a
+     * usable boot time is a window that is never judged: the per-minute entry keeps flipping for
+     * the whole life of the container instead of standing down after its first minutes, so the
+     * window the configuration describes never exists. Writability is deliberately not part of
+     * this finding: the entrypoint creates the stamp once and the runtime only reads it, so a
+     * readable 0644 root-owned file is valid. It is audited for the reason every other file
+     * precondition is - the fault is a fact about the installation from the moment the file goes -
+     * and the boot that finds it is the only surface that can say so before a deploy's rehearsal
+     * does.
      */
     public const KEY_PGCAT_BOOT_FILE_UNUSABLE = 'swrr.pgcat.boot_file.unusable';
 
@@ -1043,7 +1046,7 @@ class WeightedDatabaseServiceProvider extends DatabaseServiceProvider
             'config_path' => 'The pgcat flip target is usable again — it is there, and the directory it sits in accepts the copy a flip writes beside it — or pgcat flipping is off.',
             'readers_path' => 'The reader variant a flip swaps in is readable again, or pgcat flipping is off.',
             'no_readers_path' => 'The writer-only variant a flip swaps in is readable again, or pgcat flipping is off.',
-            'boot_file' => 'The container can record when it booted again — the boot stamp is writable where swrr.pgcat.boot_file points — or pgcat flipping is off.',
+            'boot_file' => 'A usable boot stamp can be read at swrr.pgcat.boot_file again - the file is there, readable, and holds a positive timestamp - or pgcat flipping is off.',
             'audit_lock' => 'The audit record can be locked again, so two boots cannot write it at once, or pgcat flipping is off.',
             default => 'The directory a flip records its state and stands down in is writable again, or pgcat flipping is off.',
         };

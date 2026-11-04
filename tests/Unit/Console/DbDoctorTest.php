@@ -979,7 +979,8 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringStartsWith('FAIL  pgcat files', $row);
         $this->assertStringContainsString('boot stamp', $row);
-        $this->assertStringContainsString('boot window never closes', $row);
+        $this->assertStringContainsString('cannot be used', $row);
+        $this->assertStringContainsString('the file is not there', $row);
         $this->assertStringContainsString('audit lock', $row);
         $this->assertStringContainsString('two boots can write the record at once', $row);
         $this->assertStringContainsString('mode ', $row, 'the mode and owner found travel with each sentence');
@@ -1223,8 +1224,11 @@ class DbDoctorTest extends TestCase
         // the exit code with it — the write paths row would be right and the test red.
         $this->bindRedis(reachable: true);
 
+        $stamp = $this->tempDir().'/container-booted-at';
+        file_put_contents($stamp, (string) (time() - 60));
+
         $paths = $this->armPgcat([
-            'boot_file' => $this->tempDir().'/container-booted-at',
+            'boot_file' => $stamp,
         ]);
 
         [$output, $exit] = $this->doctor();
@@ -1232,7 +1236,7 @@ class DbDoctorTest extends TestCase
 
         $this->assertStringStartsWith('PASS  write paths', $row);
 
-        foreach (['flip target', 'flip target directory', 'reader source', 'writer source', 'flip state', 'flip lock', 'boot stamp'] as $label) {
+        foreach (['flip target', 'flip target directory', 'reader source', 'writer source', 'flip state', 'flip lock'] as $label) {
             $this->assertStringContainsString($label, $row, "the row names the {$label}");
         }
 
@@ -3171,7 +3175,7 @@ class DbDoctorTest extends TestCase
         $this->assertStringContainsString('The schedule\'s own readings:', $row);
         $this->assertStringContainsString('1 entry carries `'.FlipSchedule::DEFAULT_NAME.'`', $row);
         $this->assertStringContainsString($stamp, $row, 'the stamp the window was judged against');
-        $this->assertStringContainsString('readable and writable', $row);
+        $this->assertStringContainsString('readable and holds a usable boot time', $row);
         $this->assertStringContainsString('mutexes live in', $row);
         $this->assertStringContainsString('answered a read', $row, 'a preflight asks the store; the bounded mode is what does not');
         $this->assertSame(0, $exit, 'a reading is not a verdict: the row still passes on the beat');
