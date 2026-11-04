@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **`FlipWindow::stampProblem()` and the four `STAMP_*` states as a public reading.** The boot
+  window now exposes the classifier the diagnostics already use: `STAMP_MISSING`,
+  `STAMP_UNREADABLE`, `STAMP_EMPTY` and `STAMP_UNPARSEABLE`, with `stampProblem()` returning
+  `{state, reason}` or `null` for a usable stamp. It is the same reading `bootedAt()` consumes, so a
+  consumer can report why the window is not judged without parsing a sentence. This is the API
+  addition the boot-stamp plan's step 6 named; the previous alpha's disposition work made the
+  addition explicit rather than silent.
+
 ### Fixed
 
 - **The boot stamp is judged as a readable, non-empty input instead of a path the package must
