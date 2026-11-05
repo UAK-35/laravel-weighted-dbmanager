@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha19 - 2026-11-05
+
 ### Added
 
 - **`db:doctor --no-runtime-paths`: the bounded preflight's explicit entrypoint exception.**
