@@ -107,6 +107,7 @@ report:
     "default_connection": "pgsql",
     "strict": true,
     "connection_only": false,
+    "no_runtime_paths": false,
     "real_test": false,
     "verdict": "FAIL",
     "exit_code": 1,
@@ -151,6 +152,13 @@ Beside `strict` sits `connection_only`, the other flag that changes what a run *
 it is reported: `true` on a `db:doctor --connection-only` run, which leaves the six rows whose
 subject is outside the process out of `checks` entirely (see below). A gate that requires a row has to
 be able to see that this report was never going to carry it, and a boolean is that fact.
+
+`no_runtime_paths` is the bounded mode's explicit exception, published separately so the six-row
+contract and the caller's two-row exception cannot be read as each other: `true` on
+`--connection-only --no-runtime-paths`, which also leaves `pgcat files` and `write paths` out because
+the entrypoint that creates those paths has not run. It is `false` on a plain bounded run and on
+every full run, and the flag is refused without `--connection-only` - a full run still asks both
+rows.
 
 `real_test` is the third flag of that kind, and it changes what a run asks in the other direction:
 `true` on a `db:doctor --real-test` run, which puts one real query to the connection the run follows
@@ -318,8 +326,17 @@ its own missing prerequisite as the installation's fault is worse than a row tha
 object publishes `connection_only: true` for exactly that reason, and `checks` is the full run's list
 less those six, in the order a full run asks them. Nothing else about the envelope moves: the same
 key set, `verdict` from the rows that were asked, and `exit_code` from `gateFailed()` over the same
-rule — which is what lets one gate read a bounded report and a full one without learning a second
+rule - which is what lets one gate read a bounded report and a full one without learning a second
 shape.
+
+Two of the rows a bounded run keeps are about paths the container's entrypoint creates -
+`pgcat files` and `write paths` read `/etc/pgcat`, `/var/swrr` and the boot stamp, and a build
+container that has deliberately skipped `entrypoint.sh` cannot answer them. That exception is the
+caller's and is named as one: `--connection-only --no-runtime-paths` adds exactly those two rows to
+the left-out set, the object publishes `no_runtime_paths: true` beside `connection_only: true`, and
+the flag is refused without `--connection-only`. A plain bounded run is unchanged and still asks
+both rows; widening `--connection-only` itself would have silently changed what every existing
+caller promises.
 
 The `real query` row is the one reading a bounded run keeps that is about the outside world, and it is
 kept precisely because it does not take it: unless `--real-test` asks, the row passes saying nothing

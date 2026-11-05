@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- **`db:doctor --no-runtime-paths`: the bounded preflight's explicit entrypoint exception.**
+  `--connection-only` keeps its six-row contract. A container that deliberately has not run
+  `entrypoint.sh` - the image smoke test does exactly that - can pass `--no-runtime-paths` beside it
+  to leave out `pgcat files` and `write paths`, the two rows about paths the entrypoint creates
+  (`/etc/pgcat`, `/var/swrr` and the boot stamp). The flag is refused without `--connection-only`, a
+  plain bounded run and the full run still ask both rows, and the JSON object publishes
+  `no_runtime_paths` beside `connection_only` so a gate can tell the six-row contract from the
+  two-row exception.
+
 ## 0.2.0-alpha18 - 2026-11-04
 
 ### Added

@@ -72,6 +72,7 @@ class DbDoctorTest extends TestCase
         'default_connection',
         'strict',
         'connection_only',
+        'no_runtime_paths',
         'real_test',
         'verdict',
         'exit_code',
@@ -3584,6 +3585,61 @@ class DbDoctorTest extends TestCase
     }
 
     /**
+     * `--no-runtime-paths` is the bounded mode's explicit exception, not a mode of its own: alone
+     * it is refused, so a full run can never silently become a shorter report.
+     */
+    public function test_no_runtime_paths_is_refused_without_connection_only(): void
+    {
+        [$output, $exit] = $this->doctor(noRuntimePaths: true);
+
+        $this->assertSame(1, $exit);
+        $this->assertStringContainsString('--no-runtime-paths needs --connection-only', $output);
+        $this->assertStringContainsString('a full run still asks `pgcat files` and `write paths`', $output);
+    }
+
+    /**
+     * The two runtime-path rows are the entrypoint's to create, so a container that has not run it
+     * cannot answer them. `--no-runtime-paths` is the caller saying so: the two rows leave the
+     * bounded run, the other rows are unchanged, and a plain `--connection-only` still asks both -
+     * which is the contract this flag is deliberately not rewriting.
+     */
+    public function test_the_no_runtime_paths_flag_leaves_the_two_path_rows_out_of_a_bounded_run(): void
+    {
+        $this->bindRedis(reachable: false);
+        $this->armPgcat();
+        $this->bindSupervisor();
+
+        [$json] = $this->doctorJson(connectionOnly: true, noRuntimePaths: true);
+        $report = $this->report($json);
+        $names = array_column($report['checks'], 'name');
+
+        $this->assertTrue($report['connection_only']);
+        $this->assertTrue($report['no_runtime_paths'], 'the object says the two extra rows were left out');
+        $this->assertNotContains('pgcat files', $names);
+        $this->assertNotContains('write paths', $names);
+        $this->assertContains('pgcat gate', $names);
+        $this->assertContains('variant shape', $names);
+
+        // The plain bounded run keeps the six-row contract: both path rows are still asked.
+        [$bounded] = $this->doctorJson(connectionOnly: true);
+        $boundedReport = $this->report($bounded);
+        $boundedNames = array_column($boundedReport['checks'], 'name');
+
+        $this->assertFalse($boundedReport['no_runtime_paths']);
+        $this->assertContains('pgcat files', $boundedNames);
+        $this->assertContains('write paths', $boundedNames);
+
+        // ...and so does the full run, whose object says neither bound was applied.
+        [$full] = $this->doctorJson();
+        $fullReport = $this->report($full);
+
+        $this->assertFalse($fullReport['connection_only']);
+        $this->assertFalse($fullReport['no_runtime_paths']);
+        $this->assertContains('pgcat files', array_column($fullReport['checks'], 'name'));
+        $this->assertContains('write paths', array_column($fullReport['checks'], 'name'));
+    }
+
+    /**
      * The same rule where there is no weighted manager: of the rows that do not need one, the
      * supervisor row is the only one whose subject is outside the process, and it is the one that
      * goes.
@@ -5048,7 +5104,7 @@ class DbDoctorTest extends TestCase
      *
      * @return array{0: string, 1: int}
      */
-    private function doctor(bool $strict = false, bool $connectionOnly = false, bool $contract = false, bool $realTest = false): array
+    private function doctor(bool $strict = false, bool $connectionOnly = false, bool $contract = false, bool $realTest = false, bool $noRuntimePaths = false): array
     {
         $buffer = new BufferedOutput();
 
@@ -5058,6 +5114,7 @@ class DbDoctorTest extends TestCase
                 'connection' => self::CONNECTION,
                 '--strict' => $strict,
                 '--connection-only' => $connectionOnly,
+                '--no-runtime-paths' => $noRuntimePaths,
                 '--contract' => $contract,
                 '--real-test' => $realTest,
             ],
@@ -5403,7 +5460,7 @@ class DbDoctorTest extends TestCase
         $report = json_decode($output, true);
 
         $this->assertIsArray($report, "The object did not parse:\n" . $output);
-        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'real_test', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'no_runtime_paths', 'real_test', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
         $this->assertSame($path, $report['config_file']);
         $this->assertSame('FAIL', $report['verdict']);
         $this->assertSame(1, $report['exit_code']);
@@ -5514,7 +5571,7 @@ class DbDoctorTest extends TestCase
         $report = json_decode($output, true);
 
         $this->assertIsArray($report, "The object did not parse:\n" . $output);
-        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'real_test', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
+        $this->assertSame(['command', 'config_file', 'strict', 'connection_only', 'no_runtime_paths', 'real_test', 'verdict', 'exit_code', 'counts', 'checks'], array_keys($report));
         $this->assertSame($path, $report['config_file']);
         $this->assertSame(['config file', 'replica metadata'], array_column($report['checks'], 'name'));
         $this->assertSame(['checks' => 2, 'passed' => 1, 'warnings' => 0, 'failed' => 1], $report['counts']);
@@ -5586,7 +5643,7 @@ class DbDoctorTest extends TestCase
      *
      * @return array{0: string, 1: int}
      */
-    private function doctorJson(bool $strict = false, bool $connectionOnly = false, bool $contract = false, bool $realTest = false): array
+    private function doctorJson(bool $strict = false, bool $connectionOnly = false, bool $contract = false, bool $realTest = false, bool $noRuntimePaths = false): array
     {
         $buffer = new BufferedOutput();
 
@@ -5597,6 +5654,7 @@ class DbDoctorTest extends TestCase
                 '--strict' => $strict,
                 '--json' => true,
                 '--connection-only' => $connectionOnly,
+                '--no-runtime-paths' => $noRuntimePaths,
                 '--contract' => $contract,
                 '--real-test' => $realTest,
             ],

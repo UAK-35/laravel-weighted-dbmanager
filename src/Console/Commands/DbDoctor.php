@@ -274,10 +274,28 @@ use Uak35\WeightedDbManager\Support\SwitchValue;
  *
  * Nothing about the rows it does ask changes: same names, same sentences, same verdicts, and the
  * same exit rule (`gateFailed()`), and the object is the same one with `checks` holding the rows
- * that were asked. That is deliberate rather than convenient — a gate written against a full run
+ * that were asked. That is deliberate rather than convenient - a gate written against a full run
  * reads a bounded one, and a row missing from `checks` is the only way the two differ. The rendered
  * run says which rows it left out, because a shorter report read as a complete one would be this
  * command telling an operator that six questions passed when they were never asked.
+ *
+ * THE RUNTIME-PATH EXCEPTION IS THE CALLER'S, AND IT IS EXPLICIT
+ * ------------------------------------------------------------
+ * Two of the rows a bounded run keeps are about paths the *entrypoint* creates: `pgcat files` and
+ * `write paths` read `/etc/pgcat`, `/var/swrr` and the boot stamp, all of which exist only after
+ * `entrypoint.sh` has run. A build container that has deliberately not run it (the image smoke test
+ * does exactly that) cannot answer them, and failing an image for provisioning that has not
+ * happened yet is the same false negative the six-row mode exists to avoid.
+ *
+ * That exception is **not** folded into `--connection-only`: that flag's contract is the six rows
+ * whose subject is outside the process, and widening it would silently change what existing
+ * bounded callers promise. Instead `--no-runtime-paths`, which is only accepted *beside*
+ * `--connection-only`, adds exactly those two rows to the left-out set. A plain
+ * `db:doctor --connection-only` still asks both, and the full run still asks them.
+ *
+ * The two flags are two statements: "ask only what this container can answer" and "this container
+ * has not run the entrypoint, so do not ask it to prove the files that creates". A caller that
+ * means the second says so by name.
  *
  * REAL TEST
  * ---------
@@ -529,6 +547,23 @@ class DbDoctor extends Command
     ];
 
     /**
+     * The two rows `--no-runtime-paths` leaves out, beside `--connection-only`'s own set.
+     *
+     * They are not in {@see REACHES_OUT}: their subject is inside the process, and a container that
+     * has run its entrypoint can answer both. What a build container has not done is *provision*
+     * them - `/etc/pgcat`, `/var/swrr` and the boot stamp are created by `entrypoint.sh` - so the
+     * exception belongs to the caller that skipped it, stated as a second flag rather than folded
+     * into the bounded mode's six-row contract. `--no-runtime-paths` is refused without
+     * `--connection-only`, and `asks()` consults it only for these two names.
+     *
+     * @var list<string>
+     */
+    private const RUNTIME_PATH_ROWS = [
+        'pgcat files',
+        'write paths',
+    ];
+
+    /**
      * The name of the one row that is built in every run and put only when asked.
      *
      * It is a constant because three places have to agree about it and a string in each would
@@ -544,16 +579,30 @@ class DbDoctor extends Command
                             {--strict : Treat warnings as failures, for a deploy gate}
                             {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
                             {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}
-                            {--connection-only : Bound the run to what a build container can answer: leave out the six rows whose subject is outside the process — the store, the supervisor and the running pooler — so the command runs with no store, no supervisor and no reachable database}
+                            {--connection-only : Bound the run to what a build container can answer: leave out the six rows whose subject is outside the process - the store, the supervisor and the running pooler - so the command runs with no store, no supervisor and no reachable database}
+                            {--no-runtime-paths : With --connection-only, also leave out the two runtime-path rows (`pgcat files`, `write paths`) - for a build container that has not run the entrypoint, which is what creates those files. The full run and a plain --connection-only run still ask them}
                             {--real-test : Ask the connection this run follows for one real query — the `select 1` the health endpoint runs — because whether a server answers is the one fact a configuration cannot show; the only reading here that leaves the process, and one no run takes unless it is asked for by name}
                             {--contract : Judge the deployment contract instead of the installation: one row per requirement of docs/deployment-contract.md, its verdict the loudest among the rows behind it, so a deploy fails on the requirement rather than on the reading}';
 
-    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe, the probe stamp and reachability — vet one config file without the installation, with --config-file, ask only the rows a build container can answer, with --connection-only, ask the followed connection for one real query, with --real-test, or judge the requirements of the deployment contract, with --contract';
+    protected $description = 'Check an installation end to end: provider swap, weighted factory, connector, published config, pgcat gate, files and supervisor step, replica metadata, switch values, reader windows, store probe, the probe stamp and reachability - vet one config file without the installation, with --config-file, ask only the rows a build container can answer, with --connection-only, leave the runtime-path rows out of that bounded run too, with --connection-only --no-runtime-paths, ask the followed connection for one real query, with --real-test, or judge the requirements of the deployment contract, with --contract';
 
     public function handle(): int
     {
         $argument = $this->argument('connection');
         $connection = is_string($argument) ? $argument : 'pgsql';
+
+        // --no-runtime-paths is not a mode of its own: it is the bounded mode's explicit exception
+        // for a container that has not run the entrypoint. Refused alone, because a full run asks
+        // both path rows and an inert flag would let a caller believe it had asked for something.
+        if ($this->noRuntimePaths() && ! $this->connectionOnly()) {
+            $this->error(
+                '--no-runtime-paths needs --connection-only: it adds the two runtime-path rows to the bounded '
+                .'mode\'s left-out set, and a full run still asks `pgcat files` and `write paths`. Pass both, '
+                .'or neither.'
+            );
+
+            return self::FAILURE;
+        }
 
         // The one flag that changes what is inspected rather than how it is reported: the
         // argument below is the connection of an installation, and a file being vetted is not
@@ -590,10 +639,21 @@ class DbDoctor extends Command
             $this->connector(),
             $this->publishedConfig(),
             $this->pgcatGate(),
-            $this->pgcatFiles(),
-            $this->writePaths(),
-            $this->variantShape(),
         ];
+
+        // The two runtime-path rows are asked in every mode by default. `--no-runtime-paths`
+        // (only accepted beside `--connection-only`) is the caller saying its container has not
+        // run the entrypoint that creates the paths, so it is the one exception; the predicate is
+        // here rather than a filter over the finished list because the row is never built then.
+        if ($this->asks('pgcat files')) {
+            $rows[] = $this->pgcatFiles();
+        }
+
+        if ($this->asks('write paths')) {
+            $rows[] = $this->writePaths();
+        }
+
+        $rows[] = $this->variantShape();
 
         // `asks()` rather than a conditional in each caller: the rows that need something outside
         // the process are declared in one table, so which ones a bounded run leaves out is one
@@ -4117,9 +4177,15 @@ class DbDoctor extends Command
         }
 
         if ($this->connectionOnly()) {
-            $line .= ' — <comment>--connection-only</comment>: <comment>'
+            $line .= ' - <comment>--connection-only</comment>: <comment>'
                 . implode('</comment>, <comment>', self::REACHES_OUT)
                 . '</comment> were not asked, because each one reaches something a build container may not have';
+        }
+
+        if ($this->connectionOnly() && $this->noRuntimePaths()) {
+            $line .= ' - <comment>--no-runtime-paths</comment>: <comment>'
+                . implode('</comment>, <comment>', self::RUNTIME_PATH_ROWS)
+                . '</comment> were not asked either, because this container has not run the entrypoint that creates them';
         }
 
         // Named for the same reason the bounded clause is: the `real query` row is built in every
@@ -4134,16 +4200,22 @@ class DbDoctor extends Command
     }
 
     /**
-     * Whether this run asks a row at all — the one door the bounded mode goes through.
+     * Whether this run asks a row at all - the one door the bounded mode and its runtime-path
+     * exception go through.
      *
      * `--connection-only` leaves the rows in {@see REACHES_OUT} out of the run entirely: they are
-     * not built, not printed as not-judged, and not in the object. A row that was *built* and then
-     * filtered would have already done the thing it was left out for — a store read, a socket, a
-     * `proc_open` — which is why the decision is a predicate at the call site rather than a filter
-     * over the finished list.
+     * not built, not printed as not-judged, and not in the object. `--no-runtime-paths`, which is
+     * only accepted beside it, adds the two rows in {@see RUNTIME_PATH_ROWS} for a caller whose
+     * container has not run the entrypoint. A row that was *built* and then filtered would have
+     * already done the thing it was left out for - a store read, a socket, a `proc_open` - which is
+     * why the decision is a predicate at the call site rather than a filter over the finished list.
      */
     private function asks(string $row): bool
     {
+        if ($this->connectionOnly() && $this->noRuntimePaths() && in_array($row, self::RUNTIME_PATH_ROWS, true)) {
+            return false;
+        }
+
         return !$this->connectionOnly() || !in_array($row, self::REACHES_OUT, true);
     }
 
@@ -4155,6 +4227,18 @@ class DbDoctor extends Command
     private function connectionOnly(): bool
     {
         return (bool) $this->option('connection-only');
+    }
+
+    /**
+     * Whether this bounded run also leaves the two runtime-path rows out, because its container has
+     * not run the entrypoint that creates them.
+     *
+     * It is read only where `--connection-only` is true; `handle()` refuses it alone, so a full run
+     * cannot silently turn into a different report by carrying an inert flag.
+     */
+    private function noRuntimePaths(): bool
+    {
+        return (bool) $this->option('no-runtime-paths');
     }
 
     /**
@@ -4328,7 +4412,11 @@ class DbDoctor extends Command
             $names = implode(', ', $absent);
 
             $parts[] = $this->connectionOnly()
-                ? sprintf('%s left out by --connection-only', $names)
+                ? sprintf(
+                    '%s left out by %s',
+                    $names,
+                    $this->noRuntimePaths() ? '--connection-only/--no-runtime-paths' : '--connection-only',
+                )
                 : sprintf('no row was built for %s', $names);
         }
 
@@ -4380,9 +4468,15 @@ class DbDoctor extends Command
      * report was never going to carry it. The rows absent are the ones named in the doctor's own
      * record, and the rendered run prints them; here the flag is what says they are missing.
      *
+     * `no_runtime_paths` is the bounded mode's explicit exception: true on
+     * `--connection-only --no-runtime-paths`, which also leaves out `pgcat files` and `write paths`
+     * for a container that has not run the entrypoint. It is published separately rather than
+     * folded into `connection_only`, so a gate reading a bounded report can tell the six-row
+     * contract from the two-row exception; `false` on a plain bounded run and on every full run.
+     *
      * `real_test` is the third of those flags and the one that changes the *installation*: a run
      * that asked for it opened a connection, and the `real query` row in `checks` is the answer it
-     * got. Published for the reason the two above are — a report that reached a database and one
+     * got. Published for the reason the two above are - a report that reached a database and one
      * that only read configuration must not be the same artefact to a job selecting on rows.
      *
      * `checks` is the rows themselves — the same names, the same verdicts and the same
@@ -4403,6 +4497,7 @@ class DbDoctor extends Command
                     ...$subject,
                     'strict' => $strict,
                     'connection_only' => $this->connectionOnly(),
+                    'no_runtime_paths' => $this->noRuntimePaths(),
                     'real_test' => $this->realTest(),
                     'verdict' => $this->runVerdict($rows),
                     'exit_code' => $exitCode,

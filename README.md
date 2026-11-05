@@ -1327,7 +1327,7 @@ All seven are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only] [--real-test] [--contract]` | Preflight: check an installation end to end before traffic arrives — vet one config file, a container that has no store, supervisor or database, before they are installed, ask the followed connection for one real query, or judge the deployment contract's requirements as rows |
+| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only] [--no-runtime-paths] [--real-test] [--contract]` | Preflight: check an installation end to end before traffic arrives - vet one config file, a container that has no store, supervisor or database, before they are installed, leave the entrypoint-created path rows out of such a run, ask the followed connection for one real query, or judge the deployment contract's requirements as rows |
 | `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--pool-probe] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL. `--pool-probe` is a `--status` reading: it asks the running pooler about its pools instead of staying offline |
@@ -2284,7 +2284,21 @@ inside* a row that is still asked is left out too, and it says so rather than go
 whether it answers. It runs with no
 store, no supervisor and no reachable database, and it still answers the question an image build is
 asking — `db:doctor --connection-only --strict` exits `1` for a pgcat switch armed over a `sqlite`
-connection, which is a deploy that would serve every read through a pooler that cannot front it:
+connection, which is a deploy that would serve every read through a pooler that cannot front it.
+A build container that has deliberately **not run the entrypoint** is the one caller that cannot
+answer two of the rows the bounded run keeps: `pgcat files` and `write paths` read `/etc/pgcat`,
+`/var/swrr` and the boot stamp, and `entrypoint.sh` is what creates them. `--no-runtime-paths` adds
+exactly those two rows to the left-out set, and is accepted only beside `--connection-only`:
+
+```bash
+php artisan db:doctor --connection-only --no-runtime-paths --strict
+```
+
+It is deliberately a second flag rather than a widening of `--connection-only`: the six-row mode
+still promises the six rows whose subject is outside the process, and a plain bounded run still asks
+both path rows. The exception is the caller's, and it is named at the caller - the banner says which
+two rows the flag took out, and the object publishes `no_runtime_paths: true` beside
+`connection_only: true`.
 
 ```
 $ php artisan db:doctor --connection-only --strict
@@ -2322,19 +2336,24 @@ php artisan db:doctor --connection-only --real-test --json | jq -e '.real_test a
 
 The bounded run is not a quieter doctor. The rows it does ask are built by the same code, print the
 same sentences and reach the same verdicts; `gateFailed()` is the same rule; the object is the same
-envelope, and the run *says which rows it left out* — the banner names them and the object carries
-`connection_only: true` — so a gate that requires a row can see that this report was never going to
-contain it. That is the whole contract: `checks` is the full run's list, less those six, in the
-order the full run asks them.
+envelope, and the run *says which rows it left out* - the banner names them and the object carries
+`connection_only: true` - so a gate that requires a row can see that this report was never going to
+contain it. That is the whole contract: `checks` is the full run's list, less those six - and, when
+`--no-runtime-paths` is passed, less `pgcat files` and `write paths` too - in the order the full
+run asks them.
 
 ```bash
 php artisan db:doctor --connection-only --strict --json | jq -e '.connection_only == true'
+php artisan db:doctor --connection-only --no-runtime-paths --strict --json \
+    | jq -e '.connection_only == true and .no_runtime_paths == true'
 ```
 
 It does not judge the six rows as unreachable, which would be a comment on a container's network
 rather than on the installation, and it does not refuse to run where they are reachable: a row a
 bounded run asks is the row a full run asks, and the two answers are the same. Only the six that
-reach outside the process are missing, and only because a build container cannot answer them.
+reach outside the process are missing, and only because a build container cannot answer them;
+`--no-runtime-paths` adds the two the entrypoint has not yet created, and only when the caller says
+its container skipped it.
 
 ### The deployment contract as a gate: db:doctor --contract
 
