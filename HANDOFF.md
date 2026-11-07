@@ -190,7 +190,7 @@ php bin/inventory.php --check --at=114b09b
       surface.tsv: 19 line(s) stale
 
 php bin/inventory.php --check
-  --> exit 0: inventory is current — 54 files, 281 public methods, 331 key(s)/member(s), described as v0.2.0-alpha19
+  --> exit 0: inventory is current — 54 files, 281 public methods, 331 key(s)/member(s), described as v0.2.0-alpha20
 ```
 <!-- /handoff:records -->
 
@@ -325,8 +325,8 @@ git push origin dev --follow-tags
 
 | Field | At the snapshot |
 |---|---|
-| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10`, `v0.2.0-alpha11`, `v0.2.0-alpha12`, `v0.2.0-alpha13`, `v0.2.0-alpha14`, `v0.2.0-alpha15`, `v0.2.0-alpha16`, `v0.2.0-alpha17`, `v0.2.0-alpha18`, `v0.2.0-alpha19` |
-| The latest of them | `v0.2.0-alpha19` |
+| Tags on the branch | `v0.0.1-alpha1`, `v0.1.0-alpha1`, `v0.1.0-alpha3`, `v0.2.0-alpha1`, `v0.2.0-alpha2`, `v0.2.0-alpha3`, `v0.2.0-alpha4`, `v0.2.0-alpha5`, `v0.2.0-alpha6`, `v0.2.0-alpha7`, `v0.2.0-alpha9`, `v0.2.0-alpha10`, `v0.2.0-alpha11`, `v0.2.0-alpha12`, `v0.2.0-alpha13`, `v0.2.0-alpha14`, `v0.2.0-alpha15`, `v0.2.0-alpha16`, `v0.2.0-alpha17`, `v0.2.0-alpha18`, `v0.2.0-alpha19`, `v0.2.0-alpha20` |
+| The latest of them | `v0.2.0-alpha20` |
 | A version with no suffix | none — `v0.2.0` does not exist |
 | `## Unreleased` at the basis | 19 entries — 2 added, 8 fixed, 9 changed |
 | The notes weigh as | `minor` — the `### Added` heading is the loudest the section carries at this basis: the two document skills, `wdm-runbook` and `wdm-report`, with no `### Removed` entry beside them |

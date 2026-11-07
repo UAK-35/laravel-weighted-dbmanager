@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha20 - 2026-11-07
+
 ### Changed
 
 - **A bare `db:doctor` follows the package's connection.** The positional `connection` argument is
