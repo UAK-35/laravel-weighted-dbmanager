@@ -575,7 +575,7 @@ class DbDoctor extends Command
     private const REAL_QUERY = 'real query';
 
     protected $signature = 'db:doctor
-                            {connection=pgsql : Connection whose weighted replicas are inspected}
+                            {connection? : Connection whose weighted replicas are inspected; when omitted, the connection the package follows (db-manager.swrr.connection, else database.default)}
                             {--strict : Treat warnings as failures, for a deploy gate}
                             {--json : Print one JSON object — every row, its verdict, the suggestions and the exit code — instead of the rendered table}
                             {--config-file= : Judge a config file instead of this installation: read one file — a config/db-manager.php for its switches and reader windows, or a config/database.php for its replica metadata — report the values the next boot would refuse, and read nothing from the running package, so a pipeline can vet a config before it is deployed}
@@ -589,7 +589,7 @@ class DbDoctor extends Command
     public function handle(): int
     {
         $argument = $this->argument('connection');
-        $connection = is_string($argument) ? $argument : 'pgsql';
+        $provided = is_string($argument) ? trim($argument) : '';
 
         // --no-runtime-paths is not a mode of its own: it is the bounded mode's explicit exception
         // for a container that has not run the entrypoint. Refused alone, because a full run asks
@@ -624,8 +624,16 @@ class DbDoctor extends Command
                 return self::FAILURE;
             }
 
-            return $this->vetConfigFile($candidate, $connection);
+            return $this->vetConfigFile($candidate, $provided !== '' ? $provided : 'pgsql');
         }
+
+        // A name the caller gave is the connection this run inspects; an absent argument is the
+        // connection the package follows, resolved through the same class the gate, the flipper
+        // and the connector row read, so a bare run cannot judge a different application from the
+        // one the rest of the package describes. Resolved after the config-file branch, because a
+        // file being vetted is not this installation and must not read this installation's settings.
+        $named = $provided !== '';
+        $connection = $named ? $provided : $this->followedConnection();
 
         [$manager, $resolutionError] = $this->weightedManager();
 
@@ -726,7 +734,7 @@ class DbDoctor extends Command
                 'swrr_connection' => $configured,
                 'default_connection' => $followed,
             ],
-            $this->subjectLine($connection, $followed, $configured),
+            $this->subjectLine($connection, $followed, $configured, $named),
         );
     }
 
@@ -4149,6 +4157,10 @@ class DbDoctor extends Command
      * the default followed) is unchanged and a reader who *did* set it sees where the followed
      * connection came from without opening the config file.
      *
+     * `$named` is whether the caller supplied the connection, not whether it differs from the
+     * followed one: a run told to inspect the followed connection by name is a different reading
+     * from one whose argument was absent, and only the banner can say which happened.
+     *
      * The bounded clause is not decoration. `--connection-only` prints short by design, and a
      * report that is short without saying why reads as a report in which six checks passed —
      * which is the one thing a bounded run must never be mistaken for. So the rows left out are
@@ -4159,13 +4171,17 @@ class DbDoctor extends Command
      * sentence, because the row is there and this line is about the ones that are not. A banner that
      * also enumerated readings would be a second place to keep in step with the rows.
      */
-    private function subjectLine(string $connection, string $followed, ?string $configured): string
+    private function subjectLine(string $connection, string $followed, ?string $configured, bool $named): string
     {
         $line = 'Connection inspected: <comment>' . $connection . '</comment>, followed connection is <comment>'
             . $followed . '</comment>';
 
         if ($configured !== null) {
             $line .= ' (named by <comment>' . ActiveConnection::CONFIGURED_SOURCE . '</comment>)';
+        }
+
+        if (! $named) {
+            $line .= ' - no connection was named, so the package\'s followed connection was inspected';
         }
 
         // Said above the table rather than left to the row names, because a contract run's rows are

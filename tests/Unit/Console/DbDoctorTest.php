@@ -5579,6 +5579,146 @@ class DbDoctorTest extends TestCase
     }
 
     /**
+     * The live deployment's shape: `database.default` is SQLite and the PostgreSQL path is a
+     * non-default connection named by `db-manager.swrr.connection`. A bare run has no argument to
+     * tell it a connection, so it has to ask the same `ActiveConnection` the gate, the flipper and
+     * the `connector` row ask — otherwise it inspects a connection the application does not define
+     * and warns that the pool has no replicas.
+     */
+    public function test_a_bare_run_inspects_the_connection_the_package_follows(): void
+    {
+        config()->set('database.connections.sqlite', ['driver' => 'sqlite', 'database' => ':memory:']);
+        config()->set('database.default', 'sqlite');
+        config()->set('db-manager.swrr.connection', 'pgsql_proxy');
+        config()->set('database.connections.pgsql_proxy', [
+            'driver' => 'pgsql',
+            'database' => 'app',
+            'read' => [
+                ['host' => '127.0.0.1', 'port' => 5433, 'weight' => 145],
+                ['host' => '127.0.0.1', 'port' => 5433, 'weight' => 500],
+            ],
+            'write' => ['host' => '127.0.0.1', 'port' => 5433],
+        ]);
+
+        $buffer = new BufferedOutput();
+        $this->app->make(Kernel::class)->call('db:doctor', ['--json' => true], $buffer);
+        $report = $this->report($buffer->fetch());
+
+        $this->assertSame('pgsql_proxy', $report['connection']);
+        $this->assertSame('pgsql_proxy', $report['swrr_connection']);
+        $this->assertSame('pgsql_proxy', $report['default_connection']);
+
+        $row = $this->checkNamed($report, 'replica metadata');
+        $this->assertSame('PASS', $row['verdict']);
+        $this->assertStringContainsString('2 replicas on [pgsql_proxy], total weight 645', $row['detail']);
+
+        $pair = $this->checkNamed($report, 'read/write pair');
+        $this->assertStringContainsString('[pgsql_proxy]', $pair['detail']);
+    }
+
+    /**
+     * An explicit argument is still the connection this run inspects, even when it names one the
+     * package does not follow: a caller may deliberately ask about a connection the application
+     * defines but does not route through.
+     */
+    public function test_an_explicit_connection_still_wins_over_the_followed_one(): void
+    {
+        config()->set('database.connections.sqlite', ['driver' => 'sqlite', 'database' => ':memory:']);
+        config()->set('database.default', 'sqlite');
+        config()->set('db-manager.swrr.connection', 'pgsql_proxy');
+        config()->set('database.connections.pgsql', ['driver' => 'pgsql', 'database' => 'app']);
+        config()->set('database.connections.pgsql_proxy', [
+            'driver' => 'pgsql',
+            'database' => 'app',
+            'read' => [
+                ['host' => '127.0.0.1', 'port' => 5433, 'weight' => 145],
+                ['host' => '127.0.0.1', 'port' => 5433, 'weight' => 500],
+            ],
+            'write' => ['host' => '127.0.0.1', 'port' => 5433],
+        ]);
+
+        $buffer = new BufferedOutput();
+        $this->app->make(Kernel::class)->call('db:doctor', ['connection' => 'pgsql', '--json' => true], $buffer);
+        $report = $this->report($buffer->fetch());
+
+        $this->assertSame('pgsql', $report['connection']);
+        $this->assertSame('pgsql_proxy', $report['swrr_connection']);
+        $this->assertSame('pgsql_proxy', $report['default_connection']);
+
+        $row = $this->checkNamed($report, 'replica metadata');
+        $this->assertSame('WARN', $row['verdict']);
+        $this->assertStringContainsString('no read replicas on [pgsql]', $row['detail']);
+    }
+
+    /**
+     * A file being vetted is not this installation, so it keeps the name that mode owns when the
+     * caller gives none: the literal `pgsql`. Resolving `ActiveConnection` here would judge the
+     * installation's connection against a candidate file, which is the one thing `--config-file`
+     * promises not to read.
+     */
+    public function test_the_config_file_mode_keeps_its_own_pgsql_default(): void
+    {
+        $path = $this->databaseConfigFile([
+            'pgsql' => ['read' => [['host' => '10.1.0.2', 'port' => 5432, 'weight' => 8]]],
+            'pgsql_proxy' => ['read' => [['host' => '10.1.0.3', 'port' => 5432, 'weight' => 9]]],
+        ]);
+
+        $buffer = new BufferedOutput();
+        $this->app->make(Kernel::class)->call('db:doctor', ['--config-file' => $path, '--json' => true], $buffer);
+        $report = $this->report($buffer->fetch());
+
+        $this->assertStringContainsString('the read list of connection [pgsql] is judged below', $this->checkNamed($report, 'config file')['detail']);
+
+        $buffer = new BufferedOutput();
+        $this->app->make(Kernel::class)->call('db:doctor', ['connection' => 'pgsql_proxy', '--config-file' => $path, '--json' => true], $buffer);
+        $report = $this->report($buffer->fetch());
+
+        $this->assertStringContainsString('the read list of connection [pgsql_proxy] is judged below', $this->checkNamed($report, 'config file')['detail']);
+    }
+
+    /**
+     * The contract is built from the same rows, so the connection an absent argument resolves to is
+     * the one every requirement behind it was read on. Before the argument was resolved, a bare
+     * `--contract` run folded a `replica metadata` warning about `pgsql` into `configuration` while
+     * the subject named another connection.
+     */
+    public function test_a_bare_contract_run_uses_the_followed_connection(): void
+    {
+        config()->set('database.connections.sqlite', ['driver' => 'sqlite', 'database' => ':memory:']);
+        config()->set('database.default', 'sqlite');
+        config()->set('db-manager.swrr.connection', 'pgsql_proxy');
+        config()->set('database.connections.pgsql_proxy', [
+            'driver' => 'pgsql',
+            'database' => 'app',
+            'read' => [
+                ['host' => '127.0.0.1', 'port' => 5433, 'weight' => 145],
+                ['host' => '127.0.0.1', 'port' => 5433, 'weight' => 500],
+            ],
+            'write' => ['host' => '127.0.0.1', 'port' => 5433],
+        ]);
+
+        $buffer = new BufferedOutput();
+        $this->app->make(Kernel::class)->call('db:doctor', ['--contract' => true, '--json' => true], $buffer);
+        $report = $this->report($buffer->fetch());
+
+        $this->assertSame('pgsql_proxy', $report['connection']);
+
+        $configuration = $this->checkNamed($report, 'configuration');
+        $this->assertStringNotContainsString('no read replicas', $configuration['detail']);
+    }
+
+    /**
+     * The argument is optional, not required-with-a-default: the signature used to say
+     * `{connection=pgsql}`, which no caller could tell from a run that named `pgsql` on purpose.
+     */
+    public function test_the_connection_argument_is_optional(): void
+    {
+        $definition = $this->app->make(Kernel::class)->all()['db:doctor']->getDefinition();
+
+        $this->assertFalse($definition->getArgument('connection')->isRequired());
+    }
+
+    /**
      * A config file for the vet: the shape a published `config/db-manager.php` returns, written
      * out with `var_export` so the values are PHP literals rather than a second parser's idea of
      * them.

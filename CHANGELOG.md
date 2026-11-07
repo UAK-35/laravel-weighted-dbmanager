@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Changed
+
+- **A bare `db:doctor` follows the package's connection.** The positional `connection` argument is
+  now optional; when it is omitted the command inspects the same connection the gate, the flipper,
+  `/health/db`, `db:replica-status` and its own `connector` row follow - `db-manager.swrr.connection`
+  when the installation sets it, `database.default` otherwise - resolved through `ActiveConnection`.
+  Previously the argument defaulted to the literal `pgsql`, so an installation whose PostgreSQL path
+  is a non-default connection (for example `pgsql_proxy`) had the `pgsql` connection inspected:
+  `replica metadata` warned about a connection the application does not define while `connector`
+  named the real one. A
+  caller that wants the literal `pgsql` must now pass `pgsql` explicitly. `--config-file` keeps its
+  own `pgsql` default, because a file being vetted is not the running installation. The rendered
+  banner says when the followed connection was inspected because no connection was named.
+
 ## 0.2.0-alpha19 - 2026-11-05
 
 ### Added

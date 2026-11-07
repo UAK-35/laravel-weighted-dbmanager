@@ -148,6 +148,13 @@ different thing to change. The value is read through `Support\ActiveConnection`,
 the flipper and the health endpoint read which connection is in play, so this key cannot disagree with
 them about which config key the name came from.
 
+`connection` is the argument when the caller names one and the connection the package follows when it
+does not: a bare run resolves the absent argument through `Support\ActiveConnection`, so `connection`
+and `default_connection` agree and every row that takes the name (`replica metadata`, `read/write
+pair`, `read caps`, `standby feedback`, `store reachability`) inspects the same connection the subject
+names. Naming a connection positionally still inspects that one, and `--config-file` keeps its own
+`pgsql` default because a file being vetted is not this installation.
+
 Beside `strict` sits `connection_only`, the other flag that changes what a run *asks* rather than how
 it is reported: `true` on a `db:doctor --connection-only` run, which leaves the six rows whose
 subject is outside the process out of `checks` entirely (see below). A gate that requires a row has to

@@ -1327,7 +1327,7 @@ All seven are registered by the provider.
 
 | Command                                                                      | Purpose                                                                                                       |
 |------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| `php artisan db:doctor {connection=pgsql} [--strict] [--json] [--config-file=path] [--connection-only] [--no-runtime-paths] [--real-test] [--contract]` | Preflight: check an installation end to end before traffic arrives - vet one config file, a container that has no store, supervisor or database, before they are installed, leave the entrypoint-created path rows out of such a run, ask the followed connection for one real query, or judge the deployment contract's requirements as rows |
+| `php artisan db:doctor {connection?} [--strict] [--json] [--config-file=path] [--connection-only] [--no-runtime-paths] [--real-test] [--contract]` | Preflight: check an installation end to end before traffic arrives - a bare run inspects the connection the package follows (`db-manager.swrr.connection`, else `database.default`), a name inspects that connection - vet one config file, a container that has no store, supervisor or database, before they are installed, leave the entrypoint-created path rows out of such a run, ask the followed connection for one real query, or judge the deployment contract's requirements as rows |
 | `php artisan db:replica-status {connection=pgsql} [--json]`                  | Table of host, weight, share %, health, plus formula, store backend, pgcat state and the boot audit's standing findings |
 | `php artisan db:probe-replicas {connection=pgsql} [--json]`                  | `SELECT 1` against every replica and feed results to `HealthMonitor` (schedule every 30 s)                    |
 | `php artisan db:pgcat-flip [--status\|--watch\|--dry-run\|--force-mode=] [--pool-probe] [--interval=] [--json]` | Keep `pgcat.toml` in step with the reader/writer window — a no-op unless the current connection is PostgreSQL. `--pool-probe` is a `--status` reading: it asks the running pooler about its pools instead of staying offline |
@@ -1899,7 +1899,13 @@ details.
 
 `php artisan db:doctor` answers the question a deploy actually cares about — *will
 this installation do what it is configured to do?* Twenty-six things can be wrong while
-the application still boots and answers requests, and each one is a row:
+the application still boots and answers requests, and each one is a row.
+
+A bare run inspects the connection the package follows — `db-manager.swrr.connection` when the
+installation sets it, `database.default` otherwise, the same `ActiveConnection` rule the gate, the
+flipper, `/health/db` and `db:replica-status` read. Name a connection positionally to inspect a
+different one; `--config-file` judges a file rather than the installation and keeps its own `pgsql`
+default.
 
 | Row                  | Fails when                                                                                                                                         |
 |----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1997,7 +2003,8 @@ describe a different rule from the one that produced the code:
 
 ```
 $ php artisan db:doctor
-Connection inspected: pgsql, followed connection is pgsql
+Connection inspected: pgsql, followed connection is pgsql - no connection was named, so the
+package's followed connection was inspected
 
 PASS  provider swap       WeightedDatabaseServiceProvider is in charge, weighted manager bound
 PASS  weighted factory    db.factory is Uak35\WeightedDbManager\Database\Weighted\WeightedConnectionFactory
@@ -2302,7 +2309,7 @@ two rows the flag took out, and the object publishes `no_runtime_paths: true` be
 
 ```
 $ php artisan db:doctor --connection-only --strict
-Connection inspected: pgsql, followed connection is pgsql — --connection-only: pgcat supervisor, pool probe answer, read caps, standby feedback, store probe, store reachability were not asked, because each one reaches something a build container may not have
+Connection inspected: pgsql, followed connection is pgsql - no connection was named, so the package's followed connection was inspected — --connection-only: pgcat supervisor, pool probe answer, read caps, standby feedback, store probe, store reachability were not asked, because each one reaches something a build container may not have
 
   database.default  pgsql
 

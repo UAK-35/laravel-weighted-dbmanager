@@ -974,7 +974,7 @@ final class Handoff
         ],
         'docs/planning/0005-2026-11-06_plan-db-doctor-connection-argument.md' => [
             'words' => 'the plan for making a bare `db:doctor` inspect the connection the package follows: what the literal `pgsql` argument default does today and which rows take it, the live ECS evidence that `pgsql` is undefined while `pgsql_proxy` has two replicas, and the six steps - an optional argument resolved through `ActiveConnection`, a `--config-file` default kept separate, the subject/banner clause, the tests for the bare and explicit cases, the README/JSON/CHANGELOG updates, and the post-release live check',
-            'read' => 'sha256:b014b87456a6c960d014387a7b25e4bf28ea09ce0b78fab1903381f7a72f1305',
+            'read' => 'sha256:43c3db50622aa5c903e1746481be129f5e319481e1edad047dacace0cc2deba5',
         ],
         'opencode.jsonc.template' => [
             'words' => 'the agent harness configuration for this repository, carried as a template: the instruction files it loads, the single skill target, the permission table whose broad `shell` `*` fallback comes first so the narrow grants below it are the ones that match, and the machine\'s own temp directory written as `<__SYSTEM_TEMP_FOLDER__>` so the carried file names no machine — and no default agent, because the one it named had no body anywhere in this repository\'s history',

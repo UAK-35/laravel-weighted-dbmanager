@@ -1,6 +1,6 @@
 # Plan - `db:doctor` follows the package's connection when the argument is absent
 
-Created: 2026-11-06. Status: proposed; no implementation performed.
+Created: 2026-11-06. Status: implemented on 2026-11-06; unreleased.
 
 ## Context
 
@@ -31,7 +31,7 @@ with `2 replicas on [pgsql_proxy], total weight 645`. The warning in the bare ru
 wrong-subject reading, not an installation without replicas. Report
 `docs/reports/0003-2026-11-06_rpt-db-doctor-warnings-encoding.md` records the live evidence.
 
-## What a bare `db:doctor` does today
+## What a bare `db:doctor` did before this change
 
 1. **The argument is filled by the signature.** `db:doctor` is declared as
    `{connection=pgsql : Connection whose weighted replicas are inspected}`. Symfony Console returns
