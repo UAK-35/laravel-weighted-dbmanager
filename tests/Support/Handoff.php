@@ -1020,6 +1020,10 @@ final class Handoff
             'words' => 'the bug review of config, src and tests: nine findings on replica health, Redis recovery, disabled replicas, endpoint identity, health probing, window transitions and a timing-sensitive assertion, with reproduction evidence and validation results',
             'read' => 'sha256:456954b6bb948f77d024ad60569d97d7bb34a22a542c2f942fe59e2d86354a13',
         ],
+        'docs/reports/0003-2026-11-06_rpt-db-doctor-warnings-encoding.md' => [
+            'words' => 'the explanation of two db:doctor --connection-only warnings on a live server, updated with the live ECS task: the doctor\'s positional connection argument defaults to the literal `pgsql`, so a bare run warns about `pgsql` (commented out in the app) while the package follows `pgsql_proxy`, which has two replicas and passes when passed explicitly; the published config predates the `generation` key so newer keys read from defaults; and the `ΓÇö` output is a CP437 console decoding a valid UTF-8 em dash rather than a package encoding fault, with the repairs and the evidence behind each',
+            'read' => 'sha256:7fee0040ef176c64aef2b136d1095ca334a646843b476eb459d04c6c35a8c83e',
+        ],
         'docs/investigations/0008-2026-11-03_inv-pgcat-binary-missing-image.md' => [
             'words' => 'the investigation of why a stopped ECS task refused every database connection on 127.0.0.1:5433: the task definition 39 image `d24c27b3` ships the pgcat supervisor config but not the 17,489,448-byte `/usr/local/bin/pgcat` binary, the older healthy image `23965683` has the 5.99 MB layer with the binary and the `/etc/pgcat` chown, and the entrypoint prints `ALL STARTED` with the pooler FATAL',
             'read' => 'sha256:ecfdcc9abb34a81f29f3cd3fba2c95fbfdb0ab6856048895ab8aa669ffd28536',
